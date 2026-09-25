@@ -61,28 +61,15 @@ function ensureParentDirs(dirs: Set<string>, filePath: string): void {
   }
 }
 
-export function createHost(
-  opts: {
-    fs?: VirtualFs;
-    stdout?: Uint8Array[];
-    stderr?: Uint8Array[];
-    spawnEnabled?: boolean;
-  } = {},
-): Host & { stdout: Uint8Array[]; stderr: Uint8Array[]; fs: VirtualFs } {
-  const fs = opts.fs ?? createVirtualFs();
-  const stdout = opts.stdout ?? [];
-  const stderr = opts.stderr ?? [];
+function hasChildren(fs: VirtualFs, p: string): boolean {
+  const prefix = p === "/" ? "/" : p + "/";
+  for (const f of fs.files.keys()) if (f.startsWith(prefix)) return true;
+  for (const d of fs.dirs) if (d.startsWith(prefix) && d !== p) return true;
+  return false;
+}
+
+function fsOps(fs: VirtualFs): Pick<Host, "readFile" | "writeFile" | "listDir"> {
   return {
-    fs,
-    stdout,
-    stderr,
-    spawnEnabled: opts.spawnEnabled ?? false,
-    writeStdout(bytes) {
-      stdout.push(bytes);
-    },
-    writeStderr(bytes) {
-      stderr.push(bytes);
-    },
     readFile(path) {
       const p = normalize(path);
       if (fs.dirs.has(p) && !fs.files.has(p)) {
@@ -130,9 +117,59 @@ export function createHost(
   };
 }
 
-function hasChildren(fs: VirtualFs, p: string): boolean {
-  const prefix = p === "/" ? "/" : p + "/";
-  for (const f of fs.files.keys()) if (f.startsWith(prefix)) return true;
-  for (const d of fs.dirs) if (d.startsWith(prefix) && d !== p) return true;
-  return false;
+/** Buffering host for hermetic tests — capture stdout/stderr in arrays. */
+export function createHost(
+  opts: {
+    fs?: VirtualFs;
+    stdout?: Uint8Array[];
+    stderr?: Uint8Array[];
+    spawnEnabled?: boolean;
+  } = {},
+): Host & { stdout: Uint8Array[]; stderr: Uint8Array[]; fs: VirtualFs } {
+  const fs = opts.fs ?? createVirtualFs();
+  const stdout = opts.stdout ?? [];
+  const stderr = opts.stderr ?? [];
+  return {
+    fs,
+    stdout,
+    stderr,
+    spawnEnabled: opts.spawnEnabled ?? false,
+    writeStdout(bytes) {
+      stdout.push(bytes);
+    },
+    writeStderr(bytes) {
+      stderr.push(bytes);
+    },
+    ...fsOps(fs),
+  };
+}
+
+export type ByteSink = { write(chunk: Uint8Array): unknown };
+
+/**
+ * Live host for the CLI — print/println/dump write immediately to the given
+ * sinks (default: process.stdout / process.stderr).
+ */
+export function createLiveHost(
+  opts: {
+    fs?: VirtualFs;
+    spawnEnabled?: boolean;
+    stdout?: ByteSink;
+    stderr?: ByteSink;
+  } = {},
+): Host & { fs: VirtualFs } {
+  const fs = opts.fs ?? createVirtualFs();
+  const out = opts.stdout ?? process.stdout;
+  const err = opts.stderr ?? process.stderr;
+  return {
+    fs,
+    spawnEnabled: opts.spawnEnabled ?? false,
+    writeStdout(bytes) {
+      out.write(bytes);
+    },
+    writeStderr(bytes) {
+      err.write(bytes);
+    },
+    ...fsOps(fs),
+  };
 }

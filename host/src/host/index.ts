@@ -1,2 +1,2 @@
-export type { Host, IoError, VirtualFs } from "./host.ts";
-export { createHost, createVirtualFs } from "./host.ts";
+export type { Host, IoError, VirtualFs, ByteSink } from "./host.ts";
+export { createHost, createLiveHost, createVirtualFs } from "./host.ts";

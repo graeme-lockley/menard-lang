@@ -82,7 +82,11 @@ make ci          # typecheck + test (mirrors GitHub Actions)
 ```bash
 bun run host/src/cli/menard.ts check path/to/file.mnd
 bun run host/src/cli/menard.ts run path/to/file.mnd
+bun run host/src/cli/menard.ts run --show-result path/to/file.mnd
 ```
+
+`run` writes `print` / `println` / `dump` **live** to the process streams.
+`--show-result` also prints the final non-`Unit` value (REPL-style).
 
 Exit codes: `0` ok, `1` program error/panic, `2` usage or I/O fault.
 
