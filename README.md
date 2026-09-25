@@ -3,11 +3,13 @@
 A small, statically typed, self-hosting language that compiles to LLVM IR — with
 first-class closures, explicit type parameters, and a precise garbage collector.
 
-Named for Borges' *Pierre Menard, Author of the Quixote*: the project's headline
-criterion is that two independently written compilers (one in TypeScript, one in
-Menard) must emit **byte-identical** output for the same source. Agreement is
-proven by `stage2 == stage3`. That gate proves the implementations *agree*; a
-reference interpreter is the oracle for *correctness*.
+Named for Borges' *Pierre Menard, Author of the Quixote*: there is **one**
+compiler, written once, in Menard, and the headline criterion is that two
+entirely different executions of it arrive at the same text. The reference
+interpreter (TypeScript on Bun) runs the compiler on its own source; the native
+binary built from that output compiles the same source again; and the two must
+emit **byte-identical** IR — `ir0 == ir1`. That gate proves the two executions
+*agree*; the interpreter is also the oracle for *correctness*.
 
 ## Purpose
 
@@ -19,6 +21,21 @@ Every feature is judged by finishability. The frontend is s-expressions, type
 parameters are declared rather than inferred, the syntax is closed (no macros),
 and the emitter is deliberately naive — LLVM does the optimisation work.
 Closures and the collector are isolated and deferred until self-hosting works.
+And there is no second compiler to keep in step: the bootstrap is the
+interpreter running the one compiler, from source.
+
+## The bootstrap
+
+| Stage | What it is |
+| --- | --- |
+| stage0 | the compiler (`src/`, Menard) running on the reference interpreter |
+| stage1 | the native binary built from stage0's IR for the compiler's own source |
+| stage2 | the native binary built from stage1's IR for the same source |
+
+The gate is `ir0 == ir1`: stage0 and stage1 are the same program given the same
+input, so their output must match, and `stage2` is then `stage1` byte for byte.
+No compiler binary is committed; every bootstrap starts from source. See §3.5 of
+the spec.
 
 The full design lives in [`docs/menard-spec.md`](docs/menard-spec.md); standing
 decisions are in [`docs/decisions.md`](docs/decisions.md).
@@ -46,13 +63,17 @@ decisions are in [`docs/decisions.md`](docs/decisions.md).
 
 ## Status
 
-**Phase 1** is in place: the reference interpreter (semantic oracle) with shared
-desugar and typer, production diagnostics (`diagnose` / `formatDiagnostic`),
-builtins (`Map`, `StringBuffer`, …), a virtual filesystem host, and a minimal
-prelude. Phase 0 reader/printer remains the parse front end.
+**Phase 0** (reader, printer, spans, casing) is complete. **Phase 1** is in
+progress: the reference interpreter runs as the semantic oracle, with desugar and
+typer, production diagnostics (`diagnose` / `formatDiagnostic`), builtins
+(`Map`, `StringBuffer`, …), a virtual filesystem host, and a minimal prelude.
+What remains is making it fit to host the compiler as stage0 — modules, the real
+filesystem and `argv`, recursion that does not depend on the JavaScript stack,
+a persistent `Map`, and throughput — tracked in the
+[issue list](https://github.com/graeme-lockley/menard-lang/issues).
 
-Later phases add LLVM stage0, self-hosting, and the collector — see §5 of the
-spec.
+Phase 2 writes the compiler in Menard, on the interpreter; phase 3 self-hosts
+(`ir0 == ir1`); phase 4 adds the collector — see §5 of the spec.
 
 ## Build
 
@@ -102,7 +123,7 @@ bun test ../tests
 | Path | Role |
 | --- | --- |
 | `docs/` | Language specification and decision record |
-| `host/` | TypeScript on Bun — stage0 (later) and interpreter |
+| `host/` | TypeScript on Bun — the reference interpreter: oracle and stage0 host |
 | `host/src/reader/` | Shared reader, AST, printer, casing |
 | `host/src/diagnostic/` | Diagnostic model and formatter |
 | `host/src/desugar/` | Special-form sugar |
@@ -115,4 +136,6 @@ bun test ../tests
 | `tests/` | Unit, corpus, semantic, negative, io |
 | `.github/workflows/` | CI |
 
-A full bootstrap (`make bootstrap`) arrives with self-hosting in later phases.
+The compiler itself will live in `src/` (Menard), with the C runtime in
+`runtime/`. A full bootstrap (`make bootstrap`: interpreter → stage0 → stage1 →
+stage2) arrives with self-hosting in phase 3.

@@ -34,24 +34,24 @@ bearing choices; everything in the specification follows from them.
 |---|---|---|---|
 | 1 | S-expressions, no sugar | Cheapest reader; no ambiguity | Ugly for outsiders; sugar costs double |
 | 2 | Statically typed | Types drive the showable/orderable/equatable checks and exhaustive matching | Larger typer |
-| 3 | `Int` = 63-bit tagged, **one integer type** | The tag bit makes uniform one-word values possible, and is load-bearing for the collector too (§2.2, §4.3); narrow buys no speed, wide costs boxing; a second type doubles the ways stage0 and the backend can disagree | Range limit; boxed `BigInt` eventually |
+| 3 | `Int` = 63-bit tagged, **one integer type** | The tag bit makes uniform one-word values possible, and is load-bearing for the collector too (§2.2, §4.3); narrow buys no speed, wide costs boxing; a second type doubles the ways the interpreter and the backend can disagree | Range limit; boxed `BigInt` eventually |
 | 4 | `Float` boxed in a **`bytes` payload**, **no unboxed fields** | The payload is arbitrary bits, so it must never be scanned as slots; NaN-boxing would *narrow* `Int`; unboxing would break the collector's invariants (§4.3) | Allocation churn on float-heavy code |
 | 5 | **Immutability, with exactly two reference types: `Ref` and `StringBuffer`** | Makes closure capture a copy; enumerating the exceptions keeps the rule checkable and keeps mutable state out of output | Two legal mutation paths to keep out of emission paths |
 | 6 | No exceptions | Deletes `invoke`, landing pads, unwind tables | `Result` plumbing everywhere |
-| 7 | **No macros, ever** | Macros tax every reader of every program; a closed syntax pays per idiom instead | ~dozen special forms implemented twice; prelude duplication; generic diagnostics |
+| 7 | **No macros, ever** | Macros tax every reader of every program; a closed syntax pays per idiom instead | ~dozen special forms implemented twice (interpreter and compiler); prelude duplication; generic diagnostics |
 | 8 | **No language-level iteration order; order derived from the type** | Maps have no semantic order; determinism belongs to traversal, and deriving it from the type keeps `Map` free to be any implementation | Any non-derived emission breaks the fixed point |
 | 9 | Shape-pointer headers with a **layout kind** and a **location** bit, no GC field maps | One source of truth for layout and variant tags; layout handles the even-non-pointer cases (code pointers, f64 payloads); location handles static objects; and one descriptor per constructor puts the tag in the descriptor rather than in the object | Fixed per-object overhead; collector must consult both axes |
 | 10 | `alloca` + `mem2reg`, not statepoints | Removes dominance/phi reasoning entirely | Requires side-effecting root stores |
 | 11 | Runtime in C, not self-hosted | Runtime is not the interesting problem | Two languages in the repo |
 | 12 | Single-threaded, STW collector | Removes barriers, safepoints, atomics | No concurrency in v1 |
-| 13 | **stage0 in TypeScript on Bun** | Types help; `bigint` gives exact integers; shares reader with the oracle | Two implementations of the semantics to keep aligned |
+| 13 | **The reference interpreter is TypeScript on Bun, and it is the bootstrap host** | Types help; `bigint` gives exact integers; an oracle that shares no code with the backend can judge it; and running the compiler as stage0 needs no other compiler | Two implementations of the semantics to keep aligned; the interpreter must be fast and robust enough to run the compiler |
 | 14 | No import cycles | Simpler module compilation order | Mild annoyance |
-| 15 | stage0 and the oracle share one codebase | Syntax has one host implementation | Coupling between build tool and test oracle |
+| 15 | **One compiler, written in Menard; the bootstrap is source-only** (§3.5) | A second compiler doubles every feature and needs its own agreement harness; interpreting the one compiler reaches the fixed point a stage earlier (`ir0 == ir1`) and makes one side of the gate the oracle | The interpreter is on the critical path of every bootstrap; bugs in the compiler's own logic are invisible to the gate, since both sides run the same source |
 | 16 | **No caller-supplied ordering predicate in output paths** | It would be viral, silently omittable, and could let stages disagree | Less flexibility in presentation |
 | 17 | **Determinism is four obligations** (order, identity, text, arithmetic), plus two weaker ones for I/O boundaries and seeds | Each fails silently and independently | Emission paths deterministic in order but leaking addresses or float spellings |
 | 18 | **Showable, orderable and equatable are separate positive predicates** | The three restrictions differ; exclusions alone are undecidable by a reader | A `Ref` nested in an emitted record prints an address and breaks the gate |
-| 19 | **`Int` arithmetic: only `+`/`−` are free on tagged words** | A naive tagged multiply is wrong but *deterministic*, so the gate cannot catch it | Silent wrong arithmetic that passes `stage2 == stage3` forever |
-| 20 | **The gate proves agreement, not correctness** | A deterministic bug shared by both implementations passes it every time | Over-trusting the bootstrap; skipping the oracle |
+| 19 | **`Int` arithmetic: only `+`/`−` are free on tagged words** | A naive tagged multiply is wrong but *deterministic*, so the gate cannot catch it | Silent wrong arithmetic that passes `ir0 == ir1` forever, because the compiler only multiplies small numbers |
+| 20 | **The gate proves agreement, not correctness** | A bug in the compiler's own logic is present in both executions, and a miscompile the compiler's run never reaches is outside the comparison; either passes it every time | Over-trusting the bootstrap; skipping the oracle |
 | 21 | **Type parameters are explicit and declared — never inferred** | Gives the abstraction without unification, generalization, HM diagnostics, or the value-restriction problem that `Ref` would force | More annotation at declaration sites; no `let`-polymorphism |
 | 22 | **No Unicode normalisation, anywhere** | Equality and order must be over one representation or map key behaviour depends on spelling | Slightly surprising string equality for some users |
 | 23 | **User nominal types take type parameters** | Shares all machinery with explicit function parameters; typer-only cost | No longer a "no generics" language, only a "no inference" one |
@@ -65,11 +65,11 @@ bearing choices; everything in the specification follows from them.
 | 31 | **`Map` requires orderable keys and is persistent** | Deterministic iteration by construction; value semantics preserved; deletes hash from the agreement surface | HAMT in the runtime (~300 lines ×2); no `Ref`/`Fn` keys |
 | 32 | **No `Byte` type; `Char` is a scalar value; `Str` is arbitrary bytes** | A `Byte` is a second integer type with the same agreement cost as `Int32`; bytes are small `Int`s with a documented range | Byte/character confusion is a documented-range question, not a type error |
 | 33 | **`StringBuffer` is a built-in reference type** (§2.8.2) | It needs in-place mutation, and the compiler is its hot-path client; `sb-take-str!` is free because `Str` and the buffer share one payload shape | ~200 lines of C and ~200 of TS, implemented twice; a second mutation path to keep out of output |
-| 34 | **Copy-on-write after a non-destructive `sb-to-str`** | A shared backing store means an append could otherwise mutate an immutable `Str` already held by a caller | One extra copy on the first append after a conversion; a rule both stages must implement |
+| 34 | **Copy-on-write after a non-destructive `sb-to-str`** | A shared backing store means an append could otherwise mutate an immutable `Str` already held by a caller | One extra copy on the first append after a conversion; a rule the interpreter and the runtime must both implement |
 | 35 | **Debug output is a separate printer — `dump` — writing only to fd 2, with no way to become a value** | Debugging needs to see `Ref`, `Fn` and `StringBuffer` contents, which `show` must refuse; isolation by *type*, not by convention, means a forgotten `dump` cannot break the fixed point | A sixth compiler-known intrinsic once `println` is counted; the loose policy in the derive engine; two kinds of text on stderr with opposite determinism rules |
-| 36 | **Menard has no `null`; the empty word is an allocator sentinel, not a value — kept, and paired with an *asserted* no-partial-publication discipline** | Filling an object's fields may allocate, so the collector can run mid-construction; without a distinguished word an unwritten slot holds a stale pointer or an even non-pointer, traced silently in both stages. The word converts that into a wasted read; the discipline — and its heap-verify assertion — is what stops the collector *depending* on it | One extra test in the marking loop; one `memset` per recycled object; one non-value word in the representation that must be kept out of the language, out of output, and out of the debug printer |
+| 36 | **Menard has no `null`; the empty word is an allocator sentinel, not a value — kept, and paired with an *asserted* no-partial-publication discipline** | Filling an object's fields may allocate, so the collector can run mid-construction; without a distinguished word an unwritten slot holds a stale pointer or an even non-pointer, traced silently in every native build. The word converts that into a wasted read; the discipline — and its heap-verify assertion — is what stops the collector *depending* on it | One extra test in the marking loop; one `memset` per recycled object; one non-value word in the representation that must be kept out of the language, out of output, and out of the debug printer |
 | 37 | **Process spawning is admitted, in argv-vector form only; shell strings and `fork` are refused permanently** | The build driver must be Menard, or the language's own integration test lives in a shell script; argv is data the compiler can see and check, whereas a shell string is unbounded ambient state in one string; and `fork` copies a GC's heap and collector state | ~310 lines implemented twice; a `SpawnError` taxonomy to keep aligned; a non-hermetic test tier; one more way for a path to reach the artifact |
-| 38 | **Literals and nullary constructors are static objects; layout and location are separate axes** | A literal or a nullary constructor is a constant of the program, so allocating it at each evaluation is pure waste — and for `Str`, which is not interned, "each evaluation" means each loop iteration. Making the pool static deletes the allocation rather than optimising it; splitting location from layout is what lets a `bytes` object be static and lets a nullary variant be header-only | ~120 lines across two stages for the pool; two new determinism obligations (dedup and emission order); a layout/location pair to keep straight; and the invariance rules of §2.2.1 must hold |
+| 38 | **Literals and nullary constructors are static objects; layout and location are separate axes** | A literal or a nullary constructor is a constant of the program, so allocating it at each evaluation is pure waste — and for `Str`, which is not interned, "each evaluation" means each loop iteration. Making the pool static deletes the allocation rather than optimising it; splitting location from layout is what lets a `bytes` object be static and lets a nullary variant be header-only | ~60 lines of compiler for the pool; two new determinism obligations (dedup and emission order); a layout/location pair to keep straight; and the invariance rules of §2.2.1 must hold |
 | 39 | **`print` / `println` are variadic stdout emitters: `Str` raw, other showables via `show`; no auto-newline on `print`** | Quoting every `Str` through `show` made hello-world and IR-shaped stdout unusable via `print`; bare `Str` bytes plus explicit `(print (show x))` when quotes are wanted keeps `show` injective and `write` as the arbitrary-fd primitive | Special variadic typing; six intrinsics; callers who wanted the old always-show behaviour must wrap with `show` |
 ---
 
@@ -171,8 +171,9 @@ do with the static pool:
 Under `ordinary` layout, the collector's rule — "odd → skip, empty word → skip,
 even non-zero → trace" — would have traced each of those as a **pointer to an
 object that does not exist**. Not a rare edge case: essentially every convenient
-float value. A crash, or silent retention, and *identically in both stages*, so
-§2.14's gate would have been blind to it.
+float value. A crash, or silent retention, *identically in every native build*
+and never in the interpreter, which has no heap — and since the compiler barely
+touches floats, §2.14's gate would have been blind to it.
 
 **The fix is one line and it was already licensed by the specification.**
 Invariant 4 said byte payloads "are not words in slots at all; they are the bodies
@@ -257,8 +258,10 @@ disappearance of a layout question that had no good answer.
 This is the consequence most likely to be missed, because it looks like an
 optimisation. It is not:
 
-> If stage0 deduplicated literals and stage2 did not, their IR would differ and
-> the **gate would fail with no compiler bug behind it**.
+> If the pool's contents or order depended on anything that differs between the
+> interpreter and the runtime — a container's iteration order, an address — then
+> stage0 and stage1 would emit different IR and the **gate would fail with no
+> compiler bug behind it**.
 
 Two static objects with the same bytes are interchangeable, so an implementation
 may either keep both or merge them — but *which* it does is part of the program
@@ -310,7 +313,8 @@ the way the f64 was discovered.
 - **Interning `Str` instead of making literals static.** Tempting, since `Sym` is
   already interned, but it changes `=` from "bytes" to "bytes, and here is a
   lookup" — an observable difference in cost, a hash table on the runtime's
-  critical path, and a new cross-stage agreement requirement on the hash. Static
+  critical path, and a new interpreter-versus-runtime agreement requirement on
+  the hash. Static
   literals get the allocation win with none of that.
 - **Leaving `Float` literals heap-allocated** while making string literals
   static. Rejected as inconsistent: a boxed `Float` literal has exactly the same
@@ -319,7 +323,8 @@ the way the f64 was discovered.
 - **A per-instantiation `None` singleton**, or specialising the representation so
   that `None` is a tagged immediate. Rejected: uniform one-word values mean one
   static `None` already serves every instantiation, and a special representation
-  would be a second axis of stage divergence for no gain. (This also finally
+  would be a second axis on which the interpreter and the backend could diverge,
+  for no gain. (This also finally
   closes the v0.5.4 question: a **null-as-`None`** encoding buys nothing beyond
   the singleton, and the singleton now exists.)
 - **Keeping the inline constructor tag** for the sake of one fewer load on
@@ -336,8 +341,10 @@ lowering), §2.8.1, §2.8.2 (buffer storage is heap-owned), §2.8.4, §2.10, §2
 §2.11.O, §2.13, §2.14, §2.15, §2.16, §3.1, §3.2, §3.3, §3.4, §3.5, §3.6, §3.7,
 §3.8, §3.9, §3.10, §4.1, §4.2, §4.3, §4.4, §5, §6, §7, §8, §9.
 
-Sizing moves by ~120 lines: the pool itself in each stage (Menard 60, TypeScript
-60). Totals become **~7,020 Menard / ~2,940 C / ~5,030 TypeScript**, about 15,000.
+Sizing moves by ~60 lines: the pool itself, written once, in the compiler. The
+interpreter needs none — it treats literals as ordinary values, which is exactly
+the invisibility rule. Totals become **~7,020 Menard / ~2,940 C / ~5,070
+TypeScript**, about 15,000.
 The runtime column does not grow — recognising the location bit is a branch, not a
 subsystem — and the *machine* work falls, which no line count records.
 
@@ -544,15 +551,16 @@ onto a mechanism that already existed.
 
 ### A sequencing note the operator raised at the same time
 
-> *"As soon as the stage0 has been completed, I can then use Menard to build
+> *"As soon as the compiler has been completed, I can then use Menard to build
 > project tooling. That will be the best thing ever :-)"*
 
-True, and slightly pessimistic. **Phase 1 is the interpreter and phase 2 is
-stage0**, so anything that does not need to *compile* — prelude libraries, a
-formatter, a test runner, `find-on-path`, span handling — can be written and
-tested on the interpreter before a native binary exists. The oracle *is* a Menard
-runtime. Only the driver needs stage0, because it needs a Menard binary to run,
-which is why it lands at the end of phase 3. Recorded in §5 so the plan reflects
+True, and slightly pessimistic. **Phase 1 is the interpreter, and phase 2 writes
+the compiler on it** — the compiler runs as stage0 long before it runs natively.
+So anything written in Menard — prelude libraries, a formatter, a test runner,
+`find-on-path`, span handling — can be written and tested on the interpreter
+before a native binary exists. The oracle *is* a Menard runtime. Even the driver
+runs there once the interpreter can spawn; what lands at the end of phase 3 is
+its *native* build, as an acceptance test. Recorded in §5 so the plan reflects
 it.
 
 ---
@@ -613,9 +621,10 @@ emit IR"* — is true and irrelevant, because it describes a different product:
   TypeScript, and a closed error variant — **less than `Map`**, and the same kind
   of work (a narrow interface implemented twice), which is exactly why the §2.8
   tier rules were worth having *before* this decision was taken.
-- A driver cannot precede self-hosting anyway: it is a Menard program and needs a
-  Menard binary to run. So it lands at the end of phase 3, as a **second
-  acceptance test** rather than a second deliverable.
+- A driver is a Menard program, so it runs on the interpreter as soon as the
+  interpreter can spawn; but the gate exercises its *native* build, which needs
+  stage1. So it lands at the end of phase 3, as a **second acceptance test**
+  rather than a second deliverable.
 
 ### The ten rules, and where they come from
 
@@ -643,7 +652,7 @@ agree**; four exist to keep the surface from becoming a process-control library.
    because a build that reads `SIGSEGV` as "exit 11" reports a crash as a status.
    The shell's `128 + n` folding is not adopted by the primitive; it lives in
    `status->exit-code`, in the prelude, where it is visible. `(exit!)` truncates
-   to 8 bits, identically in both stages.
+   to 8 bits, identically in the runtime and the interpreter.
 7. **No `fork`. Refused permanently, and the reason is specific to this project:**
    a GC'd runtime that forks copies the heap *and the collector's and allocator's
    state* — a half-filled object, a shadow stack that no longer matches the
@@ -702,8 +711,8 @@ Once a driver hands paths to `clang`, an absolute path has a **new route into th
 artifact**: through the IR's `source_filename` and module identifier, which the
 compiler emits. Rule now stated explicitly in §2.11.I: those derive from the
 module path **as the user gave it**, never from a resolved absolute path. It is
-deterministic by construction because the gate supplies the same path to both
-stages — and it is the sort of thing that breaks by calling a path-normalising
+deterministic by construction because the gate supplies the same path to stage0
+and stage1 — and it is the sort of thing that breaks by calling a path-normalising
 helper "for tidiness".
 
 ### The test tier this creates, and why it is fenced
@@ -760,8 +769,8 @@ slots.
 Without a distinguished word, those slots hold whatever the memory held before: a
 **stale pointer** into a freed object, or an **even non-pointer** such as a code
 pointer. Either is traced, and either fails **silently and deterministically in
-both stages** — §2.14's blind spot exactly. With the empty word, the worst case
-is a wasted read.
+every native build**, while the interpreter, which has no heap, never does —
+§2.14's blind spot exactly. With the empty word, the worst case is a wasted read.
 
 ### The part that is actually his point: demote it from mechanism to backstop
 
@@ -920,8 +929,8 @@ design and could not have carried this.
 
 **Consequence, unusual enough to state:** `dump!` output is the only thing in the
 system permitted to be **non-reproducible**. It may contain addresses and may
-differ between stage0 and stage2 — permitted *because* it cannot be an emitted
-byte.
+differ between the interpreter and a native build — permitted *because* it
+cannot be an emitted byte.
 
 **Rejected alongside:** a two-step design with a built-in nominal `Debug` type
 (buys composability, loses the guarantee the moment anyone adds an accessor —
@@ -1072,9 +1081,9 @@ implementation detail, because it is implemented twice.
 
 The **TypeScript hazard runs the other way**: in C, sharing a payload is a
 deliberate act; in TS a `Uint8Array` handed to a `Str` is not copied by default,
-so sharing is the *natural* thing to write. A stage0 author would get this wrong
-by doing the obvious thing, and if the C runtime made the same mistake the gate
-could pass. Flagged explicitly in §3.9 as the one built-in with a host-specific
+so sharing is the *natural* thing to write. The interpreter's author would get
+this wrong by doing the obvious thing, and if the C runtime made the same mistake
+the gate could pass. Flagged explicitly in §3.9 as the one built-in with a host-specific
 trap.
 
 ### Rejected: a general `MutBytes`
@@ -1276,7 +1285,7 @@ from a US hardware chain.
 | 9 | 63-bit leakage into spans/lengths: non-issues | **Accepted as knocked down.** Seeds fixed to constants anyway. |
 | 10 | Instantiating polymorphic built-ins implies real monomorphization machinery | **Accepted at the time — superseded in v0.5.** The derive-engine half stands. |
 | 11 | "Paid once" is backwards | **Accepted.** §2.9 rewritten as a trade paid per idiom. |
-| 12 | "Small enough for one person" understates total work | **Accepted.** §7 revised; hidden cost named as two behaviourally identical compilers. |
+| 12 | "Small enough for one person" understates total work | **Accepted.** §7 revised; hidden cost named as two behaviourally identical executions of the language — the interpreter, and the backend with its runtime. |
 
 **Vera's verdict on §2.11 vs. call-site predicates** — she confirms the design:
 predicates relocate the discipline rather than removing it. §2.14 carries that
@@ -1284,12 +1293,14 @@ argument.
 
 ### Ratified: the language is called **Menard**; source files use `.mnd`
 
-After Borges' *Pierre Menard, Author of the Quixote*, in which an author
-independently writes a text word-for-word identical to Cervantes' — not a copy,
-but a separate act of authorship arriving at the same bytes. The name leads on
-the **identical copy** half of the design rather than the **self** half: the self
-is already carried by the bootstrap chain, and the comparison is the stranger
-claim.
+After Borges' *Pierre Menard, Author of the Quixote*, in which an author writes a
+text word-for-word identical to Cervantes' — not a copy, but the same words
+arrived at from an entirely different world. The project's compiler is one text
+executed in two different worlds — interpreted by a TypeScript oracle, and run as
+native code built from its own output — and the two must arrive at the same
+bytes. The name leads on the **identical text** half of the design rather than
+the **self** half: the self is already carried by the bootstrap chain, and the
+comparison is the stranger claim.
 
 **Extension: `.mnd`** — the consonant skeleton, matching the three-letter
 convention. Rejected `.men`, which reads as an ordinary English word.
@@ -1308,7 +1319,7 @@ convention. Rejected `.men`, which reads as an ordinary English word.
 - **Rejected 32-bit `Int`:** not faster — in the tagged representation `add` is
   one instruction at any width.
 - **Rejected `Int32` + `Int64`:** conversion noise, duplicated arithmetic paths,
-  and a *second axis* on which stage0 and the backend can disagree.
+  and a *second axis* on which the interpreter and the backend can disagree.
 - **Standing escape hatch:** if 63 bits ever proves wrong, make `Int` 32-bit
   outright, not add a second type.
 - **v0.5.1 note:** this argument is what refuses a `Byte` type, and the tag bit
@@ -1327,7 +1338,13 @@ No caller-supplied ordering predicate in output paths. Consequence: `Map` is fre
 to be any implementation internally — and in v0.5.1 that freedom deleted the hash
 function from the agreement surface entirely.
 
-### Ratified: stage0 and the oracle are TypeScript on Bun (§3.9, ADRs 13, 15)
+### Ratified: one compiler, bootstrapped by a TypeScript interpreter (§3.5, §3.9, ADRs 13, 15)
+
+There is one compiler, written in Menard. The reference interpreter — TypeScript
+on Bun — is both the oracle and the bootstrap host: it runs the compiler as
+stage0, stage0 compiles the compiler to stage1, and the gate is that the two
+emit identical IR for the compiler's own source (`ir0 == ir1`). No compiler
+binary is ever committed; every bootstrap starts from source.
 
 Host integers model **63-bit** wrapping (`BigInt.asIntN(63, …)`), not 64-bit, and
 model `Int` **untagged** — the tag is backend-only.

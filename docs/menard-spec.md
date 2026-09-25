@@ -8,10 +8,12 @@ first-class closures, explicit type parameters, and a precise garbage collector.
 > at a text word for word identical to Cervantes'.*
 > — the argument of Borges' *Pierre Menard, Author of the Quixote*, paraphrased
 
-That is this project's headline criterion. Two independently produced
-compilers — one written in TypeScript, one written in Menard — must emit
-byte-identical output for the same source. Not the same text by copying, but the
-same text by two separate routes.
+That is this project's headline criterion. There is **one** compiler, written
+once, in Menard. It is executed by two entirely separate routes — read by a
+reference interpreter written in TypeScript, and run as native code built from
+its own output — and both executions, given the compiler's own source, must emit
+byte-identical output. Not the same text by copying, but the same text arrived at
+through two different worlds.
 
 ---
 
@@ -27,12 +29,16 @@ parameters, declared never inferred), the **syntax closed** (no macros, ever),
 the **numeric model narrow** (one integer type, one float type), and the
 **backend boring** (emit naive IR, let LLVM do the work). The two hard parts —
 closure conversion and the collector — are isolated behind narrow interfaces and
-deferred to late phases.
+deferred to late phases. And the **bootstrap is single-sourced**: the compiler
+is written only in Menard, and the reference interpreter runs it until it can
+compile itself (§3.5).
 
-The proof of agreement is a single byte-comparison: `stage2 == stage3`.
+The proof of agreement is a single byte-comparison: `ir0 == ir1` — the IR the
+interpreted compiler emits for its own source equals the IR the native compiler
+emits for the same source.
 
-**§2.14 is a necessary companion to that gate.** It proves that two
-implementations *agree*. It does not prove that either is *correct*, and the
+**§2.14 is a necessary companion to that gate.** It proves that two executions of
+one compiler *agree*. It does not prove that the compiler is *correct*, and the
 difference is not academic: a deterministically wrong compiler passes it every
 time.
 
@@ -46,7 +52,9 @@ time.
   variants, exhaustive matching, a standard library, diagnostics with source
   spans.
 - A **self-hosting compiler**: the Menard compiler is written in Menard and
-  compiles itself to LLVM IR.
+  compiles itself to LLVM IR. It is the **only** compiler: there is no bootstrap
+  compiler in another language. The reference interpreter runs it until it has
+  compiled itself.
 - A **build tool written in its own language** (`mn`, §2.15): emit IR, invoke the
   C toolchain, link the runtime, produce a binary. The top-level build command is
   Menard code, not a shell script.
@@ -61,8 +69,10 @@ All eight must hold, and each is testable.
 
 **Agreement — proven by the bootstrap gate:**
 
-1. The Menard-written compiler compiles itself: `stage2` and `stage3` are
-   **byte-identical**.
+1. The compiler compiles itself identically by both routes: the IR emitted by
+   **stage0** (the compiler running on the interpreter) and by **stage1** (the
+   native binary built from stage0's IR) is **byte-identical** — `ir0 == ir1` —
+   and consequently `stage1` and `stage2` are byte-identical binaries (§3.5).
 2. The determinism obligations of §2.11 hold, and are checked in CI rather than
    asserted in prose.
 3. The **artifact the Menard driver produces is byte-identical to the artifact
@@ -72,9 +82,10 @@ All eight must hold, and each is testable.
 
 **Correctness — proven by the oracle and the test suite, not by the gate:**
 
-4. The **reference interpreter** (§5, phase 1) agrees with both compiled stages
-   on the whole corpus. This is the only evidence of correctness the project
-   has, and it is why phase 1 is not optional.
+4. The **reference interpreter** (§5, phase 1) agrees with the compiled program
+   on the whole corpus: every corpus program produces the same output when
+   interpreted as when compiled by stage0 and by stage1. This is the project's
+   principal evidence of correctness, and it is why phase 1 is not optional.
 5. Programs using closures, type-parametric records and variants, GC'd heap
    objects, exhaustive `match` and the standard library run correctly.
 6. The collector is **precise** (no conservative scanning in the final build)
@@ -82,7 +93,9 @@ All eight must hold, and each is testable.
 
 **Project hygiene:**
 
-7. A clean checkout bootstraps with one command: `make bootstrap`.
+7. A clean checkout bootstraps with one command, `make bootstrap`, from
+   **source alone**: Bun and the pinned LLVM toolchain are the only
+   prerequisites, and no pre-built compiler binary is committed or downloaded.
 8. All parse and type errors report a source span.
 
 ### 1.3 Non-goals
@@ -94,12 +107,14 @@ or inheritance, exceptions, concurrency/threads, FFI beyond libc, finalizers,
 weak references, incremental compilation, a package manager, a REPL,
 self-hosting the runtime, **additional integer types**, **a `Byte` type**,
 **unboxed fields**, **general mutable arrays**, **debug text as a value**
-(§2.16), **`null`** (§2.10), and **shell-string command execution, `fork`,
-signal handling, child timeouts, per-spawn environment or working directory, and
-streaming child I/O** (§2.15).
+(§2.16), **`null`** (§2.10), **a second compiler** in any other language
+(§3.5), and **shell-string command execution, `fork`, signal handling, child
+timeouts, per-spawn environment or working directory, and streaming child I/O**
+(§2.15).
 
 For everything except macros, integer types, byte types, unboxing, mutable
-arrays, debug-as-value, null and that last group, these are v2 conversations.
+arrays, debug-as-value, null, a second compiler and that last group, these are
+v2 conversations.
 Each is listed specifically because it is an attractive detour that kills
 projects like this.
 
@@ -205,8 +220,10 @@ allocates the two leaves before it has finished the cons. So the collector can
 run while an object has unwritten slots. Without a distinguished word, those
 slots hold whatever was in that memory before: a **stale pointer** into a freed
 object, or an **even non-pointer** such as a code pointer. Either is traced, and
-either fails **silently and deterministically in both stages** — precisely
-§2.14's blind spot, and precisely the class of bug the gate cannot see.
+either fails **silently and deterministically in every native build** — and the
+interpreter, which has no heap, never exhibits it. That is precisely §2.14's
+blind spot: the compiler's own run is unlikely to trip it in an output-affecting
+way, so it is the class of bug the gate cannot be relied on to see.
 
 With the empty word, the worst case is a wasted read.
 
@@ -297,15 +314,18 @@ allocations are its constants, and static objects remove them entirely.
 static `Str` from a heap one, a literal from a computed value, or a static
 nullary constructor from a freshly built one. There is no address comparison, no
 `is-static`, and none may be added: the moment static-ness is observable it
-becomes a semantic difference and a new way for the two stages to disagree. This
-invisibility is also what makes deduplication safe.
+becomes a semantic difference, and the interpreter — which has no static pool at
+all — would stop agreeing with the compiled program. This invisibility is also
+what makes deduplication safe.
 
 **Deduplication and emission order are canonical.** Static objects are
 **deduplicated by byte content** and **emitted sorted by byte content**. Both are
-emitted bytes and therefore determinism obligations (§2.11): if one stage
-deduplicated literals and the other did not, their IR would differ and the gate
-would fail with no compiler bug behind it. Sorting is chosen because it is total,
-cheap, and shrinks the image.
+emitted bytes and therefore determinism obligations (§2.11): the pool is built by
+the compiler, and the compiler runs both under the interpreter and natively, so
+its order must not depend on any container's traversal order or any address. A
+pool emitted in an order the two executions do not share would fail the gate with
+no compiler bug behind it. Sorting is chosen because it is total, cheap, and
+shrinks the image.
 
 **Not in the descriptor: a GC field map.** With user type parameters (§2.3) a
 static field map cannot exist — `Leaf` in a `(Tree Str)` holds a pointer the
@@ -334,8 +354,8 @@ objects* becomes required, and must be asserted in heap-verify.
 - **A narrower `Int` buys nothing.** In this representation, `add` is one
   instruction regardless of nominal width. There is no performance argument for
   `Int32` in the *backend*; it would not be faster, only narrower. (The TS host
-  is a different story — see §3.9 — but stage0's speed is a developer-iteration
-  cost, not a correctness property.)
+  is a different story — see §3.9 — but the interpreter's speed is a bootstrap
+  and iteration cost, not a correctness property.)
 - **A wider `Int` costs real money.** A full 64-bit value cannot sit beside a
   tag, so it requires either boxing (an allocation per arithmetic operation, and
   GC pressure) or abandoning the uniform representation — and abandoning it would
@@ -343,16 +363,16 @@ objects* becomes required, and must be asserted in heap-verify.
 - **One integer type.** Providing `Int32` *and* `Int64` would force explicit
   conversions everywhere (there are no implicit conversions), duplicate the
   arithmetic paths in the typer and the emitter, and — most seriously — create a
-  **second axis on which stage0 and the backend can disagree**, doubling the
-  class of fixed-point bugs.
+  **second axis on which the interpreter and the backend can disagree**,
+  doubling the class of fixed-point bugs.
 - **Integer width and float boxing are one decision, not two.** The alternative
   to a tag bit is NaN-boxing, which unboxes `Float` but leaves only ~48 bits of
   payload — making `Int` *narrower*, not wider. For a compiler, integer width is
   worth more than float speed. Hence: 63-bit `Int`, boxed `Float`.
 - **The same argument forbids a `Byte` type** (§2.3). A byte is a second integer
   type with the same conversion noise and the same second agreement axis, and
-  the runtime pays for it in the typer, the predicates, the derive engine and
-  both stages — even though it would be free in the *representation*, since it
+  the project pays for it in the typer, the predicates, the derive engine, the
+  interpreter and the runtime — even though it would be free in the *representation*, since it
   fits the tag exactly as `Int` does. Being precise about where the cost lands
   is the point: representation-free, surface-expensive.
 
@@ -378,9 +398,11 @@ that appears is the machine's, and it is the wraparound the language specifies.
 wrong.** `t(a)·t(b) = 4ab + 2a + 2b + 1`, which equals `2ab + 1` only when
 `ab + a + b ≡ 0 (mod 2⁶³)` — true by accident on small operands, false in
 general. A naive tagged multiply passes casual testing and fails on larger
-values, and because it fails *identically in both stages* it **passes the
-bootstrap gate**. This is the single most dangerous arithmetic mistake available
-in this design; see §2.14.
+values. The interpreter, which multiplies untagged bigints, would disagree with
+it — but only on operands the compiler's own run never produces, and a compiler
+multiplies small numbers. So it **passes the bootstrap gate**, deterministically,
+every time. This is the single most dangerous arithmetic mistake available in
+this design; see §2.14.
 
 **The rule for every other operation** (`*`, `/`, `%`, `<<`, `>>`):
 
@@ -404,19 +426,20 @@ remainder by zero is a defined `panic`, not undefined behaviour — which matter
 because LLVM's `sdiv` by zero *is* undefined, so the guard must be emitted
 explicitly rather than relied on. The classic hardware trap for `INT64_MIN / −1`
 cannot fire, because untagged operands are 63-bit and never reach `INT64_MIN`.
-Both stages implement this same convention; the TypeScript host's `bigint`
-division already truncates toward zero, so the two agree by default — but the
-agreement is required, not assumed.
+The interpreter and the backend implement this same convention; the TypeScript
+host's `bigint` division already truncates toward zero, so the two agree by
+default — but the agreement is required, not assumed.
 
 **Shifts are total.** The shift amount is taken as an unsigned 63-bit quantity;
 if it is ≥ 63 the result is defined rather than undefined — `<<` yields 0, and
 arithmetic `>>` yields 0 or −1 according to the sign of the left operand. This
-rule is trivial to implement identically in both stages, which is the point.
+rule is trivial to implement identically in the interpreter and the backend,
+which is the point.
 
 #### The host must not model the tag
 
-The tag is a **backend representation detail**. The host (stage0 and the
-reference interpreter) models `Int` as an **untagged** bigint reduced to 63
+The tag is a **backend representation detail**. The host (the reference
+interpreter) models `Int` as an **untagged** bigint reduced to 63
 bits, and never constructs, inspects or reasons about a tagged word. Applying
 `BigInt.asIntN(63, …)` to a *tagged* value is a silent width bug; applying it to
 an untagged value is correct. Keeping the tag out of the host entirely removes
@@ -558,9 +581,10 @@ exactly the data type the *compiler itself* uses most. Two honest options:
   may well do this for its own environment chains.
 
 What is **not** permissible is leaving `Map` with reference semantics and calling
-the language immutable. That is precisely the kind of "deterministic,
-both-stages-agree, and wrong" defect §2.14 warns about: the compiler would
-bootstrap perfectly while aliasing its own symbol tables.
+the language immutable. That is precisely the kind of "deterministic, both
+routes agree, and wrong" defect §2.14 warns about: if the interpreter's `Map`
+and the runtime's shared the mistake, the compiler would bootstrap perfectly
+while aliasing its own symbol tables.
 
 #### Type aliases
 
@@ -578,7 +602,7 @@ An alias introduces **no new type** — only a spelling for an existing one.
 | **Nullary — no parameters.** | An alias with parameters is a type-level lambda, and that is a type-level function, which is out. `(alias IntTree (Tree Int))` is fine. |
 | **Cycles are errors.** `(alias T T)` is rejected. Recursion through a nominal type is fine. | Eager expansion would diverge otherwise. |
 | **Expanded before every semantic check**, including the showable/orderable/equatable predicates (§2.12) and type identity. | A predicate must not be able to disagree with itself depending on how a type was spelled. |
-| **Never affects `show` output** (§2.13), which prints the underlying nominal name. | If an alias changed printed output, the two stages would differ whenever they spelled a type differently — a fixed-point failure caused by a *convenience* feature. |
+| **Never affects `show` output** (§2.13), which prints the underlying nominal name. | If an alias changed printed output, `show` would depend on how a type was spelled — and the interpreter, which prints runtime values with no record of that spelling, would disagree with the compiled program: a fixed-point failure caused by a *convenience* feature. |
 | **Mangling uses the expanded type** (§2.7). | Two identical types under different aliases must mangle identically, or symbols duplicate or go missing. |
 
 **Two views of every type.** The single rule that makes aliases safe is that a
@@ -769,16 +793,18 @@ story of "what belongs in the compiler":
 
 | Tier | Rule | Implemented | In this specification? |
 |---|---|---|---|
-| **§2.8.1 Compiler-known intrinsics** | Needs **per-type synthesis** or special variadic stdout typing | Twice: stage0 and the Menard compiler | **Yes** — these are language |
+| **§2.8.1 Compiler-known intrinsics** | Needs **per-type synthesis** or special variadic stdout typing | Twice: the compiler's derive engine and the interpreter's value-directed evaluation | **Yes** — these are language |
 | **§2.8.2 Runtime-backed built-ins** | Needs in-place mutation or an opaque C representation | Twice: the C runtime and the interpreter | **Yes** — signatures and semantics |
-| **§2.8.3 Prelude** | Expressible in Menard | **Once** — one source, compiled by both stages | Listed only |
+| **§2.8.3 Prelude** | Expressible in Menard | **Once** — one source, run by the interpreter and compiled by the compiler | Listed only |
 | **§2.15 Host seam** | Touches the OS | Twice: `libc` and the interpreter's host API | **Yes** — mechanism, floor, error taxonomy |
 
 The principle behind it: **whatever is implemented twice belongs in the
-specification.** Stage0 and the Menard compiler each implement the typer, the
-derive engine and the emitter, so those are specified in detail. A prelude
-function is written once, so the gate already covers it and prose would only go
-stale.
+specification.** The compiler is written once, but the *meaning* of the language
+is implemented twice — by the interpreter, which evaluates it, and by the
+compiler plus the C runtime, which translate it — so the typing rules, the
+intrinsics and the evaluation semantics are specified in detail. A prelude
+function is written once, so the gate and the oracle already cover it and prose
+would only go stale.
 
 The second row's rule has a second clause: an operation belongs there when it
 needs in-place mutation **and** the compiler itself is a client that needs it in
@@ -891,9 +917,9 @@ Three deliberate choices among the maps:
 - **`map-keys` and `map-entries` return the derived canonical order**, not hash
   order. That makes map iteration deterministic *by construction*, which is
   worth an `O(k log k)` sort on every call. It also means **the hash function
-  needs no cross-stage agreement**: the hash order is never observable, so
-  stage0's JS `Map` and the runtime's C table may differ freely. That is a whole
-  agreement axis removed by §2.11.O.
+  needs no agreement between the interpreter and the runtime**: the hash order
+  is never observable, so the interpreter's TypeScript map and the runtime's C
+  table may differ freely. That is a whole agreement axis removed by §2.11.O.
 - **`map-entries` returns two parallel lists**, not a list of pairs, so that the
   built-in surface does not depend on a prelude type. `(List (Pair k v))` is a
   fine prelude function over it.
@@ -1026,8 +1052,10 @@ across instantiations (§2.2.1).
 memoised, recursive over the type DAG. It is **parametrised**: `show` for a
 `(Tree a)` needs `show` for `a`, so a derived function for a polymorphic type is
 generated per instantiation, and derived functions are mutually recursive. It is
-written twice — once in TypeScript, once in Menard — and the two must agree byte
-for byte. Two consequences:
+written **once**, in the compiler. The interpreter needs no derive engine — it
+has the runtime value in hand, and walks it — but its value-directed `show`, `=`,
+`compare` and `dump` are a second implementation of the same definitions, and
+the two must agree byte for byte. Two consequences:
 
 - The **showable**, **orderable** and **equatable** predicates (§2.12) are
   checked at *instantiation sites*: `(Tree Int)` may be showable while
@@ -1052,13 +1080,15 @@ Menard has no macros and no user-defined syntax, now or in future.
 
 Rationale: macros impose a cognitive burden on **every reader of every program**
 written in the language, forever. The alternative — a fixed set of special forms
-in the compiler — pays that cost *per idiom that is added*, in two compilers.
+in the compiler — pays that cost *per idiom that is added*, in the compiler and
+in the interpreter.
 For a language whose purpose is to be finished and understood, that is the right
 trade.
 
 **The cost is paid per idiom, not once, and that should be stated plainly.**
 Every new control-flow idiom — `unless`, `with-*`, `let*`, anything — is either a
-new special form, which forces a full three-stage re-bootstrap to verify, or
+new special form, which must be implemented in the interpreter *before* the
+compiler may use it, and forces a full re-bootstrap to verify, or
 hand-duplication in the prelude. Macros are precisely the mechanism that lets a
 language absorb such idioms without touching the compiler, and banning them
 inverts that economics. The ban is kept anyway, because the cost is paid by
@@ -1068,7 +1098,7 @@ forever*.
 Consequences, all accepted:
 
 - **The special-form list (§2.5) is the extension mechanism.** Adding sugar
-  means changing the compiler, in both stages, and re-bootstrapping.
+  means changing the interpreter and the compiler, and re-bootstrapping.
 - **Homoiconicity is absent.** S-expressions are retained because they give a
   cheap, unambiguous reader and a trivial printer — not for code-as-data
   manipulation. Nothing in the design depends on quoted code. `quote` survives
@@ -1112,16 +1142,19 @@ Consequences, all accepted:
 
 ### 2.11 Determinism
 
-The gate `stage2 == stage3` requires **four independent properties**, and each
-one fails silently and independently. Two further obligations, weaker and
-differently shaped, cover the I/O boundary and internal seeds.
+The gate `ir0 == ir1` requires **four independent properties**, and each one
+fails silently and independently. The gate runs one compiler on two runtimes —
+the interpreter and the C runtime — so anything the compiler's output inherits
+from its runtime rather than from its source is a way for the two to differ. Two
+further obligations, weaker and differently shaped, cover the I/O boundary and
+internal seeds.
 
 | # | Obligation | Fails when |
 |---|---|---|
 | **O** | **Order** | Any traversal reaching output iterates in hash/insertion order |
 | **I** | **Identity** | An address, allocation index, or intern slot index reaches output |
 | **T** | **Text** | `Float` or `Str` has more than one spelling for the same value |
-| **A** | **Arithmetic** | The two implementations compute different values (§2.2) |
+| **A** | **Arithmetic** | The interpreter and the backend compute different values (§2.2) |
 
 #### 2.11.O — Order
 
@@ -1139,12 +1172,13 @@ predicate**. Instead:
   order, and maps by a **total order on their keys**.
 - **One canonical order, no overrides**, in anything that reaches emitted
   output. A caller-supplied predicate is deliberately not offered: it would be
-  viral, silently omittable, and would let stage0 and stage2 disagree. §2.14
+  viral, silently omittable, and would let the interpreted and native
+  executions disagree. §2.14
   argues why relocating the discipline to call sites is strictly worse.
 - **The static pool has one canonical order.** Static objects are deduplicated by
   byte content and emitted sorted by byte content (§2.2.1), so the image does not
-  depend on the order in which the compiler happened to encounter literals. Both
-  stages must do this identically.
+  depend on the order in which the compiler happened to encounter literals, nor
+  on any container order that differs between the interpreter and the runtime.
 - **Printing is not the only consumer.** Diagnostics, symbol emission, cache
   keys and test comparisons all need a deterministic order. Attaching
   determinism to the *type* covers all of them; a call-site predicate covers only
@@ -1158,8 +1192,8 @@ predicate**. Instead:
 - **`map-keys` and `map-entries` hand out that same order** (§2.8.2), which is
   what makes map iteration deterministic for *user* code as well as for the
   compiler. This is the rule that removes the hash function from the agreement
-  surface: hash order is unobservable, so stage0 and the runtime need not agree
-  on it.
+  surface: hash order is unobservable, so the interpreter and the runtime need
+  not agree on it.
 
 #### 2.11.I — Identity
 
@@ -1216,10 +1250,11 @@ rules are in §2.13. In particular:
 
 #### 2.11.A — Arithmetic
 
-The width and the operation semantics of §2.2 hold **identically** in stage0, in
-the reference interpreter, and in the self-hosted backend. A mismatch here only
+The width and the operation semantics of §2.2 hold **identically** in the
+reference interpreter and in the code the backend emits. A mismatch here only
 ever surfaces on overflow or on a specific operand pattern, which makes it a late
-and baffling failure — and, if it is deterministic, an *invisible* one (§2.14).
+and baffling failure — and, if the compiler's own run never produces that
+pattern, an *invisible* one to the gate (§2.14).
 Overflow-adjacent arithmetic gets its own corpus (§3.7).
 
 #### 2.11.B — Boundary
@@ -1233,8 +1268,8 @@ output, not about avoiding input:
 > **Ambient state may enter a program. It may never reach emitted bytes unless it
 > entered through an argument the fixed point also supplies.**
 
-Practically: the gate runs both stages in the same environment with the same
-inputs (§3.6), the compiler emits no path, no timestamp, no locale-dependent text
+Practically: the gate runs stage0 and stage1 in the same environment with the
+same inputs (§3.6), the compiler emits no path, no timestamp, no locale-dependent text
 and no `strerror` string (§2.15), and the interpreter can run against a virtual
 filesystem so that corpus tests are hermetic (§2.15).
 
@@ -1350,9 +1385,9 @@ that would.
 `Ref`, `StringBuffer` and `Fn` are **neither orderable nor showable**. This is
 what prevents the most dangerous version of the identity leak: a record such as
 `{ name: Str, owner: (Ref T) }` nested inside an emitted list would otherwise
-print a heap address, two runs would intern at different addresses, and
-`stage2 != stage3` — with the defect occurring nowhere near the gate that catches
-it.
+print a heap address, the interpreter and the native compiler would print
+different ones, and `ir0 != ir1` — with the defect occurring nowhere near the
+gate that catches it.
 
 **Float is unorderable by choice.** A total order on floats is possible once NaN
 is excluded (§2.11.T), so this is a deliberate exclusion rather than a forced
@@ -1384,7 +1419,8 @@ those is really a rule about `map-new` and `map-set`.
 
 ### 2.13 Canonical text forms (normative)
 
-Two implementations must produce identical bytes. These rules are therefore
+Two implementations — the interpreter's printer and the compiler's derive
+engine over the C runtime — must produce identical bytes. These rules are therefore
 normative rather than a description of a formatter. **Aliases never appear here**
 (§2.3): a record is shown by its declared nominal name. Neither does **static
 placement**: a deduplicated literal and a heap `Str` with the same bytes have the
@@ -1407,47 +1443,73 @@ same spelling, because the spelling is defined on bytes alone.
 | `Ref`, `StringBuffer`, `Fn` | **no spelling — a compile error to show** (§2.12). Debug output is a separate contract: §2.16 |
 
 The exact punctuation is a detail and may be revised; what is **not** revisable
-is that both stages implement the *same* table, and that the table is total and
-injective over the bits of a value. The shortest-round-trip rule for `Float` is
+is that the interpreter and the compiled program implement the *same* table, and
+that the table is total and injective over the bits of a value. The shortest-round-trip rule for `Float` is
 singled out because it is the one entry most likely to differ between an
 implementation using the host's native formatting and one using a hand-written
 formatter.
 
 ### 2.14 What the bootstrap gate proves, and what it does not
 
-`stage2 == stage3` is the project's headline criterion, and it is worth being
-precise about its power.
+`ir0 == ir1` is the project's headline criterion, and it is worth being precise
+about its power.
 
-**It proves agreement.** Two compilers, one written in TypeScript and one written
-in Menard, independently produce byte-identical output for the same input. This
-is strong evidence for all four determinism obligations (§2.11) and for the
+**It proves agreement.** One compiler, executed by the reference interpreter
+(stage0) and executed as native code built from its own output (stage1),
+produces byte-identical IR for its own source. The two executions share nothing
+but the compiler's source text: one runs on the interpreter's evaluator and its
+TypeScript built-ins, the other on emitted LLVM IR and the C runtime. This is
+strong evidence for all four determinism obligations (§2.11) and for the
 fidelity of the self-host.
 
-**It does not prove correctness.** The gate is blind to any bug that is
-**deterministic and present in both implementations**. A `*` that is wrong the
-same way twice, a type checker that accepts the wrong program, a collector that
-frees a live object in a reproducible pattern, a `Map` that aliases instead of
-persisting (§2.3), an unwritten slot traced as a pointer (§2.2) — all pass, every
-time. The gate compares two implementations; it cannot compare either to the
-truth.
+**It is partly a correctness check, and it is worth knowing exactly which
+part.** One side of the comparison is the oracle. So a miscompile of any
+construct the compiler *itself* uses, on values the compiler itself produces, in
+a way that reaches the compiler's output, makes stage1 behave differently from
+stage0 and fails the gate. For the subset of the language the compiler
+exercises, the gate is a differential test of the backend against the oracle, on
+the largest program the project has.
 
-§2.2 supplies a concrete instance: a naive multiply of two tagged words is
-natural to write, wrong, and **perfectly deterministic**. It passes the gate and
+**It does not prove correctness.** The gate is blind to three classes of bug:
+
+- **Bugs in the compiler's own logic.** Both executions run the same source, so
+  a desugaring that drops a case, a typer that accepts the wrong program, or an
+  emitter rule that is wrong for every program is wrong identically in stage0
+  and stage1 — and the IR they agree on is wrong.
+- **Backend bugs the compiler's run never reaches.** A construct the compiler
+  does not use, an operand range it never produces, or a failure that does not
+  affect its output is outside the comparison.
+- **Bugs the interpreter and the runtime share.** A `Map` that aliases instead of
+  persisting (§2.3) in both, or a canonical text form (§2.13) both get wrong,
+  agrees with itself.
+
+§2.2 supplies a concrete instance of the second class: a naive multiply of two
+tagged words is natural to write, wrong, and **perfectly deterministic** — and it
+is right on the small operands a compiler multiplies. It passes the gate and
 produces wrong numbers forever. A `Float` box given `ordinary` layout is the same
-shape of error — the two stages would scan f64 bits identically and corrupt
-identically, and the comparison would never see it.
+shape of error: the compiler barely uses floats, the interpreter has no heap to
+scan, and the comparison never sees it. So is a collector that frees a live
+object in a pattern the compiler's run does not produce, and an unwritten slot
+traced as a pointer (§2.2).
 
 Consequences, and they are structural rather than cosmetic:
 
 - **Correctness evidence lives elsewhere**: the reference interpreter (§5,
-  phase 1), the semantic test suite, and review. The gate is an *agreement*
-  oracle, not a *correctness* oracle. §1.2 separates the two deliberately.
-- **Phase 1 is load-bearing**, not a nice-to-have. It is the only artefact in the
-  project whose job is to be *right* rather than to *agree*.
-- **Deterministic-wrong needs its own test discipline.** Ordinary differential
-  testing cannot catch it, by construction. What catches it is boundary-value
-  corpora (overflow, division, shift edges, aliasing) checked against the oracle,
-  and readable, reviewed emission code.
+  phase 1) run against every corpus program, the semantic test suite, and
+  review. The gate is chiefly an *agreement* oracle, not a *correctness* oracle.
+  §1.2 separates the two deliberately.
+- **Phase 1 is load-bearing**, not a nice-to-have. The interpreter is the only
+  artefact in the project whose job is to be *right* rather than to *agree* — and
+  it is also what runs the compiler until the compiler can run itself.
+- **The corpus extends the gate's reach.** Every corpus program is run by the
+  interpreter and compiled by stage0 and by stage1, and all three outputs must
+  match. That is the same differential test the gate performs, applied to code
+  that exercises what the compiler does not.
+- **Deterministic-wrong needs its own test discipline.** A bug in the compiler's
+  logic is invisible to any comparison between two executions of that logic, by
+  construction. What catches it is boundary-value corpora (overflow, division,
+  shift edges, aliasing) checked against the oracle, and readable, reviewed
+  emission code.
 
 **Derived order versus call-site predicates.** Output paths do not take a
 caller-supplied ordering predicate, and the reason is that a predicate does not
@@ -1535,7 +1597,10 @@ the same information in a form the compiler checks.
 
 **Tier 0 — the bootstrap floor.** All a self-hosting compiler needs. Note what is
 *absent*: no directory listing (imports use explicit relative paths), no
-environment, no process spawning, no stdin.
+environment, no process spawning, no stdin. The interpreter must provide this
+tier over the **real** filesystem as well as the virtual one, because stage0 is
+the compiler running on the interpreter (§3.5): it reads real source files, takes
+real arguments, writes real IR and sets a real exit code.
 
 ```lisp
 ; menard/sys.mnd
@@ -1663,7 +1728,7 @@ rest are the ones that keep this from becoming a process-control library.
    status. The shell's `128 + n` folding is **not** adopted by the primitive; a
    driver that wants that convention applies it itself, in Menard, where it is
    visible (`status->exit-code`, §2.8.3). `(exit)` takes its code **truncated to
-   8 bits**, identically in both stages.
+   8 bits**, identically in the runtime and the interpreter.
 7. **No `fork`.** This is a garbage-collected runtime, and `fork` copies the heap
    *and the collector's and allocator's state* into the child: a half-filled
    object, a shadow stack that no longer corresponds to the new machine stack, a
@@ -1706,8 +1771,9 @@ the build *succeeds*, never what the compiler *emits*. Two rules do follow:
 absolute path has a route into the artifact: through the IR's `source_filename`
 and module identifier, which the compiler emits. Hence the rule in §2.11.I:
 **paths in the IR derive from the module path as the user gave it, never from a
-resolved absolute path.** The gate supplies the same path to both stages, so this
-is deterministic by construction; a build that resolved paths first would not be.
+resolved absolute path.** The gate supplies the same path to stage0 and stage1,
+so this is deterministic by construction; a build that resolved paths first would
+not be — and the interpreter and the runtime would resolve them differently.
 
 **Cost:** ~160 lines of C, ~150 of TypeScript, and a `SpawnError` taxonomy
 implemented twice. It is smaller than `Map` and it is the same kind of work — a
@@ -1762,10 +1828,10 @@ Two rules, both load-bearing:
 
 - **No `strerror`, no errno, no OS message text.** `strerror` is locale-dependent,
   and §3.7's negative tests compare messages byte-for-byte. The runtime maps
-  `errno` into this variant; stage0 maps Bun's exception `code` into it. The
-  *Menard* taxonomy is the contract.
+  `errno` into this variant; the interpreter maps Bun's exception `code` into
+  it. The *Menard* taxonomy is the contract.
 - **This is a fifth agreement obligation (§2.11.B), alongside arithmetic.**
-  Stage0 sees a JS exception; the runtime sees `errno`. Both must produce the
+  The interpreter sees a JS exception; the runtime sees `errno`. Both must produce the
   *same* case for the same failure. Interrupted reads are retried rather than
   surfaced; partial writes are looped. Neither host's detail may reach behaviour.
 
@@ -1793,15 +1859,19 @@ it carries a code.
    (§2.11.O), not the OS's. Buffers are flushed before exit; stdout and stderr
    are separate streams with no interleaving guarantee.
 6. **The interpreter implements the same surface, over a virtual filesystem**, so
-   corpus tests stay hermetic and byte-comparable (§3.7). This is the second
-   implementation of the seam — see the note below.
+   corpus tests stay hermetic and byte-comparable (§3.7), **and over the real
+   filesystem** when it hosts stage0 (§3.5). This is the second implementation of
+   the seam — see the note below.
 
 **The dual-implementation note.** Collectively, §2.8.2 and §2.15 are the parts of
 the surface implemented **twice**: the C runtime and the interpreter each must
 provide `Map`, `StringBuffer`, the string operations, the OS seam and the two
-spawn forms, agreeing exactly. That is the same tax as the frontend, and it is
+spawn forms, agreeing exactly. That is the same tax as the language's evaluation
+semantics, which the interpreter and the backend also each implement, and it is
 why the built-in surface is kept as small as the tier rules allow. It is also the
-one part of the design where "just add a function" is not cheap.
+one part of the design where "just add a function" is not cheap. The tax is paid
+**once per operation**, not once per compiler: there is one compiler, and it is a
+*client* of this surface, never a second provider of it.
 
 ### 2.16 Debug output
 
@@ -1879,8 +1949,8 @@ that no operation may notice.
   why `dump` is safe to sprinkle.
 - **Consequence, stated because it is unusual:** `dump` output is the only thing
   in the system permitted to be **non-reproducible** — it may contain addresses,
-  and it may differ between stage0 and stage2. That is permitted *because* it
-  cannot be an emitted byte.
+  and it may differ between the interpreter and a native build. That is
+  permitted *because* it cannot be an emitted byte.
 - A **two-step design** — a built-in nominal `Debug` type, so that debug text
   could be passed around and composed — is rejected for v1. It buys composability
   at the cost of a built-in type whose value can leak the moment an accessor is
@@ -1943,6 +2013,11 @@ unspecified beyond the table above and may change freely.
 
 ### 3.1 Pipeline
 
+This is the pipeline of **the** compiler — the only one, written in Menard under
+`src/`. The same source runs in two ways: on the reference interpreter (stage0,
+§3.5), and as a native binary built from its own output. Nothing in the pipeline
+knows or may depend on which.
+
 ```mermaid
 flowchart LR
     A["source .mnd"] --> B["reader<br/>Ast + Span"]
@@ -1983,6 +2058,13 @@ enforces the casing rule and the `!` hygiene rule (§2.1), and works in **bytes*
 The reader is also where `Str` and `Float` literals are first identified as
 candidates for the static pool, since it is what knows their bytes (§2.2.1).
 
+**The interpreter has its own front end** — reader, desugar and typer, in
+TypeScript (§3.9) — because it must parse, check and run programs, the compiler
+among them, without a compiler. So the front end is the one part of the pipeline
+with two implementations. They must accept and reject exactly the same programs,
+and report the same diagnostic code at the same primary span; the negative corpus
+(§3.7) checks both against the same fixtures.
+
 ### 3.3 Typer
 
 - Local inference for `let` and lambdas; declared signatures at top level.
@@ -2011,6 +2093,12 @@ constructors, its **static** location (§2.2.1) — the one place these are deci
 so that the emitter and the collector cannot disagree about them.
 
 The typechecker is the largest single component. Budget accordingly.
+
+The interpreter's typer implements the same typing rules, without the
+compiler-only outputs (capture analysis, may-collect, layout kinds). It checks
+every program before the interpreter runs it — including the compiler, before
+stage0 starts — so the compiler's source is type-checked by an independent
+implementation on every bootstrap, and the compiler then checks itself.
 
 ### 3.4 Backend
 
@@ -2054,30 +2142,91 @@ The typechecker is the largest single component. Budget accordingly.
 
 ### 3.5 Bootstrap chain
 
+There is one compiler, `C`, written in Menard. There is no bootstrap compiler in
+any other language. The reference interpreter `I` runs `C` until `C` can run
+itself:
+
+| Stage | What it is | Built from |
+|---|---|---|
+| **stage0** | `C` running on the interpreter | the source of `C`, and nothing else |
+| **stage1** | a native binary | `ir0`: stage0's output for the source of `C`, linked with the runtime |
+| **stage2** | a native binary | `ir1`: stage1's output for the source of `C`, linked with the runtime |
+
 ```mermaid
 flowchart TD
-    S0["stage0 compiler<br/>TypeScript on Bun"] -->|compiles Menard source| S1["stage1 binary"]
-    S1 -->|compiles the same Menard source| S2["stage2 binary"]
-    S2 -->|compiles it once more| S3["stage3 binary"]
-    S3 --> CMP{"cmp stage2 stage3"}
-    CMP -->|identical| OK["Agreement proven<br/>(not correctness — §2.14)"]
-    CMP -->|differs| BAD["Nondeterminism or a divergence.<br/>Bisect by pass dumps."]
+    SRC["compiler source (src/)<br/>Menard, written once"] --> S0["stage0<br/>the compiler on the interpreter"]
+    SRC --> S1run
+    S0 -->|"compiles its own source → ir0"| S1["stage1 binary<br/>clang(ir0 + runtime)"]
+    S1 --> S1run["stage1 compiles the same source → ir1"]
+    S0 --> CMP{"cmp ir0 ir1"}
+    S1run --> CMP
+    CMP -->|identical| OK["Agreement proven<br/>stage2 = clang(ir1) is stage1, byte for byte<br/>(not correctness — §2.14)"]
+    CMP -->|differs| BAD["The interpreter and the native build disagree<br/>about what the compiler does. Bisect by pass dumps."]
 ```
 
 The fixed point is
 
-$$C_2 = C_3$$
+$$\mathit{ir}_0 = \mathit{ir}_1$$
 
-byte-identical binaries. This is the standard GCC/Rust three-stage bootstrap, and
-it is the project's definition of *agreement*.
+byte-identical IR, and it is the project's definition of *agreement*.
 
-**stage0 is the reference semantics.** It must be *correct rather than clever*,
-because when stage1 and stage2 disagree, stage0 decides who is wrong. In
-particular, stage0's arithmetic must match the runtime's **exactly**, including
-the 63-bit width and the operation-by-operation rules of §2.2 — and it must model
-`Int` **untagged**, never constructing a tagged word (§2.2). Its static pool must
-also be **laid out identically** to the Menard stage's: same deduplication, same
-sorted order, same alignment (§2.2.1).
+**Why equality is expected one stage earlier than in a conventional
+bootstrap.** In a bootstrap that starts from a *different* compiler, stage1 is
+built by that other compiler and may legitimately differ from stage2, so the
+fixed point is only reached at `stage2 == stage3`. Here stage0 and stage1 are the
+**same program** — the source of `C` — given the **same input** — the source of
+`C`. The only thing that differs is how the program is executed. So their outputs
+must already be identical, and any difference is a disagreement between the
+interpreter and the compiled code about what `C` does: a miscompile, an
+interpreter bug, or a determinism failure (§2.11). The shape is that of
+diverse double-compiling, with the interpreter as the diverse route.
+
+**Consequences.** If `ir0 == ir1`, then `stage2 = clang(ir1)` is `stage1`, byte
+for byte, provided the toolchain is itself deterministic. `make
+check-fixed-point` builds stage2 and compares the binaries anyway, because it is
+cheap and it is the check on that proviso. A third stage adds nothing.
+
+**The bootstrap is source-only.** Nothing but the source of `C`, the prelude,
+the runtime's C source and the interpreter's TypeScript source enters a
+bootstrap. No compiler binary is committed, downloaded or cached between
+bootstraps, so there is no binary whose provenance must be trusted: every
+bootstrap starts from the interpreter.
+
+**The interpreter is the reference semantics.** It must be *correct rather than
+clever*, because when stage0 and stage1 disagree, the interpreter decides who is
+wrong. In particular, its arithmetic must match the runtime's **exactly**,
+including the 63-bit width and the operation-by-operation rules of §2.2 — and it
+must model `Int` **untagged**, never constructing a tagged word (§2.2). It has no
+static pool: it treats literals as ordinary values, which is exactly the
+invisibility §2.2.1 requires.
+
+**The interpreter is also a build host**, and that adds requirements an oracle
+alone would not have. Each is an acceptance criterion of phase 1 (§5), because
+the compiler cannot be developed on an interpreter that fails them:
+
+- **The bootstrap floor over the real filesystem** — `argv`, `read-file`,
+  `write`, `write-file`, `exit` (§2.15, tier 0) — and **modules**: one file per
+  module, `import`, no cycles (§2.7). The compiler is a multi-module program that
+  reads files and writes IR.
+- **Recursion bounded by memory, not by the host's stack.** The compiler
+  recurses over syntax trees and walks long lists. The interpreter's evaluator
+  must not map Menard calls onto JavaScript calls one-for-one, or a deep enough
+  input overflows the JavaScript stack; it keeps an explicit continuation stack
+  instead. `loop`/`recur` runs in constant space.
+- **Asymptotically honest built-ins.** `map-set` is `O(log n)` with structural
+  sharing (§2.3), `sb-append!` is amortised `O(1)` (§2.8.2). A built-in that is
+  correct but quadratic makes stage0 unusable long before it makes a test fail.
+- **Throughput sufficient for stage0 to compile the compiler in minutes.**
+  Until stage1 exists, stage0 is how the compiler is developed and tested (§5,
+  phase 2). Afterwards the compiler is developed with the previous native build,
+  but stage0 still runs on every bootstrap and in CI, so its speed is a real
+  cost throughout. It is tracked by a benchmark in the test suite.
+
+**What is not permitted: bootstrapping from a previous native build.** A stage1
+from an earlier checkout may be used to *develop* the compiler quickly, but a
+bootstrap — and every gate run — starts from stage0. Otherwise a bug in an old
+binary could propagate into a new one without ever being executed by the
+interpreter, and the source-only property would be gone.
 
 **Who invokes `clang` is a free choice, and the gate does not care.** A shell
 driver and the Menard driver `mn` (§2.15) both produce the same artifact from the
@@ -2102,18 +2251,19 @@ These are mandatory from day one, and each maps to an obligation in §2.11:
 | **A spawned child never inherits the descriptor carrying the artifact**, and captured child output is never compared (§2.15). | **I**, **B** |
 | `argv` lists handed to children are built deterministically, in a fixed order, from flags and inputs. | **I** |
 | One spelling per value (§2.13). `Float` shortest-round-trip; NaN impossible; `−0.0` fixed. | **T** |
-| Arithmetic is 63-bit and identically defined in stage0, the interpreter, and the backend. | **A** |
-| `IoError` and `SpawnError` cases are identical in stage0 and the runtime; no `strerror`, no errno text, no locale. | **B** |
+| Arithmetic is 63-bit and identically defined in the interpreter and the backend. | **A** |
+| `IoError` and `SpawnError` cases are identical in the interpreter and the runtime; no `strerror`, no errno text, no locale. | **B** |
 | No environment value, cwd, timestamp, hostname or absolute path reaches emitted bytes. | **B**, **I** |
 | The audit for the two rows above is over **`extern` and module imports**, not over a name (§2.15). | **B** |
 | `list-dir` and `map-keys` hand out the canonical order, never the OS's or the hash's. | **O** |
 | Hash seeds are fixed constants; no RNG, clock, pid, environment, or locale in output. | O, I |
 | Symbol and definition emission order is **stable and explicit**. | **O** |
-| Instantiation order and derived-function naming are deterministic and identical in both stages. | O, I |
+| Instantiation order and derived-function naming are deterministic, and depend on nothing that differs between the interpreter and the runtime. | O, I |
+| **Nothing the compiler emits depends on how it is being executed** — no interpreter-only or runtime-only behaviour, no host-specific iteration order, no probe of which host is running. | **O**, **I** |
 | No absolute paths in output: `-ffile-prefix-map`, `-fdebug-prefix-map`, or no debug info in the compared stages. | **I** |
 | No timestamps, no build IDs, no random seeds, no environment-dependent output. | **I** |
 | The compiler is **single-threaded**. Parallel emission is a v2 feature and a determinism hazard. | O, I |
-| The gate runs both stages in the same environment, with the same arguments and inputs. | **B** |
+| The gate runs stage0 and stage1 in the same environment, with the same arguments and inputs. | **B** |
 | The gate compares the **artifact only**; stderr is not part of it. Do not merge the streams. | **I**, **B** |
 
 ### 3.7 Testing strategy
@@ -2121,14 +2271,15 @@ These are mandatory from day one, and each maps to an obligation in §2.11:
 | Layer | Method |
 |---|---|
 | Reader | round-trip print tests, fuzzing; casing and `!`-hygiene fixtures; **invalid-UTF-8 input** |
-| Typer | negative tests: every error kind has a fixture, **including alias-aware messages** |
+| Typer | negative tests: every error kind has a fixture, **including alias-aware messages**; the interpreter's typer and the compiler's must agree on the diagnostic code and primary span of every fixture |
 | Type parameters | positive and negative instantiation tests; a non-showable instantiation rejected at the point of use |
 | Semantics | **reference interpreter** as oracle (§5, phase 1) |
 | Backend | golden IR tests, one per construct |
-| Whole compiler | differential IR: stage0 vs stage1 on the entire corpus |
+| Whole compiler | **three-way agreement** on the entire corpus: each program's output under the interpreter equals its output when compiled by stage0 and when compiled by stage1; and stage0 and stage1 emit identical IR for it |
+| **Interpreter as build host** | a compiler-scale benchmark (deep recursion, long lists, large maps, many modules) with a time budget, so a quadratic built-in or a host-stack dependency fails CI rather than a bootstrap (§3.5) |
 | **Deterministic-wrong** | boundary corpora for overflow, division, remainder, shift edges, **`Map` aliasing**, and **`StringBuffer` copy-on-write**, checked against the oracle (§2.14) |
 | **Derive engine** | per-type golden output for `show`, `=` and `compare`, including nested maps, recursive types and **parameterised types at several instantiations** |
-| **Static pool** | a static `Str` and an equal heap `Str` are indistinguishable to `show`, `=` and `compare`; deduplication and emission order are golden-tested; a nullary constructor allocates nothing; both stages lay the pool out identically |
+| **Static pool** | a static `Str` and an equal heap `Str` are indistinguishable to `show`, `=` and `compare`; deduplication and emission order are golden-tested; a nullary constructor allocates nothing; stage0 and stage1 lay the pool out identically |
 | **Representation invariants** | heap-verify asserts odd immediates, 8-byte alignment for heap **and** static objects, empty-word handling, **that every slot word matches its declared layout kind**, and **the no-partial-publication rule** — no object reachable from a root at a collection contains the empty word (§2.2) |
 | **`dump`** | output captured on **fd 2** and asserted on **structurally**, never byte-compared; a cyclic `Ref` graph must terminate via the depth cap; a closure's dumped environment shows captured values (§2.16) |
 | **Canonical text** | one fixture per entry of the §2.13 table, byte-compared |
@@ -2139,21 +2290,28 @@ These are mandatory from day one, and each maps to an obligation in §2.11:
 | **Host seam** | golden fixtures over a **virtual filesystem**, so the corpus is hermetic; `IoError` case mapping tested per failure mode |
 | Regression | every bug becomes a corpus file, permanently |
 
-**Differential IR testing is the early-warning system** for *divergence*: before
-self-hosting works at all, compare the IR text stage0 and stage1 produce for the
-same input. Divergence points at a specific pass, with a small failing case.
+**Differential execution is the early-warning system** for *divergence*. Before
+self-hosting works at all — before stage1 exists — every corpus program is run
+by the interpreter and compiled by stage0, and the two outputs are compared. A
+corpus program is small and exercises one thing, so a divergence points at a
+specific construct, with a small failing case, long before it could surface as
+an `ir0 != ir1` somewhere in the compiler. Once stage1 exists, the IR stage0 and
+stage1 emit for each corpus program is compared as well, and a difference there
+points at a specific pass.
 
-**But note its blind spot**, which is the lesson of §2.14: differential IR testing
-compares two implementations, so a mistake both make is invisible to it. It must
-be paired with the oracle and with boundary-value tests, or the project acquires
-a false sense of safety.
+**But note its blind spot**, which is the lesson of §2.14: when stage0 and stage1
+agree, they are agreeing about one compiler's logic, so a mistake in that logic
+is invisible to them. The interpreter-versus-compiled comparison catches a
+miscompile only where the program's output depends on it. Both must be paired
+with the oracle's golden outputs and with boundary-value tests, or the project
+acquires a false sense of safety.
 
 **Two test-hygiene rules that §2.15 and §2.16 create, both silent if broken:**
 
 - A test may assert on `dump` output only by capturing fd 2 and checking
   structure, never by comparing bytes — debug text is permitted to differ between
-  stages, and a byte-comparison would make the suite flaky in a way that looks
-  like a real bug.
+  the interpreter and a native build, and a byte-comparison would make the suite
+  flaky in a way that looks like a real bug.
 - **Spawning and the virtual filesystem do not compose.** A child is a real
   process on the real filesystem; the interpreter's virtual FS does not extend
   into it. So spawning tests are a **separate, explicitly non-hermetic tier**, and
@@ -2163,20 +2321,28 @@ a false sense of safety.
 
 ### 3.8 Debugging a self-hosted compiler
 
-Keep stage0 forever. When stage3 misbehaves:
+The compiler always has a second way to run: stage0, the same source on the
+interpreter. When a native compiler misbehaves:
 
-1. Reproduce the failure under stage1.
-2. Recompile the failing file with stage0.
-3. Diff the pass dumps (`--dump-after=typer`, `--dump-after=ir`) between the two.
-4. The first divergent pass is the bug.
+1. Reduce the failing input as far as it will go.
+2. Compile it with stage0 — the same compiler source, on the interpreter.
+3. Diff the pass dumps (`--dump-after=typer`, `--dump-after=ir`) between stage0
+   and the native compiler.
+4. The first divergent pass is where native execution goes wrong. Something that
+   pass does is miscompiled (or the interpreter is wrong about it); a corpus
+   program that does the same thing, run by the interpreter and compiled, will
+   reproduce it in miniature.
 
 Add `dump` calls freely here (§2.16): they cannot affect the artifact, so a
 debugging session cannot corrupt the fixed point, and no cleanup is required
 before re-running the gate.
 
-**If the two stages do not diverge, this procedure cannot help you** — and that
-is the case for every bug in §2.14. Those are debugged against the oracle, not
-against the other stage.
+**If stage0 and the native compiler do not diverge, this procedure cannot help
+you** — and that is the case for every bug in the compiler's own logic (§2.14).
+Those are debugged against the oracle: run the *miscompiled program* on the
+interpreter to learn what it should do, and read the pass dumps against that.
+Because stage0 builds from source, any earlier revision of the compiler can be
+run the same way, so bisecting a regression needs no archive of old binaries.
 
 **When the bug is in the driver rather than the compiler, the divergence is in
 the `argv`.** `mn --print-toolchain` and a `dump` of the constructed argument
@@ -2184,19 +2350,24 @@ list turn a "the build produced nothing" symptom into a diff of two lists, which
 is the same technique as the pass dumps one level down.
 
 **When the divergence is in the static pool, the diff is a list of literals.**
-Deduplication and emission order are canonical (§2.2.1), so a stage that sorted
-differently, or failed to deduplicate, shows up as a reordered or duplicated
-block in the IR — the same two-list diff one level down.
+Deduplication and emission order are canonical (§2.2.1), so an execution that
+sorted differently, or failed to deduplicate, shows up as a reordered or
+duplicated block in the IR — the same two-list diff one level down.
 
-Never debug a self-hosted compiler without a working older stage. This is the
-single most important operational rule in the project.
+Never debug a self-hosted compiler without a working second route. The
+interpreter is that route, and it stays one only if it can run every revision of
+the compiler: **the interpreter never falls behind the language the compiler is
+written in.** A feature reaches the interpreter before the compiler may use it.
+This is the single most important operational rule in the project.
 
 ### 3.9 Host language: TypeScript on Bun
 
-stage0 **and** the reference interpreter are written in TypeScript, run on Bun,
-and written to the portable ECMAScript subset so Node also works. They **share
-the reader, AST and printer**, so syntax has exactly one implementation in the
-host language and one in Menard.
+The reference interpreter is the project's only TypeScript, and it has two jobs:
+it is the semantic **oracle**, and it is the **bootstrap host** that runs the
+compiler as stage0 (§3.5). It runs on Bun and is written to the portable
+ECMAScript subset so Node also works. Its reader, AST and printer are shared by
+its typer, its evaluator and its tests, so syntax has exactly one implementation
+in the host language and one in Menard.
 
 Seven host-language hazards, each with a rule:
 
@@ -2225,20 +2396,35 @@ Seven host-language hazards, each with a rule:
    must reject a NUL rather than truncate it (§2.15).
 6. **Object-literal key order is a trap.** Integer-like keys sort ascending
    regardless of insertion. Use `Map` for anything whose iteration can reach
-   emitted output, or order it explicitly per §2.11.O. This is also the hazard
-   that bites the **static pool**: stage0's deduplication and sorted emission
-   must be done explicitly, in bytes, not inherited from a host container's
-   iteration order.
+   emitted output, or order it explicitly per §2.11.O. The interpreter's
+   `map-keys` and `map-entries` must sort explicitly, in canonical order, never
+   hand out a host container's iteration order — otherwise stage0 sees one
+   order and stage1 another, and the compiler's output differs with no compiler
+   bug behind it.
 7. **TypeScript's type system is unsound** — structural, `any`, index
    signatures. Treat types as documentation, not verification. Add runtime
    assertions on AST shapes and property tests on the reader.
 
-Pin the Bun version and record it in `--version`. stage0 is a build tool, not a
-shipped artifact, so its performance does not matter — but its *reproducibility*
-does. `bigint` arithmetic is substantially slower than 32-bit `number`
-arithmetic, so a 32-bit host would iterate faster; that is an iteration-speed
-cost, not a correctness argument, and it does not outweigh §2.2's single-width
-rule.
+Pin the Bun version and record it in `--version`. The interpreter is a build
+tool, not a shipped artifact, and its *reproducibility* matters absolutely. Its
+performance matters too, but only up to a threshold: stage0 must compile the
+compiler in minutes (§3.5), and beyond that speed buys nothing. `bigint`
+arithmetic is substantially slower than 32-bit `number` arithmetic, so a 32-bit
+host would run faster; that is a speed cost, not a correctness argument, and it
+does not outweigh §2.2's single-width rule. Speed is recovered elsewhere — by
+resolving names and special forms once, before evaluation, rather than on every
+visit to a node — never by narrowing `Int`.
+
+**Two host-specific rules for the evaluator**, both of which follow from its job
+as a build host:
+
+- **No Menard call is a JavaScript call.** The evaluator keeps its own
+  continuation stack, so the depth of a Menard recursion is bounded by memory,
+  not by the JS engine's stack. A JavaScript `RangeError` escaping the evaluator
+  is an interpreter bug, never a program error.
+- **Every built-in has the complexity the specification states.** A persistent
+  `Map` is `O(log n)` per update (§2.3), not a copy of the whole table; copying
+  is correct, and it makes stage0 quadratic in the size of the compiler.
 
 **Three host-specific correctness rules for the seam.**
 
@@ -2270,14 +2456,17 @@ not merely *possible*, or the gate would be the only thing holding the rule.
 
 ```
 menard/
-  spec/            this document; menard-spec-draft.md; decisions.md
-  host/            TypeScript on Bun (not shipped)
-    src/reader/    shared: reader, AST, printer, spans
-    src/interp/    reference interpreter (the oracle) + virtual FS + spawn
-    src/stage0/    bootstrap compiler to LLVM IR
+  docs/            this document; decisions.md
+  host/            the reference interpreter: TypeScript on Bun (not shipped)
+    src/reader/    reader, AST, printer, spans, casing
+    src/diagnostic/  diagnostic model and formatter
+    src/desugar/   special-form sugar
+    src/type/      the interpreter's typer (§3.3)
+    src/interp/    evaluator (the oracle, and the stage0 host) + modules
     src/builtins/  Map, StringBuffer, Str, Char — the §2.8.2 tier, in TypeScript
-    src/static/    the literal pool: dedup, canonical order, shape descriptors
-  src/             Menard compiler written in Menard
+    src/host/      the seam: virtual FS, real FS, argv, exit, spawn
+    src/cli/       menard check | run — and the entry point that runs stage0
+  src/             THE compiler, written in Menard — the only one
   src/driver/      mn: emit / check / build / run  (§2.15)
   prelude/         standard library in Menard (lists, strings, parse, which, status)
   stdlib/          sys / io / fs / proc wrappers over extern (§2.15) — the
@@ -2287,13 +2476,16 @@ menard/
     unit/
     golden-ir/     incl. the static pool's layout and order
     golden-show/   derive engine output, per type and instantiation
-    corpus/        incl. regression and boundary cases
+    corpus/        incl. regression and boundary cases; each run three ways (§3.7)
+    negative/      diagnostic fixtures, shared by both typers
+    semantic/      oracle behaviour
+    bench/         interpreter-as-build-host budget (§3.5)
     gc-stress/
     heap-verify/   representation invariants, layout kinds, static objects (§2.2, §2.2.1)
     io/            hermetic, over the virtual filesystem
     proc/          NOT hermetic — the only tier that spawns (§3.7)
     stub-child/    a tiny program that echoes argv and exits scripted (§3.7)
-  tools/           bootstrap script, determinism checker, IR differ
+  tools/           bootstrap script (stage0 → stage1 → stage2), determinism checker, IR differ
   Makefile         make bootstrap | make test | make check-fixed-point
 ```
 
@@ -2335,7 +2527,7 @@ one.
   guarantees the **no-partial-publication** discipline (§2.2) is a *safety net*
   rather than the only defence: without zeroing, an unwritten slot would hold
   stack or freed-heap dirt — a stale pointer, or an even non-pointer such as a
-  code pointer — and tracing it would corrupt silently in both stages.
+  code pointer — and tracing it would corrupt silently in every native build.
 - Recycling from a free list therefore **must** zero (or otherwise scrub) the
   body before handing it out. Bump allocation from fresh, already-zeroed pages
   needs no work; this is where the cost lands, and it is one `memset` per
@@ -2517,22 +2709,32 @@ a phase before the previous one's test passes.
 | Phase | Deliverable | Acceptance test | Est. |
 |---|---|---|---|
 | **0** | Reader, printer, AST, spans, casing check, test harness (TypeScript) | Round-trips the whole corpus, including invalid UTF-8; fuzzing finds no crashes | 1–2 wk |
-| **1** | **Reference interpreter** in TypeScript — full semantics, no LLVM; **virtual filesystem** for the seam | Runs the prelude and a test suite; becomes the semantic oracle | 3 wk |
-| **2** | stage0 compiler: typing + instantiation, closure conversion, derive engine, IR emission, **static pool**, **leaking allocator**; §2.8.2 built-ins in TS | Compiles real programs with closures, parameterised records and variants; binaries run; `show` and order match the golden corpus | 5–9 wk |
-| **3** | Compiler rewritten in Menard; **the `mn` driver** (§2.15); `stage1`, `stage2`, `stage3` | **`stage2 == stage3`**; **and the driver's artifact is byte-identical to the harness's** | 7–11 wk |
+| **1** | **Reference interpreter** in TypeScript — full semantics, no LLVM; §2.8.2 built-ins; **virtual and real filesystem** for the seam; **modules**; fit to be a **build host** (§3.5): host-stack-independent recursion, asymptotically honest built-ins, adequate throughput | Runs the prelude and a test suite and becomes the semantic oracle; **and** passes the build-host benchmark (§3.7) — a multi-module program that reads and writes files, recurses deeply and builds large maps, within its time budget | 4–5 wk |
+| **2** | **The compiler, in Menard, run as stage0**: reader, desugar, typing + instantiation, closure conversion, derive engine, IR emission, **static pool**, **leaking allocator**; the minimal C runtime | Compiles real programs with closures, parameterised records and variants; binaries run; every corpus program's compiled output matches the interpreter's; `show` and order match the golden corpus | 8–12 wk |
+| **3** | **Self-hosting**: stage0 compiles the compiler; `stage1`, `stage2`; **the `mn` driver** (§2.15) built natively | **`ir0 == ir1`** and `stage1 == stage2`; **and the driver's artifact is byte-identical to the harness's** | 2–4 wk |
 | **4** | Real collector: conservative (Boehm-style) first, then precise shadow-stack **with layout-kind and location scanning** | GC stress corpus runs in bounded memory; heap-verify asserts the §2.2 invariants, including no-partial-publication, and is clean | 3–6 wk |
 | **5** | Performance and polish: NaN-boxing, `-O2` tuning, diagnostics, docs | Compiler compiles itself in under N minutes | open |
 
-**Phase 1 must not be skipped**, and §2.14 raises the stakes: the bootstrap gate
-cannot detect a bug that both implementations share, so the interpreter is the
-project's *only* correctness oracle. It costs little, freezes the semantics
-before you touch IR, and shares the reader with stage0 (§3.9).
+**Phase 1 cannot be skipped**, for two reasons. §2.14: the gate cannot detect a
+bug in the compiler's own logic, so the interpreter is the project's principal
+correctness oracle. And §3.5: the interpreter is the only way the compiler runs
+before it can run itself — there is no other bootstrap compiler. It freezes the
+semantics before you touch IR, and every weakness it has as a build host becomes
+a weakness of phase 2's inner loop, which is why its build-host requirements are
+part of its acceptance test rather than deferred to when they hurt.
 
-**Phase 1 is also when Menard tooling starts.** Anything that does not need to
-*compile* — prelude libraries, a formatter, a test runner, `find-on-path`, span
-handling — runs on the interpreter from the moment it works, so it can be written
-and tested against the oracle long before a native binary exists. Only the driver
-needs stage0, because it needs a Menard binary to run.
+**Phase 1 is also when Menard tooling starts.** Anything written in Menard — the
+compiler included, but also prelude libraries, a formatter, a test runner,
+`find-on-path`, span handling — runs on the interpreter from the moment it
+works, so it can be written and tested against the oracle long before a native
+binary exists.
+
+**Phase 2 is written in the language it implements, from the first line.** The
+compiler is developed on the interpreter: `menard run src/main.mnd -- file.mnd`
+is stage0 compiling one file. That makes phase 2 the language's first large
+program as well as its compiler, and it is where interpreter bugs and missing
+features surface. The rule from §3.8 governs: a feature reaches the interpreter
+before the compiler uses it.
 
 **Phase 2 deliberately leaks.** Bump-allocate and never free. Get self-hosting
 with a broken memory model, *then* make it correct. Chasing a collector bug while
@@ -2545,13 +2747,18 @@ Phase 2 is also where the **static pool** first pays for itself, because a
 leaking allocator is exactly when "this allocation never happens" is easiest to
 see: the compiler's own binary size and its allocation count both drop.
 
+**Phase 3 is short because phase 2 did the work.** Once stage0 compiles every
+construct the compiler uses, self-hosting is running stage0 on the compiler's own
+source and fixing what the gate shows. What remains is the determinism
+obligations that only a program as large as the compiler exercises.
+
 **The driver lands with self-hosting, and it is a second acceptance test rather
-than a second deliverable.** `make bootstrap` can drive `clang` from a script
-until `mn` exists; once it does, running the whole chain through `mn build` and
-byte-comparing against the script's artifact is a genuine end-to-end test of the
-runtime — arena construction, `argv`, file I/O, `Result`, exit codes and
-`posix_spawn` — that no IR comparison would catch. The driver cannot precede
-self-hosting: it is a Menard program, and it needs a Menard binary to run.
+than a second deliverable.** `mn` is a Menard program, so it runs on the
+interpreter as soon as the interpreter can spawn, and `make bootstrap` may use it
+there or drive `clang` from a script. Once stage1 exists, running the whole chain
+through a native `mn build` and byte-comparing against the script's artifact is a
+genuine end-to-end test of the runtime — arena construction, `argv`, file I/O,
+`Result`, exit codes and `posix_spawn` — that no IR comparison would catch.
 
 **Phase 4 in two steps.** Link a conservative collector first — it requires zero
 compiler cooperation and immediately replaces leaking with working. Then add
@@ -2572,18 +2779,18 @@ The failure modes this design is most exposed to, and what holds each one off.
 
 | Hazard | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| **A deterministic bug passes the gate** (§2.14) | High | Wrong output that looks proven-correct | Reference interpreter as oracle; boundary corpora; §1.2 separates agreement from correctness |
+| **A deterministic bug passes the gate** (§2.14) — a bug in the compiler's own logic, or a miscompile the compiler's run never reaches | High | Wrong output that looks proven-correct | Reference interpreter as oracle; every corpus program run three ways (§3.7); boundary corpora; §1.2 separates agreement from correctness |
 | **Naive tagged multiply** emits wrong numbers (§2.2) | High | Silent wrong arithmetic, invisible to the gate | Explicit untag/native/reduce-63/retag; overflow and boundary corpus; readable emission code |
-| **A boxed `Float` is given `ordinary` layout** (§2.2.1) | Medium | f64 bit patterns are very often even non-zero (`1.0` is `0x3FF0000000000000`), so the collector traces them as pointers to objects that do not exist — a crash or silent retention, identically in both stages | `Float` is a `bytes` object; heap-verify checks every slot word against its declared **layout kind**; the derive engine and arithmetic never inspect payload words |
+| **A boxed `Float` is given `ordinary` layout** (§2.2.1) | Medium | f64 bit patterns are very often even non-zero (`1.0` is `0x3FF0000000000000`), so the collector traces them as pointers to objects that do not exist — a crash or silent retention, identically in every native build, and never in the interpreter, which has no heap | `Float` is a `bytes` object; heap-verify checks every slot word against its declared **layout kind**; the derive engine and arithmetic never inspect payload words |
 | **An even non-heap word appears in a slot without a declared layout kind** (code pointer, static object, f64 payload, or any new case) | Medium | Collector marks a `.text` address, a `.rodata` constant, or arbitrary bits | Layout kinds plus the location bit (§2.2.1); heap-verify checks every slot word against its declared kind; new kinds require a specification change |
-| **Static objects diverge between the two stages** (deduplication or emission order) | Medium | The gate fails with no compiler bug behind it | Dedup by byte content, emit sorted by byte content (§2.2.1); §3.6 row; golden pool fixtures (§3.7) |
-| **Static-ness becomes observable** (an address comparison, an `is-static` operation, a `dump` that reports it) | Low | A semantic difference between the stages, and deduplication stops being safe | §2.2.1 states the invisibility rule; §2.11.I excludes it from output; §2.16 forbids `dump` from reporting it |
+| **The static pool differs between stage0 and stage1** (deduplication or emission order inherited from a container order the interpreter and the runtime do not share) | Medium | The gate fails with no compiler bug behind it | Dedup by byte content, emit sorted by byte content (§2.2.1); §3.6 row; golden pool fixtures (§3.7) |
+| **Static-ness becomes observable** (an address comparison, an `is-static` operation, a `dump` that reports it) | Low | A semantic difference between the interpreter and compiled code, and deduplication stops being safe | §2.2.1 states the invisibility rule; §2.11.I excludes it from output; §2.16 forbids `dump` from reporting it |
 | **A `StringBuffer` adopts static storage as writable** (§2.8.2) | Low | Writing to `.rodata` — a fault, or silent corruption of a constant | The backing store is always heap-owned; copy-on-write is the only sharing; `.rodata` is never written |
 | **An unwritten slot holds dirt instead of the empty word** — partial publication, an uninitialised root slot, or an allocator that stops zeroing | Medium | Collector traces stack or freed-heap garbage; silent and deterministic, so the gate will not notice | `mn_alloc` zeroes bodies and recycled objects; `mn_root_push` initialises the slot; **heap-verify asserts no object reachable from a root contains the empty word** (§2.2, §4.2, §4.4) |
-| **A buffer append mutates a `Str` already handed out** (§2.8.2) | Medium | Silent corruption of an immutable value, invisible to the gate if both stages share the mistake | Copy-on-write rule stated as semantics; dedicated buffer fixture (§3.7); explicit TS hazard note (§3.9) |
-| **`Map` aliases instead of persisting** (§2.3) | Medium | The compiler silently corrupts its own symbol tables while bootstrapping perfectly | Persistence stated as a §2.3 rule, not an implementation detail; aliasing corpus (§3.7) |
+| **A buffer append mutates a `Str` already handed out** (§2.8.2) | Medium | Silent corruption of an immutable value, invisible to the gate if the interpreter and the runtime share the mistake | Copy-on-write rule stated as semantics; dedicated buffer fixture (§3.7); explicit TS hazard note (§3.9) |
+| **`Map` aliases instead of persisting** (§2.3) | Medium | The compiler silently corrupts its own symbol tables — and bootstraps perfectly if the interpreter's `Map` makes the same mistake | Persistence stated as a §2.3 rule, not an implementation detail; aliasing corpus (§3.7) |
 | **Representation invariant violated** (odd instant or static object as a slot value, unaligned object) | Medium | Collector frees live objects; intermittent corruption | Stated as invariants, not conventions; asserted in heap-verify over the whole corpus **and the static pool**; invariants named in the definition of done |
-| **`dump` output compared byte-for-byte, or `dump` called from a diagnostic path** (§2.16) | Medium | A flaky suite that looks like a determinism bug, or diagnostics that differ between stages | §2.16 states the two-kinds-of-stderr rule; `dump` is captured on fd 2 and asserted structurally (§3.7) |
+| **`dump` output compared byte-for-byte, or `dump` called from a diagnostic path** (§2.16) | Medium | A flaky suite that looks like a determinism bug, or diagnostics that differ between the interpreter and a native build | §2.16 states the two-kinds-of-stderr rule; `dump` is captured on fd 2 and asserted structurally (§3.7) |
 | **Debug text routed to fd 1**, or stderr merged into the artifact | Low | Directly breaks the fixed point — the one way §2.16's isolation fails | `dump` has no value form and no accessor (§2.16); §3.6 requires the gate to compare the artifact alone |
 | **An ambient call is missed in an audit** (§2.15) | Medium | A path or environment value reaches emitted bytes with no signal to the reader | The boundary is the `extern` confinement in four named modules — checkable by lint (§2.7, §3.6); `find-on-path` keeps `PATH` lookup in visible code |
 | **The `!` convention is over-read** — taken for a checkable guarantee rather than a naming habit | Low | A reader trusts a marker nothing enforces | §2.15 states it is unchecked and covers five names; a linter is the only enforcement |
@@ -2593,16 +2800,16 @@ The failure modes this design is most exposed to, and what holds each one off.
 | **`fork` sneaks in** for a "simpler" spawn | Low | Copies the heap, the shadow stack and allocator state; a class of intermittent corruption in the child | §2.15 rule 7: `posix_spawn` only, stated as permanent |
 | **A hung child hangs `make bootstrap`** with no diagnosis | Medium | A build that never finishes, attributed to the compiler | Rule 8: no timeouts, stated as a known limitation; the driver prints its argv first, so the culprit is visible |
 | **The non-hermetic spawn tier spreads** into corpus tests | Medium | The hermetic-corpus claim quietly stops being true | Rule 10: spawning disabled by default in the interpreter, returning `(Unsupported)`; the `proc/` tier is named and fenced |
-| **`SpawnError`/status handling drifts between stage0 and the runtime** | Medium | The driver behaves differently under the oracle than under the compiled binary — the one thing the oracle exists to prevent | Closed Menard variants, no `errno`, no messages; per-case fixtures over the stub child (§3.7); §3.9 host note |
-| **An absolute path reaches the IR** via `source_filename` once a driver handles paths (§3.4) | Medium | A fixed-point failure caused by a path-normalising helper called "for tidiness" | §2.11.I names it; §3.6 row; the gate supplies identical paths to both stages |
+| **`SpawnError`/status handling drifts between the interpreter and the runtime** | Medium | The driver behaves differently under the oracle than under the compiled binary — the one thing the oracle exists to prevent | Closed Menard variants, no `errno`, no messages; per-case fixtures over the stub child (§3.7); §3.9 host note |
+| **An absolute path reaches the IR** via `source_filename` once a driver handles paths (§3.4) | Medium | A fixed-point failure caused by a path-normalising helper called "for tidiness" | §2.11.I names it; §3.6 row; the gate supplies identical paths to stage0 and stage1 |
 | **A cyclic `Ref` graph diverges the debug printer** (§2.16) | Low | A hanging compiler, mistaken for a loop elsewhere | Fixed depth cap with `...`, not a visited set; a cyclic fixture (§3.7) |
 | Root slots optimised away by LLVM (register liveness vs. shadow stack) | High | Subtle, intermittent crashes | Side-effecting root stores; GC stress mode that collects on every allocation; heap-verify mode |
 | Fixed point fails on nondeterminism, not miscompiles | High | Blocks phase 3 | The obligations of §2.11 plus §2.11.B; `make check-fixed-point` in CI from day one |
-| **stage0 and the runtime disagree on `Int` width, or the host models the tag** | High | Late, baffling fixed-point failure on overflow | Untagged bigint model in the host (§3.9); width specified once (§2.2); overflow corpus |
-| **`IoError` mapping drifts between stage0 and the runtime** | Medium | Divergent behaviour on I/O failure; locale-dependent text leaks into compared diagnostics | Closed Menard variant with codes, never `strerror`; per-failure-mode fixtures (§3.7); §2.11.B |
+| **The interpreter and the runtime disagree on `Int` width, or the host models the tag** | High | Late, baffling fixed-point failure on overflow | Untagged bigint model in the host (§3.9); width specified once (§2.2); overflow corpus |
+| **`IoError` mapping drifts between the interpreter and the runtime** | Medium | Divergent behaviour on I/O failure; locale-dependent text leaks into compared diagnostics | Closed Menard variant with codes, never `strerror`; per-failure-mode fixtures (§3.7); §2.11.B |
 | **Address or intern-index leakage into output** (§2.11.I) | Medium | Nondeterminism at a site far from the defect | Showable predicate is a compile error (§2.12); debug printing isolated by type (§2.16) |
 | **Alias name leaks into emitted output or a mangled symbol** | Medium | Fixed-point failure caused by a convenience feature | Canonical/display split (§2.3); mangling uses expanded types; determinism row in §3.6 |
-| **Float or Str text drifts between implementations** (§2.11.T) | Medium | Fixed-point failure traced to a formatter | Normative text table (§2.13); byte-compared fixtures per entry |
+| **Float or Str text drifts between the interpreter and the derive engine** (§2.11.T) | Medium | Fixed-point failure traced to a formatter | Normative text table (§2.13); byte-compared fixtures per entry |
 | Non-orderable/non-showable type reaches an output path | Medium | Nondeterminism or a crash | Compile error at the point of use; checked at instantiation, so `(Tree (Ref Int))` is rejected where it is shown |
 | **The dual-implemented surface is under-budgeted** (§2.8.2, §2.15) | Medium | The smallest-looking tier is the most expensive per line | Keep the tier rules strict; §7 costs it explicitly; each built-in has an interpreter fixture |
 | **Derive engine larger than budgeted** (parametrised) | Medium | Schedule overrun in phases 2–3 | Costed in §7; own phase-2 acceptance test; memoised per instantiation |
@@ -2618,12 +2825,15 @@ The failure modes this design is most exposed to, and what holds each one off.
 | Scope creep in general: threads, more integer types, `Byte`, structural unions, "one more feature" | High | Project never finishes | Non-goals list; phase gates with tests; macros closed by policy |
 | Menard `Int` in a JS `number`, or a 32-bit bitwise op | Medium | Silent truncation | `bigint` everywhere; lint ban on `number` and bitwise operators in semantic modules; boundary tests |
 | UTF-16 / UTF-8 confusion, or assuming `Str` is valid UTF-8 | Medium | Wrong spans, corrupted strings | All source handling via `Uint8Array`; byte offsets; invalid-UTF-8 fixtures (§2.3) |
-| Closure conversion bugs interacting with GC | Medium | Hard to reproduce | Reference interpreter oracle; differential IR testing; `dump` of closure environments (§2.16) |
+| Closure conversion bugs interacting with GC | Medium | Hard to reproduce | Reference interpreter oracle; differential execution (§3.7); `dump` of closure environments (§2.16) |
 | LLVM version drift (`musttail`, opaque pointers, pass behaviour) | Medium | Build breaks; silent behaviour change | Pin the LLVM version; record in `--version` |
-| Bun / TypeScript version drift | Medium | stage0 output changes | Pin the Bun version; test the bootstrap in CI |
-| Debugging a self-hosted compiler with no working stage | Medium | Weeks lost | Keep stage0 forever; per-pass dumps; `dump` (§2.16); a driver bug needs an `argv` diff (§3.8); a pool bug needs a literal diff (§3.8); non-divergent bugs need the oracle instead |
+| Bun / TypeScript version drift | Medium | The interpreter's behaviour changes, and stage0 with it | Pin the Bun version; test the bootstrap in CI |
+| Debugging a self-hosted compiler with no working second route | Medium | Weeks lost | stage0 builds from source at any revision; the interpreter never falls behind the language (§3.8); per-pass dumps; `dump` (§2.16); a driver bug needs an `argv` diff (§3.8); a pool bug needs a literal diff (§3.8); non-divergent bugs need the oracle instead |
+| **The interpreter is too slow, or too shallow, to host the compiler** — a quadratic built-in, host-stack recursion, per-node name lookup | High | stage0 takes hours or crashes on the compiler's own source; phase 2's inner loop stalls | Build-host requirements are a phase-1 acceptance test (§3.5, §5); the benchmark in §3.7 runs in CI; the evaluator keeps its own continuation stack (§3.9) |
+| **The interpreter falls behind the language** — the compiler uses a construct the interpreter does not run, or runs differently | Medium | stage0 cannot run the compiler, and there is no other bootstrap route | §3.8's rule: a feature reaches the interpreter before the compiler uses it; stage0 runs in CI on every change |
+| **A previous native build becomes the de facto bootstrap** | Medium | A bug in an old binary propagates without ever being run by the interpreter; the source-only property is lost | §3.5: every bootstrap and every gate run starts from stage0; no compiler binary is committed or cached |
 | Machine-stack overflow on deep ASTs | Medium | Crashes on real input | Depth guard; growable shadow stack; explicit limits |
-| Clock: this is months, not weekends | Certain | Abandonment | Phases independently useful; phases 0–2 already produce a working compiler |
+| Clock: this is months, not weekends | Certain | Abandonment | Phases independently useful; the interpreter alone runs Menard programs from phase 1, and phase 2 produces a working compiler |
 
 ---
 
@@ -2650,24 +2860,27 @@ The failure modes this design is most exposed to, and what holds each one off.
 | Runtime: `StringBuffer`, growth, `to-str` cache, `take-str`, copy-on-write | C11 | 200 |
 | Runtime: fd-2 dump writer, stderr flush before panic | C11 | 40 |
 | Runtime: `posix_spawn` wrapper — two modes, status decode, error mapping | C11 | 160 |
-| stage0 compiler (shared reader/AST, incl. instantiation and the static pool) | TypeScript | 2,900 |
-| **Static pool in stage0** (collection, dedup, canonical order) | TypeScript | 60 |
-| Reference interpreter (shared reader/AST, virtual FS) | TypeScript | 900 |
-| §2.8.2 built-ins in the interpreter (`Map`, `StringBuffer`, `Str`, `Char`) | TypeScript | 900 |
+| Interpreter front end: reader, printer, spans, casing, diagnostics | TypeScript | 1,000 |
+| Interpreter desugar | TypeScript | 250 |
+| Interpreter typer — the same rules, without the compiler-only analyses (§3.3) | TypeScript | 1,300 |
+| Interpreter evaluator: explicit continuation stack, names resolved before evaluation, modules | TypeScript | 1,100 |
+| §2.8.2 built-ins in the interpreter (persistent `Map`, `StringBuffer`, `Str`, `Char`) | TypeScript | 900 |
+| Interpreter seam: virtual and real filesystem, `argv`, exit codes | TypeScript | 250 |
 | `dump` in the interpreter (loose policy, depth cap) | TypeScript | 120 |
 | Interpreter `spawn`, same argv/status rules, disable switch | TypeScript | 150 |
-| Test support: stub child, non-hermetic `proc/` fixtures, driver end-to-end | mixed | 220 |
+| Test support: stub child, non-hermetic `proc/` fixtures, driver end-to-end, build-host benchmark | mixed | 260 |
 
-Roughly **7,020 lines of Menard, 2,940 of C, 5,030 of TypeScript** — about 15,000
-total, plus the stub child and driver fixtures.
+Roughly **7,020 lines of Menard, 2,940 of C, 5,070 of TypeScript** — about 15,000
+total, plus the stub child and driver fixtures. Every line of compiler is
+Menard; the TypeScript is the interpreter and nothing else.
 
 **Where the cost sits.** No compiler machinery here is speculative: instantiation
 is typer-only, the typer has no pointer maps, and the derive engine is one
 traversal with two policies. The dominant growth is in the **runtime and the
 interpreter**, because the built-in surface and the host seam are implemented
 **twice**. The static pool is the one recent addition on the *compiler* side, and
-it is small — ~120 lines across the two stages — because it is a list of literals
-and a sort.
+it is small — ~60 lines, written once — because it is a list of literals and a
+sort.
 
 **And it is paid for out of the runtime, which no line count shows.** Static
 objects delete the allocations a compiler makes most often: every literal
@@ -2677,13 +2890,23 @@ hot loops of the reader, the typer and the emitter. The pool is the rare change
 that adds compiler code and removes machine work.
 
 **The hidden cost is orthogonal to language size.** The largest single expense is
-not any feature: it is one person maintaining **two behaviourally identical
-compilers** plus the harness that proves they agree, with the derive engine, the
-arithmetic rules, the built-in surface and the OS seam each implemented twice.
-That is the real price of the bootstrap, and it is the thing most likely to
-surprise.
+not any feature: it is one person keeping **two behaviourally identical
+executions of the language** — the interpreter, and the backend with its runtime
+— plus the harness that proves they agree, with the arithmetic rules, the
+canonical text forms, the built-in surface and the OS seam each implemented
+twice. That price is irreducible: an oracle that shared the backend's code could
+not judge it. What the design refuses is paying it a *second* time. There is one
+compiler, so the derive engine, closure conversion, the emitter and the static
+pool are written once, and a new feature is implemented in the interpreter and
+the compiler — not in the interpreter and two compilers.
 
-For one competent implementer: **3–6 months full-time, 8–16 months part-time.**
+**The interpreter carries a cost a pure oracle would not.** It must be fast and
+robust enough to run the compiler (§3.5), which is engineering an oracle would
+never need: an evaluator with its own continuation stack, names resolved ahead of
+evaluation, built-ins with honest complexity. It is a few hundred lines, and it
+is paid up front in phase 1.
+
+For one competent implementer: **3–6 months full-time, 7–14 months part-time.**
 Closures plus a real collector approximately **double** the backend work versus a
 no-frills version — but they don't multiply it, and the doubling is concentrated
 in two well-understood places.
@@ -2694,14 +2917,23 @@ in two well-understood places.
 
 - [ ] All eight success criteria (§1.2) hold, with correctness and agreement
       evidenced separately.
-- [ ] `make bootstrap` builds from a clean checkout, one command — and, once `mn`
-      exists, that command runs the Menard driver.
-- [ ] `make check-fixed-point` passes in CI: `stage2 == stage3`, **and** the
-      driver's artifact matches the harness's byte for byte.
+- [ ] `make bootstrap` builds from a clean checkout, one command, from source
+      alone — interpreter, then stage0, stage1, stage2 — and, once `mn` exists,
+      that command runs the Menard driver.
+- [ ] There is exactly one compiler, and it is written in Menard. No compiler
+      binary is committed, downloaded or cached between bootstraps.
+- [ ] `make check-fixed-point` passes in CI: `ir0 == ir1` and `stage1 == stage2`,
+      **and** the driver's artifact matches the harness's byte for byte.
 - [ ] All determinism obligations (§2.11, including §2.11.B) hold and are checked
       in CI, not asserted in prose.
-- [ ] The reference interpreter agrees with stage0, stage1 and stage2 on the
-      whole corpus — the correctness evidence the gate cannot supply.
+- [ ] The reference interpreter agrees with programs compiled by stage0, stage1
+      and stage2 on the whole corpus — the correctness evidence the gate cannot
+      supply.
+- [ ] The interpreter meets its build-host requirements (§3.5): recursion bounded
+      by memory rather than the host stack, built-ins with the complexity this
+      specification states, and stage0 compiling the compiler within the
+      benchmark's budget.
+- [ ] The interpreter's typer and the compiler's agree on every negative fixture.
 - [ ] The collector is precise, and the GC stress corpus runs in bounded memory.
 - [ ] **The §2.2 invariants hold and are asserted in the heap-verify build**,
       including that every slot word matches its declared **layout kind**, that
@@ -2710,7 +2942,7 @@ in two well-understood places.
 - [ ] **`Float` is a `bytes` object**: its f64 payload is never scanned as slots,
       and no boxed float can be traced as a pointer.
 - [ ] **Static objects are 8-byte aligned, deduplicated by byte content, and
-      emitted sorted by byte content**, identically in both stages.
+      emitted sorted by byte content**, identically by stage0 and stage1.
 - [ ] **Static-ness is unobservable**: no operation — including `show`, `=`,
       `compare` and `dump` — distinguishes a static `Str`, `Float` or nullary
       constructor from a heap-allocated one.
@@ -2751,12 +2983,14 @@ in two well-understood places.
       the prelude relies on aliasing.
 - [ ] Exactly two reference types — `Ref` and `StringBuffer` — both non-showable,
       both non-orderable, neither reaching an output path. The buffer's
-      copy-on-write rule is implemented in both stages and tested.
+      copy-on-write rule is implemented in the interpreter and the runtime, and
+      tested.
 - [ ] **Debug text cannot reach the artifact**: `dump` writes only to fd 2, has no
       value form and no accessor, and no diagnostic path calls it. A forgotten
-      `dump` does not change `stage2 == stage3`. (§2.16)
+      `dump` does not change `ir0 == ir1`. (§2.16)
 - [ ] Every fixed bug has a permanent corpus file.
-- [ ] The stage0 compiler is retained and documented as the reference semantics.
+- [ ] The reference interpreter is retained and documented as the reference
+      semantics, and it runs every revision of the compiler.
 - [ ] This specification states plainly what the bootstrap gate does *not* prove
       (§2.14).
 - [ ] This specification is updated to match reality, or it is deleted. A spec
@@ -2769,6 +3003,7 @@ in two well-understood places.
 > A Lisp-shaped, statically typed, macro-free language with closures, explicit
 > type parameters, a persistent map, a built-in byte buffer, static string and
 > float literals, a precise tag-based collector, and a build driver written in
-> the language itself — compiling to LLVM IR via an intentionally naive emitter,
-> proven self-hosting by a byte-identical three-stage bootstrap, and honest that
-> the bootstrap proves agreement, not correctness.
+> the language itself — compiled by a single compiler written in Menard, which
+> the reference interpreter runs until it can compile itself; proven self-hosting
+> when the interpreted and native compilers emit byte-identical IR for their own
+> source, and honest that the bootstrap proves agreement, not correctness.
