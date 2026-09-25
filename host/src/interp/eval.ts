@@ -61,9 +61,25 @@ export function evalProgram(
       defineTop(f, env);
     }
     let last: Value = vUnit();
+    let e = env;
     for (const f of forms) {
       if (isTopDef(f)) continue;
-      last = evalExpr(f, env, host, null);
+      // Top-level (let x e) binds for later forms
+      if (
+        f.tag === "list" &&
+        f.elems[0]?.tag === "sym" &&
+        nameEquals(f.elems[0].name, "let") &&
+        f.elems.length === 3
+      ) {
+        const n = symName(f.elems[1]!);
+        const v = evalExpr(f.elems[2]!, e, host, null);
+        const child = emptyEnv(e);
+        envSet(child, n, v);
+        e = child;
+        last = v;
+        continue;
+      }
+      last = evalExpr(f, e, host, null);
     }
     // if last form is defn-only file, try calling main
     const main = envGet(env, "main");
@@ -171,9 +187,35 @@ function applyFn(
     envSet(child, fn.params[i]!, args[i]!);
   }
   const forms = body as Ast[];
+  return evalSequence(forms, child, host, null);
+}
+
+/** Sequence of forms with do-like sequential `let` binding (spec §2.4). */
+function evalSequence(
+  forms: Ast[],
+  env: Env,
+  host: Host,
+  loop: { names: string[]; env: Env } | null,
+): Value {
   let last: Value = vUnit();
-  for (const b of forms) {
-    last = evalExpr(b, child, host, null);
+  let e = env;
+  for (const form of forms) {
+    if (
+      form.tag === "list" &&
+      form.elems[0] &&
+      form.elems[0].tag === "sym" &&
+      nameEquals(form.elems[0].name, "let") &&
+      form.elems.length === 3
+    ) {
+      const n = symName(form.elems[1]!);
+      const v = evalExpr(form.elems[2]!, e, host, loop);
+      const child = emptyEnv(e);
+      envSet(child, n, v);
+      e = child;
+      last = v;
+      continue;
+    }
+    last = evalExpr(form, e, host, loop);
   }
   return last;
 }
@@ -333,28 +375,7 @@ function evalDo(
   host: Host,
   loop: { names: string[]; env: Env } | null,
 ): Value {
-  let last: Value = vUnit();
-  let e = env;
-  for (let i = 1; i < ast.elems.length; i++) {
-    const form = ast.elems[i]!;
-    if (
-      form.tag === "list" &&
-      form.elems[0] &&
-      form.elems[0].tag === "sym" &&
-      nameEquals(form.elems[0].name, "let") &&
-      form.elems.length === 3
-    ) {
-      const n = symName(form.elems[1]!);
-      const v = evalExpr(form.elems[2]!, e, host, loop);
-      const child = emptyEnv(e);
-      envSet(child, n, v);
-      e = child;
-      last = v;
-      continue;
-    }
-    last = evalExpr(form, e, host, loop);
-  }
-  return last;
+  return evalSequence(ast.elems.slice(1), env, host, loop);
 }
 
 function evalLoop(ast: Ast & { tag: "list" }, env: Env, host: Host): Value {

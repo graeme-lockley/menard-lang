@@ -557,9 +557,11 @@ export function typecheckForms(forms: Ast[]): {
   for (const f of forms) {
     collectDef(env, f);
   }
-  // Pass 2: typecheck definitions and expressions
+  // Pass 2: typecheck definitions and expressions (sequential let at top level)
+  const topLocal = new Map<string, Type>();
+  const topSubst: Subst = new Map();
   for (const f of forms) {
-    typecheckTop(env, f);
+    typecheckTop(env, f, topLocal, topSubst);
   }
   return {
     ok: env.diagnostics.length === 0,
@@ -659,9 +661,14 @@ function parseTypeName(ast: Ast): { name: string | null; params: string[] } {
   return { name: null, params: [] };
 }
 
-function typecheckTop(env: TypeEnv, ast: Ast): void {
+function typecheckTop(
+  env: TypeEnv,
+  ast: Ast,
+  topLocal: Map<string, Type>,
+  topSubst: Subst,
+): void {
   if (ast.tag !== "list" || ast.kind !== "paren" || ast.elems.length === 0) {
-    infer(env, ast, new Map(), new Map());
+    infer(env, ast, topLocal, topSubst);
     return;
   }
   const hn = symStr(ast.elems[0]!);
@@ -670,7 +677,14 @@ function typecheckTop(env: TypeEnv, ast: Ast): void {
     typecheckDefn(env, ast);
     return;
   }
-  infer(env, ast, new Map(), new Map());
+  // Top-level (let x e) binds for later forms; (let x e body…) is a full expression
+  if (hn === "let" && ast.elems.length === 3) {
+    const n = symStr(ast.elems[1]!);
+    const t = infer(env, ast.elems[2]!, topLocal, topSubst);
+    if (n) topLocal.set(n, t);
+    return;
+  }
+  infer(env, ast, topLocal, topSubst);
 }
 
 function typecheckDefn(env: TypeEnv, ast: Ast & { tag: "list" }): void {
@@ -741,10 +755,10 @@ function typecheckDefn(env: TypeEnv, ast: Ast & { tag: "list" }): void {
     local.set(paramNames[i]!, paramTypes[i]!);
   }
   const subst: Subst = new Map();
-  let bodyType: Type = prim("Unit");
-  for (const b of body) {
-    bodyType = infer(env, b, local, subst);
-  }
+  const bodyType =
+    body.length === 0
+      ? prim("Unit")
+      : inferSequence(env, body, local, subst);
   expectType(env, bodyType, retType, subst, body[body.length - 1]?.span ?? ast.span);
 }
 
@@ -895,11 +909,19 @@ function inferDo(
   local: Map<string, Type>,
   subst: Subst,
 ): Type {
+  return inferSequence(env, ast.elems.slice(1), local, subst);
+}
+
+/** Sequence of forms with do-like sequential `let` binding (spec §2.4). */
+function inferSequence(
+  env: TypeEnv,
+  forms: Ast[],
+  local: Map<string, Type>,
+  subst: Subst,
+): Type {
   let last: Type = prim("Unit");
   const loc = new Map(local);
-  for (let i = 1; i < ast.elems.length; i++) {
-    const e = ast.elems[i]!;
-    // sequential let binding
+  for (const e of forms) {
     if (
       e.tag === "list" &&
       e.elems[0] &&

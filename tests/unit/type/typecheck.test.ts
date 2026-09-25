@@ -100,6 +100,32 @@ describe("typer", () => {
     const diags = diagnose("(recur 1)");
     expect(diags.some((d) => d.code === "E_TYPE_RECUR")).toBe(true);
   });
+
+  test("sequential let in defn body scopes over later forms", () => {
+    const src = `(defn f (n: Int) -> Int
+  (let i (ref n))
+  (set! i (+ (deref i) 1))
+  (deref i))
+(f 41)`;
+    const diags = diagnose(src);
+    expect(diags).toEqual([]);
+  });
+
+  test("count-down (spec §2.4) typechecks", () => {
+    const src = `(defn count-down (n: Int) -> Unit
+  (let i (ref n))
+  (while (> (deref i) 0)
+    (print (deref i))
+    (set! i (- (deref i) 1))))
+(count-down 0)`;
+    const diags = diagnose(src);
+    expect(diags).toEqual([]);
+  });
+
+  test("top-level sequential let scopes over later forms", () => {
+    const diags = diagnose("(let x 40)\n(+ x 2)");
+    expect(diags).toEqual([]);
+  });
 });
 
 describe("pipeline diagnose", () => {
@@ -207,5 +233,34 @@ describe("run", () => {
     const r = run(src);
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(55n);
+  });
+
+  test("sequential let in defn body evaluates", () => {
+    const src = `(defn f (n: Int) -> Int
+  (let i (ref n))
+  (set! i (+ (deref i) 1))
+  (deref i))
+(f 41)`;
+    const r = run(src);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(42n);
+  });
+
+  test("count-down (spec §2.4) evaluates", () => {
+    const src = `(defn count-down (n: Int) -> Unit
+  (let i (ref n))
+  (while (> (deref i) 0)
+    (print (deref i))
+    (set! i (- (deref i) 1))))
+(count-down 0)`;
+    const r = run(src);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.tag).toBe("unit");
+  });
+
+  test("top-level sequential let evaluates", () => {
+    const r = run("(let x 40)\n(+ x 2)");
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(42n);
   });
 });
