@@ -126,6 +126,21 @@ describe("typer", () => {
     const diags = diagnose("(let x 40)\n(+ x 2)");
     expect(diags).toEqual([]);
   });
+
+  test("forward reference to later defn typechecks", () => {
+    const src = `(defn g (n: Int) -> Int (mk n))
+(defn mk (n: Int) -> Int (+ n 1))
+(g 3)`;
+    const diags = diagnose(src);
+    expect(diags).toEqual([]);
+  });
+
+  test("mutual recursion typechecks", () => {
+    const src = `(defn (ev [a]) (x: a) -> Bool (od x))
+(defn (od [a]) (x: a) -> Bool (ev x))`;
+    const diags = diagnose(src);
+    expect(diags).toEqual([]);
+  });
 });
 
 describe("pipeline diagnose", () => {
@@ -262,5 +277,25 @@ describe("run", () => {
     const r = run("(let x 40)\n(+ x 2)");
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(42n);
+  });
+
+  test("forward reference to later defn evaluates", () => {
+    const src = `(defn g (n: Int) -> Int (mk n))
+(defn mk (n: Int) -> Int (+ n 1))
+(g 3)`;
+    const r = run(src);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(4n);
+  });
+
+  test("mutual recursion evaluates with base case", () => {
+    const src = `(defn is-even (n: Int) -> Bool
+  (if (= n 0) true (is-odd (- n 1))))
+(defn is-odd (n: Int) -> Bool
+  (if (= n 0) false (is-even (- n 1))))
+(is-even 4)`;
+    const r = run(src);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "bool") expect(r.value.value).toBe(true);
   });
 });

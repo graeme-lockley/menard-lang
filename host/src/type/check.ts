@@ -553,11 +553,12 @@ export function typecheckForms(forms: Ast[]): {
   env: TypeEnv;
 } {
   const env = emptyEnv();
-  // Pass 1: collect type definitions
+  // Pass 1: collect type definitions and defn signatures (bodies unchecked)
   for (const f of forms) {
     collectDef(env, f);
+    collectDefnScheme(env, f);
   }
-  // Pass 2: typecheck definitions and expressions (sequential let at top level)
+  // Pass 2: typecheck defn bodies and expressions (sequential let at top level)
   const topLocal = new Map<string, Type>();
   const topSubst: Subst = new Map();
   for (const f of forms) {
@@ -688,10 +689,58 @@ function typecheckTop(
 }
 
 function typecheckDefn(env: TypeEnv, ast: Ast & { tag: "list" }): void {
-  // (defn name (p: T) … -> R body…) or (defn (name [a]) …)
+  // Scheme was registered in pass 1; check the body only.
+  const parsed = parseDefn(env, ast, true);
+  if (!parsed) return;
+
+  const local = new Map<string, Type>();
+  for (let i = 0; i < parsed.paramNames.length; i++) {
+    local.set(parsed.paramNames[i]!, parsed.paramTypes[i]!);
+  }
+  const subst: Subst = new Map();
+  const bodyType =
+    parsed.body.length === 0
+      ? prim("Unit")
+      : inferSequence(env, parsed.body, local, subst);
+  expectType(
+    env,
+    bodyType,
+    parsed.retType,
+    subst,
+    parsed.body[parsed.body.length - 1]?.span ?? ast.span,
+  );
+}
+
+/** Register a defn's scheme without checking its body (pass 1). */
+function collectDefnScheme(env: TypeEnv, ast: Ast): void {
+  if (ast.tag !== "list" || ast.kind !== "paren" || ast.elems.length === 0) return;
+  if (symStr(ast.elems[0]!) !== "defn") return;
+  const parsed = parseDefn(env, ast, false);
+  if (!parsed) return;
+  env.values.set(parsed.name, {
+    params: parsed.typeParams,
+    type: tFn(parsed.paramTypes, parsed.retType),
+  });
+}
+
+type ParsedDefn = {
+  name: string;
+  typeParams: string[];
+  paramNames: string[];
+  paramTypes: Type[];
+  retType: Type;
+  body: Ast[];
+};
+
+/** Parse a defn header. When `report` is true, emit diagnostics on malformation. */
+function parseDefn(
+  env: TypeEnv,
+  ast: Ast & { tag: "list" },
+  report: boolean,
+): ParsedDefn | null {
   if (ast.elems.length < 3) {
-    err(env, "E_TYPE_DEFN", "malformed defn", ast.span);
-    return;
+    if (report) err(env, "E_TYPE_DEFN", "malformed defn", ast.span);
+    return null;
   }
   let name: string | null;
   let typeParams: string[] = [];
@@ -710,10 +759,10 @@ function typecheckDefn(env: TypeEnv, ast: Ast & { tag: "list" }): void {
     }
     idx = 2;
   } else {
-    err(env, "E_TYPE_DEFN", "malformed defn name", namePart.span);
-    return;
+    if (report) err(env, "E_TYPE_DEFN", "malformed defn name", namePart.span);
+    return null;
   }
-  if (!name) return;
+  if (!name) return null;
 
   const paramSet = new Set(typeParams);
   const paramTypes: Type[] = [];
@@ -724,7 +773,6 @@ function typecheckDefn(env: TypeEnv, ast: Ast & { tag: "list" }): void {
       idx++;
       break;
     }
-    // (p: T) or bare for sugar — require (p: T)
     if (e.tag === "list" && e.elems.length >= 2) {
       const pn = fieldName(e.elems[0]!) ?? symStr(e.elems[0]!);
       if (pn) {
@@ -737,29 +785,19 @@ function typecheckDefn(env: TypeEnv, ast: Ast & { tag: "list" }): void {
     break;
   }
   if (idx >= ast.elems.length) {
-    err(env, "E_TYPE_DEFN", "defn missing return type", ast.span);
-    return;
+    if (report) err(env, "E_TYPE_DEFN", "defn missing return type", ast.span);
+    return null;
   }
   const retType = parseTypeExpr(env, ast.elems[idx]!, paramSet);
   idx++;
-  const body = ast.elems.slice(idx);
-
-  const scheme: Scheme = {
-    params: typeParams,
-    type: tFn(paramTypes, retType),
+  return {
+    name,
+    typeParams,
+    paramNames,
+    paramTypes,
+    retType,
+    body: ast.elems.slice(idx),
   };
-  env.values.set(name, scheme);
-
-  const local = new Map<string, Type>();
-  for (let i = 0; i < paramNames.length; i++) {
-    local.set(paramNames[i]!, paramTypes[i]!);
-  }
-  const subst: Subst = new Map();
-  const bodyType =
-    body.length === 0
-      ? prim("Unit")
-      : inferSequence(env, body, local, subst);
-  expectType(env, bodyType, retType, subst, body[body.length - 1]?.span ?? ast.span);
 }
 
 function infer(
