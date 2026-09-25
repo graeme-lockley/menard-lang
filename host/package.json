@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "bun test"
+    "test": "bun test ../tests",
+    "typecheck": "bunx tsc --noEmit -p tsconfig.json",
+    "menard": "bun run src/cli/menard.ts"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",

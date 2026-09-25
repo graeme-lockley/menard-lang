@@ -46,10 +46,13 @@ decisions are in [`docs/decisions.md`](docs/decisions.md).
 
 ## Status
 
-**Phase 0** is in place: a byte-oriented s-expression reader and printer in
-TypeScript (Bun), with spans, `!` hygiene, form-aware casing checks, corpus
-round-trips, and fuzz. Later phases add the reference interpreter, the stage0
-LLVM compiler, self-hosting, and the collector — see §5 of the spec.
+**Phase 1** is in place: the reference interpreter (semantic oracle) with shared
+desugar and typer, production diagnostics (`diagnose` / `formatDiagnostic`),
+builtins (`Map`, `StringBuffer`, …), a virtual filesystem host, and a minimal
+prelude. Phase 0 reader/printer remains the parse front end.
+
+Later phases add LLVM stage0, self-hosting, and the collector — see §5 of the
+spec.
 
 ## Build
 
@@ -69,10 +72,19 @@ cd ..
 ### Test and typecheck
 
 ```bash
-make test        # reader unit tests, corpus, fuzz
+make test        # unit, corpus, fuzz, semantic, negative diagnostics, io
 make typecheck   # tsc --noEmit
 make ci          # typecheck + test (mirrors GitHub Actions)
 ```
+
+### Check / run a program (Phase 1 host CLI)
+
+```bash
+bun run host/src/cli/menard.ts check path/to/file.mnd
+bun run host/src/cli/menard.ts run path/to/file.mnd
+```
+
+Exit codes: `0` ok, `1` program error/panic, `2` usage or I/O fault.
 
 Or from `host/`:
 
@@ -86,9 +98,17 @@ bun test ../tests
 | Path | Role |
 | --- | --- |
 | `docs/` | Language specification and decision record |
-| `host/` | TypeScript on Bun — stage0 and (soon) the interpreter |
+| `host/` | TypeScript on Bun — stage0 (later) and interpreter |
 | `host/src/reader/` | Shared reader, AST, printer, casing |
-| `tests/` | Unit tests and `.mnd` corpus fixtures |
+| `host/src/diagnostic/` | Diagnostic model and formatter |
+| `host/src/desugar/` | Special-form sugar |
+| `host/src/type/` | Typechecker |
+| `host/src/interp/` | Reference interpreter + `diagnose`/`run` |
+| `host/src/builtins/` | Map, StringBuffer (TS) |
+| `host/src/host/` | Virtual filesystem Host |
+| `host/src/cli/` | `check` / `run` CLI |
+| `prelude/` | Minimal Menard prelude |
+| `tests/` | Unit, corpus, semantic, negative, io |
 | `.github/workflows/` | CI |
 
 A full bootstrap (`make bootstrap`) arrives with self-hosting in later phases.
