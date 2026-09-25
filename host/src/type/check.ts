@@ -32,6 +32,8 @@ export type TypeEnv = {
   diagnostics: Diagnostic[];
   /** display aliases for messages */
   displayAlias: Map<string, string>;
+  /** types of current loop bindings in order; null when not inside a loop */
+  loopBindings: Type[] | null;
 };
 
 export function emptyEnv(): TypeEnv {
@@ -43,6 +45,7 @@ export function emptyEnv(): TypeEnv {
     nextVar: 0,
     diagnostics: [],
     displayAlias: new Map(),
+    loopBindings: null,
   };
   installBuiltins(env);
   return env;
@@ -791,7 +794,7 @@ function infer(
       if (hn === "let") return inferLet(env, ast, local, subst);
       if (hn === "do") return inferDo(env, ast, local, subst);
       if (hn === "loop") return inferLoop(env, ast, local, subst);
-      if (hn === "recur") return prim("Unit"); // checked in loop context loosely
+      if (hn === "recur") return inferRecur(env, ast, local, subst);
       if (hn === "panic") {
         if (ast.elems[1]) infer(env, ast.elems[1]!, local, subst);
         return freshVar(env); // never
@@ -927,16 +930,50 @@ function inferLoop(
   }
   const bindings = ast.elems[1]!;
   const loc = new Map(local);
+  const bindingTypes: Type[] = [];
   if (bindings.tag === "list") {
     for (const b of bindings.elems) {
       if (b.tag === "list" && b.elems.length >= 2) {
         const n = symStr(b.elems[0]!);
         const t = infer(env, b.elems[1]!, local, subst);
+        bindingTypes.push(t);
         if (n) loc.set(n, t);
       }
     }
   }
-  return infer(env, ast.elems[2]!, loc, subst);
+  const prev = env.loopBindings;
+  env.loopBindings = bindingTypes;
+  const body = infer(env, ast.elems[2]!, loc, subst);
+  env.loopBindings = prev;
+  return body;
+}
+
+/** recur is a tail jump: check args against loop bindings; type is fresh (never). */
+function inferRecur(
+  env: TypeEnv,
+  ast: Ast & { tag: "list" },
+  local: Map<string, Type>,
+  subst: Subst,
+): Type {
+  if (env.loopBindings === null) {
+    err(env, "E_TYPE_RECUR", "recur outside loop", ast.span);
+    return freshVar(env);
+  }
+  const args = ast.elems.slice(1);
+  const expected = env.loopBindings;
+  if (args.length !== expected.length) {
+    err(
+      env,
+      "E_TYPE_ARITY",
+      `recur expects ${expected.length} argument${expected.length === 1 ? "" : "s"}, got ${args.length}`,
+      ast.span,
+    );
+  }
+  const n = Math.min(args.length, expected.length);
+  for (let i = 0; i < n; i++) {
+    expectType(env, infer(env, args[i]!, local, subst), expected[i]!, subst, args[i]!.span);
+  }
+  return freshVar(env);
 }
 
 function inferLambda(

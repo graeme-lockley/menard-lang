@@ -74,6 +74,32 @@ describe("typer", () => {
     const diags = diagnose(src);
     expect(diags).toEqual([]);
   });
+
+  test("loop/recur sum-to typechecks (spec §2.4)", () => {
+    const src = `(defn sum-to (n: Int) -> Int
+  (loop ((i 0) (acc 0))
+    (if (> i n)
+      acc
+      (recur (+ i 1) (+ acc i)))))
+(sum-to 10)`;
+    const diags = diagnose(src);
+    expect(diags).toEqual([]);
+  });
+
+  test("recur arity must match loop bindings", () => {
+    const src = `(defn bad (n: Int) -> Int
+  (loop ((i 0))
+    (if (> i n) i (recur (+ i 1) 0))))`;
+    const diags = diagnose(src);
+    expect(diags.some((d) => d.code === "E_TYPE_ARITY" || d.code === "E_TYPE_RECUR")).toBe(
+      true,
+    );
+  });
+
+  test("recur outside loop is an error", () => {
+    const diags = diagnose("(recur 1)");
+    expect(diags.some((d) => d.code === "E_TYPE_RECUR")).toBe(true);
+  });
 });
 
 describe("pipeline diagnose", () => {
@@ -169,5 +195,17 @@ describe("run", () => {
         if (r.value.tag === "variant") expect(r.value.ctor).toBe(ctor);
       }
     }
+  });
+
+  test("loop/recur sum-to evaluates", () => {
+    const src = `(defn sum-to (n: Int) -> Int
+  (loop ((i 0) (acc 0))
+    (if (> i n)
+      acc
+      (recur (+ i 1) (+ acc i)))))
+(sum-to 10)`;
+    const r = run(src);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(55n);
   });
 });
