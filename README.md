@@ -63,17 +63,18 @@ decisions are in [`docs/decisions.md`](docs/decisions.md).
 
 ## Status
 
-**Phase 0** (reader, printer, spans, casing) is complete. **Phase 1** is in
-progress: the reference interpreter runs as the semantic oracle, with desugar and
-typer, production diagnostics (`diagnose` / `formatDiagnostic`), builtins
-(`Map`, `StringBuffer`, …), a virtual filesystem host, and a minimal prelude.
-What remains is making it fit to host the compiler as stage0 — modules, the real
-filesystem and `argv`, recursion that does not depend on the JavaScript stack,
-a persistent `Map`, and throughput — tracked in the
-[issue list](https://github.com/graeme-lockley/menard-lang/issues).
+**Phase 0** and **Phase 1** are complete. The reference interpreter is the
+semantic oracle and stage0 host: modules, the tier-0 seam (real filesystem and
+`argv`), continuation-stack evaluation, a persistent `Map`, production
+diagnostics, and a build-host benchmark in CI. Issues
+[#1](https://github.com/graeme-lockley/menard-lang/issues/1)–[#10](https://github.com/graeme-lockley/menard-lang/issues/10)
+are closed.
 
-Phase 2 writes the compiler in Menard, on the interpreter; phase 3 self-hosts
-(`ir0 == ir1`); phase 4 adds the collector — see §5 of the spec.
+**Next is Phase 2** — write the compiler in Menard and run it as stage0 on the
+interpreter. Phase 3 self-hosts (`ir0 == ir1`); phase 4 adds the collector —
+see §5 of the spec. Remaining host work — notably
+[`spawn` / `spawn-capture`](https://github.com/graeme-lockley/menard-lang/issues/11)
+— is tracked in the [issue list](https://github.com/graeme-lockley/menard-lang/issues).
 
 ## Build
 
@@ -93,7 +94,7 @@ cd ..
 ### Test and typecheck
 
 ```bash
-make test        # unit, corpus, fuzz, semantic, negative diagnostics, io
+make test        # unit, corpus, fuzz, semantic, negative, io, build-host bench
 make typecheck   # tsc --noEmit
 make ci          # typecheck + test (mirrors GitHub Actions)
 ```
@@ -104,10 +105,13 @@ make ci          # typecheck + test (mirrors GitHub Actions)
 bun run host/src/cli/menard.ts check path/to/file.mnd
 bun run host/src/cli/menard.ts run path/to/file.mnd
 bun run host/src/cli/menard.ts run --show-result path/to/file.mnd
+bun run host/src/cli/menard.ts run path/to/file.mnd -- arg1 arg2
 ```
 
 `run` writes `print` / `println` / `dump` **live** to the process streams.
 `--show-result` also prints the final non-`Unit` value (REPL-style).
+Arguments after `--` become `(arg)` / `(arg-count)` — the stage0 shape is
+`run src/main.mnd -- file.mnd`.
 
 Exit codes: `0` ok, `1` program error/panic, `2` usage or I/O fault.
 
@@ -128,12 +132,13 @@ bun test ../tests
 | `host/src/diagnostic/` | Diagnostic model and formatter |
 | `host/src/desugar/` | Special-form sugar |
 | `host/src/type/` | Typechecker |
-| `host/src/interp/` | Reference interpreter + `diagnose`/`run` |
+| `host/src/interp/` | Evaluator, modules, pipeline (`diagnose` / `run`) |
 | `host/src/builtins/` | Map, StringBuffer (TS) |
-| `host/src/host/` | Virtual filesystem Host |
+| `host/src/host/` | Virtual + real FS Host, live sinks |
 | `host/src/cli/` | `check` / `run` CLI |
 | `prelude/` | Minimal Menard prelude |
 | `tests/` | Unit, corpus, semantic, negative, io |
+| `tests/bench/` | Build-host benchmark (CI time budgets) |
 | `.github/workflows/` | CI |
 
 The compiler itself will live in `src/` (Menard), with the C runtime in
