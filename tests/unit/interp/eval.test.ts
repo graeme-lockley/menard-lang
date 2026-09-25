@@ -6,6 +6,8 @@ import {
   mapNew,
   mapSet,
   mapGet,
+  mapKeys,
+  mapSize,
   sbNew,
   sbAppend,
   sbToStr,
@@ -22,6 +24,39 @@ describe("builtins Map", () => {
       value: 1n,
     });
   });
+
+  test("map-keys is sorted by key order", () => {
+    const enc = new TextEncoder();
+    let m = mapNew();
+    m = mapSet(m, { tag: "str", bytes: enc.encode("c") }, { tag: "int", value: 3n });
+    m = mapSet(m, { tag: "str", bytes: enc.encode("a") }, { tag: "int", value: 1n });
+    m = mapSet(m, { tag: "str", bytes: enc.encode("b") }, { tag: "int", value: 2n });
+    const keys = mapKeys(m).map((k) =>
+      k.tag === "str" ? new TextDecoder().decode(k.bytes) : "",
+    );
+    expect(keys).toEqual(["a", "b", "c"]);
+  });
+
+  test("map-set is O(log n): 100k inserts within budget", () => {
+    const N = 100_000;
+    const budgetMs = 3000;
+    let m = mapNew();
+    const empty = m;
+    const t0 = performance.now();
+    for (let i = 0; i < N; i++) {
+      m = mapSet(m, { tag: "int", value: BigInt(i) }, { tag: "int", value: BigInt(i) });
+    }
+    const elapsed = performance.now() - t0;
+    expect(mapSize(m)).toBe(BigInt(N));
+    expect(mapSize(empty)).toBe(0n);
+    expect(mapGet(empty, { tag: "int", value: 0n })).toBeUndefined();
+    expect(mapGet(m, { tag: "int", value: 0n })).toEqual({ tag: "int", value: 0n });
+    expect(mapGet(m, { tag: "int", value: BigInt(N - 1) })).toEqual({
+      tag: "int",
+      value: BigInt(N - 1),
+    });
+    expect(elapsed).toBeLessThan(budgetMs);
+  }, 10_000);
 });
 
 describe("builtins StringBuffer", () => {

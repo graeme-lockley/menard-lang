@@ -1,4 +1,5 @@
 import type { Value } from "./value.ts";
+import { mapEntries, mapGet, mapSize } from "../builtins/collections.ts";
 
 export function showValue(v: Value): string {
   switch (v.tag) {
@@ -35,11 +36,10 @@ export function showValue(v: Value): string {
     case "record":
       return `(${v.name} ${v.fields.map(showValue).join(" ")})`;
     case "map": {
-      const items = [...v.map.entries.values()];
-      items.sort((a, b) => compareValue(a.key, b.key));
+      const { keys, vals } = mapEntries(v.map);
       const parts: string[] = [];
-      for (const e of items) {
-        parts.push(showValue(e.key), showValue(e.val));
+      for (let i = 0; i < keys.length; i++) {
+        parts.push(showValue(keys[i]!), showValue(vals[i]!));
       }
       return `{${parts.join(" ")}}`;
     }
@@ -101,10 +101,11 @@ export function equalValue(a: Value, b: Value): boolean {
       return a.sb === (b as typeof a).sb;
     case "map": {
       const bb = (b as typeof a).map;
-      if (a.map.entries.size !== bb.entries.size) return false;
-      for (const [k, e] of a.map.entries) {
-        const o = bb.entries.get(k);
-        if (!o || !equalValue(e.val, o.val)) return false;
+      if (mapSize(a.map) !== mapSize(bb)) return false;
+      const { keys, vals } = mapEntries(a.map);
+      for (let i = 0; i < keys.length; i++) {
+        const o = mapGet(bb, keys[i]!);
+        if (o === undefined || !equalValue(vals[i]!, o)) return false;
       }
       return true;
     }
@@ -174,20 +175,16 @@ export function compareValue(a: Value, b: Value): number {
       return a.fields.length - bb.fields.length;
     }
     case "map": {
-      const ae = [...a.map.entries.values()].sort((x, y) =>
-        compareValue(x.key, y.key),
-      );
-      const be = [...(b as typeof a).map.entries.values()].sort((x, y) =>
-        compareValue(x.key, y.key),
-      );
-      const n = Math.min(ae.length, be.length);
+      const ae = mapEntries(a.map);
+      const be = mapEntries((b as typeof a).map);
+      const n = Math.min(ae.keys.length, be.keys.length);
       for (let i = 0; i < n; i++) {
-        const ck = compareValue(ae[i]!.key, be[i]!.key);
+        const ck = compareValue(ae.keys[i]!, be.keys[i]!);
         if (ck !== 0) return ck;
-        const cv = compareValue(ae[i]!.val, be[i]!.val);
+        const cv = compareValue(ae.vals[i]!, be.vals[i]!);
         if (cv !== 0) return cv;
       }
-      return ae.length - be.length;
+      return ae.keys.length - be.keys.length;
     }
     default:
       return 0;
@@ -213,7 +210,7 @@ export function dumpValue(v: Value, depth = 0): string {
     case "record":
       return `(${v.name}${v.fields.map((f) => " " + dumpValue(f, depth + 1)).join("")})`;
     case "map":
-      return `{map size=${v.map.entries.size}}`;
+      return `{map size=${mapSize(v.map)}}`;
     default:
       try {
         return showValue(v);

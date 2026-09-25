@@ -1,68 +1,132 @@
 import type { Value } from "../interp/value.ts";
 
-/** Persistent map with value semantics — structural copy on write (simple impl). */
+/**
+ * Persistent ordered map (AVL tree) with value semantics.
+ * Updates are O(log n) with structural sharing; in-order walk yields
+ * canonical key order (§2.11.O) without a separate sort.
+ */
 export type MenardMap = {
   kind: "map";
-  /** insertion-stable store; iteration uses sorted keys via compare */
-  entries: Map<string, { key: Value; val: Value }>;
+  root: MapNode | null;
 };
 
-function keyId(k: Value): string {
-  switch (k.tag) {
-    case "int":
-      return `i:${k.value}`;
-    case "bool":
-      return `b:${k.value}`;
-    case "str":
-      return `s:${Buffer.from(k.bytes).toString("hex")}`;
-    case "sym":
-      return `y:${Buffer.from(k.name).toString("hex")}`;
-    case "float":
-      return `f:${Object.is(k.value, -0) ? "-0" : String(k.value)}`;
-    case "unit":
-      return "u";
-    case "char":
-      return `c:${k.value}`;
-    default:
-      throw new Error("map key must be orderable primitive");
-  }
-}
+type MapNode = {
+  key: Value;
+  val: Value;
+  left: MapNode | null;
+  right: MapNode | null;
+  height: number;
+  size: number;
+};
 
 export function mapNew(): MenardMap {
-  return { kind: "map", entries: new Map() };
+  return { kind: "map", root: null };
 }
 
 export function mapSet(m: MenardMap, k: Value, v: Value): MenardMap {
-  const next = new Map(m.entries);
-  next.set(keyId(k), { key: k, val: v });
-  return { kind: "map", entries: next };
+  return { kind: "map", root: insert(m.root, k, v) };
 }
 
 export function mapGet(m: MenardMap, k: Value): Value | undefined {
-  return m.entries.get(keyId(k))?.val;
+  let n = m.root;
+  while (n) {
+    const c = compareValues(k, n.key);
+    if (c === 0) return n.val;
+    n = c < 0 ? n.left : n.right;
+  }
+  return undefined;
 }
 
 export function mapHas(m: MenardMap, k: Value): boolean {
-  return m.entries.has(keyId(k));
+  return mapGet(m, k) !== undefined;
 }
 
 export function mapSize(m: MenardMap): bigint {
-  return BigInt(m.entries.size);
+  return BigInt(m.root?.size ?? 0);
 }
 
 export function mapKeys(m: MenardMap): Value[] {
-  const items = [...m.entries.values()].map((e) => e.key);
-  items.sort((a, b) => compareValues(a, b));
-  return items;
+  const out: Value[] = [];
+  inorder(m.root, (n) => out.push(n.key));
+  return out;
 }
 
 export function mapEntries(m: MenardMap): { keys: Value[]; vals: Value[] } {
-  const items = [...m.entries.values()];
-  items.sort((a, b) => compareValues(a.key, b.key));
+  const keys: Value[] = [];
+  const vals: Value[] = [];
+  inorder(m.root, (n) => {
+    keys.push(n.key);
+    vals.push(n.val);
+  });
+  return { keys, vals };
+}
+
+function height(n: MapNode | null): number {
+  return n?.height ?? 0;
+}
+
+function sizeOf(n: MapNode | null): number {
+  return n?.size ?? 0;
+}
+
+function mk(
+  key: Value,
+  val: Value,
+  left: MapNode | null,
+  right: MapNode | null,
+): MapNode {
   return {
-    keys: items.map((e) => e.key),
-    vals: items.map((e) => e.val),
+    key,
+    val,
+    left,
+    right,
+    height: 1 + Math.max(height(left), height(right)),
+    size: 1 + sizeOf(left) + sizeOf(right),
   };
+}
+
+function rotateLeft(n: MapNode): MapNode {
+  const r = n.right!;
+  return mk(r.key, r.val, mk(n.key, n.val, n.left, r.left), r.right);
+}
+
+function rotateRight(n: MapNode): MapNode {
+  const l = n.left!;
+  return mk(l.key, l.val, l.left, mk(n.key, n.val, l.right, n.right));
+}
+
+function balance(n: MapNode): MapNode {
+  const bf = height(n.left) - height(n.right);
+  if (bf > 1) {
+    const l = n.left!;
+    if (height(l.right) > height(l.left)) {
+      return rotateRight(mk(n.key, n.val, rotateLeft(l), n.right));
+    }
+    return rotateRight(n);
+  }
+  if (bf < -1) {
+    const r = n.right!;
+    if (height(r.left) > height(r.right)) {
+      return rotateLeft(mk(n.key, n.val, n.left, rotateRight(r)));
+    }
+    return rotateLeft(n);
+  }
+  return n;
+}
+
+function insert(node: MapNode | null, k: Value, v: Value): MapNode {
+  if (!node) return mk(k, v, null, null);
+  const c = compareValues(k, node.key);
+  if (c === 0) return mk(k, v, node.left, node.right);
+  if (c < 0) return balance(mk(node.key, node.val, insert(node.left, k, v), node.right));
+  return balance(mk(node.key, node.val, node.left, insert(node.right, k, v)));
+}
+
+function inorder(node: MapNode | null, visit: (n: MapNode) => void): void {
+  if (!node) return;
+  inorder(node.left, visit);
+  visit(node);
+  inorder(node.right, visit);
 }
 
 function compareValues(a: Value, b: Value): number {
@@ -81,7 +145,10 @@ function compareValues(a: Value, b: Value): number {
     case "str":
     case "sym": {
       const aa = a.tag === "str" ? a.bytes : a.name;
-      const bb = b.tag === "str" ? (b as typeof a & { tag: "str" }).bytes : (b as { tag: "sym"; name: Uint8Array }).name;
+      const bb =
+        b.tag === "str"
+          ? (b as typeof a & { tag: "str" }).bytes
+          : (b as { tag: "sym"; name: Uint8Array }).name;
       const n = Math.min(aa.length, bb.length);
       for (let i = 0; i < n; i++) {
         if (aa[i]! !== bb[i]!) return aa[i]! - bb[i]!;
