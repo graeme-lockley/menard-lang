@@ -5,11 +5,13 @@
  *
  * print/println/dump write live to process streams during evaluation.
  * Pass --show-result to also print the final non-Unit value (REPL-style).
+ * Set MENARD_STACK=1 to include a stack trace on internal faults.
  */
 import { readFileSync } from "node:fs";
 import { diagnose, run, formatRunErrors, showValue } from "../interp/index.ts";
 import { formatDiagnostics } from "../diagnostic/index.ts";
 import { createLiveHost } from "../host/index.ts";
+import { withInternalGuard } from "./guard.ts";
 
 function usage(): never {
   console.error("usage: menard <check|run> [--show-result] <file.mnd>");
@@ -18,42 +20,52 @@ function usage(): never {
 
 const args = process.argv.slice(2);
 const showResult = args.includes("--show-result");
+const showStack = process.env.MENARD_STACK === "1";
 const positional = args.filter((a) => a !== "--show-result");
 const [cmd, file] = positional;
 if (!cmd || !file || (cmd !== "check" && cmd !== "run")) usage();
 
-let source: Uint8Array;
-try {
-  source = new Uint8Array(readFileSync(file));
-} catch (e) {
-  console.error(`error: cannot read ${file}: ${e}`);
-  process.exit(2);
-}
+withInternalGuard(
+  () => {
+    let source: Uint8Array;
+    try {
+      source = new Uint8Array(readFileSync(file));
+    } catch (e) {
+      console.error(`error: cannot read ${file}: ${e}`);
+      process.exit(2);
+    }
 
-const path = file;
+    const path = file;
 
-if (cmd === "check") {
-  const diags = diagnose(source, { path });
-  if (diags.length === 0) {
-    process.exit(0);
-  }
-  process.stderr.write(formatDiagnostics(diags, source, path));
-  process.exit(1);
-}
+    if (cmd === "check") {
+      const diags = diagnose(source, { path });
+      if (diags.length === 0) {
+        process.exit(0);
+      }
+      process.stderr.write(formatDiagnostics(diags, source, path));
+      process.exit(1);
+    }
 
-// run — live host so print/println appear as they execute
-const host = createLiveHost();
-const result = run(source, { path, host });
-if (result.ok) {
-  if (showResult && result.value.tag !== "unit") {
-    process.stdout.write(showValue(result.value) + "\n");
-  }
-  process.exit(0);
-}
+    // run — live host so print/println appear as they execute
+    const host = createLiveHost();
+    const result = run(source, { path, host });
+    if (result.ok) {
+      if (showResult && result.value.tag !== "unit") {
+        process.stdout.write(showValue(result.value) + "\n");
+      }
+      process.exit(0);
+    }
 
-if (result.kind === "diagnostics" || result.kind === "panic") {
-  process.stderr.write(formatRunErrors(result, source, path));
-  process.exit(1);
-}
+    if (result.kind === "diagnostics" || result.kind === "panic") {
+      process.stderr.write(formatRunErrors(result, source, path));
+      process.exit(1);
+    }
 
-process.exit(2);
+    process.exit(2);
+  },
+  {
+    writeStderr: (s) => process.stderr.write(s),
+    exit: (c) => process.exit(c),
+    showStack,
+  },
+);
