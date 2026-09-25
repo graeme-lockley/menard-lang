@@ -28,6 +28,7 @@ import {
   sbTakeStr,
 } from "../builtins/collections.ts";
 import type { Host } from "../host/host.ts";
+import { ExitSignal, type IoError } from "../host/host.ts";
 import { showValue, equalValue, compareValue, dumpValue } from "./derive.ts";
 
 export class PanicError extends Error {
@@ -41,7 +42,7 @@ export class PanicError extends Error {
 }
 
 export type EvalResult =
-  | { ok: true; value: Value }
+  | { ok: true; value: Value; exitCode?: number }
   | { ok: false; panic: { message: string; span?: Span } };
 
 function symName(ast: Ast): string {
@@ -82,6 +83,9 @@ export function evalProgram(forms: Ast[], host: Host): EvalResult {
     }
     return { ok: true, value: last };
   } catch (err) {
+    if (err instanceof ExitSignal) {
+      return { ok: true, value: vUnit(), exitCode: err.code };
+    }
     if (err instanceof PanicError) {
       return { ok: false, panic: { message: err.message, span: err.span } };
     }
@@ -805,10 +809,33 @@ function installBuiltins(env: Env): void {
     "map-new", "map-get", "map-set", "map-has", "map-size", "map-keys",
     "sb-new", "sb-append!", "sb-append-byte!", "sb-length", "sb-clear!", "sb-to-str", "sb-take-str!",
     "None", "Some", "Ok", "Err", "Nil", "Cons",
+    "exit", "arg-count", "arg", "write", "read-file", "write-file",
+    "NotFound", "Permission", "Exists", "IsADirectory", "NotADirectory",
+    "InvalidPath", "TooLarge", "Other", "Unsupported",
   ];
   for (const n of names) {
     envSet(env, n, { tag: "builtin", name: n });
   }
+}
+
+function ioErrorToValue(err: IoError): Value {
+  switch (err.tag) {
+    case "Other":
+      return vVariant("Other", [vInt(err.code)]);
+    case "Unsupported":
+      // Not in the Menard IoError variant; fold into Other.
+      return vVariant("Other", [vInt(0n)]);
+    default:
+      return vVariant(err.tag);
+  }
+}
+
+function resultOk(v: Value): Value {
+  return vVariant("Ok", [v]);
+}
+
+function resultErr(err: IoError): Value {
+  return vVariant("Err", [ioErrorToValue(err)]);
 }
 
 function applyBuiltin(
@@ -966,6 +993,47 @@ function applyBuiltin(
       return vVariant("Nil");
     case "Cons":
       return vVariant("Cons", [args[0]!, args[1]!]);
+    case "exit": {
+      const code = Number((args[0] as { value: bigint }).value);
+      return host.exit(code);
+    }
+    case "arg-count":
+      return vInt(BigInt(host.argv.length));
+    case "arg": {
+      const i = Number((args[0] as { value: bigint }).value);
+      if (i < 0 || i >= host.argv.length) {
+        throw new PanicError(`arg index out of range: ${i}`, span);
+      }
+      return vStr(new TextEncoder().encode(host.argv[i]!));
+    }
+    case "write": {
+      const fd = Number((args[0] as { value: bigint }).value);
+      const s = args[1] as { bytes: Uint8Array };
+      const w = host.writeFd(fd, s.bytes);
+      return w.ok ? resultOk(vUnit()) : resultErr(w.error);
+    }
+    case "read-file": {
+      const path = new TextDecoder().decode((args[0] as { bytes: Uint8Array }).bytes);
+      const r = host.readFile(path);
+      return r.ok ? resultOk(vStr(r.bytes)) : resultErr(r.error);
+    }
+    case "write-file": {
+      const path = new TextDecoder().decode((args[0] as { bytes: Uint8Array }).bytes);
+      const data = (args[1] as { bytes: Uint8Array }).bytes;
+      const w = host.writeFile(path, data);
+      return w.ok ? resultOk(vUnit()) : resultErr(w.error);
+    }
+    case "NotFound":
+    case "Permission":
+    case "Exists":
+    case "IsADirectory":
+    case "NotADirectory":
+    case "InvalidPath":
+    case "TooLarge":
+    case "Unsupported":
+      return vVariant(name);
+    case "Other":
+      return vVariant("Other", [args[0]!]);
     default:
       throw new PanicError(`unknown builtin ${name}`, span);
   }

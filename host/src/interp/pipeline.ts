@@ -19,7 +19,7 @@ export type PipelineOpts = {
   skipTypecheck?: boolean;
 };
 
-export type RunOk = { ok: true; value: Value };
+export type RunOk = { ok: true; value: Value; exitCode?: number };
 export type RunErr = { ok: false; kind: "diagnostics"; diagnostics: Diagnostic[] };
 export type RunPanic = {
   ok: false;
@@ -109,7 +109,7 @@ export function run(
       span: result.panic.span,
     };
   }
-  return { ok: true, value: result.value };
+  return { ok: true, value: result.value, exitCode: result.exitCode };
 }
 
 export function formatRunErrors(

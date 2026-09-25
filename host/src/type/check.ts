@@ -211,6 +211,42 @@ function installBuiltins(env: TypeEnv): void {
   env.values.set("Nil", { params: ["a"], type: tFn([], tList(a)) });
   env.values.set("Cons", { params: ["a"], type: tFn([a, tList(a)], tList(a)) });
 
+  // IoError (§2.15) — closed variant for the host seam
+  const ioSpan = { start: 0, end: 0 };
+  const ioCtors: { name: string; payloads: Type[] }[] = [
+    { name: "NotFound", payloads: [] },
+    { name: "Permission", payloads: [] },
+    { name: "Exists", payloads: [] },
+    { name: "IsADirectory", payloads: [] },
+    { name: "NotADirectory", payloads: [] },
+    { name: "InvalidPath", payloads: [] },
+    { name: "TooLarge", payloads: [] },
+    { name: "Other", payloads: [I] },
+  ];
+  env.types.set("IoError", {
+    kind: "variant",
+    name: "IoError",
+    params: [],
+    ctors: ioCtors.map((c) => ({ ...c, span: ioSpan })),
+    span: ioSpan,
+  });
+  const ioType: Type = { tag: "nominal", name: "IoError", args: [], kind: "variant" };
+  for (const c of ioCtors) {
+    env.ctors.set(c.name, { typeName: "IoError", payloads: c.payloads, params: [] });
+    env.values.set(c.name, {
+      params: [],
+      type: tFn(c.payloads, ioType),
+    });
+  }
+
+  // Tier-0 host seam (§2.15)
+  env.values.set("exit", { params: [], type: tFn([I], U) });
+  env.values.set("arg-count", { params: [], type: tFn([], I) });
+  env.values.set("arg", { params: [], type: tFn([I], S) });
+  env.values.set("write", { params: [], type: tFn([I, S], tResult(U, ioType)) });
+  env.values.set("read-file", { params: [], type: tFn([S], tResult(S, ioType)) });
+  env.values.set("write-file", { params: [], type: tFn([S, S], tResult(U, ioType)) });
+
   void F;
 }
 
