@@ -78,6 +78,25 @@ describe("builtins StringBuffer", () => {
   });
 });
 
+describe("evaluator depth", () => {
+  test("non-tail recursion of 20k frames stays within memory", () => {
+    const src = `(defn mk (n: Int) -> Int (if (= n 0) 0 (+ 1 (mk (- n 1)))))
+(mk 20000)`;
+    const r = run(src);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(20000n);
+  }, 60_000);
+
+  test("builds and sizes a 10k-element list", () => {
+    const src = `(defn mk (n: Int) -> (List Int) (if (= n 0) (Nil) (Cons n (mk (- n 1)))))
+(defn (size [a]) (xs: (List a)) -> Int (match xs (Nil) 0 (Cons _ t) (+ 1 (size t))))
+(size (mk 10000))`;
+    const r = run(src);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(10000n);
+  }, 120_000);
+});
+
 describe("intrinsics via run", () => {
   test("show int", () => {
     const r = run('(show 42)');

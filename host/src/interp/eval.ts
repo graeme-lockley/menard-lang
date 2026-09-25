@@ -49,14 +49,10 @@ function symName(ast: Ast): string {
   return new TextDecoder().decode(ast.name);
 }
 
-export function evalProgram(
-  forms: Ast[],
-  host: Host,
-): EvalResult {
+export function evalProgram(forms: Ast[], host: Host): EvalResult {
   const env = emptyEnv();
   installBuiltins(env);
   try {
-    // define types / functions first
     for (const f of forms) {
       defineTop(f, env);
     }
@@ -64,7 +60,6 @@ export function evalProgram(
     let e = env;
     for (const f of forms) {
       if (isTopDef(f)) continue;
-      // Top-level (let x e) binds for later forms
       if (
         f.tag === "list" &&
         f.elems[0]?.tag === "sym" &&
@@ -72,26 +67,25 @@ export function evalProgram(
         f.elems.length === 3
       ) {
         const n = symName(f.elems[1]!);
-        const v = evalExpr(f.elems[2]!, e, host, null);
+        const v = evalExpr(f.elems[2]!, e, host);
         const child = emptyEnv(e);
         envSet(child, n, v);
         e = child;
         last = v;
         continue;
       }
-      last = evalExpr(f, e, host, null);
+      last = evalExpr(f, e, host);
     }
-    // if last form is defn-only file, try calling main
     const main = envGet(env, "main");
     if (main && main.tag === "fn") {
       last = applyFn(main, [], host, forms[forms.length - 1]?.span);
     }
     return { ok: true, value: last };
-  } catch (e) {
-    if (e instanceof PanicError) {
-      return { ok: false, panic: { message: e.message, span: e.span } };
+  } catch (err) {
+    if (err instanceof PanicError) {
+      return { ok: false, panic: { message: err.message, span: err.span } };
     }
-    throw e;
+    throw err;
   }
 }
 
@@ -112,11 +106,10 @@ function defineTop(ast: Ast, env: Env): void {
   const hn = ast.elems[0]!;
   if (hn.tag !== "sym") return;
   if (nameEquals(hn.name, "defn")) {
-    if (ast.tag === "list") defineDefn(ast, env);
+    defineDefn(ast, env);
     return;
   }
   if (nameEquals(hn.name, "variant")) {
-    // (variant Name|(Name [a]) (Ctor …)…)
     for (let i = 2; i < ast.elems.length; i++) {
       const ce = ast.elems[i]!;
       if (ce.tag !== "list" || ce.elems.length < 1 || ce.elems[0]!.tag !== "sym") continue;
@@ -150,78 +143,7 @@ function defineTop(ast: Ast, env: Env): void {
   }
 }
 
-function applyFn(
-  fn: Value & { tag: "fn" },
-  args: Value[],
-  host: Host,
-  span?: Span,
-): Value {
-  // synthetic constructors
-  const body = fn.body as Ast[] | { __variant: string; arity: number } | { __record: string; arity: number };
-  if (body && typeof body === "object" && !Array.isArray(body) && "__variant" in body) {
-    if (args.length !== body.arity) {
-      throw new PanicError(
-        `arity mismatch: expected ${body.arity}, found ${args.length}`,
-        span,
-      );
-    }
-    return vVariant(body.__variant, args);
-  }
-  if (body && typeof body === "object" && !Array.isArray(body) && "__record" in body) {
-    if (args.length !== body.arity) {
-      throw new PanicError(
-        `arity mismatch: expected ${body.arity}, found ${args.length}`,
-        span,
-      );
-    }
-    return { tag: "record", name: body.__record, fields: args };
-  }
-  if (args.length !== fn.params.length) {
-    throw new PanicError(
-      `arity mismatch: expected ${fn.params.length}, found ${args.length}`,
-      span,
-    );
-  }
-  const child = emptyEnv(fn.env);
-  for (let i = 0; i < fn.params.length; i++) {
-    envSet(child, fn.params[i]!, args[i]!);
-  }
-  const forms = body as Ast[];
-  return evalSequence(forms, child, host, null);
-}
-
-/** Sequence of forms with do-like sequential `let` binding (spec §2.4). */
-function evalSequence(
-  forms: Ast[],
-  env: Env,
-  host: Host,
-  loop: { names: string[]; env: Env } | null,
-): Value {
-  let last: Value = vUnit();
-  let e = env;
-  for (const form of forms) {
-    if (
-      form.tag === "list" &&
-      form.elems[0] &&
-      form.elems[0].tag === "sym" &&
-      nameEquals(form.elems[0].name, "let") &&
-      form.elems.length === 3
-    ) {
-      const n = symName(form.elems[1]!);
-      const v = evalExpr(form.elems[2]!, e, host, loop);
-      const child = emptyEnv(e);
-      envSet(child, n, v);
-      e = child;
-      last = v;
-      continue;
-    }
-    last = evalExpr(form, e, host, loop);
-  }
-  return last;
-}
-
 function defineDefn(ast: Ast & { tag: "list" }, env: Env): void {
-  // (defn name (p: T)* -> R body…) or (defn (name [a]) …)
   let name: string;
   let idx = 1;
   const namePart = ast.elems[1]!;
@@ -249,178 +171,560 @@ function defineDefn(ast: Ast & { tag: "list" }, env: Env): void {
     }
     break;
   }
-  // skip return type
   idx++;
   const body = ast.elems.slice(idx);
-  envSet(env, name, {
-    tag: "fn",
-    params,
-    body,
-    env,
-  });
+  envSet(env, name, { tag: "fn", params, body, env });
 }
 
-function evalExpr(
+type LoopCtx = { names: string[]; env: Env };
+
+/**
+ * Heap-allocated continuations. Menard recursion depth is bounded by this
+ * stack (and memory), not by the JavaScript call stack (§3.5, §3.9).
+ */
+type Cont =
+  | { tag: "seq"; forms: Ast[]; i: number; env: Env; loop: LoopCtx | null }
+  | { tag: "if"; then: Ast; else_: Ast; env: Env; loop: LoopCtx | null }
+  | { tag: "let"; name: string; rest: Ast[]; env: Env; loop: LoopCtx | null }
+  | {
+      tag: "list";
+      elems: Ast[];
+      i: number;
+      acc: Value[];
+      env: Env;
+      loop: LoopCtx | null;
+    }
+  | {
+      tag: "app";
+      argAsts: Ast[];
+      i: number;
+      callee: Value | null;
+      argVals: Value[];
+      env: Env;
+      loop: LoopCtx | null;
+      span?: Span;
+    }
+  | { tag: "set-ref"; valAst: Ast; env: Env; loop: LoopCtx | null; span?: Span }
+  | { tag: "set-val"; ref: Value; span?: Span }
+  | { tag: "match"; clauses: Ast[]; env: Env; loop: LoopCtx | null; span?: Span }
+  | {
+      tag: "loop-init";
+      names: string[];
+      inits: Ast[];
+      i: number;
+      child: Env;
+      body: Ast;
+      outer: Env;
+    }
+  | { tag: "loop-run"; names: string[]; child: Env; body: Ast }
+  | {
+      tag: "recur";
+      argAsts: Ast[];
+      i: number;
+      vals: Value[];
+      env: Env;
+      loop: LoopCtx;
+      span?: Span;
+    }
+  | { tag: "panic"; span?: Span };
+
+type Step =
+  | { tag: "value"; value: Value }
+  | { tag: "eval"; ast: Ast; env: Env; loop: LoopCtx | null };
+
+function evalExpr(ast: Ast, env: Env, host: Host): Value {
+  return drive(ast, env, null, [], host);
+}
+
+function applyFn(
+  fn: Value & { tag: "fn" },
+  args: Value[],
+  host: Host,
+  span?: Span,
+): Value {
+  const opened = openFn(fn, args, span);
+  if (opened.tag === "value") return opened.value;
+  return driveSequence(opened.forms, opened.env, null, host);
+}
+
+function openFn(
+  fn: Value & { tag: "fn" },
+  args: Value[],
+  span?: Span,
+): { tag: "value"; value: Value } | { tag: "body"; forms: Ast[]; env: Env } {
+  const body = fn.body as
+    | Ast[]
+    | { __variant: string; arity: number }
+    | { __record: string; arity: number };
+  if (body && typeof body === "object" && !Array.isArray(body) && "__variant" in body) {
+    if (args.length !== body.arity) {
+      throw new PanicError(
+        `arity mismatch: expected ${body.arity}, found ${args.length}`,
+        span,
+      );
+    }
+    return { tag: "value", value: vVariant(body.__variant, args) };
+  }
+  if (body && typeof body === "object" && !Array.isArray(body) && "__record" in body) {
+    if (args.length !== body.arity) {
+      throw new PanicError(
+        `arity mismatch: expected ${body.arity}, found ${args.length}`,
+        span,
+      );
+    }
+    return {
+      tag: "value",
+      value: { tag: "record", name: body.__record, fields: args },
+    };
+  }
+  if (args.length !== fn.params.length) {
+    throw new PanicError(
+      `arity mismatch: expected ${fn.params.length}, found ${args.length}`,
+      span,
+    );
+  }
+  const child = emptyEnv(fn.env);
+  for (let i = 0; i < fn.params.length; i++) {
+    envSet(child, fn.params[i]!, args[i]!);
+  }
+  return { tag: "body", forms: body as Ast[], env: child };
+}
+
+function driveSequence(
+  forms: Ast[],
+  env: Env,
+  loop: LoopCtx | null,
+  host: Host,
+): Value {
+  if (forms.length === 0) return vUnit();
+  const stack: Cont[] = [];
+  if (forms.length > 1) {
+    stack.push({ tag: "seq", forms, i: 0, env, loop });
+  }
+  return drive(forms[0]!, env, loop, stack, host);
+}
+
+function drive(
+  start: Ast,
+  startEnv: Env,
+  startLoop: LoopCtx | null,
+  stack: Cont[],
+  host: Host,
+): Value {
+  let pending: Ast | null = start;
+  let env = startEnv;
+  let loop = startLoop;
+  let result: Value = vUnit();
+
+  for (;;) {
+    if (pending !== null) {
+      const ast = pending;
+      pending = null;
+      const step = beginEval(ast, env, loop, stack);
+      if (step.tag === "value") {
+        result = step.value;
+      } else {
+        pending = step.ast;
+        env = step.env;
+        loop = step.loop;
+        continue;
+      }
+    }
+
+    for (;;) {
+      if (stack.length === 0) return result;
+      const c = stack.pop()!;
+      const next = resume(c, result, stack, host);
+      if (next.tag === "value") {
+        result = next.value;
+        continue;
+      }
+      pending = next.ast;
+      env = next.env;
+      loop = next.loop;
+      break;
+    }
+  }
+}
+
+function beginEval(
   ast: Ast,
   env: Env,
-  host: Host,
-  loop: { names: string[]; env: Env } | null,
-): Value {
+  loop: LoopCtx | null,
+  stack: Cont[],
+): Step {
   switch (ast.tag) {
     case "int":
-      return vInt(ast.value);
+      return { tag: "value", value: vInt(ast.value) };
     case "float":
-      return { tag: "float", value: ast.value };
+      return { tag: "value", value: { tag: "float", value: ast.value } };
     case "bool":
-      return vBool(ast.value);
+      return { tag: "value", value: vBool(ast.value) };
     case "str":
-      return vStr(ast.bytes);
+      return { tag: "value", value: vStr(ast.bytes) };
     case "sym": {
       const n = symName(ast);
       const v = envGet(env, n);
       if (!v) throw new PanicError(`unbound variable ${n}`, ast.span);
-      return v;
+      return { tag: "value", value: v };
     }
     case "list": {
       if (ast.kind === "bracket") {
-        return {
+        if (ast.elems.length === 0) {
+          return { tag: "value", value: { tag: "list", elems: [] } };
+        }
+        stack.push({
           tag: "list",
-          elems: ast.elems.map((e) => evalExpr(e, env, host, loop)),
-        };
+          elems: ast.elems,
+          i: 0,
+          acc: [],
+          env,
+          loop,
+        });
+        return { tag: "eval", ast: ast.elems[0]!, env, loop };
       }
-      if (ast.elems.length === 0) return vUnit();
+      if (ast.elems.length === 0) return { tag: "value", value: vUnit() };
       const head = ast.elems[0]!;
       if (head.tag === "sym") {
-        if (nameEquals(head.name, "if")) return evalIf(ast, env, host, loop);
-        if (nameEquals(head.name, "let")) return evalLet(ast, env, host, loop);
-        if (nameEquals(head.name, "do")) return evalDo(ast, env, host, loop);
-        if (nameEquals(head.name, "loop")) return evalLoop(ast, env, host);
-        if (nameEquals(head.name, "recur")) return evalRecur(ast, env, host, loop);
+        if (nameEquals(head.name, "if")) {
+          stack.push({
+            tag: "if",
+            then: ast.elems[2]!,
+            else_: ast.elems[3]!,
+            env,
+            loop,
+          });
+          return { tag: "eval", ast: ast.elems[1]!, env, loop };
+        }
+        if (nameEquals(head.name, "let")) {
+          const name = symName(ast.elems[1]!);
+          stack.push({
+            tag: "let",
+            name,
+            rest: ast.elems.slice(3),
+            env,
+            loop,
+          });
+          return { tag: "eval", ast: ast.elems[2]!, env, loop };
+        }
+        if (nameEquals(head.name, "do")) {
+          const forms = ast.elems.slice(1);
+          if (forms.length === 0) return { tag: "value", value: vUnit() };
+          if (forms.length > 1) {
+            stack.push({ tag: "seq", forms, i: 0, env, loop });
+          }
+          return { tag: "eval", ast: forms[0]!, env, loop };
+        }
+        if (nameEquals(head.name, "loop")) {
+          return beginLoop(ast, env, stack);
+        }
+        if (nameEquals(head.name, "recur")) {
+          if (!loop) throw new PanicError("recur outside loop", ast.span);
+          const argAsts = ast.elems.slice(1);
+          if (argAsts.length === 0) {
+            return restartLoop(stack, [], ast.span);
+          }
+          stack.push({
+            tag: "recur",
+            argAsts,
+            i: 0,
+            vals: [],
+            env,
+            loop,
+            span: ast.span,
+          });
+          return { tag: "eval", ast: argAsts[0]!, env, loop };
+        }
         if (nameEquals(head.name, "panic")) {
-          const msg =
-            ast.elems[1] !== undefined
-              ? valueToPanicMsg(evalExpr(ast.elems[1], env, host, loop))
-              : "panic";
-          throw new PanicError(msg, ast.span);
+          if (ast.elems[1] === undefined) {
+            throw new PanicError("panic", ast.span);
+          }
+          stack.push({ tag: "panic", span: ast.span });
+          return { tag: "eval", ast: ast.elems[1]!, env, loop };
         }
         if (nameEquals(head.name, "return")) {
-          if (ast.elems[1]) return evalExpr(ast.elems[1], env, host, loop);
-          return vUnit();
+          if (ast.elems[1]) return { tag: "eval", ast: ast.elems[1]!, env, loop };
+          return { tag: "value", value: vUnit() };
         }
-        if (nameEquals(head.name, "match")) return evalMatch(ast, env, host, loop);
+        if (nameEquals(head.name, "match")) {
+          stack.push({
+            tag: "match",
+            clauses: ast.elems.slice(2),
+            env,
+            loop,
+            span: ast.span,
+          });
+          return { tag: "eval", ast: ast.elems[1]!, env, loop };
+        }
         if (nameEquals(head.name, "fn") || nameEquals(head.name, "lambda")) {
-          return evalLambda(ast, env);
+          return { tag: "value", value: evalLambda(ast, env) };
         }
         if (nameEquals(head.name, "quote")) {
-          return quoteValue(ast.elems[1] ?? ast);
+          return { tag: "value", value: quoteValue(ast.elems[1] ?? ast) };
         }
         if (nameEquals(head.name, "set!")) {
-          const r = evalExpr(ast.elems[1]!, env, host, loop);
-          const v = evalExpr(ast.elems[2]!, env, host, loop);
-          if (r.tag !== "ref") throw new PanicError("set! on non-ref", ast.span);
-          r.cell.value = v;
-          return vUnit();
+          stack.push({
+            tag: "set-ref",
+            valAst: ast.elems[2]!,
+            env,
+            loop,
+            span: ast.span,
+          });
+          return { tag: "eval", ast: ast.elems[1]!, env, loop };
         }
-        if (nameEquals(head.name, "defrec") || nameEquals(head.name, "variant") || nameEquals(head.name, "alias") || nameEquals(head.name, "defn")) {
-          return vUnit();
+        if (
+          nameEquals(head.name, "defrec") ||
+          nameEquals(head.name, "variant") ||
+          nameEquals(head.name, "alias") ||
+          nameEquals(head.name, "defn")
+        ) {
+          return { tag: "value", value: vUnit() };
         }
       }
-      // application
-      const callee = evalExpr(head, env, host, loop);
-      const args = ast.elems.slice(1).map((a) => evalExpr(a, env, host, loop));
-      return apply(callee, args, host, ast.span);
+      const argAsts = ast.elems.slice(1);
+      stack.push({
+        tag: "app",
+        argAsts,
+        i: -1,
+        callee: null,
+        argVals: [],
+        env,
+        loop,
+        span: ast.span,
+      });
+      return { tag: "eval", ast: head, env, loop };
     }
   }
+}
+
+function beginLoop(ast: Ast & { tag: "list" }, env: Env, stack: Cont[]): Step {
+  const bindings = ast.elems[1]!;
+  const body = ast.elems[2]!;
+  const child = emptyEnv(env);
+  const names: string[] = [];
+  const inits: Ast[] = [];
+  if (bindings.tag === "list") {
+    for (const b of bindings.elems) {
+      if (b.tag === "list" && b.elems.length >= 2) {
+        names.push(symName(b.elems[0]!));
+        inits.push(b.elems[1]!);
+      }
+    }
+  }
+  if (inits.length === 0) {
+    stack.push({ tag: "loop-run", names, child, body });
+    return {
+      tag: "eval",
+      ast: body,
+      env: child,
+      loop: { names, env: child },
+    };
+  }
+  stack.push({
+    tag: "loop-init",
+    names,
+    inits,
+    i: 0,
+    child,
+    body,
+    outer: env,
+  });
+  return { tag: "eval", ast: inits[0]!, env, loop: null };
+}
+
+function resume(c: Cont, value: Value, stack: Cont[], host: Host): Step {
+  switch (c.tag) {
+    case "seq": {
+      // Finished forms[c.i]. Binding-style (let x e) extends the sequence env.
+      let e = c.env;
+      const finished = c.forms[c.i]!;
+      if (
+        finished.tag === "list" &&
+        finished.elems[0]?.tag === "sym" &&
+        nameEquals(finished.elems[0].name, "let") &&
+        finished.elems.length === 3
+      ) {
+        const child = emptyEnv(e);
+        envSet(child, symName(finished.elems[1]!), value);
+        e = child;
+      }
+      const nextI = c.i + 1;
+      if (nextI >= c.forms.length) return { tag: "value", value };
+      if (nextI + 1 < c.forms.length) {
+        stack.push({ tag: "seq", forms: c.forms, i: nextI, env: e, loop: c.loop });
+      }
+      return {
+        tag: "eval",
+        ast: c.forms[nextI]!,
+        env: e,
+        loop: c.loop,
+      };
+    }
+    case "if": {
+      if (value.tag !== "bool") throw new PanicError("if test not Bool");
+      return {
+        tag: "eval",
+        ast: value.value ? c.then : c.else_,
+        env: c.env,
+        loop: c.loop,
+      };
+    }
+    case "let": {
+      const child = emptyEnv(c.env);
+      envSet(child, c.name, value);
+      if (c.rest.length === 0) return { tag: "value", value };
+      if (c.rest.length === 1) {
+        return { tag: "eval", ast: c.rest[0]!, env: child, loop: c.loop };
+      }
+      stack.push({ tag: "seq", forms: c.rest, i: 0, env: child, loop: c.loop });
+      return { tag: "eval", ast: c.rest[0]!, env: child, loop: c.loop };
+    }
+    case "list": {
+      const acc = c.acc;
+      acc.push(value);
+      const nextI = c.i + 1;
+      if (nextI >= c.elems.length) {
+        return { tag: "value", value: { tag: "list", elems: acc } };
+      }
+      stack.push({ ...c, i: nextI, acc });
+      return { tag: "eval", ast: c.elems[nextI]!, env: c.env, loop: c.loop };
+    }
+    case "app": {
+      if (c.i === -1) {
+        if (c.argAsts.length === 0) {
+          return applyNow(value, [], host, c.span, stack, c.loop);
+        }
+        stack.push({
+          tag: "app",
+          argAsts: c.argAsts,
+          i: 0,
+          callee: value,
+          argVals: [],
+          env: c.env,
+          loop: c.loop,
+          span: c.span,
+        });
+        return { tag: "eval", ast: c.argAsts[0]!, env: c.env, loop: c.loop };
+      }
+      const argVals = c.argVals;
+      argVals.push(value);
+      const nextI = c.i + 1;
+      if (nextI >= c.argAsts.length) {
+        return applyNow(c.callee!, argVals, host, c.span, stack, c.loop);
+      }
+      stack.push({ ...c, i: nextI, argVals });
+      return { tag: "eval", ast: c.argAsts[nextI]!, env: c.env, loop: c.loop };
+    }
+    case "set-ref": {
+      stack.push({ tag: "set-val", ref: value, span: c.span });
+      return { tag: "eval", ast: c.valAst, env: c.env, loop: c.loop };
+    }
+    case "set-val": {
+      if (c.ref.tag !== "ref") throw new PanicError("set! on non-ref", c.span);
+      c.ref.cell.value = value;
+      return { tag: "value", value: vUnit() };
+    }
+    case "match": {
+      for (let i = 0; i + 1 < c.clauses.length; i += 2) {
+        const pat = c.clauses[i]!;
+        const body = c.clauses[i + 1]!;
+        const child = emptyEnv(c.env);
+        if (matchPat(pat, value, child)) {
+          return { tag: "eval", ast: body, env: child, loop: c.loop };
+        }
+      }
+      throw new PanicError("match: no clause matched", c.span);
+    }
+    case "loop-init": {
+      envSet(c.child, c.names[c.i]!, value);
+      const nextI = c.i + 1;
+      if (nextI >= c.inits.length) {
+        stack.push({
+          tag: "loop-run",
+          names: c.names,
+          child: c.child,
+          body: c.body,
+        });
+        return {
+          tag: "eval",
+          ast: c.body,
+          env: c.child,
+          loop: { names: c.names, env: c.child },
+        };
+      }
+      stack.push({ ...c, i: nextI });
+      return { tag: "eval", ast: c.inits[nextI]!, env: c.outer, loop: null };
+    }
+    case "loop-run":
+      return { tag: "value", value };
+    case "recur": {
+      const vals = c.vals;
+      vals.push(value);
+      const nextI = c.i + 1;
+      if (nextI < c.argAsts.length) {
+        stack.push({ ...c, i: nextI, vals });
+        return {
+          tag: "eval",
+          ast: c.argAsts[nextI]!,
+          env: c.env,
+          loop: c.loop,
+        };
+      }
+      return restartLoop(stack, vals, c.span);
+    }
+    case "panic":
+      throw new PanicError(valueToPanicMsg(value), c.span);
+  }
+}
+
+function applyNow(
+  callee: Value,
+  args: Value[],
+  host: Host,
+  span: Span | undefined,
+  stack: Cont[],
+  loop: LoopCtx | null,
+): Step {
+  if (callee.tag === "builtin") {
+    return { tag: "value", value: applyBuiltin(callee.name, args, host, span) };
+  }
+  if (callee.tag !== "fn") {
+    throw new PanicError("attempted to call non-function", span);
+  }
+  const opened = openFn(callee, args, span);
+  if (opened.tag === "value") return opened;
+  const forms = opened.forms;
+  if (forms.length === 0) return { tag: "value", value: vUnit() };
+  if (forms.length > 1) {
+    stack.push({ tag: "seq", forms, i: 0, env: opened.env, loop });
+  }
+  return { tag: "eval", ast: forms[0]!, env: opened.env, loop };
+}
+
+function restartLoop(stack: Cont[], args: Value[], span?: Span): Step {
+  while (stack.length > 0) {
+    const top = stack[stack.length - 1]!;
+    if (top.tag === "loop-run") break;
+    stack.pop();
+  }
+  const top = stack[stack.length - 1];
+  if (!top || top.tag !== "loop-run") {
+    throw new PanicError("recur outside loop", span);
+  }
+  for (let i = 0; i < top.names.length; i++) {
+    envSet(top.child, top.names[i]!, args[i] ?? vUnit());
+  }
+  return {
+    tag: "eval",
+    ast: top.body,
+    env: top.child,
+    loop: { names: top.names, env: top.child },
+  };
 }
 
 function valueToPanicMsg(v: Value): string {
   if (v.tag === "str") return new TextDecoder().decode(v.bytes);
   return showValue(v);
-}
-
-function evalIf(
-  ast: Ast & { tag: "list" },
-  env: Env,
-  host: Host,
-  loop: { names: string[]; env: Env } | null,
-): Value {
-  const t = evalExpr(ast.elems[1]!, env, host, loop);
-  if (t.tag !== "bool") throw new PanicError("if test not Bool", ast.elems[1]!.span);
-  return t.value
-    ? evalExpr(ast.elems[2]!, env, host, loop)
-    : evalExpr(ast.elems[3]!, env, host, loop);
-}
-
-function evalLet(
-  ast: Ast & { tag: "list" },
-  env: Env,
-  host: Host,
-  loop: { names: string[]; env: Env } | null,
-): Value {
-  const name = symName(ast.elems[1]!);
-  const val = evalExpr(ast.elems[2]!, env, host, loop);
-  const child = emptyEnv(env);
-  envSet(child, name, val);
-  if (ast.elems.length === 3) return val;
-  let last: Value = val;
-  for (let i = 3; i < ast.elems.length; i++) {
-    last = evalExpr(ast.elems[i]!, child, host, loop);
-  }
-  return last;
-}
-
-function evalDo(
-  ast: Ast & { tag: "list" },
-  env: Env,
-  host: Host,
-  loop: { names: string[]; env: Env } | null,
-): Value {
-  return evalSequence(ast.elems.slice(1), env, host, loop);
-}
-
-function evalLoop(ast: Ast & { tag: "list" }, env: Env, host: Host): Value {
-  const bindings = ast.elems[1]!;
-  const body = ast.elems[2]!;
-  const child = emptyEnv(env);
-  const names: string[] = [];
-  if (bindings.tag === "list") {
-    for (const b of bindings.elems) {
-      if (b.tag === "list" && b.elems.length >= 2) {
-        const n = symName(b.elems[0]!);
-        names.push(n);
-        envSet(child, n, evalExpr(b.elems[1]!, env, host, null));
-      }
-    }
-  }
-  const loop = { names, env: child };
-  for (;;) {
-    try {
-      return evalExpr(body, child, host, loop);
-    } catch (e) {
-      if (e instanceof RecurSignal) {
-        for (let i = 0; i < names.length; i++) {
-          envSet(child, names[i]!, e.args[i] ?? vUnit());
-        }
-        continue;
-      }
-      throw e;
-    }
-  }
-}
-
-class RecurSignal {
-  constructor(readonly args: Value[]) {}
-}
-
-function evalRecur(
-  ast: Ast & { tag: "list" },
-  env: Env,
-  host: Host,
-  loop: { names: string[]; env: Env } | null,
-): Value {
-  if (!loop) throw new PanicError("recur outside loop", ast.span);
-  const args = ast.elems.slice(1).map((a) => evalExpr(a, env, host, loop));
-  throw new RecurSignal(args);
 }
 
 function evalLambda(ast: Ast & { tag: "list" }, env: Env): Value {
@@ -437,31 +741,10 @@ function evalLambda(ast: Ast & { tag: "list" }, env: Env): Value {
   };
 }
 
-function evalMatch(
-  ast: Ast & { tag: "list" },
-  env: Env,
-  host: Host,
-  loop: { names: string[]; env: Env } | null,
-): Value {
-  // (match e pat1 body1 pat2 body2 …)
-  const scrut = evalExpr(ast.elems[1]!, env, host, loop);
-  const rest = ast.elems.slice(2);
-  for (let i = 0; i + 1 < rest.length; i += 2) {
-    const pat = rest[i]!;
-    const body = rest[i + 1]!;
-    const child = emptyEnv(env);
-    if (matchPat(pat, scrut, child)) {
-      return evalExpr(body, child, host, loop);
-    }
-  }
-  throw new PanicError("match: no clause matched", ast.span);
-}
-
 function matchPat(pat: Ast, v: Value, env: Env): boolean {
   if (pat.tag === "sym") {
     const n = symName(pat);
     if (n === "_") return true;
-    // nullary ctor?
     if (v.tag === "variant" && v.ctor === n && v.payloads.length === 0) return true;
     envSet(env, n, v);
     return true;
@@ -508,17 +791,8 @@ function quoteValue(ast: Ast): Value {
     case "sym":
       return { tag: "sym", name: ast.name };
     case "list":
-      return {
-        tag: "list",
-        elems: ast.elems.map(quoteValue),
-      };
+      return { tag: "list", elems: ast.elems.map(quoteValue) };
   }
-}
-
-function apply(callee: Value, args: Value[], host: Host, span?: Span): Value {
-  if (callee.tag === "fn") return applyFn(callee, args, host, span);
-  if (callee.tag === "builtin") return applyBuiltin(callee.name, args, host, span);
-  throw new PanicError("attempted to call non-function", span);
 }
 
 function installBuiltins(env: Env): void {
@@ -625,7 +899,6 @@ function applyBuiltin(
       return vStr(out);
     }
     case "char->str": {
-      // encode scalar as UTF-8
       const cp = (args[0] as { value: number }).value;
       return vStr(new TextEncoder().encode(String.fromCodePoint(cp)));
     }
