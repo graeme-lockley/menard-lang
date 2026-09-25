@@ -150,44 +150,40 @@ function installBuiltins(env: TypeEnv): void {
   env.values.set("sb-to-str", { params: [], type: tFn([SB], S) });
   env.values.set("sb-take-str!", { params: [], type: tFn([SB], S) });
 
-  // Maybe / Result constructors as variants
+  // Maybe / Result / List — same registration as user variants: ctors + values
+  const a: Type = { tag: "param", name: "a" };
+  const tParam: Type = { tag: "param", name: "t" };
+  const eParam: Type = { tag: "param", name: "e" };
+
   env.types.set("Maybe", {
     kind: "variant",
     name: "Maybe",
     params: ["a"],
     ctors: [
       { name: "None", payloads: [], span: { start: 0, end: 0 } },
-      { name: "Some", payloads: [{ tag: "param", name: "a" }], span: { start: 0, end: 0 } },
+      { name: "Some", payloads: [a], span: { start: 0, end: 0 } },
     ],
     span: { start: 0, end: 0 },
   });
   env.ctors.set("None", { typeName: "Maybe", payloads: [], params: ["a"] });
-  env.ctors.set("Some", {
-    typeName: "Maybe",
-    payloads: [{ tag: "param", name: "a" }],
-    params: ["a"],
-  });
+  env.ctors.set("Some", { typeName: "Maybe", payloads: [a], params: ["a"] });
+  env.values.set("None", { params: ["a"], type: tFn([], tMaybe(a)) });
+  env.values.set("Some", { params: ["a"], type: tFn([a], tMaybe(a)) });
 
   env.types.set("Result", {
     kind: "variant",
     name: "Result",
     params: ["t", "e"],
     ctors: [
-      { name: "Ok", payloads: [{ tag: "param", name: "t" }], span: { start: 0, end: 0 } },
-      { name: "Err", payloads: [{ tag: "param", name: "e" }], span: { start: 0, end: 0 } },
+      { name: "Ok", payloads: [tParam], span: { start: 0, end: 0 } },
+      { name: "Err", payloads: [eParam], span: { start: 0, end: 0 } },
     ],
     span: { start: 0, end: 0 },
   });
-  env.ctors.set("Ok", {
-    typeName: "Result",
-    payloads: [{ tag: "param", name: "t" }],
-    params: ["t", "e"],
-  });
-  env.ctors.set("Err", {
-    typeName: "Result",
-    payloads: [{ tag: "param", name: "e" }],
-    params: ["t", "e"],
-  });
+  env.ctors.set("Ok", { typeName: "Result", payloads: [tParam], params: ["t", "e"] });
+  env.ctors.set("Err", { typeName: "Result", payloads: [eParam], params: ["t", "e"] });
+  env.values.set("Ok", { params: ["t", "e"], type: tFn([tParam], tResult(tParam, eParam)) });
+  env.values.set("Err", { params: ["t", "e"], type: tFn([eParam], tResult(tParam, eParam)) });
 
   env.types.set("List", {
     kind: "variant",
@@ -197,7 +193,7 @@ function installBuiltins(env: TypeEnv): void {
       { name: "Nil", payloads: [], span: { start: 0, end: 0 } },
       {
         name: "Cons",
-        payloads: [{ tag: "param", name: "a" }, tList({ tag: "param", name: "a" })],
+        payloads: [a, tList(a)],
         span: { start: 0, end: 0 },
       },
     ],
@@ -206,9 +202,11 @@ function installBuiltins(env: TypeEnv): void {
   env.ctors.set("Nil", { typeName: "List", payloads: [], params: ["a"] });
   env.ctors.set("Cons", {
     typeName: "List",
-    payloads: [{ tag: "param", name: "a" }, tList({ tag: "param", name: "a" })],
+    payloads: [a, tList(a)],
     params: ["a"],
   });
+  env.values.set("Nil", { params: ["a"], type: tFn([], tList(a)) });
+  env.values.set("Cons", { params: ["a"], type: tFn([a, tList(a)], tList(a)) });
 
   void F;
 }

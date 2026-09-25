@@ -47,6 +47,33 @@ describe("typer", () => {
     const diags = diagnose("(print (ref 1))");
     expect(diags.some((d) => d.code === "E_TYPE_SHOWABLE")).toBe(true);
   });
+
+  test("built-in constructors typecheck as expressions", () => {
+    const cases = [
+      "(None)",
+      "(Some 1)",
+      "(Ok 1)",
+      '(Err "e")',
+      "(Nil)",
+      "(Cons 1 (Nil))",
+    ];
+    for (const src of cases) {
+      const diags = diagnose(src);
+      expect(diags).toEqual([]);
+    }
+  });
+
+  test("built-in constructors in typed defn bodies", () => {
+    const src = `(defn f (n: Int) -> (List Int)
+  (Cons n (Nil)))
+(defn g (n: Int) -> (Maybe Int)
+  (Some n))
+(defn h (n: Int) -> (Result Int Str)
+  (Ok n))
+(f 1)`;
+    const diags = diagnose(src);
+    expect(diags).toEqual([]);
+  });
 });
 
 describe("pipeline diagnose", () => {
@@ -123,5 +150,24 @@ describe("run", () => {
     const r = run(src);
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(1n);
+  });
+
+  test("built-in constructors evaluate", () => {
+    const cases: { src: string; ctor: string }[] = [
+      { src: "(None)", ctor: "None" },
+      { src: "(Some 1)", ctor: "Some" },
+      { src: "(Ok 1)", ctor: "Ok" },
+      { src: '(Err "e")', ctor: "Err" },
+      { src: "(Nil)", ctor: "Nil" },
+      { src: "(Cons 1 (Nil))", ctor: "Cons" },
+    ];
+    for (const { src, ctor } of cases) {
+      const r = run(src);
+      expect(r.ok).toBe(true);
+      if (r.ok) {
+        expect(r.value.tag).toBe("variant");
+        if (r.value.tag === "variant") expect(r.value.ctor).toBe(ctor);
+      }
+    }
   });
 });
