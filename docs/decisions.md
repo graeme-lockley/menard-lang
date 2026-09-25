@@ -13,7 +13,7 @@ project, kept for reference only.
 When this file and the specification disagree, the specification wins and this
 file is wrong.
 
-**On ADR numbers.** The standing decisions are numbered 1–38 in the index below,
+**On ADR numbers.** The standing decisions are numbered 1–39 in the index below,
 and the dated entries refer to them by those numbers. The specification does not
 cite them; it states rules and gives reasons inline, so it stands alone.
 
@@ -66,10 +66,42 @@ bearing choices; everything in the specification follows from them.
 | 32 | **No `Byte` type; `Char` is a scalar value; `Str` is arbitrary bytes** | A `Byte` is a second integer type with the same agreement cost as `Int32`; bytes are small `Int`s with a documented range | Byte/character confusion is a documented-range question, not a type error |
 | 33 | **`StringBuffer` is a built-in reference type** (§2.8.2) | It needs in-place mutation, and the compiler is its hot-path client; `sb-take-str!` is free because `Str` and the buffer share one payload shape | ~200 lines of C and ~200 of TS, implemented twice; a second mutation path to keep out of output |
 | 34 | **Copy-on-write after a non-destructive `sb-to-str`** | A shared backing store means an append could otherwise mutate an immutable `Str` already held by a caller | One extra copy on the first append after a conversion; a rule both stages must implement |
-| 35 | **Debug output is a separate printer — `dump` — writing only to fd 2, with no way to become a value** | Debugging needs to see `Ref`, `Fn` and `StringBuffer` contents, which `show` must refuse; isolation by *type*, not by convention, means a forgotten `dump` cannot break the fixed point | A fifth compiler-known intrinsic; the loose policy in the derive engine; two kinds of text on stderr with opposite determinism rules |
+| 35 | **Debug output is a separate printer — `dump` — writing only to fd 2, with no way to become a value** | Debugging needs to see `Ref`, `Fn` and `StringBuffer` contents, which `show` must refuse; isolation by *type*, not by convention, means a forgotten `dump` cannot break the fixed point | A sixth compiler-known intrinsic once `println` is counted; the loose policy in the derive engine; two kinds of text on stderr with opposite determinism rules |
 | 36 | **Menard has no `null`; the empty word is an allocator sentinel, not a value — kept, and paired with an *asserted* no-partial-publication discipline** | Filling an object's fields may allocate, so the collector can run mid-construction; without a distinguished word an unwritten slot holds a stale pointer or an even non-pointer, traced silently in both stages. The word converts that into a wasted read; the discipline — and its heap-verify assertion — is what stops the collector *depending* on it | One extra test in the marking loop; one `memset` per recycled object; one non-value word in the representation that must be kept out of the language, out of output, and out of the debug printer |
 | 37 | **Process spawning is admitted, in argv-vector form only; shell strings and `fork` are refused permanently** | The build driver must be Menard, or the language's own integration test lives in a shell script; argv is data the compiler can see and check, whereas a shell string is unbounded ambient state in one string; and `fork` copies a GC's heap and collector state | ~310 lines implemented twice; a `SpawnError` taxonomy to keep aligned; a non-hermetic test tier; one more way for a path to reach the artifact |
 | 38 | **Literals and nullary constructors are static objects; layout and location are separate axes** | A literal or a nullary constructor is a constant of the program, so allocating it at each evaluation is pure waste — and for `Str`, which is not interned, "each evaluation" means each loop iteration. Making the pool static deletes the allocation rather than optimising it; splitting location from layout is what lets a `bytes` object be static and lets a nullary variant be header-only | ~120 lines across two stages for the pool; two new determinism obligations (dedup and emission order); a layout/location pair to keep straight; and the invariance rules of §2.2.1 must hold |
+| 39 | **`print` / `println` are variadic stdout emitters: `Str` raw, other showables via `show`; no auto-newline on `print`** | Quoting every `Str` through `show` made hello-world and IR-shaped stdout unusable via `print`; bare `Str` bytes plus explicit `(print (show x))` when quotes are wanted keeps `show` injective and `write` as the arbitrary-fd primitive | Special variadic typing; six intrinsics; callers who wanted the old always-show behaviour must wrap with `show` |
+---
+
+## 2026-09-25 — `print` / `println`: bare stdout, ADR 39
+
+### The decision
+
+`print` and `println` take **zero or more** arguments and write to fd 1:
+
+- each `Str` is emitted as **raw bytes** (no quotes);
+- every other argument must be **showable**; its `(show …)` bytes are written;
+- `print` adds **no** newline; `println` appends one `0x0a` after the args
+  (`(println)` alone writes just that newline).
+
+`show` is unchanged (still quotes `Str`). `write` remains raw bytes to an
+arbitrary fd. Adds ADR 39; amends the §2.8.1 intrinsic set to **six**.
+
+### Why
+
+The previous rule — `print` = always `show` then write — made ordinary messages
+and any stdout that must be byte-exact (including the shape of IR) wrong by
+default: `(print "Hello, world!")` produced `"Hello, world!"` with quotes. The
+fix needed was already named in §2.15 as `write`; elevating bare `Str` emission
+onto `print` / `println` for **stdout only** keeps the common path short without
+collapsing `show`'s injectivity.
+
+Rejected alternative: `Str`-only print (option A). Accepted: option B — non-`Str`
+showables still go through `show`, so `(print 42)` and `(print "x=" 1)` work.
+
+### Propagated
+
+§2.5, §2.8.1, §2.12 (Showable clients), §2.15 tier table and rule 1, `!` table.
 
 ---
 

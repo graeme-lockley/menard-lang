@@ -504,7 +504,7 @@ function installBuiltins(env: Env): void {
   const names = [
     "+", "-", "*", "/", "%", "<", ">", "<=", ">=",
     "f+", "f-", "f*", "f/",
-    "show", "print", "=", "compare", "dump",
+    "show", "print", "println", "=", "compare", "dump",
     "ref", "deref",
     "str-byte-length", "str-byte", "str-slice", "str-concat", "char->str",
     "map-new", "map-get", "map-set", "map-has", "map-size", "map-keys",
@@ -551,8 +551,20 @@ function applyBuiltin(
     case "show":
       return vStr(new TextEncoder().encode(showValue(args[0]!)));
     case "print": {
-      const s = showValue(args[0]!);
-      host.writeStdout(new TextEncoder().encode(s + "\n"));
+      const enc = new TextEncoder();
+      for (const a of args) {
+        if (a.tag === "str") host.writeStdout(a.bytes);
+        else host.writeStdout(enc.encode(showValue(a)));
+      }
+      return vUnit();
+    }
+    case "println": {
+      const enc = new TextEncoder();
+      for (const a of args) {
+        if (a.tag === "str") host.writeStdout(a.bytes);
+        else host.writeStdout(enc.encode(showValue(a)));
+      }
+      host.writeStdout(new Uint8Array([0x0a]));
       return vUnit();
     }
     case "=":

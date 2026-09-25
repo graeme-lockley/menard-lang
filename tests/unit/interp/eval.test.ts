@@ -52,6 +52,47 @@ describe("intrinsics via run", () => {
     }
   });
 
+  test("print writes Str bare, no newline", () => {
+    const host = createHost();
+    const r = run('(print "hi")', { host });
+    expect(r.ok).toBe(true);
+    const out = host.stdout.map((b) => new TextDecoder().decode(b)).join("");
+    expect(out).toBe("hi");
+  });
+
+  test("println appends newline", () => {
+    const host = createHost();
+    const r = run('(println "hi")', { host });
+    expect(r.ok).toBe(true);
+    const out = host.stdout.map((b) => new TextDecoder().decode(b)).join("");
+    expect(out).toBe("hi\n");
+  });
+
+  test("print zero args writes nothing; println writes newline", () => {
+    const h1 = createHost();
+    expect(run("(print)", { host: h1 }).ok).toBe(true);
+    expect(h1.stdout).toEqual([]);
+    const h2 = createHost();
+    expect(run("(println)", { host: h2 }).ok).toBe(true);
+    expect(new TextDecoder().decode(h2.stdout[0]!)).toBe("\n");
+  });
+
+  test("print mixes Str raw and show of Int", () => {
+    const host = createHost();
+    const r = run('(print "a" 1)', { host });
+    expect(r.ok).toBe(true);
+    const out = host.stdout.map((b) => new TextDecoder().decode(b)).join("");
+    expect(out).toBe("a1");
+  });
+
+  test("show still quotes Str", () => {
+    const r = run('(show "hi")');
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "str") {
+      expect(new TextDecoder().decode(r.value.bytes)).toBe('"hi"');
+    }
+  });
+
   test("map round trip", () => {
     const src = `(do
   (let m (map-new))

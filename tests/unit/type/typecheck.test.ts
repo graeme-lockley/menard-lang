@@ -42,6 +42,11 @@ describe("typer", () => {
     const diags = diagnose(src);
     expect(diags.some((d) => d.code === "E_TYPE_SHOWABLE")).toBe(true);
   });
+
+  test("print rejects non-showable Ref", () => {
+    const diags = diagnose("(print (ref 1))");
+    expect(diags.some((d) => d.code === "E_TYPE_SHOWABLE")).toBe(true);
+  });
 });
 
 describe("pipeline diagnose", () => {

@@ -670,8 +670,8 @@ ref   deref   set!     quote
 `cond`, `when`, `while` and `and`/`or` are sugar over `if` and `loop`, expanded
 during desugaring (before typing).
 
-Note what is **not** here: `show`, `print`, `=`, `compare` and `dump` are
-**compiler-known intrinsics** (§2.8.1), not special forms, because they are
+Note what is **not** here: `show`, `print`, `println`, `=`, `compare` and `dump`
+are **compiler-known intrinsics** (§2.8.1), not special forms, because they are
 type-directed rather than syntactic. **No process or OS operation is a special
 form either** — `spawn` is an ordinary function over the host seam (§2.15).
 
@@ -769,7 +769,7 @@ story of "what belongs in the compiler":
 
 | Tier | Rule | Implemented | In this specification? |
 |---|---|---|---|
-| **§2.8.1 Compiler-known intrinsics** | Needs **per-type synthesis** | Twice: stage0 and the Menard compiler | **Yes** — these are language |
+| **§2.8.1 Compiler-known intrinsics** | Needs **per-type synthesis** or special variadic stdout typing | Twice: stage0 and the Menard compiler | **Yes** — these are language |
 | **§2.8.2 Runtime-backed built-ins** | Needs in-place mutation or an opaque C representation | Twice: the C runtime and the interpreter | **Yes** — signatures and semantics |
 | **§2.8.3 Prelude** | Expressible in Menard | **Once** — one source, compiled by both stages | Listed only |
 | **§2.15 Host seam** | Touches the OS | Twice: `libc` and the interpreter's host API | **Yes** — mechanism, floor, error taxonomy |
@@ -790,26 +790,41 @@ language.
 
 #### 2.8.1 Compiler-known intrinsics
 
-The set is **five operations**. Membership is decided by a single criterion:
-these are exactly the operations that require the **derive engine** —
-type-directed synthesis over the shape of a type — because the mechanism cannot
-be reified in the language (it must inspect values the type system calls opaque)
-and cannot be written in the prelude.
+The set is **six operations**. Membership is decided by needing either the
+**derive engine** (type-directed synthesis over the shape of a type) or
+**special typing that the prelude cannot express** (variadic stdout emission with
+a per-argument showable check). Neither class can be reified honestly in the
+language.
 
 ```lisp
-(defn (show    [a]) (v: a)        -> Str   ; requires showable a  (§2.12)
-(defn (print   [a]) (v: a)        -> Unit  ; show, then write to fd 1
-(defn (=       [a]) (x: a) (y: a) -> Bool  ; total (§2.12); identity for Ref/Fn/buffers
-(defn (compare [a]) (x: a) (y: a) -> Int   ; requires orderable a; <0, 0, >0
-(defn (dump    [a]) (v: a)        -> Unit  ; loose debug text, fd 2 only (§2.16); no predicate
+(defn (show    [a]) (v: a) -> Str              ; requires showable a  (§2.12)
+(defn  print        (a: …) -> Unit             ; variadic; see below
+(defn  println      (a: …) -> Unit             ; print, then one 0x0a
+(defn (=       [a]) (x: a) (y: a) -> Bool      ; total (§2.12); identity for Ref/Fn/buffers
+(defn (compare [a]) (x: a) (y: a) -> Int       ; requires orderable a; <0, 0, >0
+(defn (dump    [a]) (v: a) -> Unit             ; loose debug text, fd 2 only (§2.16); no predicate
 ```
+
+**`print` and `println`.** Zero or more arguments, left to right, written to
+fd 1 as **raw bytes** — no automatic quoting, and `print` adds **no** newline:
+
+- a `Str` argument is emitted **as its bytes** (so `(print "hi")` writes `hi`);
+- any other argument must be **showable** (§2.12); the bytes of `(show a)` are
+  written instead (so `(print 42)` writes `42`, and `(print "x=" 1)` writes `x=1`).
+
+`(println a…)` is identical, then one `\n` (`0x0a`). `(println)` alone writes
+just that newline. Both return `Unit`.
+
+`show` itself is unchanged: `(show "hi")` is still the quoted spelling `"hi"`.
+Use `(print (show s))` when the quoted form is what should reach stdout.
 
 `show`, `=`, `compare` and `dump` are **derived per type**: records
 field-by-field in declaration order, variants by tag then payload, lists in index
 order, maps by sorted keys. They are the *third* traversal machinery in the
 compiler, distinct from both the typer and the emitter, and they are
 **parametrised** (§2.8.4). `dump` is the same traversal with a **loose**
-policy — it is not a second engine (§2.16).
+policy — it is not a second engine (§2.16). `print` / `println` call into that
+machinery only for non-`Str` arguments.
 
 The type-directed operations must agree with the representation about static
 objects in exactly one respect: a static `Str` and an equal heap `Str` are
@@ -821,9 +836,10 @@ Everything a reader might expect here and does not find — `length`, `map`,
 `fold`, `sort`, `contains`, `append` — is expressible with `match` and `recur`,
 so it lives in the prelude.
 
-**None of the five carries a `!`** (§2.15). Two of them touch a stream, but a
-stream is not a value you hold, so their effect is not *mutation* — which is the
-only thing `!` marks. `show`, `=` and `compare` are pure and touch nothing.
+**None of the six carries a `!`** (§2.15). `print`, `println` and `dump` touch a
+stream, but a stream is not a value you hold, so their effect is not *mutation* —
+which is the only thing `!` marks. `show`, `=` and `compare` are pure and touch
+nothing.
 
 #### 2.8.2 Runtime-backed built-ins
 
@@ -1255,7 +1271,7 @@ There are **three** predicates, and they have different shapes:
 
 | Predicate | Question | Used by |
 |---|---|---|
-| **Showable(T)** | Does T have exactly one spelling? | `show`, `print`, map keys when shown |
+| **Showable(T)** | Does T have exactly one spelling? | `show`, non-`Str` args to `print`/`println`, map keys when shown |
 | **Orderable(T)** | Is there a total order consistent with equality? | `compare`, `sort`, `Map` **keys**, canonical emission |
 | **Equatable(T)** | Is equality defined on T? | `=`, `contains` |
 
@@ -1480,7 +1496,7 @@ thing.**
 | `set!` | **yes** | The anchor case |
 | `sb-append!`, `sb-append-byte!`, `sb-clear!`, `sb-take-str!` | **yes** | The buffer is visible through the argument |
 | `sb-to-str` | **no** | Non-destructive — the sharp distinction from `sb-take-str!` |
-| `print`, `write`, `dump`, `read-file`, `write-file`, `exit`, `spawn`, … | **no** | They touch the OS, not an argument |
+| `print`, `println`, `write`, `dump`, `read-file`, `write-file`, `exit`, `spawn`, … | **no** | They touch the OS, not an argument |
 
 The total population of `!` in the language is therefore **one special form and
 four functions**. Applying the rule is a decision about five names, not a
@@ -1528,8 +1544,9 @@ environment, no process spawning, no stdin.
 (arg)       (i: Int) -> Str
 
 ; menard/io.mnd — fd 1 and 2
-(write)     (fd: Int) (s: Str) -> (Result Unit IoError)   ; raw bytes, no escaping
-(print)     [a] (v: a) -> Unit                            ; show, then write to fd 1 (§2.8.1)
+(write)     (fd: Int) (s: Str) -> (Result Unit IoError)   ; raw bytes to any fd
+(print)     (a: …) -> Unit                                ; variadic stdout (§2.8.1)
+(println)   (a: …) -> Unit                                ; print, then 0x0a
 (dump)      [a] (v: a) -> Unit                            ; loose debug text, fd 2 only (§2.16)
 
 ; menard/fs.mnd — whole-file is the primitive; streaming is v2
@@ -1757,10 +1774,13 @@ it carries a code.
 
 #### Six rules
 
-1. **`print` shows; `write` emits.** `print` derives through `show`, which
-   *quotes and escapes* a `Str` (§2.13) — so it cannot write IR; the first byte
-   would be a quotation mark. `write` is raw and byte-exact. Since `Str` is
-   bytes, a whole IR buffer is a `Str` and one `write` emits it.
+1. **`print` / `println` emit; `write` targets a fd; `show` spells.** A `Str`
+   passed to `print` or `println` is written as **raw bytes** (no quotes). Any
+   other argument must be showable and is emitted as the bytes of `(show a)`.
+   Neither form adds a newline except `println`, which appends one `0x0a`.
+   `write` remains the host-seam primitive for raw bytes to an **arbitrary** fd
+   (so IR goes out with `(write 1 ir)`, not through `show`). `show` alone never
+   touches a stream — it only builds the unique spelling (§2.13).
 2. **stdout and stderr are byte streams.** No newline translation, no encoding
    conversion, no locale — otherwise the gate breaks across platforms. Files are
    opened in binary mode for the same reason.

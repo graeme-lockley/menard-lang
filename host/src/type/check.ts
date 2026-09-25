@@ -84,10 +84,9 @@ function installBuiltins(env: TypeEnv): void {
     params: ["a"],
     type: tFn([{ tag: "param", name: "a" }], S),
   });
-  env.values.set("print", {
-    params: ["a"],
-    type: tFn([{ tag: "param", name: "a" }], U),
-  });
+  // print / println: variadic; typed specially in inferApp
+  env.values.set("print", { params: [], type: tFn([], U) });
+  env.values.set("println", { params: [], type: tFn([], U) });
   env.values.set("=", {
     params: ["a"],
     type: tFn([{ tag: "param", name: "a" }, { tag: "param", name: "a" }], B),
@@ -1119,17 +1118,33 @@ function inferApp(
   local: Map<string, Type>,
   subst: Subst,
 ): Type {
+  const hn = symStr(ast.elems[0]!);
+
+  // Variadic print / println: Str raw; other args must be showable
+  if (hn === "print" || hn === "println") {
+    for (let i = 1; i < ast.elems.length; i++) {
+      const t = applySubst(infer(env, ast.elems[i]!, local, subst), subst);
+      const isStr = t.tag === "prim" && t.name === "Str";
+      if (!isStr && !isShowable(t)) {
+        err(
+          env,
+          "E_TYPE_SHOWABLE",
+          `type ${typeShow(t)} is not showable`,
+          ast.elems[i]!.span,
+        );
+      }
+    }
+    return prim("Unit");
+  }
+
   const callee = infer(env, ast.elems[0]!, local, subst);
   const args = ast.elems.slice(1).map((a) => infer(env, a, local, subst));
   const ret = freshVar(env);
-  const fnType = tFn(args.map(() => freshVar(env)), ret);
   // unify callee with fn of arg types
   if (!unify(env, callee, tFn(args, ret), subst, ast.span)) {
     // try arity message already emitted
   }
-  // check showable for show/print
-  const hn = symStr(ast.elems[0]!);
-  if (hn === "show" || hn === "print") {
+  if (hn === "show") {
     const a0 = applySubst(args[0] ?? freshVar(env), subst);
     if (!isShowable(a0)) {
       err(
@@ -1154,6 +1169,5 @@ function inferApp(
   if (hn === "map-new" || hn === "map-set" || hn === "map-get") {
     // Map keys must be orderable — checked when key type known
   }
-  void fnType;
   return applySubst(ret, subst);
 }
