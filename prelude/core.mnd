@@ -1,12 +1,10 @@
-; Minimal prelude subset for Phase 1
-
-(defn (id [a]) (x: a) -> a
+(pub defn (id [a]) (x: a) -> a
   x)
 
-(defn not (b: Bool) -> Bool
+(pub defn not (b: Bool) -> Bool
   (if b false true))
 
-(defn (list-length [a]) (xs: (List a)) -> Int
+(pub defn (list-length [a]) (xs: (List a)) -> Int
   (match xs
     (Nil) 0
     (Cons _ t) (+ 1 (list-length t))))

@@ -42,7 +42,7 @@ export class PanicError extends Error {
 }
 
 export type EvalResult =
-  | { ok: true; value: Value; exitCode?: number }
+  | { ok: true; value: Value; exitCode?: number; env: Env }
   | { ok: false; panic: { message: string; span?: Span } };
 
 function symName(ast: Ast): string {
@@ -50,9 +50,18 @@ function symName(ast: Ast): string {
   return new TextDecoder().decode(ast.name);
 }
 
-export function evalProgram(forms: Ast[], host: Host): EvalResult {
+export function evalProgram(
+  forms: Ast[],
+  host: Host,
+  opts: { importBindings?: Map<string, Value> } = {},
+): EvalResult {
   const env = emptyEnv();
   installBuiltins(env);
+  if (opts.importBindings) {
+    for (const [k, v] of opts.importBindings) {
+      envSet(env, k, v);
+    }
+  }
   try {
     for (const f of forms) {
       defineTop(f, env);
@@ -81,10 +90,10 @@ export function evalProgram(forms: Ast[], host: Host): EvalResult {
     if (main && main.tag === "fn") {
       last = applyFn(main, [], host, forms[forms.length - 1]?.span);
     }
-    return { ok: true, value: last };
+    return { ok: true, value: last, env };
   } catch (err) {
     if (err instanceof ExitSignal) {
-      return { ok: true, value: vUnit(), exitCode: err.code };
+      return { ok: true, value: vUnit(), exitCode: err.code, env };
     }
     if (err instanceof PanicError) {
       return { ok: false, panic: { message: err.message, span: err.span } };
@@ -97,11 +106,20 @@ function isTopDef(ast: Ast): boolean {
   if (ast.tag !== "list" || ast.elems.length === 0) return false;
   const h = ast.elems[0]!;
   if (h.tag !== "sym") return false;
+  if (nameEquals(h.name, "pub") && ast.elems.length >= 2) {
+    return isTopDef({
+      tag: "list",
+      kind: ast.kind,
+      elems: ast.elems.slice(1),
+      span: ast.span,
+    });
+  }
   return (
     nameEquals(h.name, "defn") ||
     nameEquals(h.name, "defrec") ||
     nameEquals(h.name, "variant") ||
-    nameEquals(h.name, "alias")
+    nameEquals(h.name, "alias") ||
+    nameEquals(h.name, "extern")
   );
 }
 
@@ -109,6 +127,23 @@ function defineTop(ast: Ast, env: Env): void {
   if (ast.tag !== "list" || ast.elems.length === 0) return;
   const hn = ast.elems[0]!;
   if (hn.tag !== "sym") return;
+  if (nameEquals(hn.name, "pub") && ast.elems.length >= 2) {
+    defineTop(
+      { tag: "list", kind: ast.kind, elems: ast.elems.slice(1), span: ast.span },
+      env,
+    );
+    return;
+  }
+  if (nameEquals(hn.name, "extern")) {
+    // Interpreter: extern names the existing host builtin (same symbol).
+    const name = symName(ast.elems[1]!);
+    const existing = envGet(env, name);
+    if (!existing) {
+      throw new PanicError(`extern unbound in interpreter: ${name}`, ast.span);
+    }
+    envSet(env, name, existing);
+    return;
+  }
   if (nameEquals(hn.name, "defn")) {
     defineDefn(ast, env);
     return;

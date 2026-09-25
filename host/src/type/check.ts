@@ -583,34 +583,178 @@ export type TypedProgram = {
   env: TypeEnv;
 };
 
-export function typecheckForms(forms: Ast[]): {
+export function typecheckForms(
+  forms: Ast[],
+  opts: {
+    /** Schemes/types from imported modules, applied after builtins. */
+    imports?: ImportBundle[];
+    /** If set, pub signatures may not mention private nominals of this module. */
+    exports?: Set<string>;
+  } = {},
+): {
   ok: boolean;
   diagnostics: Diagnostic[];
   env: TypeEnv;
+  bundle: ImportBundle;
 } {
   const env = emptyEnv();
-  // Pass 1: collect type definitions and defn signatures (bodies unchecked)
+  for (const b of opts.imports ?? []) {
+    mergeImportBundle(env, b);
+  }
   for (const f of forms) {
     collectDef(env, f);
     collectDefnScheme(env, f);
+    collectExternScheme(env, f);
   }
-  // Pass 2: typecheck defn bodies and expressions (sequential let at top level)
   const topLocal = new Map<string, Type>();
   const topSubst: Subst = new Map();
   for (const f of forms) {
     typecheckTop(env, f, topLocal, topSubst);
   }
+  if (opts.exports) {
+    checkPubPrivateTypes(env, forms, opts.exports);
+  }
   return {
     ok: env.diagnostics.length === 0,
     diagnostics: env.diagnostics,
     env,
+    bundle: bundleExports(env, opts.exports ?? new Set()),
   };
+}
+
+export type ImportBundle = {
+  values: Map<string, Scheme>;
+  types: Map<string, TypeDef>;
+  ctors: Map<string, { typeName: string; payloads: Type[]; params: string[] }>;
+  aliases: Map<string, Type>;
+};
+
+function mergeImportBundle(env: TypeEnv, b: ImportBundle): void {
+  for (const [k, v] of b.values) env.values.set(k, v);
+  for (const [k, v] of b.types) env.types.set(k, v);
+  for (const [k, v] of b.ctors) env.ctors.set(k, v);
+  for (const [k, v] of b.aliases) {
+    env.aliases.set(k, v);
+    env.displayAlias.set(k, k);
+  }
+}
+
+function bundleExports(env: TypeEnv, exports: Set<string>): ImportBundle {
+  const values = new Map<string, Scheme>();
+  const types = new Map<string, TypeDef>();
+  const ctors = new Map<string, { typeName: string; payloads: Type[]; params: string[] }>();
+  const aliases = new Map<string, Type>();
+  for (const name of exports) {
+    const s = env.values.get(name);
+    if (s) values.set(name, s);
+    const t = env.types.get(name);
+    if (t) types.set(name, t);
+    const c = env.ctors.get(name);
+    if (c) ctors.set(name, c);
+    const a = env.aliases.get(name);
+    if (a) aliases.set(name, a);
+  }
+  return { values, types, ctors, aliases };
+}
+
+const BUILTIN_NOMINALS = new Set([
+  "Maybe",
+  "Result",
+  "List",
+  "Map",
+  "IoError",
+  "StringBuffer",
+  "Ref",
+  "Fn",
+]);
+
+function checkPubPrivateTypes(env: TypeEnv, forms: Ast[], exports: Set<string>): void {
+  for (const f of forms) {
+    if (f.tag !== "list" || f.elems.length === 0) continue;
+    const hn = symStr(f.elems[0]!);
+    if (hn !== "defn" && hn !== "extern") continue;
+    const names = hn === "defn"
+      ? (() => {
+          const p = parseDefn(env, f, false);
+          return p ? [p.name] : [];
+        })()
+      : (() => {
+          const n = symStr(f.elems[1]!);
+          return n ? [n] : [];
+        })();
+    if (!names.some((n) => exports.has(n))) continue;
+    const scheme = env.values.get(names[0]!);
+    if (!scheme) continue;
+    const leaked = nominalNamesInType(scheme.type).filter(
+      (n) =>
+        env.types.has(n) &&
+        !exports.has(n) &&
+        !BUILTIN_NOMINALS.has(n),
+    );
+    if (leaked.length > 0) {
+      err(
+        env,
+        "E_PUB_PRIVATE_TYPE",
+        `pub signature mentions private type ${leaked[0]}`,
+        f.span,
+      );
+    }
+  }
+}
+
+function nominalNamesInType(t: Type): string[] {
+  switch (t.tag) {
+    case "nominal":
+      return [t.name, ...t.args.flatMap(nominalNamesInType)];
+    case "fn":
+      return [...t.params.flatMap(nominalNamesInType), ...nominalNamesInType(t.ret)];
+    case "list":
+    case "maybe":
+    case "ref":
+      return nominalNamesInType(t.elem);
+    case "map":
+      return [...nominalNamesInType(t.key), ...nominalNamesInType(t.val)];
+    case "result":
+      return [...nominalNamesInType(t.ok), ...nominalNamesInType(t.err)];
+    case "arr":
+      return nominalNamesInType(t.elem);
+    default:
+      return [];
+  }
+}
+
+function collectExternScheme(env: TypeEnv, ast: Ast): void {
+  if (ast.tag !== "list" || ast.elems.length === 0) return;
+  if (symStr(ast.elems[0]!) !== "extern") return;
+  // Reuse defn header parsing by synthesizing a defn-shaped list without body
+  const fake: Ast & { tag: "list" } = {
+    tag: "list",
+    kind: ast.kind,
+    elems: [{ tag: "sym", name: new TextEncoder().encode("defn"), span: ast.span }, ...ast.elems.slice(1)],
+    span: ast.span,
+  };
+  const parsed = parseDefn(env, fake, true);
+  if (!parsed) return;
+  env.values.set(parsed.name, {
+    params: parsed.typeParams,
+    type: tFn(parsed.paramTypes, parsed.retType),
+  });
 }
 
 function collectDef(env: TypeEnv, ast: Ast): void {
   if (ast.tag !== "list" || ast.kind !== "paren" || ast.elems.length === 0) return;
   const head = ast.elems[0]!;
   const hn = symStr(head);
+  if (hn === "pub" && ast.elems.length >= 2) {
+    const inner: Ast = {
+      tag: "list",
+      kind: ast.kind,
+      elems: ast.elems.slice(1),
+      span: ast.span,
+    };
+    collectDef(env, inner);
+    return;
+  }
   if (hn === "alias" && ast.elems.length >= 3) {
     const name = symStr(ast.elems[1]!);
     if (!name) return;
@@ -709,7 +853,16 @@ function typecheckTop(
     return;
   }
   const hn = symStr(ast.elems[0]!);
-  if (hn === "alias" || hn === "defrec" || hn === "variant") return;
+  if (hn === "pub" && ast.elems.length >= 2) {
+    typecheckTop(
+      env,
+      { tag: "list", kind: ast.kind, elems: ast.elems.slice(1), span: ast.span },
+      topLocal,
+      topSubst,
+    );
+    return;
+  }
+  if (hn === "alias" || hn === "defrec" || hn === "variant" || hn === "extern") return;
   if (hn === "defn") {
     typecheckDefn(env, ast);
     return;
@@ -750,6 +903,15 @@ function typecheckDefn(env: TypeEnv, ast: Ast & { tag: "list" }): void {
 /** Register a defn's scheme without checking its body (pass 1). */
 function collectDefnScheme(env: TypeEnv, ast: Ast): void {
   if (ast.tag !== "list" || ast.kind !== "paren" || ast.elems.length === 0) return;
+  if (symStr(ast.elems[0]!) === "pub" && ast.elems.length >= 2) {
+    collectDefnScheme(env, {
+      tag: "list",
+      kind: ast.kind,
+      elems: ast.elems.slice(1),
+      span: ast.span,
+    });
+    return;
+  }
   if (symStr(ast.elems[0]!) !== "defn") return;
   const parsed = parseDefn(env, ast, false);
   if (!parsed) return;

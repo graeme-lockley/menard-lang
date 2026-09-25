@@ -17,4 +17,4 @@ export {
   typeShow,
 } from "./types.ts";
 
-export { emptyEnv, typecheckForms, parseTypeExpr, type TypeEnv } from "./check.ts";
+export { emptyEnv, typecheckForms, parseTypeExpr, type TypeEnv, type ImportBundle } from "./check.ts";

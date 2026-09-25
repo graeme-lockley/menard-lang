@@ -6,11 +6,12 @@ import {
 import { formatDiagnostics } from "../diagnostic/format.ts";
 import { readAll, checkCasingAll } from "../reader/index.ts";
 import { desugarAll } from "../desugar/index.ts";
-import { typecheckForms } from "../type/index.ts";
+import { typecheckForms, type ImportBundle } from "../type/check.ts";
 import { evalProgram, type EvalResult } from "../interp/eval.ts";
-import { showValue, type Value } from "../interp/index.ts";
+import { showValue, type Value, envGet } from "../interp/index.ts";
 import { createHost, type Host } from "../host/index.ts";
 import type { Span } from "../reader/span.ts";
+import { loadModuleGraph } from "./modules.ts";
 
 export type PipelineOpts = {
   path?: string;
@@ -37,14 +38,21 @@ function toBytes(source: Uint8Array | string): Uint8Array {
 
 /**
  * Diagnose source: parse → casing → desugar → type.
- * Fail-fast per phase. Never throws for user programs.
+ * With `path` + `host`, loads the import graph through Host.
+ * Never throws for user programs.
  */
 export function diagnose(
   source: Uint8Array | string,
-  _opts: PipelineOpts = {},
+  opts: PipelineOpts = {},
 ): Diagnostic[] {
   const src = toBytes(source);
+  if (opts.path && opts.host) {
+    return diagnoseModules(src, opts.path, opts.host, opts.skipTypecheck);
+  }
+  return diagnoseSingle(src, opts.skipTypecheck);
+}
 
+function diagnoseSingle(src: Uint8Array, skipTypecheck?: boolean): Diagnostic[] {
   const parsed = readAll(src);
   if (!parsed.ok) {
     return [parseErrorToDiagnostic(parsed.error, codeForParse(parsed.error.message))];
@@ -60,10 +68,39 @@ export function diagnose(
     return desugared.diagnostics;
   }
 
-  if (_opts.skipTypecheck) return [];
+  if (skipTypecheck) return [];
 
   const typed = typecheckForms(desugared.forms);
   return typed.diagnostics;
+}
+
+function diagnoseModules(
+  src: Uint8Array,
+  path: string,
+  host: Host,
+  skipTypecheck?: boolean,
+): Diagnostic[] {
+  const loaded = loadModuleGraph(path, src, host);
+  if (!loaded.ok) return loaded.diagnostics;
+  if (skipTypecheck) return [];
+
+  const bundles = new Map<string, ImportBundle>();
+  const allDiags: Diagnostic[] = [];
+  for (const p of loaded.graph.order) {
+    const mod = loaded.graph.modules.get(p)!;
+    const imports: ImportBundle[] = [];
+    for (const imp of mod.imports) {
+      const b = bundles.get(imp);
+      if (b) imports.push(b);
+    }
+    const typed = typecheckForms(mod.forms, {
+      imports,
+      exports: mod.exports,
+    });
+    allDiags.push(...typed.diagnostics);
+    bundles.set(p, typed.bundle);
+  }
+  return allDiags;
 }
 
 function codeForParse(message: string): string {
@@ -86,6 +123,15 @@ export function run(
     return { ok: false, kind: "diagnostics", diagnostics: diags };
   }
 
+  const host = opts.host ?? createHost();
+
+  if (opts.path) {
+    return runModules(src, opts.path, host);
+  }
+  return runSingle(src, host);
+}
+
+function runSingle(src: Uint8Array, host: Host): RunResult {
   const parsed = readAll(src);
   if (!parsed.ok) {
     return {
@@ -99,7 +145,6 @@ export function run(
     return { ok: false, kind: "diagnostics", diagnostics: desugared.diagnostics };
   }
 
-  const host = opts.host ?? createHost();
   const result: EvalResult = evalProgram(desugared.forms, host);
   if (!result.ok) {
     return {
@@ -110,6 +155,48 @@ export function run(
     };
   }
   return { ok: true, value: result.value, exitCode: result.exitCode };
+}
+
+function runModules(src: Uint8Array, path: string, host: Host): RunResult {
+  const loaded = loadModuleGraph(path, src, host);
+  if (!loaded.ok) {
+    return { ok: false, kind: "diagnostics", diagnostics: loaded.diagnostics };
+  }
+
+  const exportVals = new Map<string, Map<string, Value>>();
+  let last: EvalResult | null = null;
+
+  for (const p of loaded.graph.order) {
+    const mod = loaded.graph.modules.get(p)!;
+    const importBindings = new Map<string, Value>();
+    for (const imp of mod.imports) {
+      const ex = exportVals.get(imp);
+      if (ex) {
+        for (const [k, v] of ex) importBindings.set(k, v);
+      }
+    }
+    const result = evalProgram(mod.forms, host, { importBindings });
+    if (!result.ok) {
+      return {
+        ok: false,
+        kind: "panic",
+        message: result.panic.message,
+        span: result.panic.span,
+      };
+    }
+    const exported = new Map<string, Value>();
+    for (const name of mod.exports) {
+      const v = envGet(result.env, name);
+      if (v) exported.set(name, v);
+    }
+    exportVals.set(p, exported);
+    last = result;
+  }
+
+  if (!last || !last.ok) {
+    return { ok: true, value: { tag: "unit" } };
+  }
+  return { ok: true, value: last.value, exitCode: last.exitCode };
 }
 
 export function formatRunErrors(

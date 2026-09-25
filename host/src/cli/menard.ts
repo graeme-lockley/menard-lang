@@ -37,9 +37,10 @@ withInternalGuard(
     }
 
     const path = file;
+    const host = createLiveHost({ realFs: true, argv });
 
     if (cmd === "check") {
-      const diags = diagnose(source, { path });
+      const diags = diagnose(source, { path, host });
       if (diags.length === 0) {
         process.exit(0);
       }
@@ -47,8 +48,6 @@ withInternalGuard(
       process.exit(1);
     }
 
-    // Real filesystem for stage0; argv after `--`
-    const host = createLiveHost({ realFs: true, argv });
     const result = run(source, { path, host });
     if (result.ok) {
       if (showResult && result.exitCode === undefined && result.value.tag !== "unit") {
