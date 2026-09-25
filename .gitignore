@@ -1,0 +1,9 @@
+# Dependencies
+host/node_modules/
+
+# OS
+.DS_Store
+
+# Editor
+*.swp
+.idea/

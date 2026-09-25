@@ -1,0 +1,35 @@
+; Spec examples — Phase 0 corpus (syntax only)
+
+(defrec (Pair [a b]) (fst: a) (snd: b))
+
+(variant (Tree [a])
+  (Leaf a)
+  (Node (Tree a) (Tree a))
+  (Empty))
+
+(defrec (Env [v]) (parent: (Maybe (Env v))) (bindings: (Map Str v)))
+
+(alias Ints (List Int))
+(alias EnvMap (Map Str Binding))
+
+(defn sign (n: Int) -> Str
+  (if (< n 0) "negative"
+    (if (= n 0) "zero" "positive")))
+
+(defn sum-to (n: Int) -> Int
+  (loop ((i 0) (acc 0))
+    (if (> i n)
+      acc
+      (recur (+ i 1) (+ acc i)))))
+
+(defn (tree-size [a]) (t: (Tree a)) -> Int
+  (match t
+    (Empty)       0
+    (Leaf _)      1
+    (Node l r)    (+ 1 (+ (tree-size l) (tree-size r)))))
+
+(defn count-down (n: Int) -> Unit
+  (let i (ref n))
+  (while (> (deref i) 0)
+    (print (deref i))
+    (set! i (- (deref i) 1))))

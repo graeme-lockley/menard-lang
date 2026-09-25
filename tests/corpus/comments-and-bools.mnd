@@ -1,0 +1,11 @@
+; Comments, bools, and nested lists
+
+(defn flag (b: Bool) -> Bool
+  ; identity
+  b)
+
+(defn pick (c: Bool) -> Int
+  (if c 1 0))
+
+(defn both (a: Bool) (b: Bool) -> Bool
+  (and a b))
