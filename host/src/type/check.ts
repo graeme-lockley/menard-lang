@@ -247,6 +247,96 @@ function installBuiltins(env: TypeEnv): void {
   env.values.set("read-file", { params: [], type: tFn([S], tResult(S, ioType)) });
   env.values.set("write-file", { params: [], type: tFn([S, S], tResult(U, ioType)) });
 
+  // Tier 1½ — process spawning (§2.15)
+  const spawnSpan = { start: 0, end: 0 };
+  const spawnStatusCtors: { name: string; payloads: Type[] }[] = [
+    { name: "Exited", payloads: [I] },
+    { name: "Signalled", payloads: [I] },
+  ];
+  env.types.set("SpawnStatus", {
+    kind: "variant",
+    name: "SpawnStatus",
+    params: [],
+    ctors: spawnStatusCtors.map((c) => ({ ...c, span: spawnSpan })),
+    span: spawnSpan,
+  });
+  const spawnStatusType: Type = {
+    tag: "nominal",
+    name: "SpawnStatus",
+    args: [],
+    kind: "variant",
+  };
+  for (const c of spawnStatusCtors) {
+    env.ctors.set(c.name, { typeName: "SpawnStatus", payloads: c.payloads, params: [] });
+    env.values.set(c.name, { params: [], type: tFn(c.payloads, spawnStatusType) });
+  }
+
+  // Shared nullary NotFound/Permission stay registered as IoError (same payloads).
+  // Unique SpawnError ctors are registered here; type lists all six for exhaustiveness.
+  const spawnErrCtors: { name: string; payloads: Type[]; register: boolean }[] = [
+    { name: "NotFound", payloads: [], register: false },
+    { name: "NotExecutable", payloads: [], register: true },
+    { name: "Permission", payloads: [], register: false },
+    { name: "InvalidArgument", payloads: [], register: true },
+    { name: "TooManyArguments", payloads: [], register: true },
+    { name: "Unsupported", payloads: [], register: true },
+  ];
+  env.types.set("SpawnError", {
+    kind: "variant",
+    name: "SpawnError",
+    params: [],
+    ctors: spawnErrCtors.map((c) => ({ name: c.name, payloads: c.payloads, span: spawnSpan })),
+    span: spawnSpan,
+  });
+  const spawnErrType: Type = {
+    tag: "nominal",
+    name: "SpawnError",
+    args: [],
+    kind: "variant",
+  };
+  for (const c of spawnErrCtors) {
+    if (!c.register) continue;
+    env.ctors.set(c.name, { typeName: "SpawnError", payloads: c.payloads, params: [] });
+    env.values.set(c.name, { params: [], type: tFn(c.payloads, spawnErrType) });
+  }
+
+  const spawnOutFields: RecordField[] = [
+    { name: "status", type: spawnStatusType, span: spawnSpan },
+    { name: "stdout", type: S, span: spawnSpan },
+    { name: "stderr", type: S, span: spawnSpan },
+  ];
+  env.types.set("SpawnOutput", {
+    kind: "record",
+    name: "SpawnOutput",
+    params: [],
+    fields: spawnOutFields,
+    span: spawnSpan,
+  });
+  env.ctors.set("SpawnOutput", {
+    typeName: "SpawnOutput",
+    payloads: spawnOutFields.map((f) => f.type),
+    params: [],
+  });
+  const spawnOutType: Type = {
+    tag: "nominal",
+    name: "SpawnOutput",
+    args: [],
+    kind: "record",
+  };
+  env.values.set("SpawnOutput", {
+    params: [],
+    type: tFn(spawnOutFields.map((f) => f.type), spawnOutType),
+  });
+
+  env.values.set("spawn", {
+    params: [],
+    type: tFn([tList(S)], tResult(spawnStatusType, spawnErrType)),
+  });
+  env.values.set("spawn-capture", {
+    params: [],
+    type: tFn([tList(S), S], tResult(spawnOutType, spawnErrType)),
+  });
+
   void F;
 }
 
@@ -663,6 +753,9 @@ const BUILTIN_NOMINALS = new Set([
   "List",
   "Map",
   "IoError",
+  "SpawnStatus",
+  "SpawnError",
+  "SpawnOutput",
   "StringBuffer",
   "Ref",
   "Fn",

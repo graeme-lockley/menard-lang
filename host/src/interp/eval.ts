@@ -28,7 +28,7 @@ import {
   sbTakeStr,
 } from "../builtins/collections.ts";
 import type { Host } from "../host/host.ts";
-import { ExitSignal, type IoError } from "../host/host.ts";
+import { ExitSignal, type IoError, type SpawnError, type SpawnStatus } from "../host/host.ts";
 import { showValue, equalValue, compareValue, dumpValue } from "./derive.ts";
 import { decodeSymBytes, specialFormOf, Sf } from "./resolve.ts";
 
@@ -843,8 +843,11 @@ function installBuiltins(env: Env): void {
     "sb-new", "sb-append!", "sb-append-byte!", "sb-length", "sb-clear!", "sb-to-str", "sb-take-str!",
     "None", "Some", "Ok", "Err", "Nil", "Cons",
     "exit", "arg-count", "arg", "write", "read-file", "write-file",
+    "spawn", "spawn-capture",
     "NotFound", "Permission", "Exists", "IsADirectory", "NotADirectory",
     "InvalidPath", "TooLarge", "Other", "Unsupported",
+    "NotExecutable", "InvalidArgument", "TooManyArguments",
+    "Exited", "Signalled", "SpawnOutput",
   ];
   for (const n of names) {
     envSet(env, n, { tag: "builtin", name: n });
@@ -869,6 +872,34 @@ function resultOk(v: Value): Value {
 
 function resultErr(err: IoError): Value {
   return vVariant("Err", [ioErrorToValue(err)]);
+}
+
+function spawnErrorToValue(err: SpawnError): Value {
+  return vVariant(err.tag);
+}
+
+function spawnResultErr(err: SpawnError): Value {
+  return vVariant("Err", [spawnErrorToValue(err)]);
+}
+
+function spawnStatusToValue(status: SpawnStatus): Value {
+  if (status.tag === "Exited") return vVariant("Exited", [vInt(BigInt(status.code))]);
+  return vVariant("Signalled", [vInt(BigInt(status.signal))]);
+}
+
+/** Walk a Cons/Nil `(List Str)` into argv bytes. Returns null if malformed. */
+function listStrToArgv(v: Value): Uint8Array[] | null {
+  const out: Uint8Array[] = [];
+  let cur: Value = v;
+  while (true) {
+    if (cur.tag !== "variant") return null;
+    if (cur.ctor === "Nil") return out;
+    if (cur.ctor !== "Cons" || cur.payloads.length !== 2) return null;
+    const head = cur.payloads[0]!;
+    if (head.tag !== "str") return null;
+    out.push(head.bytes);
+    cur = cur.payloads[1]!;
+  }
 }
 
 function applyBuiltin(
@@ -1056,6 +1087,26 @@ function applyBuiltin(
       const w = host.writeFile(path, data);
       return w.ok ? resultOk(vUnit()) : resultErr(w.error);
     }
+    case "spawn": {
+      const argv = listStrToArgv(args[0]!);
+      if (argv === null) throw new PanicError("spawn: expected (List Str)", span);
+      const r = host.spawn(argv);
+      return r.ok
+        ? resultOk(spawnStatusToValue(r.status))
+        : spawnResultErr(r.error);
+    }
+    case "spawn-capture": {
+      const argv = listStrToArgv(args[0]!);
+      if (argv === null) throw new PanicError("spawn-capture: expected (List Str)", span);
+      const stdin = (args[1] as { bytes: Uint8Array }).bytes;
+      const r = host.spawnCapture(argv, stdin);
+      if (!r.ok) return spawnResultErr(r.error);
+      return resultOk({
+        tag: "record",
+        name: "SpawnOutput",
+        fields: [spawnStatusToValue(r.status), vStr(r.stdout), vStr(r.stderr)],
+      });
+    }
     case "NotFound":
     case "Permission":
     case "Exists":
@@ -1064,7 +1115,20 @@ function applyBuiltin(
     case "InvalidPath":
     case "TooLarge":
     case "Unsupported":
+    case "NotExecutable":
+    case "InvalidArgument":
+    case "TooManyArguments":
       return vVariant(name);
+    case "Exited":
+      return vVariant("Exited", [args[0]!]);
+    case "Signalled":
+      return vVariant("Signalled", [args[0]!]);
+    case "SpawnOutput":
+      return {
+        tag: "record",
+        name: "SpawnOutput",
+        fields: [args[0]!, args[1]!, args[2]!],
+      };
     case "Other":
       return vVariant("Other", [args[0]!]);
     default:

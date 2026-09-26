@@ -1,4 +1,6 @@
 import * as nodeFs from "node:fs";
+import { spawnSync } from "node:child_process";
+import * as os from "node:os";
 
 export type IoError =
   | { tag: "NotFound" }
@@ -33,7 +35,148 @@ export type Host = {
   exit(code: number): never;
   /** When false, spawn returns Unsupported */
   spawnEnabled: boolean;
+  /**
+   * Spawn a child with an argv vector (no shell). argv[0] is a path — bare
+   * names mean `./name`, never a PATH search (§2.15).
+   */
+  spawn(argv: Uint8Array[]): SpawnOutcome;
+  /** Like spawn, but pipes stdin and captures stdout/stderr. */
+  spawnCapture(argv: Uint8Array[], stdin: Uint8Array): SpawnCaptureOutcome;
 };
+
+export type SpawnStatus =
+  | { tag: "Exited"; code: number }
+  | { tag: "Signalled"; signal: number };
+
+export type SpawnError =
+  | { tag: "NotFound" }
+  | { tag: "NotExecutable" }
+  | { tag: "Permission" }
+  | { tag: "InvalidArgument" }
+  | { tag: "TooManyArguments" }
+  | { tag: "Unsupported" };
+
+export type SpawnOutcome =
+  | { ok: true; status: SpawnStatus }
+  | { ok: false; error: SpawnError };
+
+export type SpawnCaptureOutcome =
+  | { ok: true; status: SpawnStatus; stdout: Uint8Array; stderr: Uint8Array }
+  | { ok: false; error: SpawnError };
+
+/** Map Node/Bun spawn failure codes into SpawnError. */
+export function mapSpawnErrno(code: string | undefined): SpawnError {
+  switch (code) {
+    case "ENOENT":
+      return { tag: "NotFound" };
+    case "EACCES":
+    case "EPERM":
+      return { tag: "Permission" };
+    case "ENOEXEC":
+      return { tag: "NotExecutable" };
+    case "E2BIG":
+      return { tag: "TooManyArguments" };
+    default:
+      return { tag: "NotFound" };
+  }
+}
+
+/** Validate argv: non-empty, no NULs (§2.15 rules 5). */
+export function validateSpawnArgv(argv: Uint8Array[]): SpawnError | null {
+  if (argv.length === 0) return { tag: "InvalidArgument" };
+  for (const a of argv) {
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] === 0) return { tag: "InvalidArgument" };
+    }
+  }
+  return null;
+}
+
+/** Bare names mean ./name — never PATH (§2.15 rule 2). */
+export function resolveSpawnCmd(cmd: string): string {
+  if (cmd.includes("/") || cmd.includes("\\")) return cmd;
+  return "./" + cmd;
+}
+
+function spawnDisabled(): SpawnOutcome {
+  return { ok: false, error: { tag: "Unsupported" } };
+}
+
+function spawnCaptureDisabled(): SpawnCaptureOutcome {
+  return { ok: false, error: { tag: "Unsupported" } };
+}
+
+function decodeArgv(argv: Uint8Array[]): string[] {
+  const dec = new TextDecoder();
+  return argv.map((a) => dec.decode(a));
+}
+
+function signalNumber(name: string | null | undefined): number {
+  if (!name) return 0;
+  const n = (os.constants.signals as Record<string, number>)[name];
+  return typeof n === "number" ? n : 0;
+}
+
+function runSpawn(
+  argv: Uint8Array[],
+  opts: { stdin?: Uint8Array; capture: boolean },
+): SpawnOutcome | SpawnCaptureOutcome {
+  const bad = validateSpawnArgv(argv);
+  if (bad) return { ok: false, error: bad };
+  const strings = decodeArgv(argv);
+  const cmd = resolveSpawnCmd(strings[0]!);
+  const args = strings.slice(1);
+  try {
+    const result = spawnSync(cmd, args, {
+      shell: false,
+      env: process.env,
+      cwd: process.cwd(),
+      stdio: opts.capture ? ["pipe", "pipe", "pipe"] : "inherit",
+      input: opts.capture ? opts.stdin : undefined,
+      encoding: "buffer",
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    if (result.error) {
+      return {
+        ok: false,
+        error: mapSpawnErrno((result.error as NodeJS.ErrnoException).code),
+      };
+    }
+    let status: SpawnStatus;
+    if (result.signal) {
+      status = { tag: "Signalled", signal: signalNumber(result.signal) };
+    } else {
+      status = { tag: "Exited", code: (result.status ?? 0) & 0xff };
+    }
+    if (opts.capture) {
+      return {
+        ok: true,
+        status,
+        stdout: new Uint8Array((result.stdout as Buffer | null) ?? []),
+        stderr: new Uint8Array((result.stderr as Buffer | null) ?? []),
+      };
+    }
+    return { ok: true, status };
+  } catch (e) {
+    return {
+      ok: false,
+      error: mapSpawnErrno((e as NodeJS.ErrnoException).code),
+    };
+  }
+}
+
+function spawnOps(enabled: boolean): Pick<Host, "spawn" | "spawnCapture"> {
+  return {
+    spawn(argv) {
+      if (!enabled) return spawnDisabled();
+      return runSpawn(argv, { capture: false }) as SpawnOutcome;
+    },
+    spawnCapture(argv, stdin) {
+      if (!enabled) return spawnCaptureDisabled();
+      return runSpawn(argv, { stdin, capture: true }) as SpawnCaptureOutcome;
+    },
+  };
+}
 
 /** Map Node/Bun `error.code` strings into the closed Menard IoError taxonomy. */
 export function mapNodeErrno(code: string | undefined): IoError {
@@ -196,12 +339,13 @@ export function createHost(
   const writeStderr = (bytes: Uint8Array) => {
     stderr.push(bytes);
   };
+  const spawnEnabled = opts.spawnEnabled ?? false;
   return {
     fs,
     stdout,
     stderr,
     argv: opts.argv ?? [],
-    spawnEnabled: opts.spawnEnabled ?? false,
+    spawnEnabled,
     writeStdout,
     writeStderr,
     writeFd(fd, bytes) {
@@ -211,6 +355,7 @@ export function createHost(
       throw new ExitSignal(code & 0xff);
     },
     ...fsOps(fs),
+    ...spawnOps(spawnEnabled),
   };
 }
 
@@ -250,10 +395,11 @@ export function createLiveHost(
   }
 
   const fs = opts.fs ?? createVirtualFs();
+  const spawnEnabled = opts.spawnEnabled ?? false;
   return {
     fs,
     argv: opts.argv ?? [],
-    spawnEnabled: opts.spawnEnabled ?? false,
+    spawnEnabled,
     writeStdout,
     writeStderr,
     writeFd(fd, bytes) {
@@ -263,6 +409,7 @@ export function createLiveHost(
       throw new ExitSignal(code & 0xff);
     },
     ...fsOps(fs),
+    ...spawnOps(spawnEnabled),
   };
 }
 
@@ -286,9 +433,10 @@ export function createRealHost(
     err.write(bytes);
   };
 
+  const spawnEnabled = opts.spawnEnabled ?? false;
   return {
     argv: opts.argv ?? [],
-    spawnEnabled: opts.spawnEnabled ?? false,
+    spawnEnabled,
     writeStdout,
     writeStderr,
     writeFd(fd, bytes) {
@@ -333,5 +481,6 @@ export function createRealHost(
     exit(code) {
       throw new ExitSignal(code & 0xff);
     },
+    ...spawnOps(spawnEnabled),
   };
 }
