@@ -1,0 +1,183 @@
+#!/usr/bin/env bun
+/**
+ * Menard driver — build / run / inter a `.mnd` program.
+ *
+ *   ./mn build <file.mnd> [-o <binary>]
+ *   ./mn run   <file.mnd> [-o <binary>] [-- <args…>]
+ *   ./mn inter <file.mnd> [-- <args…>] [--show-result]
+ *
+ * `build`  — stage0 emit (Menard compiler on the interpreter) → clang link → binary
+ * `run`    — build, then execute the binary
+ * `inter`  — run on the reference interpreter (no native binary)
+ *
+ * Exit codes mirror the underlying tools: 0 ok, non-zero from compile/link/program.
+ */
+import { mkdirSync, existsSync } from "node:fs";
+import { dirname, join, basename, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+
+const ROOT = import.meta.dir;
+const HOST_CLI = join(ROOT, "host/src/cli/menard.ts");
+const COMPILER = join(ROOT, "src/main.mnd");
+const RUNTIME_DIR = join(ROOT, "runtime");
+const RUNTIME_SRCS = [
+  join(RUNTIME_DIR, "src/alloc.c"),
+  join(RUNTIME_DIR, "src/panic.c"),
+  join(RUNTIME_DIR, "src/print.c"),
+  join(RUNTIME_DIR, "src/shadow.c"),
+];
+const BUILD_DIR = join(ROOT, "build");
+const CFLAGS = ["-std=c11", "-Wall", "-Wextra", "-O1"];
+
+function usage(): never {
+  console.error(`usage:
+  mn build <file.mnd> [-o <binary>]
+  mn run   <file.mnd> [-o <binary>] [-- <args…>]
+  mn inter <file.mnd> [--show-result] [-- <args…>]`);
+  process.exit(2);
+}
+
+function whichClang(): string {
+  const fromEnv = process.env.CC ?? process.env.MENARD_CC;
+  if (fromEnv && fromEnv.length > 0) return fromEnv;
+  const found = Bun.which("clang");
+  if (!found) {
+    console.error("error: clang not found on PATH (set CC or MENARD_CC)");
+    process.exit(2);
+  }
+  return found;
+}
+
+function stem(file: string): string {
+  const base = basename(file);
+  return base.endsWith(".mnd") ? base.slice(0, -4) : base;
+}
+
+function defaultBinary(file: string): string {
+  return join(BUILD_DIR, stem(file));
+}
+
+function defaultBitcode(file: string): string {
+  return join(BUILD_DIR, stem(file) + ".bc");
+}
+
+function runCmd(
+  cmd: string,
+  args: string[],
+  opts: { inherit?: boolean } = {},
+): number {
+  const r = spawnSync(cmd, args, {
+    cwd: ROOT,
+    stdio: opts.inherit === false ? "pipe" : "inherit",
+    env: process.env,
+  });
+  if (r.error) {
+    console.error(`error: failed to run ${cmd}: ${r.error.message}`);
+    process.exit(2);
+  }
+  return r.status ?? 2;
+}
+
+/** Stage0 emit via the Menard compiler on the interpreter. */
+function emitBitcode(src: string, bcOut: string): void {
+  mkdirSync(dirname(bcOut), { recursive: true });
+  const code = runCmd(process.execPath, [
+    "run",
+    HOST_CLI,
+    "run",
+    COMPILER,
+    "--",
+    "emit",
+    src,
+    bcOut,
+  ]);
+  if (code !== 0) process.exit(code);
+}
+
+/** Link .bc + leaking runtime → native binary. */
+function linkBinary(bc: string, bin: string): void {
+  mkdirSync(dirname(bin), { recursive: true });
+  const clang = whichClang();
+  const code = runCmd(clang, [
+    ...CFLAGS,
+    `-I${join(RUNTIME_DIR, "include")}`,
+    bc,
+    ...RUNTIME_SRCS,
+    "-o",
+    bin,
+  ]);
+  if (code !== 0) process.exit(code);
+}
+
+function build(src: string, bin: string): void {
+  const absSrc = resolve(src);
+  if (!existsSync(absSrc)) {
+    console.error(`error: cannot read ${src}`);
+    process.exit(2);
+  }
+  const bc = defaultBitcode(src);
+  emitBitcode(absSrc, bc);
+  linkBinary(bc, bin);
+}
+
+function parseArgs(argv: string[]): {
+  cmd: string;
+  file: string | undefined;
+  out: string | undefined;
+  showResult: boolean;
+  progArgs: string[];
+} {
+  if (argv.length === 0) usage();
+  const cmd = argv[0]!;
+  const rest = argv.slice(1);
+  const dash = rest.indexOf("--");
+  const before = dash >= 0 ? rest.slice(0, dash) : rest;
+  const progArgs = dash >= 0 ? rest.slice(dash + 1) : [];
+
+  let out: string | undefined;
+  let showResult = false;
+  const positional: string[] = [];
+  for (let i = 0; i < before.length; i++) {
+    const a = before[i]!;
+    if (a === "-o") {
+      out = before[++i];
+      if (!out) usage();
+    } else if (a === "--show-result") {
+      showResult = true;
+    } else if (a.startsWith("-")) {
+      console.error(`error: unknown flag ${a}`);
+      usage();
+    } else {
+      positional.push(a);
+    }
+  }
+  return { cmd, file: positional[0], out, showResult, progArgs };
+}
+
+const { cmd, file, out, showResult, progArgs } = parseArgs(process.argv.slice(2));
+if (!file || (cmd !== "build" && cmd !== "run" && cmd !== "inter")) usage();
+
+const absFile = resolve(file);
+if (!existsSync(absFile)) {
+  console.error(`error: cannot read ${file}`);
+  process.exit(2);
+}
+
+if (cmd === "inter") {
+  const args = ["run", HOST_CLI, "run"];
+  if (showResult) args.push("--show-result");
+  args.push(absFile);
+  if (progArgs.length > 0) args.push("--", ...progArgs);
+  process.exit(runCmd(process.execPath, args));
+}
+
+const bin = out ? resolve(out) : defaultBinary(file);
+build(absFile, bin);
+
+if (cmd === "build") {
+  console.error(`wrote ${bin}`);
+  process.exit(0);
+}
+
+// run
+process.exit(runCmd(bin, progArgs));

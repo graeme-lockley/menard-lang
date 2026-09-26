@@ -137,6 +137,21 @@ make typecheck   # tsc --noEmit
 make ci          # typecheck + test (mirrors GitHub Actions)
 ```
 
+### `mn` — build / run / interpret
+
+```bash
+./mn build path/to/file.mnd          # emit bitcode, link → build/<name>
+./mn build path/to/file.mnd -o out   # same, write binary to out
+./mn run   path/to/file.mnd          # build, then execute
+./mn run   path/to/file.mnd -- a b   # build, run with argv a b
+./mn inter path/to/file.mnd          # reference interpreter only
+./mn inter path/to/file.mnd --show-result
+```
+
+`build` / `run` use stage0 (`src/main.mnd` on the host) then `clang` + the
+leaking runtime. `inter` is the Phase 1 host CLI. Override the linker with
+`CC` or `MENARD_CC`.
+
 ### Check / run a program (Phase 1 host CLI)
 
 ```bash
