@@ -1,0 +1,10 @@
+; Slice 2B/2H oracle fixture: `main` calls another top-level pure-`Int`
+; `defn` (`answer`). `src/emit/lower.mnd` lowers this to a real `call
+; i64 @answer(...)` — `answer` itself becomes a real `i64`-params-and-
+; return `LFunc`, with its own `alloca`/`store`/`load` for the
+; parameter — not a compile-time inlined `ret i32 42`. See
+; `tests/phase2/oracle.test.ts`.
+
+(defn answer (n: Int) -> Int (+ n 2))
+
+(defn main -> Int (answer 40))

@@ -1,0 +1,433 @@
+; Derive planning — slice 2F.
+;
+; `derive.mnd`'s `plan-derives` still returns `forms` unchanged (real
+; per-instantiation code generation for `show`/`=`/`compare`/`dump` is a
+; later slice, spec §2.8.4). What this module adds is the first *real*
+; analysis in the derive stage: `describe-derives` walks a program's
+; forms and reports, for every type the program actually asks the
+; compiler to derive something for, which of `show`/`=`/`compare`/`dump`
+; it needs — the exact question the real derive engine will have to
+; answer to know what to generate. `src/main.mnd` prints this to stderr
+; whenever `--dump-after=derive` is given, alongside the existing raw
+; `dump` of the forms.
+;
+; ## The rule this picks (see the slice's own "pick one clear rule")
+;
+; "Every use site of `show`/`=`/`compare`/`dump`", not "every public
+; nominal type": scanning use sites is what the real derive engine will
+; do (§2.8.4's "checked at instantiation sites"), and it is the only rule
+; that can ever say "this type does *not* need `show`" — a
+; declared-types rule cannot, and would make every user type "need"
+; every derived function whether the program ever calls one on it or
+; not.
+;
+; ## How a use site's argument type is found, with no typer in hand
+;
+; This pass runs on the same bare `Ast` the rest of `src/main.mnd`'s
+; post-type pipeline passes around — `type/check.mnd`'s `typecheck-forms`
+; accepts or rejects a program but returns the same forms it was given,
+; not a type-annotated tree (see that module's own header comment and
+; `emit/lower.mnd`'s "why a separate fold-time value/environment" for the
+; same situation). So this module re-derives just enough type information
+; itself, `classify-expr-type` below, entirely syntactically: an `Int`/
+; `Float`/`Bool`/`Str` literal is exactly that type; a call to a known
+; arithmetic/comparison builtin or to a fully-saturated constructor (its
+; own declared arity, from a local scan of every top-level `variant`/
+; `defrec` plus the compiler's builtin `Maybe`/`Result`/`List`/`IoError`
+; ctors) is the type that operator/constructor produces; `if`/`let`/`do`
+; take the type of their tail. This is deliberately not a real
+; unifier — a call to a user `defn`, an unresolved bound variable, or a
+; `match` result is simply not classified (silently omitted from the
+; plan, rather than guessed at) — but it is enough to answer "does this
+; program ever `show` an `Int`", which is what the finishable slice and
+; its test ask for.
+;
+; ## What is not here yet
+;
+; TODO(later slice): actual per-instantiation code generation (a
+; synthesized `defn` per derived function per type) — this module only
+; plans, it does not emit. `plan-derives` (`derive.mnd`) stays the
+; identity on `forms` until that lands; wiring a generated `show`/`=`/
+; `compare`/`dump` `defn` into the form list without breaking
+; `type/check.mnd`'s two-pass scheme collection (mangled naming per
+; instantiation, mutual recursion between derived functions for nested
+; types, memoisation so `(Tree Int)` derives once — spec §2.8.4) is real
+; work, deferred rather than half-done here.
+
+(import "../reader/ast.mnd")
+
+; Re-export shim — see `reader/casing.mnd`'s header comment for why this
+; is needed: a `pub` signature (`describe-derives`, below) may not mention
+; a private nominal type, even one imported `pub` from elsewhere.
+(pub alias Ast Ast)
+
+; ---------------------------------------------------------------------------
+; Small Ast helpers, restated locally per `src/`'s "no prelude import"
+; rule (see `type/check.mnd`'s equivalent header note).
+
+(defn sym-str (ast: Ast) -> (Maybe Str)
+  (match ast (SymNode n _) (Some n) _ (None)))
+
+(defn is-sym (ast: Ast) (name: Str) -> Bool
+  (match (sym-str ast) (Some n) (= n name) (None) false))
+
+(defn list-length (xs: (List Ast)) -> Int
+  (match xs
+    (Nil) 0
+    (Cons _ rest) (+ 1 (list-length rest))))
+
+(defn last-of (xs: (List Ast)) -> (Maybe Ast)
+  (match xs
+    (Nil) (None)
+    (Cons x (Nil)) (Some x)
+    (Cons _ rest) (last-of rest)))
+
+(defn str-list-contains (xs: (List Str)) (x: Str) -> Bool
+  (match xs
+    (Nil) false
+    (Cons h rest) (if (= h x) true (str-list-contains rest x))))
+
+; `main` or `(f [a])` — the type-parameter list (if any) is irrelevant
+; here, only the bare declared name is.
+(defn decl-name-of (name-part: Ast) -> (Maybe Str)
+  (match name-part
+    (SymNode n _) (Some n)
+    (ParenNode (Cons n-ast _) _) (sym-str n-ast)
+    _ (None)))
+
+; `(pub defn …)`/`(pub variant …)`/`(pub defrec …)` — strip the `pub`
+; wrapper, exactly as `emit/lower.mnd`'s `unwrap-pub` does.
+(defn unwrap-pub (ast: Ast) -> Ast
+  (match ast
+    (ParenNode (Cons head rest) sp) (unwrap-pub-head head rest sp ast)
+    _ ast))
+
+(defn unwrap-pub-head (head: Ast) (rest: (List Ast)) (sp: Span) (ast: Ast) -> Ast
+  (if (is-sym head "pub") (unwrap-pub (ParenNode rest sp)) ast))
+
+; ---------------------------------------------------------------------------
+; Constructor metadata: name -> (owning type, declared arity). Builtins
+; first, then every top-level `variant`/`defrec` in `forms` (a later
+; declaration of the same name — unusual, but harmless — simply wins, the
+; same "last write wins" `map-set` behaviour `type/check.mnd`'s own
+; `ctor-set` has).
+
+(defrec CtorMeta (type-name: Str) (arity: Int))
+(defn ctor-meta-type (c: CtorMeta) -> Str (match c (CtorMeta t _) t))
+(defn ctor-meta-arity (c: CtorMeta) -> Int (match c (CtorMeta _ a) a))
+
+(defn builtin-ctor-metas -> (Map Str CtorMeta)
+  (do
+    (let m0 (map-new))
+    (let m1 (map-set m0 "None" (CtorMeta "Maybe" 0)))
+    (let m2 (map-set m1 "Some" (CtorMeta "Maybe" 1)))
+    (let m3 (map-set m2 "Ok" (CtorMeta "Result" 1)))
+    (let m4 (map-set m3 "Err" (CtorMeta "Result" 1)))
+    (let m5 (map-set m4 "Nil" (CtorMeta "List" 0)))
+    (let m6 (map-set m5 "Cons" (CtorMeta "List" 2)))
+    (let m7 (map-set m6 "NotFound" (CtorMeta "IoError" 0)))
+    (let m8 (map-set m7 "Permission" (CtorMeta "IoError" 0)))
+    (let m9 (map-set m8 "Exists" (CtorMeta "IoError" 0)))
+    (let m10 (map-set m9 "IsADirectory" (CtorMeta "IoError" 0)))
+    (let m11 (map-set m10 "NotADirectory" (CtorMeta "IoError" 0)))
+    (let m12 (map-set m11 "InvalidPath" (CtorMeta "IoError" 0)))
+    (let m13 (map-set m12 "TooLarge" (CtorMeta "IoError" 0)))
+    (map-set m13 "Other" (CtorMeta "IoError" 1))))
+
+(defn register-one-variant-ctor (type-name: Str) (c: Ast) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
+  (match c
+    (ParenNode (Cons cname-ast payload-asts) _) (register-ctor-named type-name cname-ast (list-length payload-asts) acc)
+    _ acc))
+
+(defn register-ctor-named (type-name: Str) (cname-ast: Ast) (arity: Int) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
+  (match (sym-str cname-ast)
+    (None) acc
+    (Some cname) (map-set acc cname (CtorMeta type-name arity))))
+
+(defn register-variant-ctors (type-name: Str) (ctor-asts: (List Ast)) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
+  (match ctor-asts
+    (Nil) acc
+    (Cons c rest) (register-variant-ctors type-name rest (register-one-variant-ctor type-name c acc))))
+
+(defn collect-variant-decl (rest: (List Ast)) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
+  (match rest
+    (Cons name-part ctors) (collect-variant-decl-named name-part ctors acc)
+    (Nil) acc))
+
+(defn collect-variant-decl-named (name-part: Ast) (ctors: (List Ast)) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
+  (match (decl-name-of name-part)
+    (None) acc
+    (Some type-name) (register-variant-ctors type-name ctors acc)))
+
+(defn collect-defrec-decl (rest: (List Ast)) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
+  (match rest
+    (Cons name-part fields) (collect-defrec-decl-named name-part fields acc)
+    (Nil) acc))
+
+(defn collect-defrec-decl-named (name-part: Ast) (fields: (List Ast)) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
+  (match (decl-name-of name-part)
+    (None) acc
+    (Some type-name) (map-set acc type-name (CtorMeta type-name (list-length fields)))))
+
+(defn collect-ctors-named (hn: Str) (rest: (List Ast)) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
+  (if (= hn "variant") (collect-variant-decl rest acc)
+    (if (= hn "defrec") (collect-defrec-decl rest acc)
+      acc)))
+
+(defn collect-ctors-form (ast: Ast) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
+  (collect-ctors-form-checked (unwrap-pub ast) acc))
+
+(defn collect-ctors-form-checked (ast: Ast) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
+  (match ast
+    (ParenNode (Cons head rest) _) (collect-ctors-form-head head rest acc)
+    _ acc))
+
+(defn collect-ctors-form-head (head: Ast) (rest: (List Ast)) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
+  (match (sym-str head)
+    (None) acc
+    (Some hn) (collect-ctors-named hn rest acc)))
+
+(defn collect-ctors (forms: (List Ast)) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
+  (match forms
+    (Nil) acc
+    (Cons f rest) (collect-ctors rest (collect-ctors-form f acc))))
+
+(defn all-ctor-metas (forms: (List Ast)) -> (Map Str CtorMeta)
+  (collect-ctors forms (builtin-ctor-metas)))
+
+; ---------------------------------------------------------------------------
+; `classify-expr-type`: the syntactic, no-typer type guess described in
+; the header comment above. `(None)` on any expression this cannot
+; classify — never a wrong guess, only a missing one.
+
+(defn is-int-op (name: Str) -> Bool
+  (or (= name "+") (or (= name "-") (or (= name "*") (or (= name "/") (= name "%"))))))
+
+(defn is-bool-op (name: Str) -> Bool
+  (or (= name "<") (or (= name ">") (or (= name "<=") (or (= name ">=") (= name "="))))))
+
+(defn classify-sym (name: Str) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
+  (match (map-get ctors name)
+    (None) (None)
+    (Some meta) (if (= (ctor-meta-arity meta) 0) (Some (ctor-meta-type meta)) (None))))
+
+(defn classify-ctor-call (hn: Str) (args: (List Ast)) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
+  (match (map-get ctors hn)
+    (None) (None)
+    (Some meta) (if (= (ctor-meta-arity meta) (list-length args)) (Some (ctor-meta-type meta)) (None))))
+
+(defn classify-expr-type (ast: Ast) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
+  (match ast
+    (IntNode _ _) (Some "Int")
+    (FloatNode _ _) (Some "Float")
+    (BoolNode _ _) (Some "Bool")
+    (StrNode _ _) (Some "Str")
+    (SymNode name _) (classify-sym name ctors)
+    (ParenNode elems _) (classify-paren elems ctors)
+    (BracketNode _ _) (None)))
+
+(defn classify-paren (elems: (List Ast)) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
+  (match elems
+    (Nil) (None)
+    (Cons head args) (classify-paren-head head args ctors)))
+
+(defn classify-paren-head (head: Ast) (args: (List Ast)) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
+  (match (sym-str head)
+    (None) (None)
+    (Some hn) (classify-named hn args ctors)))
+
+(defn classify-named (hn: Str) (args: (List Ast)) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
+  (if (is-int-op hn) (Some "Int")
+    (if (is-bool-op hn) (Some "Bool")
+      (if (= hn "str-concat") (Some "Str")
+        (if (= hn "char->str") (Some "Str")
+          (if (= hn "if") (classify-if args ctors)
+            (if (= hn "let") (classify-let args ctors)
+              (if (= hn "do") (classify-do args ctors)
+                (classify-ctor-call hn args ctors)))))))))
+
+(defn classify-if (args: (List Ast)) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
+  (match args
+    (Cons _ (Cons then-ast _)) (classify-expr-type then-ast ctors)
+    _ (None)))
+
+(defn classify-let (args: (List Ast)) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
+  (match args
+    (Cons _ (Cons expr-ast body)) (classify-let-body expr-ast body ctors)
+    _ (None)))
+
+(defn classify-let-body (expr-ast: Ast) (body: (List Ast)) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
+  (match body
+    (Nil) (classify-expr-type expr-ast ctors)
+    _ (classify-do body ctors)))
+
+(defn classify-do (args: (List Ast)) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
+  (match (last-of args)
+    (None) (None)
+    (Some tail) (classify-expr-type tail ctors)))
+
+; ---------------------------------------------------------------------------
+; Usage collection: walk every real-code form (skipping type/module
+; declarations, which never contain a runtime `show`/`=`/`compare`/`dump`
+; call), recording a `(type-name, op)` pair at each use site this can
+; classify. `quote`'s body is data, not code, and is left unwalked, the
+; same way `type/check.mnd`'s `infer-quote-form` treats it specially
+; rather than recursing.
+
+(defrec Usage (type-name: Str) (op: Str))
+(defn usage-type-name (u: Usage) -> Str (match u (Usage t _) t))
+(defn usage-op (u: Usage) -> Str (match u (Usage _ o) o))
+
+(defn record-usage! (usages: (Ref (List Usage))) (type-name: Str) (op: Str) -> Unit
+  (set! usages (Cons (Usage type-name op) (deref usages))))
+
+(defn is-derive-op (name: Str) -> Bool
+  (or (= name "show") (or (= name "compare") (or (= name "dump") (= name "=")))))
+
+(defn maybe-record-classified (op: Str) (a: Ast) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
+  (match (classify-expr-type a ctors)
+    (None) ()
+    (Some t) (record-usage! usages t op)))
+
+(defn maybe-record-op (hn: Str) (args: (List Ast)) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
+  (if (is-derive-op hn)
+    (maybe-record-op-args hn args ctors usages)
+    ()))
+
+(defn maybe-record-op-args (hn: Str) (args: (List Ast)) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
+  (match args
+    (Cons a _) (maybe-record-classified hn a ctors usages)
+    (Nil) ()))
+
+(defn walk-list (xs: (List Ast)) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
+  (match xs
+    (Nil) ()
+    (Cons x rest) (do (walk-expr x ctors usages) (walk-list rest ctors usages))))
+
+(defn walk-expr (ast: Ast) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
+  (match ast
+    (ParenNode elems _) (walk-paren elems ctors usages)
+    (BracketNode elems _) (walk-list elems ctors usages)
+    _ ()))
+
+(defn walk-paren (elems: (List Ast)) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
+  (match elems
+    (Nil) ()
+    (Cons head rest) (walk-paren-head head rest ctors usages)))
+
+(defn walk-paren-head (head: Ast) (rest: (List Ast)) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
+  (if (is-sym head "quote") ()
+    (walk-paren-nonquote head rest ctors usages)))
+
+(defn walk-paren-nonquote (head: Ast) (rest: (List Ast)) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
+  (do
+    (match (sym-str head) (Some hn) (maybe-record-op hn rest ctors usages) (None) ())
+    (walk-list rest ctors usages)))
+
+; Top-level dispatch: skip `alias`/`defrec`/`variant`/`extern`/`import`
+; (never contain a runtime use site), walk everything else — `defn`
+; bodies, top-level `let`s, bare top-level expressions — as ordinary code,
+; exactly like `type/check.mnd`'s `typecheck-top-named` does for typing.
+
+(defn is-decl-head (name: Str) -> Bool
+  (or (= name "alias") (or (= name "defrec") (or (= name "variant") (or (= name "extern") (= name "import"))))))
+
+(defn walk-top-form (ast: Ast) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
+  (walk-top-form-checked (unwrap-pub ast) ctors usages))
+
+(defn walk-top-form-checked (ast: Ast) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
+  (match ast
+    (ParenNode (Cons head _) _) (walk-top-form-head head ast ctors usages)
+    _ (walk-expr ast ctors usages)))
+
+(defn walk-top-form-head (head: Ast) (whole: Ast) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
+  (match (sym-str head)
+    (Some hn) (if (is-decl-head hn) () (walk-expr whole ctors usages))
+    (None) (walk-expr whole ctors usages)))
+
+(defn walk-top-forms (forms: (List Ast)) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
+  (match forms
+    (Nil) ()
+    (Cons f rest) (do (walk-top-form f ctors usages) (walk-top-forms rest ctors usages))))
+
+; ---------------------------------------------------------------------------
+; Rendering: one line per type name that needs at least one derived
+; function, `"<TypeName>: <op>, <op>, …"`, types sorted by name and each
+; type's own ops listed in a fixed canonical order — both required so the
+; plan's text is deterministic (spec §2.11) rather than dependent on
+; `Map`/traversal order.
+
+(defn nl -> Str
+  (do
+    (let sb (sb-new))
+    (sb-append-byte! sb 10)
+    (sb-take-str! sb)))
+
+(defn str-insert-sorted (x: Str) (xs: (List Str)) -> (List Str)
+  (match xs
+    (Nil) (Cons x (Nil))
+    (Cons h rest) (if (<= (compare x h) 0) (Cons x (Cons h rest)) (Cons h (str-insert-sorted x rest)))))
+
+(defn sort-strs (xs: (List Str)) -> (List Str)
+  (match xs
+    (Nil) (Nil)
+    (Cons h rest) (str-insert-sorted h (sort-strs rest))))
+
+(defn insert-distinct (x: Str) (xs: (List Str)) -> (List Str)
+  (if (str-list-contains xs x) xs (Cons x xs)))
+
+(defn collect-type-names (usages: (List Usage)) -> (List Str)
+  (match usages
+    (Nil) (Nil)
+    (Cons u rest) (insert-distinct (usage-type-name u) (collect-type-names rest))))
+
+(defn usages-has (usages: (List Usage)) (t: Str) (op: Str) -> Bool
+  (match usages
+    (Nil) false
+    (Cons u rest) (if (and (= (usage-type-name u) t) (= (usage-op u) op)) true (usages-has rest t op))))
+
+(defn derive-op-order -> (List Str)
+  (Cons "show" (Cons "=" (Cons "compare" (Cons "dump" (Nil))))))
+
+(defn filter-present (ops: (List Str)) (usages: (List Usage)) (t: Str) -> (List Str)
+  (match ops
+    (Nil) (Nil)
+    (Cons op rest) (filter-present-cons op rest usages t)))
+
+(defn filter-present-cons (op: Str) (rest: (List Str)) (usages: (List Usage)) (t: Str) -> (List Str)
+  (if (usages-has usages t op)
+    (Cons op (filter-present rest usages t))
+    (filter-present rest usages t)))
+
+(defn ops-for-type (usages: (List Usage)) (t: Str) -> (List Str)
+  (filter-present (derive-op-order) usages t))
+
+(defn join-with-commas (xs: (List Str)) -> Str
+  (match xs
+    (Nil) ""
+    (Cons x (Nil)) x
+    (Cons x rest) (str-concat x (str-concat ", " (join-with-commas rest)))))
+
+(defn render-line (t: Str) (usages: (List Usage)) -> Str
+  (str-concat t (str-concat ": " (join-with-commas (ops-for-type usages t)))))
+
+(defn render-lines (type-names: (List Str)) (usages: (List Usage)) -> Str
+  (match type-names
+    (Nil) ""
+    (Cons t (Nil)) (render-line t usages)
+    (Cons t rest) (str-concat (render-line t usages) (str-concat (nl) (render-lines rest usages)))))
+
+(defn render-usages (usages: (List Usage)) -> Str
+  (render-lines (sort-strs (collect-type-names usages)) usages))
+
+; List every type this program's `show`/`=`/`compare`/`dump` use sites
+; need, one per line, `"<TypeName>: <op>, …"`, sorted for determinism.
+; Empty (`""`) if the program has no classifiable use site of any of the
+; four — see this module's header comment for exactly what "classifiable"
+; covers and does not yet cover.
+(pub defn describe-derives (forms: (List Ast)) -> Str
+  (do
+    (let ctors (all-ctor-metas forms))
+    (let usages (ref (Nil)))
+    (walk-top-forms forms ctors usages)
+    (render-usages (deref usages))))

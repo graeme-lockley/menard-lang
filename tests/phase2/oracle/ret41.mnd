@@ -1,0 +1,9 @@
+; Slice 2B/2H oracle fixture: a literal `main`. `src/emit/lower.mnd`
+; lowers this to a real untag(`lshr 1`)/`trunc i32`/`ret` sequence over
+; the tagged literal `t(41)`, not a folded `ret i32 41` (see that
+; module's header comment). See `tests/phase2/emit-link.test.ts` (whose
+; `hello.mnd` untags `t(0)` the same way) and `tests/phase2/oracle.test.ts`
+; (this file, and its siblings) for the emit -> clang -> run smoke this
+; proves.
+
+(defn main -> Int 41)

@@ -1,0 +1,1016 @@
+; Lowering — real instruction emission for the tagged-`Int` ABI (spec
+; §2.2/§3.4), replacing slice 2B/2G's constant-folding evaluator entirely.
+;
+; ## What changed, and why
+;
+; The previous version of this module (`FoldVal`, `fold-expr`, …) never
+; wrote a single LLVM instruction: it *evaluated* `main`'s body down to
+; one compile-time `Int` and handed that number to `bc-writer.mnd`'s
+; `write-int-main-bc`, which always produced `define i32 @main() { ret
+; i32 N }` — a correct exit code, but a `.bc` whose instructions do not
+; compute anything. That was a deliberate, documented shortcut for
+; slices 2B/2G (see the plan for exactly what it bought); this slice
+; replaces it with a real (if still narrow) instruction selector: `Int`
+; literals, `+ - * / %`, comparisons, `if`, `let` (both shapes), `do`, and
+; calls to other top-level `Int`-returning `defn`s all become real
+; `alloca`/`store`/`load`/`binop`/`icmp`/`br`/`call`/`ret` instructions
+; (`src/emit/llvm-ir.mnd`'s `Item`s), assembled into an `LlvmModule` and
+; handed to `src/emit/bc-writer.mnd`'s `write-module-bc`. `FoldVal` and
+; every `fold-*` function are gone; there is no more "evaluate the
+; program inside the compiler" path at all.
+;
+; What is *not* lowered here — `loop`/`recur`, `match`, `fn` (a closure
+; `close/close.mnd` failed to lambda-lift), and any value that isn't
+; `Int` (`Bool` as a first-class value, `Str`, lists, records, other
+; `variant`s) — is a clean `Err`, not a crash and not a silent
+; miscompile; see "Scope" below for exactly what that means for each.
+;
+; ## The tagged-`Int` ABI, literally
+;
+; Every `Int` this module ever produces a value for is the *tagged*
+; representation, `t(v) = (v << 1) | 1` (`runtime/include/menard.h`),
+; held in an `i64`. Two operations are free (spec §2.2): `+`/`-` on the
+; tagged words directly, fixed up by one extra `add`/`sub` of the
+; constant `1` (`t(a) + t(b) - 1 == t(a + b)`; `t(a) - t(b) + 1 == t(a -
+; b)`) — the fixup is *not* optional, and skipping it is exactly the
+; "naive tagged multiply" mistake spec §2.2 calls out (for `+`/`-` the
+; fixup is required for correctness, not an optimisation). `*`/`/`/`%`
+; untag both operands (`ashr 1`, sign-extending), perform the native
+; 64-bit op, then retag (`shl 1`, `or 1`) — this module does not add
+; spec §3.4's explicit `sdiv`/`srem`-by-zero guard yet (see "Scope"
+; below); comparisons (`< > <= >= =`) run directly on the tagged words
+; (tagging is order- and equality-preserving, an injective affine map, so
+; no untagging is needed) and produce `i1`, consumed only by `if`'s own
+; conditional branch — this module has no other way to produce or
+; consume a `Bool` value (see "Scope").
+;
+; ## `Builder`: the one piece of mutable state per function
+;
+; Exactly one `Builder` is threaded through lowering one function's body
+; (never shared across functions). It owns three `Ref`s:
+;
+; - `items`: every `Item` appended so far, **in reverse** (`Cons`ed onto
+;   the front — O(1) — then reversed once, at the end, into the order
+;   `LFunc`/`write-module-bc` need).
+; - `next-val`: the running absolute SSA value-id counter. A function's
+;   own params occupy the first `nparams` ids right after every
+;   module-scope global value (`num-globals` — the total count of
+;   `Int`-returning top-level `defn`s, fixed once for the whole module
+;   before any function body is lowered); `builder-new` is handed
+;   `num-globals + nparams` as this counter's starting point, i.e. *after*
+;   the params, since params never themselves appear as an `Item` (they
+;   are simply referenced by their fixed ids). Each value-producing `Item`
+;   consumes exactly one id, at the moment it is appended (`bump-val!`).
+; - `next-bb`: the next not-yet-used basic-block index (`fresh-bb!`);
+;   block 0 (the entry block) is implicitly already "current" the moment
+;   a `Builder` is created, so this starts at `1`. See `llvm-ir.mnd`'s
+;   "Basic blocks are implicit" note: nothing here tracks "which block is
+;   currently open" beyond this counter — a new block simply begins right
+;   after whatever `Item` most recently terminated one (`IBr`/`ICondBr`/
+;   `IRet`), which holds automatically as long as every `if`'s `then`
+;   block's `Item`s are fully appended before its `else` block's, which
+;   are fully appended before `join`'s — exactly the order `lower-if`
+;   below produces by simple recursive-descent structure, with no explicit
+;   block bookkeeping needed beyond the three fresh indices it allocates.
+;
+; Every relative-value-reference computation (`rel-ref`) reads `next-val`
+; *at the moment an instruction is appended*, before that instruction's
+; own result (if it has one) is counted — exactly the semantics module
+; format version 1 needs (`nextValueNo - targetAbsoluteId`; see
+; `bc-writer.mnd`'s and `tools/bc-writer/write-ssa.ts`'s header comments
+; for how this was confirmed against a real bitcode reader).
+;
+; ## Constants are never cached across a function — a real bug, fixed once
+;
+; An earlier draft of this module (and of `tools/bc-writer/write-ssa.ts`,
+; where the mistake was actually caught) tried to dedupe small constants
+; per function — "the tagged `1` is always the same value, so intern it
+; once and reuse its id everywhere". That is wrong the moment the first
+; use is inside an `if`'s `then` branch and a later use is inside its
+; `else` sibling: `then` does not dominate `else`, so a value defined
+; there is not valid there, and the module fails to verify (or worse,
+; behaves unpredictably in a toolchain that skips verification). The fix
+; kept here is the simple, always-correct one: `const-i64!`/`const-i32!`
+; below never cache anything — every call materializes a brand-new
+; `IConstI64`/`IConstI32` `Item`, right at the point of use, in whichever
+; block is currently being appended to. This costs a little bitcode size
+; (the same small integer may appear several times) and costs nothing in
+; correctness: a freshly created value trivially dominates its own,
+; immediately-following use, unconditionally, regardless of what control
+; flow is or isn't open around it.
+;
+; ## Locals: `alloca` + `store`/`load`, uniformly, for params too
+;
+; Spec §3.4 "emit naive IR; let LLVM optimise" — this module allocates one
+; `i64` slot per bound name (a `defn`'s own parameters *and* every `let`),
+; stores into it once, and reads it back with a fresh `load` at every
+; reference, never reusing a cached SSA value across uses the way a
+; smarter frontend would. `mem2reg` (run by `clang`/`opt`, never by this
+; compiler) turns every one of these into real SSA once the module is
+; loaded; this module's own job is only to be *obviously correct*, not
+; small. `env`, threaded through every lowering function below, maps a
+; bound name to its alloca's absolute value id (never to a raw value) —
+; `lower-sym` is the one place that turns a name into a value, via `load`.
+;
+; ## `if`, without hand-built `phi`s
+;
+; `lower-if` allocates a temporary result slot (another `alloca`, in the
+; block open when the `if` is encountered — which dominates `then`,
+; `else` and `join` alike), lowers `then` into a fresh `then` block ending
+; in a `store` to that slot and a `br` to `join`, lowers `else` into a
+; fresh `else` block the same way, then `load`s the slot back in `join` —
+; exactly spec §3.4's "no hand-built phi nodes, no dominance-frontier
+; reasoning" instruction, at the cost of one extra `alloca`/`store`/`load`
+; per `if` that `mem2reg` is expected to clean up later, not by this
+; compiler.
+;
+; ## Calls, and the two kinds of top-level `defn` this module sees
+;
+; After `close/close.mnd` (lambda lifting) and `root/root.mnd` (shadow-
+; stack wrapping) have run, every top-level `defn` a real program's forms
+; contain is one of exactly two shapes:
+;
+; - An **`Int`-only `defn`** (every param and the return both a bare
+;   `Int`): `main`, any user-written helper, and every lambda-lifted
+;   `__lamN`. Every one of these becomes a real `i64`-params-and-return
+;   `LFunc` (`main` alone gets `() -> i32`, spec's C entry point — see
+;   `finish-main-return!` below) — `collect-int-defns`/`build-func-refs`
+;   assign each one a module-scope global value id, `0..N-1`, in the
+;   order they appear in the program's top-level forms (this fixes the
+;   global numbering `ICall`'s callee-rel operands are computed against —
+;   see `llvm-ir.mnd`'s "order fixes each function's... id" note; it must
+;   match `write-module-bc`'s own traversal of the same list exactly, and
+;   does, since both walk the one `LFunc` list this module builds).
+; - A **`Unit`, zero-parameter, empty-body no-op `defn`** — precisely
+;   `root/root.mnd`'s own `shadow-push`/`shadow-pop` stand-ins (spec §4.4's
+;   shadow-stack rooting ABI, still a no-op in phase 2 — see that module's
+;   header comment and `runtime/src/shadow.c`'s). This module never lowers
+;   these to a real function at all: `collect-noop-names` recognises the
+;   shape structurally (not by hardcoding the two names), and
+;   `lower-sequence` simply *skips* a call to one wherever it appears in a
+;   body sequence (always mid-sequence, never a body's last form, by
+;   `root/root.mnd`'s own construction) — no `LFunc`, no `ICall`, nothing
+;   in the emitted module at all for either helper.
+;
+; Any *other* call — to a name that is neither of the above (a `Bool`-
+; returning helper, a constructor, an unresolved free variable, …) — is a
+; clean `Err`.
+;
+; ## Scope: what is not lowered, and why that is an `Err`, not a fallback
+;
+; - **`loop`/`recur`, `match`, `fn`.** All three need machinery this
+;   slice does not build: `loop`/`recur` would need its own naive-`alloca`
+;   loop-variable treatment (very much *buildable* the same way `if` is,
+;   just not built yet); `match` needs a real heap-object/shape-descriptor
+;   model (spec §2.2's tagged-pointer objects) this backend has no
+;   allocator story for at all; a leftover `fn` means `close-convert`
+;   failed to lambda-lift it (its own documented limitation). Rather than
+;   half-implement any of these, every one is a named, explicit `Err` —
+;   `tests/phase2/oracle.test.ts`'s header comment records which oracle
+;   fixtures this removes (the `loop`/`match` ones) and why.
+; - **`Bool` as a first-class value.** Comparisons produce `i1` and are
+;   usable *only* as `if`'s own test (`lower-cond`); a comparison anywhere
+;   else, a bound `Bool` local, a `Bool`-returning `defn`, `Bool` literals
+;   — all `Err`. There is no tagged-immediate encoding for `Bool` wired up
+;   in this module (unlike `Int`, spec §2.2 gives `Bool` one, but nothing
+;   here needs it yet); adding it is future work, not a correctness gap
+;   in what *is* implemented.
+; - **`sdiv`/`srem`-by-zero guard (spec §3.4).** `*`/`/`/`%` untag, do the
+;   native op, and retag, but do not yet guard `/`/`%`'s divisor against
+;   zero with an explicit panic the way the spec's backend section
+;   requires (LLVM's `sdiv`/`srem` by zero is undefined, not merely
+;   wrong) — no current oracle fixture divides, so this is a documented
+;   gap rather than a silently-wrong path exercised by any test; adding
+;   it needs a `br`+call-`mn_panic`+`unreachable` sequence this module's
+;   `Builder` can already express, just not yet wired for this one case.
+
+(import "../reader/ast.mnd")
+(import "../util/result.mnd")
+(import "./llvm-ir.mnd")
+(import "./bc-writer.mnd")
+
+(pub alias Ast Ast)
+(pub alias Span Span)
+
+; ---------------------------------------------------------------------------
+; Small Ast helpers, restated locally per `src/`'s "no prelude import"
+; rule (see `type/check.mnd`'s equivalent header note).
+
+(defn sym-str (ast: Ast) -> (Maybe Str)
+  (match ast (SymNode n _) (Some n) _ (None)))
+
+(defn is-sym (ast: Ast) (name: Str) -> Bool
+  (match (sym-str ast) (Some n) (= n name) (None) false))
+
+(defn strip-trailing-colon (raw: Str) -> Str
+  (let n (str-byte-length raw))
+  (if (and (> n 0) (= (str-byte raw (- n 1)) 58)) (str-slice raw 0 (- n 1)) raw))
+
+(defn ast-list-length (xs: (List Ast)) -> Int
+  (match xs
+    (Nil) 0
+    (Cons _ rest) (+ 1 (ast-list-length rest))))
+
+; ---------------------------------------------------------------------------
+; `defn` header parsing: name, `(name: Type)` params (both parts kept —
+; unlike the old fold-based lowerer, this module needs a param's declared
+; type to decide whether the whole `defn` is lowerable at all), the
+; return type, and the body.
+
+(defrec LParam (name: Str) (ty: Ast))
+(defn lparam-name (p: LParam) -> Str (match p (LParam n _) n))
+(defn lparam-ty (p: LParam) -> Ast (match p (LParam _ t) t))
+
+(defrec LDefn (name: Str) (params: (List LParam)) (ret: Ast) (body: (List Ast)))
+(defn ldefn-name (ld: LDefn) -> Str (match ld (LDefn n _ _ _) n))
+(defn ldefn-params (ld: LDefn) -> (List LParam) (match ld (LDefn _ p _ _) p))
+(defn ldefn-ret (ld: LDefn) -> Ast (match ld (LDefn _ _ r _) r))
+(defn ldefn-body (ld: LDefn) -> (List Ast) (match ld (LDefn _ _ _ b) b))
+
+(defn param-arity-of (ps: (List LParam)) -> Int
+  (match ps (Nil) 0 (Cons _ rest) (+ 1 (param-arity-of rest))))
+
+(defn lparam-names (ps: (List LParam)) -> (List Str)
+  (match ps (Nil) (Nil) (Cons p rest) (Cons (lparam-name p) (lparam-names rest))))
+
+(defrec ArrowSplit (before: (List Ast)) (after: (List Ast)))
+
+(defn find-arrow (elems: (List Ast)) -> (Maybe ArrowSplit)
+  (match elems
+    (Nil) (None)
+    (Cons e rest) (find-arrow-cons e rest)))
+
+(defn find-arrow-cons (e: Ast) (rest: (List Ast)) -> (Maybe ArrowSplit)
+  (if (is-sym e "->") (Some (ArrowSplit (Nil) rest))
+    (find-arrow-cons-recurse e rest)))
+
+(defn find-arrow-cons-recurse (e: Ast) (rest: (List Ast)) -> (Maybe ArrowSplit)
+  (match (find-arrow rest)
+    (None) (None)
+    (Some split) (Some (ArrowSplit (Cons e (arrow-split-before split)) (arrow-split-after split)))))
+
+(defn arrow-split-before (s: ArrowSplit) -> (List Ast) (match s (ArrowSplit b _) b))
+(defn arrow-split-after (s: ArrowSplit) -> (List Ast) (match s (ArrowSplit _ a) a))
+
+(defn param-of (ast: Ast) -> (Maybe LParam)
+  (match ast
+    (ParenNode (Cons name-ast (Cons ty-ast _)) _) (param-of-named name-ast ty-ast)
+    _ (None)))
+
+(defn param-of-named (name-ast: Ast) (ty-ast: Ast) -> (Maybe LParam)
+  (match (sym-str name-ast)
+    (Some n) (Some (LParam (strip-trailing-colon n) ty-ast))
+    (None) (None)))
+
+(defn params-of (elems: (List Ast)) -> (List LParam)
+  (match elems
+    (Nil) (Nil)
+    (Cons e rest) (params-of-cons e rest)))
+
+(defn params-of-cons (e: Ast) (rest: (List Ast)) -> (List LParam)
+  (match (param-of e)
+    (Some p) (Cons p (params-of rest))
+    (None) (params-of rest)))
+
+; `main` or `(f [a])` — the type-parameter list (if any) is irrelevant
+; here (this lowerer never instantiates one), only the bare name is.
+(defn defn-name-of (name-part: Ast) -> (Maybe Str)
+  (match name-part
+    (SymNode n _) (Some n)
+    (ParenNode (Cons n-ast _) _) (sym-str n-ast)
+    _ (None)))
+
+(defn parse-ldefn (elems: (List Ast)) -> (Maybe LDefn)
+  (match elems
+    (Cons _ (Cons name-part rest)) (parse-ldefn-named name-part rest)
+    _ (None)))
+
+(defn parse-ldefn-named (name-part: Ast) (rest: (List Ast)) -> (Maybe LDefn)
+  (match (defn-name-of name-part)
+    (None) (None)
+    (Some name) (parse-ldefn-header name rest)))
+
+(defn parse-ldefn-header (name: Str) (rest: (List Ast)) -> (Maybe LDefn)
+  (match (find-arrow rest)
+    (None) (None)
+    (Some split) (parse-ldefn-ret name (params-of (arrow-split-before split)) (arrow-split-after split))))
+
+(defn parse-ldefn-ret (name: Str) (params: (List LParam)) (after: (List Ast)) -> (Maybe LDefn)
+  (match after
+    (Cons ret-ast body) (Some (LDefn name params ret-ast body))
+    (Nil) (None)))
+
+; `(pub defn …)` — strip the `pub` wrapper; every other top-level shape
+; (`defrec`, `variant`, `alias`, a bare expression, …) is not a `defn` and
+; is simply not a lowering-relevant form.
+(defn unwrap-pub (ast: Ast) -> Ast
+  (match ast
+    (ParenNode (Cons head rest) sp) (unwrap-pub-head head rest sp ast)
+    _ ast))
+
+(defn unwrap-pub-head (head: Ast) (rest: (List Ast)) (sp: Span) (ast: Ast) -> Ast
+  (if (is-sym head "pub") (unwrap-pub (ParenNode rest sp)) ast))
+
+(defn top-form-ldefn (ast: Ast) -> (Maybe LDefn)
+  (match (unwrap-pub ast)
+    (ParenNode (Cons head rest) _) (top-form-ldefn-named head rest)
+    _ (None)))
+
+(defn top-form-ldefn-named (head: Ast) (rest: (List Ast)) -> (Maybe LDefn)
+  (if (is-sym head "defn") (parse-ldefn (Cons head rest)) (None)))
+
+(defn collect-ldefns-all (forms: (List Ast)) -> (List LDefn)
+  (match forms
+    (Nil) (Nil)
+    (Cons f rest) (collect-ldefns-all-cons f rest)))
+
+(defn collect-ldefns-all-cons (f: Ast) (rest: (List Ast)) -> (List LDefn)
+  (match (top-form-ldefn f)
+    (None) (collect-ldefns-all rest)
+    (Some ld) (Cons ld (collect-ldefns-all rest))))
+
+; ---------------------------------------------------------------------------
+; Which top-level `defn`s this module actually lowers — see header
+; comment's "Calls, and the two kinds of top-level `defn`".
+
+(defn is-type-named (ast: Ast) (name: Str) -> Bool
+  (match ast (SymNode n _) (= n name) _ false))
+
+(defn is-int-type (ast: Ast) -> Bool (is-type-named ast "Int"))
+(defn is-unit-type (ast: Ast) -> Bool (is-type-named ast "Unit"))
+
+(defn all-params-int (ps: (List LParam)) -> Bool
+  (match ps (Nil) true (Cons p rest) (and (is-int-type (lparam-ty p)) (all-params-int rest))))
+
+(defn is-int-ldefn (ld: LDefn) -> Bool
+  (and (is-int-type (ldefn-ret ld)) (all-params-int (ldefn-params ld))))
+
+(defn filter-int-ldefns (lds: (List LDefn)) -> (List LDefn)
+  (match lds
+    (Nil) (Nil)
+    (Cons ld rest) (filter-int-ldefns-cons ld rest)))
+
+(defn filter-int-ldefns-cons (ld: LDefn) (rest: (List LDefn)) -> (List LDefn)
+  (if (is-int-ldefn ld) (Cons ld (filter-int-ldefns rest)) (filter-int-ldefns rest))
+)
+
+; `root/root.mnd`'s `shadow-helper-defn` builds exactly `(defn NAME ->
+; Unit ())` — a single-form body that is itself the empty-parens `Unit`
+; literal `()` (an empty `ParenNode`), not an empty body list.
+(defn is-unit-literal (ast: Ast) -> Bool
+  (match ast (ParenNode (Nil) _) true _ false))
+
+(defn is-unit-literal-body (body: (List Ast)) -> Bool
+  (match body (Cons f (Nil)) (is-unit-literal f) _ false))
+
+(defn is-unit-noop-ldefn (ld: LDefn) -> Bool
+  (and (is-unit-type (ldefn-ret ld))
+    (and (match (ldefn-params ld) (Nil) true _ false) (is-unit-literal-body (ldefn-body ld)))))
+
+(defn collect-noop-names (lds: (List LDefn)) -> (Map Str Bool)
+  (match lds
+    (Nil) (map-new)
+    (Cons ld rest) (collect-noop-names-cons ld rest)))
+
+(defn collect-noop-names-cons (ld: LDefn) (rest: (List LDefn)) -> (Map Str Bool)
+  (if (is-unit-noop-ldefn ld)
+    (map-set (collect-noop-names rest) (ldefn-name ld) true)
+    (collect-noop-names rest)))
+
+(defn find-ldefn-named (lds: (List LDefn)) (name: Str) -> (Maybe LDefn)
+  (match lds
+    (Nil) (None)
+    (Cons ld rest) (if (= (ldefn-name ld) name) (Some ld) (find-ldefn-named rest name))))
+
+; A resolved call target: its module-scope global value id and its
+; declared arity (for the arity check `lower-call-with-ref` below does).
+(defrec FuncRef (abs: Int) (arity: Int))
+(defn func-ref-abs (fr: FuncRef) -> Int (match fr (FuncRef a _) a))
+(defn func-ref-arity (fr: FuncRef) -> Int (match fr (FuncRef _ a) a))
+
+(defn build-func-refs (lds: (List LDefn)) (idx: Int) -> (Map Str FuncRef)
+  (match lds
+    (Nil) (map-new)
+    (Cons ld rest) (map-set (build-func-refs rest (+ idx 1)) (ldefn-name ld) (FuncRef idx (param-arity-of (ldefn-params ld))))))
+
+; ---------------------------------------------------------------------------
+; `Builder` — see header comment's "The one piece of mutable state per
+; function".
+
+; A basic block is its own independent, mutable slot; a value like
+; `IBr`'s target is only known once that block is **closed** (see below)
+; — not the instant it is allocated. Two attempts at a simpler design
+; were tried and both broke the moment a branch's own content was
+; itself another `if` (both are recorded here since either mistake is
+; easy to make again):
+;
+; 1. One shared flat `items` list, with `IBr`/`ICondBr` targets computed
+;    as plain absolute block numbers *the moment `fresh-bb!` hands them
+;    out* — before `then`/`else` are lowered at all. Nested control flow
+;    allocates *more* blocks while `then` is still being lowered, and
+;    those ids land, in the actual output stream, in between `then`'s
+;    own content and `else`'s — but `else`'s target id was already
+;    fixed to a number that assumed no such thing would happen. Caught
+;    by `llvm-as`'s "does not dominate all uses", one step removed from
+;    the real mistake.
+; 2. Giving every block its *own* separate item-slot (fixing #1's
+;    branch-target mismatch) but still assigning each slot's final
+;    stream position at *allocation* time. This looked right — every
+;    branch target now really does point at the block it means — but
+;    broke *value* numbering instead: `next-val` counts up in the literal
+;    call order lowering happens to run in (`then`'s whole nested subtree
+;    finishes — including blocks allocated *after* `else`/`join` were —
+;    before `else` is even started), while `write-module-bc` reads the
+;    flattened stream in allocation-position order. The two orders only
+;    coincide when there is no nesting at all; a nested `if` proved it
+;    silently miscounts value ids (`llvm-dis`'s "Invalid store record").
+;
+; The fix actually kept here: a block's final stream position is decided
+; not at allocation, and not by a separately-chosen layout, but at
+; **closure** — the moment lowering is done with it and moves on
+; (`switch-to!`, or the one implicit close of whatever block is still
+; open when the function itself is finished, `finish-builder!`). Closure
+; order, it turns out, is *exactly* call order: a block's own content is
+; always one contiguous burst of `emit!`/`bump-val!` calls between the
+; moment it becomes current and the moment something switches away from
+; it, so numbering blocks in the order they close reproduces the same
+; order `next-val` already counts up in — value numbering and block
+; numbering agree again, at any nesting depth, with no separate
+; "layout" decision to get right or wrong.
+;
+; That leaves branch targets referencing a block that has not closed
+; yet (every branch here is a forward reference — `if`'s `condbr` always
+; targets `then`/`else`, neither closed; `then`'s and `else`'s own `br`s
+; always target `join`, closed last of the three). A block's `BB` handle
+; therefore carries its index as a `Ref Int`, unresolved (`-1`) until
+; `close-current!` fills it in; `IBr`/`ICondBr` cannot be finished at the
+; moment they are appended (their target's `Ref Int` has no real value
+; yet), so this module keeps its own `PendingItem` — everything else is
+; already a finished `Item`, but a branch instead carries the *handle*
+; it will resolve against once every block has finally closed, at
+; `builder-items-ordered`'s call to `resolve-pending-list`.
+(variant PendingItem
+  (PDone Item)
+  (PBr (Ref Int))
+  (PCondBr (Ref Int) (Ref Int) Int))
+
+(defrec BB (idx-ref: (Ref Int)) (slot: (Ref (List PendingItem))))
+(defn bb-idx-ref (bb: BB) -> (Ref Int) (match bb (BB r _) r))
+(defn bb-slot (bb: BB) -> (Ref (List PendingItem)) (match bb (BB _ s) s))
+
+(defrec Builder (closed: (Ref (List (Ref (List PendingItem))))) (cur: (Ref BB)) (next-val: (Ref Int)) (closed-count: (Ref Int)))
+
+(defn b-closed (b: Builder) -> (Ref (List (Ref (List PendingItem)))) (match b (Builder c _ _ _) c))
+(defn b-cur (b: Builder) -> (Ref BB) (match b (Builder _ c _ _) c))
+(defn b-next-val (b: Builder) -> (Ref Int) (match b (Builder _ _ n _) n))
+(defn b-closed-count (b: Builder) -> (Ref Int) (match b (Builder _ _ _ n) n))
+
+(defn new-bb -> BB (BB (ref (- 0 1)) (ref (Nil))))
+
+(defn builder-new (start-val: Int) -> Builder
+  (Builder (ref (Nil)) (ref (new-bb)) (ref start-val) (ref 0)))
+
+(defn emit-pending! (b: Builder) (p: PendingItem) -> Unit
+  (do
+    (let cur (deref (b-cur b)))
+    (let slot (bb-slot cur))
+    (set! slot (Cons p (deref slot)))))
+
+(defn emit! (b: Builder) (it: Item) -> Unit (emit-pending! b (PDone it)))
+
+(defn rel-ref (b: Builder) (abs-id: Int) -> Int
+  (- (deref (b-next-val b)) abs-id))
+
+(defn bump-val! (b: Builder) -> Int
+  (do
+    (let v (deref (b-next-val b)))
+    (set! (b-next-val b) (+ v 1))
+    v))
+
+; Allocates a fresh, still-open block; call `switch-to!` once lowering
+; actually reaches it (its final index stays unresolved until then).
+(defn fresh-bb! (b: Builder) -> BB (new-bb))
+
+; Closes whichever block is currently open: resolves *its* index to the
+; running closure-order counter, files its slot away in closure order,
+; then bumps the counter — see header comment's "closure order ... is
+; exactly call order".
+(defn close-current! (b: Builder) -> Unit
+  (do
+    (let cur (deref (b-cur b)))
+    (let n (deref (b-closed-count b)))
+    (set! (bb-idx-ref cur) n)
+    (set! (b-closed b) (Cons (bb-slot cur) (deref (b-closed b))))
+    (set! (b-closed-count b) (+ n 1))))
+
+(defn switch-to! (b: Builder) (target: BB) -> Unit
+  (do
+    (close-current! b)
+    (set! (b-cur b) target)))
+
+; The one open block left when the function's body is fully lowered
+; (`main`'s or an ordinary function's final `ret`'s own block) never
+; goes through `switch-to!`; this closes it explicitly, exactly once,
+; right before `total-blocks`/`builder-items-ordered` read the result.
+(defn finish-builder! (b: Builder) -> Unit (close-current! b))
+
+(defn total-blocks (b: Builder) -> Int (deref (b-closed-count b)))
+
+(defn pending-reverse-onto (xs: (List PendingItem)) (acc: (List PendingItem)) -> (List PendingItem)
+  (match xs (Nil) acc (Cons x rest) (pending-reverse-onto rest (Cons x acc))))
+
+(defn blocks-reverse-onto (xs: (List (Ref (List PendingItem)))) (acc: (List (Ref (List PendingItem)))) -> (List (Ref (List PendingItem)))
+  (match xs (Nil) acc (Cons x rest) (blocks-reverse-onto rest (Cons x acc))))
+
+(defn append-items (xs: (List Item)) (ys: (List Item)) -> (List Item)
+  (match xs (Nil) ys (Cons x rest) (Cons x (append-items rest ys))))
+
+; Every block's own `idx-ref` is resolved by now (`finish-builder!` has
+; already run) — a `PBr`/`PCondBr`'s target(s) can finally be read.
+(defn resolve-pending (p: PendingItem) -> Item
+  (match p
+    (PDone it) it
+    (PBr r) (IBr (deref r))
+    (PCondBr t f c) (ICondBr (deref t) (deref f) c)))
+
+(defn resolve-pending-list (xs: (List PendingItem)) -> (List Item)
+  (match xs (Nil) (Nil) (Cons x rest) (Cons (resolve-pending x) (resolve-pending-list rest))))
+
+; `closed` accumulated blocks in closure order via Cons-prepend, so one
+; reversal recovers that order; each block's own content was likewise
+; Cons-prepended by `emit-pending!`, needing the same one-time reversal
+; before its `PendingItem`s can be resolved and concatenated into the
+; final flat stream `write-module-bc` expects.
+(defn flatten-blocks (ordered: (List (Ref (List PendingItem)))) -> (List Item)
+  (match ordered
+    (Nil) (Nil)
+    (Cons slot rest) (append-items (resolve-pending-list (pending-reverse-onto (deref slot) (Nil))) (flatten-blocks rest))))
+
+(defn builder-items-ordered (b: Builder) -> (List Item)
+  (flatten-blocks (blocks-reverse-onto (deref (b-closed b)) (Nil))))
+
+; ---------------------------------------------------------------------------
+; Builder operations — each one appends exactly the `Item`(s) its name
+; says, computing every relative reference at the moment of appending
+; (see header comment's "`next-val` ... at the moment an instruction is
+; appended"), and returns the fresh value's absolute id where it produces
+; one.
+
+; See header comment's "Constants are never cached across a function" —
+; every call here is a brand-new `Item`, deliberately never deduped.
+(defn const-i64! (b: Builder) (raw: Int) -> Int
+  (do (emit! b (IConstI64 (encode-signed-i64 raw))) (bump-val! b)))
+
+(defn const-i32! (b: Builder) (raw: Int) -> Int
+  (do (emit! b (IConstI32 (encode-signed-i64 raw))) (bump-val! b)))
+
+; `t(v) = (v << 1) | 1` — the raw i64 value a tagged `Int` literal `v`
+; is; `const-i64!` then encodes *that* per the bitcode's own zig-zag
+; integer-constant scheme (two independent layers — see `bc-writer.mnd`'s
+; `encode-signed-i64` doc comment).
+(defn const-tagged! (b: Builder) (v: Int) -> Int
+  (const-i64! b (+ (* v 2) 1)))
+
+(defn emit-binop! (b: Builder) (op: Int) (lhs-abs: Int) (rhs-abs: Int) -> Int
+  (do
+    (let it (IBinop op (rel-ref b lhs-abs) (rel-ref b rhs-abs)))
+    (emit! b it)
+    (bump-val! b)))
+
+(defn emit-cmp2! (b: Builder) (pred: Int) (lhs-abs: Int) (rhs-abs: Int) -> Int
+  (do
+    (let it (ICmp2 pred (rel-ref b lhs-abs) (rel-ref b rhs-abs)))
+    (emit! b it)
+    (bump-val! b)))
+
+(defn emit-cast! (b: Builder) (op: Int) (val-abs: Int) (to-ty: Int) -> Int
+  (do
+    (let it (ICast op (rel-ref b val-abs) to-ty))
+    (emit! b it)
+    (bump-val! b)))
+
+; `alloca i64, align 8`. The array-size operand is a fresh `i32` `1`
+; (never cached — see above); its id is absolute, not relative, per
+; `llvm-ir.mnd`'s `IAlloca` doc comment.
+(defn emit-alloca! (b: Builder) -> Int
+  (do
+    (let size-abs (const-i32! b 1))
+    (emit! b (IAlloca size-abs))
+    (bump-val! b)))
+
+(defn emit-store! (b: Builder) (ptr-abs: Int) (val-abs: Int) -> Unit
+  (emit! b (IStore (rel-ref b ptr-abs) (rel-ref b val-abs))))
+
+(defn emit-load! (b: Builder) (ptr-abs: Int) -> Int
+  (do (emit! b (ILoad (rel-ref b ptr-abs))) (bump-val! b)))
+
+; Branch targets are `BB` handles, not raw ints — their real index is
+; unresolved until closure (see header comment); `emit-pending!` files
+; a `PBr`/`PCondBr` carrying the target's own `idx-ref` directly, to be
+; read back only once every block has closed.
+(defn emit-br! (b: Builder) (target: BB) -> Unit
+  (emit-pending! b (PBr (bb-idx-ref target))))
+
+(defn emit-condbr! (b: Builder) (true-bb: BB) (false-bb: BB) (cond-abs: Int) -> Unit
+  (emit-pending! b (PCondBr (bb-idx-ref true-bb) (bb-idx-ref false-bb) (rel-ref b cond-abs))))
+
+(defn rel-refs (b: Builder) (xs: (List Int)) -> (List Int)
+  (match xs (Nil) (Nil) (Cons x rest) (Cons (rel-ref b x) (rel-refs b rest))))
+
+(defn emit-call! (b: Builder) (callee-abs: Int) (arg-abs: (List Int)) -> Int
+  (do
+    (let callee-rel (rel-ref b callee-abs))
+    (let arg-rels (rel-refs b arg-abs))
+    (emit! b (ICall callee-rel arg-rels))
+    (bump-val! b)))
+
+(defn emit-ret! (b: Builder) (val-abs: Int) -> Unit
+  (emit! b (IRet (rel-ref b val-abs))))
+
+; `+`/`-`: free plus a one-instruction fixup (header comment's "The
+; tagged-`Int` ABI, literally").
+(defn arith-add! (b: Builder) (av: Int) (cv: Int) -> Int
+  (do
+    (let sum (emit-binop! b (binop-add) av cv))
+    (let one (const-i64! b 1))
+    (emit-binop! b (binop-sub) sum one)))
+
+(defn arith-sub! (b: Builder) (av: Int) (cv: Int) -> Int
+  (do
+    (let diff (emit-binop! b (binop-sub) av cv))
+    (let one (const-i64! b 1))
+    (emit-binop! b (binop-add) diff one)))
+
+; untag (`ashr 1`) / retag (`shl 1`, `or 1`) — shared by `*`/`/`/`%`.
+(defn arith-untag! (b: Builder) (v: Int) -> Int
+  (do
+    (let one (const-i64! b 1))
+    (emit-binop! b (binop-ashr) v one)))
+
+(defn arith-retag! (b: Builder) (v: Int) -> Int
+  (do
+    (let one (const-i64! b 1))
+    (let shifted (emit-binop! b (binop-shl) v one))
+    (emit-binop! b (binop-or) shifted one)))
+
+(defn arith-mul! (b: Builder) (av: Int) (cv: Int) -> Int
+  (do
+    (let ua (arith-untag! b av))
+    (let uc (arith-untag! b cv))
+    (let prod (emit-binop! b (binop-mul) ua uc))
+    (arith-retag! b prod)))
+
+; No zero-guard yet — see header comment's "Scope".
+(defn arith-div! (b: Builder) (av: Int) (cv: Int) -> Int
+  (do
+    (let ua (arith-untag! b av))
+    (let uc (arith-untag! b cv))
+    (let q (emit-binop! b (binop-sdiv) ua uc))
+    (arith-retag! b q)))
+
+(defn arith-rem! (b: Builder) (av: Int) (cv: Int) -> Int
+  (do
+    (let ua (arith-untag! b av))
+    (let uc (arith-untag! b cv))
+    (let r (emit-binop! b (binop-srem) ua uc))
+    (arith-retag! b r)))
+
+; ---------------------------------------------------------------------------
+; The lowerer proper. `env` binds a body's local names (params, `let`s)
+; to alloca absolute ids; `funcs` is every lowerable (`Int`-only) `defn`,
+; for calls; `noop` is every `Unit`, zero-arg, empty-body `defn`'s name,
+; for the shadow-push/pop skip (see header comment).
+
+(defn is-arith-binop (s: Str) -> Bool
+  (or (= s "+") (or (= s "-") (or (= s "*") (or (= s "/") (= s "%"))))))
+
+(defn is-cmp-op (s: Str) -> Bool
+  (or (= s "<") (or (= s ">") (or (= s "<=") (or (= s ">=") (= s "="))))))
+
+(defn str-in-list (s: Str) (xs: (List Str)) -> Bool
+  (match xs
+    (Nil) false
+    (Cons x rest) (if (= s x) true (str-in-list s rest))))
+
+(defn unsupported-form-names -> (List Str)
+  (Cons "loop"
+    (Cons "recur"
+      (Cons "match"
+        (Cons "fn"
+          (Cons "lambda"
+            (Cons "quote"
+              (Cons "set!"
+                (Cons "ref"
+                  (Cons "deref" (Nil)))))))))))
+
+(defn is-unsupported-form (s: Str) -> Bool
+  (str-in-list s (unsupported-form-names)))
+
+(defn lower-expr (ast: Ast) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result Int Str)
+  (match ast
+    (IntNode n _) (Ok (const-tagged! b n))
+    (BoolNode _ _) (Err "cannot lower a Bool value with the real instruction lowerer yet (Bool is only usable as `if`'s own test)")
+    (SymNode name _) (lower-sym name env b)
+    (ParenNode elems _) (lower-paren elems env b funcs noop)
+    (BracketNode _ _) (Err "cannot lower a list literal with the real instruction lowerer yet")
+    (StrNode _ _) (Err "cannot lower a Str value with the real instruction lowerer yet")
+    (FloatNode _ _) (Err "cannot lower a Float value with the real instruction lowerer yet")))
+
+(defn lower-sym (name: Str) (env: (Map Str Int)) (b: Builder) -> (Result Int Str)
+  (match (map-get env name)
+    (Some slot) (Ok (emit-load! b slot))
+    (None) (Err (str-concat "cannot lower unbound name " name))))
+
+(defn lower-paren (elems: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result Int Str)
+  (match elems
+    (Nil) (Err "an empty form `()` is not a valid Int expression")
+    (Cons head rest) (lower-paren-head head rest env b funcs noop)))
+
+(defn lower-paren-head (head: Ast) (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result Int Str)
+  (match (sym-str head)
+    (None) (Err "cannot lower an application with a non-symbol head")
+    (Some hn) (lower-named hn rest env b funcs noop)))
+
+(defn lower-named (hn: Str) (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result Int Str)
+  (if (= hn "if") (lower-if rest env b funcs noop)
+    (if (= hn "let") (lower-let-inline rest env b funcs noop)
+      (if (= hn "do") (lower-sequence rest env b funcs noop)
+        (if (is-arith-binop hn) (lower-arith rest hn env b funcs noop)
+          (if (is-cmp-op hn) (Err (str-concat "comparison `" (str-concat hn "` is only usable as `if`'s own test, not as a value")))
+            (if (is-unsupported-form hn) (Err (str-concat "cannot lower `" (str-concat hn "` with the real instruction lowerer yet (Int/if/let/calls only)")))
+              (lower-call hn rest env b funcs noop))))))))
+
+; -- if --
+
+(defn lower-if (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result Int Str)
+  (match rest
+    (Cons test (Cons then (Cons els (Nil))))
+      (result-bind (lower-cond test env b funcs noop) (fn (cond-abs) (lower-if-branches cond-abs then els env b funcs noop)))
+    _ (Err "if requires a test, a then-branch and an else-branch")))
+
+(defn lower-if-branches (cond-abs: Int) (then: Ast) (els: Ast) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result Int Str)
+  (do
+    ; `result-slot` is allocated into the block still open when the
+    ; `if` is encountered — the one block guaranteed to dominate
+    ; `then`, `else` and `join` alike, however many blocks each of
+    ; those turns out to need internally (see `Builder`'s header
+    ; comment).
+    (let result-slot (emit-alloca! b))
+    (let then-bb (fresh-bb! b))
+    (let else-bb (fresh-bb! b))
+    (let join-bb (fresh-bb! b))
+    (emit-condbr! b then-bb else-bb cond-abs)
+    (switch-to! b then-bb)
+    (result-bind (lower-expr then env b funcs noop)
+      (fn (then-val) (lower-if-then-done then-val els result-slot else-bb join-bb env b funcs noop)))))
+
+(defn lower-if-then-done (then-val: Int) (els: Ast) (result-slot: Int) (else-bb: BB) (join-bb: BB) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result Int Str)
+  (do
+    ; Wherever lowering `then` left `cur` (its own last block, however
+    ; many it allocated along the way) is exactly where this store+br
+    ; belongs — no explicit switch needed here, only *into* `else`.
+    (emit-store! b result-slot then-val)
+    (emit-br! b join-bb)
+    (switch-to! b else-bb)
+    (result-bind (lower-expr els env b funcs noop)
+      (fn (else-val) (lower-if-else-done else-val result-slot join-bb b)))))
+
+(defn lower-if-else-done (else-val: Int) (result-slot: Int) (join-bb: BB) (b: Builder) -> (Result Int Str)
+  (do
+    (emit-store! b result-slot else-val)
+    (emit-br! b join-bb)
+    (switch-to! b join-bb)
+    (Ok (emit-load! b result-slot))))
+
+; `if`'s test must be a direct comparison — see header comment's "Scope"
+; (no other way to produce or consume a `Bool` here).
+(defn lower-cond (ast: Ast) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result Int Str)
+  (match ast
+    (ParenNode (Cons head (Cons a (Cons c (Nil)))) _) (lower-cond-named head a c env b funcs noop)
+    _ (Err "if's test must be a direct comparison (<, >, <=, >=, =) with the real instruction lowerer")))
+
+(defn lower-cond-named (head: Ast) (a-ast: Ast) (c-ast: Ast) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result Int Str)
+  (match (sym-str head)
+    (Some hn) (lower-cond-op hn a-ast c-ast env b funcs noop)
+    (None) (Err "if's test must be a direct comparison (<, >, <=, >=, =) with the real instruction lowerer")))
+
+(defn lower-cond-op (hn: Str) (a-ast: Ast) (c-ast: Ast) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result Int Str)
+  (if (is-cmp-op hn)
+    (result-bind (lower-expr a-ast env b funcs noop)
+      (fn (av) (result-bind (lower-expr c-ast env b funcs noop) (fn (cv) (Ok (emit-cmp2! b (cmp-pred-for hn) av cv))))))
+    (Err "if's test must be a direct comparison (<, >, <=, >=, =) with the real instruction lowerer")))
+
+(defn cmp-pred-for (op: Str) -> Int
+  (if (= op "<") (icmp-slt)
+    (if (= op ">") (icmp-sgt)
+      (if (= op "<=") (icmp-sle)
+        (if (= op ">=") (icmp-sge)
+          (icmp-eq))))))
+
+; -- arithmetic --
+
+(defn lower-arith (args: (List Ast)) (op: Str) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result Int Str)
+  (match args
+    (Cons a-ast (Cons c-ast (Nil)))
+      (result-bind (lower-expr a-ast env b funcs noop)
+        (fn (av) (result-bind (lower-expr c-ast env b funcs noop) (fn (cv) (Ok (apply-arith! b op av cv))))))
+    _ (Err (str-concat "operator " (str-concat op " expects exactly 2 arguments")))))
+
+(defn apply-arith! (b: Builder) (op: Str) (av: Int) (cv: Int) -> Int
+  (if (= op "+") (arith-add! b av cv)
+    (if (= op "-") (arith-sub! b av cv)
+      (if (= op "*") (arith-mul! b av cv)
+        (if (= op "/") (arith-div! b av cv)
+          (arith-rem! b av cv))))))
+
+; -- let (both the inline-body form `(let n e body…)` and the bare,
+; sequence-threading form `(let n e)` — see `lower-sequence` for the
+; latter). --
+
+(defn lower-let-inline (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result Int Str)
+  (match rest
+    (Cons name-ast (Cons expr-ast body)) (lower-let-inline-named name-ast expr-ast body env b funcs noop)
+    _ (Err "let requires a name and an expression")))
+
+(defn lower-let-inline-named (name-ast: Ast) (expr-ast: Ast) (body: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result Int Str)
+  (match (sym-str name-ast)
+    (None) (Err "let name must be a symbol")
+    (Some name) (result-bind (lower-expr expr-ast env b funcs noop) (fn (v) (lower-let-inline-bind name v body env b funcs noop)))))
+
+(defn lower-let-inline-bind (name: Str) (v: Int) (body: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result Int Str)
+  (do
+    (let slot (emit-alloca! b))
+    (emit-store! b slot v)
+    (lower-let-inline-continue body (map-set env name slot) b funcs noop v)))
+
+(defn lower-let-inline-continue (body: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (v: Int) -> (Result Int Str)
+  (match body
+    (Nil) (Ok v)
+    _ (lower-sequence body env b funcs noop)))
+
+; -- sequences: a `defn` body (or a `do`'s tail) is a `(List Ast)` of
+; sequential forms; a bare `(let n e)` among them extends the env for
+; every sibling that follows; a call to a known no-op (`shadow-push`/
+; `shadow-pop`) is skipped entirely (see header comment). --
+
+(defrec SimpleLet (name: Str) (expr: Ast))
+
+(defn as-simple-let (f: Ast) -> (Maybe SimpleLet)
+  (match f
+    (ParenNode (Cons head (Cons name-ast (Cons expr-ast (Nil)))) _) (as-simple-let-named head name-ast expr-ast)
+    _ (None)))
+
+(defn as-simple-let-named (head: Ast) (name-ast: Ast) (expr-ast: Ast) -> (Maybe SimpleLet)
+  (if (is-sym head "let")
+    (match (sym-str name-ast) (Some n) (Some (SimpleLet n expr-ast)) (None) (None))
+    (None)))
+
+(defn is-unit-noop-call (f: Ast) (noop: (Map Str Bool)) -> Bool
+  (match f
+    (ParenNode (Cons head (Nil)) _) (is-unit-noop-call-named head noop)
+    _ false))
+
+(defn is-unit-noop-call-named (head: Ast) (noop: (Map Str Bool)) -> Bool
+  (match (sym-str head)
+    (None) false
+    (Some name) (match (map-get noop name) (Some _) true (None) false)))
+
+(defn lower-sequence (forms: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result Int Str)
+  (match forms
+    (Nil) (Err "an empty body cannot be lowered to an Int")
+    (Cons f rest) (lower-sequence-step f rest env b funcs noop)))
+
+(defn lower-sequence-step (f: Ast) (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result Int Str)
+  (if (is-unit-noop-call f noop)
+    (lower-sequence-after-skip rest env b funcs noop)
+    (lower-sequence-step-real f rest env b funcs noop)))
+
+(defn lower-sequence-after-skip (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result Int Str)
+  (match rest
+    (Nil) (Err "a no-op call cannot be the last form of a body")
+    _ (lower-sequence rest env b funcs noop)))
+
+(defn lower-sequence-step-real (f: Ast) (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result Int Str)
+  (match (as-simple-let f)
+    (Some sl) (lower-sequence-let sl rest env b funcs noop)
+    (None) (lower-sequence-plain f rest env b funcs noop)))
+
+(defn lower-sequence-let (sl: SimpleLet) (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result Int Str)
+  (match sl
+    (SimpleLet name expr) (result-bind (lower-expr expr env b funcs noop) (fn (v) (lower-sequence-let-bind name v rest env b funcs noop)))))
+
+(defn lower-sequence-let-bind (name: Str) (v: Int) (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result Int Str)
+  (do
+    (let slot (emit-alloca! b))
+    (emit-store! b slot v)
+    (lower-sequence-rest rest (map-set env name slot) b funcs noop v)))
+
+(defn lower-sequence-rest (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (fallback: Int) -> (Result Int Str)
+  (match rest
+    (Nil) (Ok fallback)
+    _ (lower-sequence rest env b funcs noop)))
+
+(defn lower-sequence-plain (f: Ast) (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result Int Str)
+  (result-bind (lower-expr f env b funcs noop) (fn (v) (lower-sequence-rest rest env b funcs noop v))))
+
+; -- calls to other top-level `Int`-only `defn`s --
+
+(defn lower-args (arg-asts: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result (List Int) Str)
+  (match arg-asts
+    (Nil) (Ok (Nil))
+    (Cons a rest) (result-bind (lower-expr a env b funcs noop) (fn (v) (lower-args-cons v rest env b funcs noop)))))
+
+(defn lower-args-cons (v: Int) (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result (List Int) Str)
+  (result-bind (lower-args rest env b funcs noop) (fn (vs) (Ok (Cons v vs)))))
+
+(defn lower-call (name: Str) (arg-asts: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result Int Str)
+  (match (map-get funcs name)
+    (None) (Err (str-concat "cannot lower a call to " name))
+    (Some fr) (lower-call-with-ref fr name arg-asts env b funcs noop)))
+
+(defn lower-call-with-ref (fr: FuncRef) (name: Str) (arg-asts: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result Int Str)
+  (if (= (ast-list-length arg-asts) (func-ref-arity fr))
+    (result-bind (lower-args arg-asts env b funcs noop) (fn (args) (Ok (emit-call! b (func-ref-abs fr) args))))
+    (Err (str-concat "arity mismatch calling " name))))
+
+; ---------------------------------------------------------------------------
+; One function: bind params (each its own alloca, uniformly with `let`s
+; — see header comment), lower the body, then either `ret` the tagged
+; `i64` result directly, or — `main` only — untag+trunc to `i32` first.
+
+(defn bind-params! (b: Builder) (names: (List Str)) (start: Int) (i: Int) -> (Map Str Int)
+  (match names
+    (Nil) (map-new)
+    (Cons n rest) (bind-params-cons! b n rest start i)))
+
+(defn bind-params-cons! (b: Builder) (n: Str) (rest: (List Str)) (start: Int) (i: Int) -> (Map Str Int)
+  (do
+    (let param-abs (+ start i))
+    (let slot (emit-alloca! b))
+    (emit-store! b slot param-abs)
+    (map-set (bind-params! b rest start (+ i 1)) n slot)))
+
+(defn finish-return! (b: Builder) (is-main: Bool) (result-abs: Int) -> Unit
+  (if is-main (finish-main-return! b result-abs) (emit-ret! b result-abs)))
+
+; spec: `main` computes a tagged `i64` `Int` like any other function,
+; then `lshr 1` (untag) + `trunc i32` + `ret i32` — see header comment.
+(defn finish-main-return! (b: Builder) (result-abs: Int) -> Unit
+  (do
+    (let one (const-i64! b 1))
+    (let untagged (emit-binop! b (binop-lshr) result-abs one))
+    (let i32v (emit-cast! b (cast-trunc) untagged (ty-i32)))
+    (emit-ret! b i32v)))
+
+(defn lower-one-func (ld: LDefn) (num-globals: Int) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result LFunc Str)
+  (do
+    (let nparams (param-arity-of (ldefn-params ld)))
+    (let b (builder-new (+ num-globals nparams)))
+    (let env0 (bind-params! b (lparam-names (ldefn-params ld)) num-globals 0))
+    (let is-main (= (ldefn-name ld) "main"))
+    (result-bind (lower-sequence (ldefn-body ld) env0 b funcs noop)
+      (fn (result-abs) (lower-one-func-finish ld is-main result-abs b)))))
+
+(defn lower-one-func-finish (ld: LDefn) (is-main: Bool) (result-abs: Int) (b: Builder) -> (Result LFunc Str)
+  (do
+    (finish-return! b is-main result-abs)
+    (finish-builder! b)
+    (Ok (LFunc (ldefn-name ld) (param-arity-of (ldefn-params ld)) is-main (total-blocks b) (builder-items-ordered b)))))
+
+(defn lower-all-funcs (lds: (List LDefn)) (num-globals: Int) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result (List LFunc) Str)
+  (match lds
+    (Nil) (Ok (Nil))
+    (Cons ld rest) (result-bind (lower-one-func ld num-globals funcs noop) (fn (lf) (lower-all-funcs-cons lf rest num-globals funcs noop)))))
+
+(defn lower-all-funcs-cons (lf: LFunc) (rest: (List LDefn)) (num-globals: Int) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) -> (Result (List LFunc) Str)
+  (result-bind (lower-all-funcs rest num-globals funcs noop) (fn (lfs) (Ok (Cons lf lfs)))))
+
+; ---------------------------------------------------------------------------
+; Entry point: find `main`, lower every `Int`-only top-level `defn` (in
+; source order — this order is the module's global value numbering, see
+; header comment), hand the result to `bc-writer.mnd`.
+
+(defn ast-list-length-lds (lds: (List LDefn)) -> Int
+  (match lds (Nil) 0 (Cons _ rest) (+ 1 (ast-list-length-lds rest))))
+
+(pub defn lower-program (forms: (List Ast)) -> (Result Str Str)
+  (do
+    (let lds (collect-ldefns-all forms))
+    (let int-lds (filter-int-ldefns lds))
+    (match (find-ldefn-named int-lds "main")
+      (None) (Err "program has no top-level `defn main -> Int …` the real instruction lowerer can handle (`main`, and every function it calls, must have Int-only params and an Int return)")
+      (Some main-ld) (lower-program-checked-main main-ld int-lds lds))))
+
+(defn lower-program-checked-main (main-ld: LDefn) (int-lds: (List LDefn)) (all-lds: (List LDefn)) -> (Result Str Str)
+  (if (> (param-arity-of (ldefn-params main-ld)) 0)
+    (Err "`main` must take no arguments")
+    (lower-program-build int-lds all-lds)))
+
+(defn lower-program-build (int-lds: (List LDefn)) (all-lds: (List LDefn)) -> (Result Str Str)
+  (do
+    (let num-globals (ast-list-length-lds int-lds))
+    (let funcs (build-func-refs int-lds 0))
+    (let noop (collect-noop-names all-lds))
+    (match (lower-all-funcs int-lds num-globals funcs noop)
+      (Ok lfuncs) (Ok (write-module-bc (LlvmModule lfuncs)))
+      (Err msg) (Err (str-concat "cannot lower `main`: " msg)))))

@@ -1,0 +1,44 @@
+; Test harness (not part of the compiler): read a `.mnd` file and print
+; `pool/pool.mnd`'s `pool-summary` for it to stdout. Prints the summary
+; (one entry per line, or nothing if the program has none) and exits 0 on
+; a successful read; otherwise prints a reason to stderr and exits 1.
+;
+; Usage: bun run host/src/cli/menard.ts run src/tools/pool-dump.mnd -- <file.mnd>
+; Driven from tests/phase2/pool.test.ts.
+
+(import "../reader/ast.mnd")
+(import "../reader/read.mnd")
+(import "../pool/pool.mnd")
+
+(defn nl -> Str
+  (do
+    (let sb (sb-new))
+    (sb-append-byte! sb 10)
+    (sb-take-str! sb)))
+
+(defn fail (msg: Str) -> Unit
+  (do
+    (write 2 msg)
+    (write 2 (nl))
+    (exit 1)))
+
+(defn fail-parse (path: Str) (e: ParseError) -> Unit
+  (match e
+    (ParseError _ msg) (fail (str-concat (str-concat path ": parse error: ") msg))))
+
+(defn print-summary (forms: (List Ast)) -> Unit
+  (do
+    (println (pool-summary forms))
+    (exit 0)))
+
+(defn check-source (path: Str) (src: Str) -> Unit
+  (match (read-all src)
+    (Ok forms) (print-summary forms)
+    (Err e) (fail-parse path e)))
+
+(defn main -> Unit
+  (if (< (arg-count) 1)
+    (fail "usage: pool-dump.mnd <file.mnd>")
+    (match (read-file (arg 0))
+      (Ok src) (check-source (arg 0) src)
+      (Err _) (fail (str-concat "cannot read " (arg 0))))))

@@ -1,6 +1,12 @@
 # Dependencies
 host/node_modules/
 
+# Runtime build artifacts
+runtime/build/
+
+# Compiler (make hello-native) build artifacts
+build/
+
 # OS
 .DS_Store
 

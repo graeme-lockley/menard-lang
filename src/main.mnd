@@ -1,0 +1,367 @@
+; Menard compiler CLI entry point (slice 2.0 scaffold).
+;
+; Usage (via the host, per README/spec §3.5):
+;   bun run host/src/cli/menard.ts run src/main.mnd -- <check|emit> <file.mnd> [out.bc] [--dump-after=reader|desugar|type|close|root|derive]
+;
+; `check` runs the full front end through derive planning (see below).
+; `emit` does the same, then writes a bitcode module to `out.bc`, or to
+; `<file>.bc` (replacing a trailing `.mnd`, or appending `.bc`) when no
+; output path is given.
+;
+; `--dump-after=reader`, `--dump-after=desugar`, `--dump-after=type`,
+; `--dump-after=close`, `--dump-after=root`, and `--dump-after=derive`
+; may appear anywhere in the argument list; each prints the forms produced
+; by that pipeline stage to stderr (via `dump`) — `reader` right after
+; reading, before casing; `desugar` right after desugaring, once casing
+; has passed; `type` right after typechecking, once the typer has passed;
+; `close` after closure conversion; `root` after rooting analysis; `derive`
+; after derive planning. None of these count as a positional argument.
+; `--dump-after=derive` additionally prints `derive/plan.mnd`'s
+; `describe-derives` — which types the program's `show`/`=`/`compare`/
+; `dump` use sites need derived (slice 2F) — right after the forms dump.
+
+(import "./reader/ast.mnd")
+(import "./reader/read.mnd")
+(import "./reader/casing.mnd")
+(import "./desugar/desugar.mnd")
+(import "./type/check.mnd")
+(import "./close/close.mnd")
+(import "./root/root.mnd")
+(import "./derive/derive.mnd")
+(import "./derive/plan.mnd")
+(import "./emit/bitcode.mnd")
+
+(defn nl -> Str
+  (do
+    (let sb (sb-new))
+    (sb-append-byte! sb 10)
+    (sb-take-str! sb)))
+
+(defn write-line (fd: Int) (s: Str) -> Unit
+  (do
+    (write fd s)
+    (write fd (nl))
+    ()))
+
+; ---------------------------------------------------------------------------
+; argv: mode, file, [out] are positional; --dump-after=reader and
+; --dump-after=desugar are flags and are skipped when counting/indexing
+; positional arguments.
+
+(defn is-dump-after-reader (s: Str) -> Bool
+  (= s "--dump-after=reader"))
+
+(defn is-dump-after-desugar (s: Str) -> Bool
+  (= s "--dump-after=desugar"))
+
+(defn is-dump-after-type (s: Str) -> Bool
+  (= s "--dump-after=type"))
+
+(defn is-dump-after-close (s: Str) -> Bool
+  (= s "--dump-after=close"))
+
+(defn is-dump-after-root (s: Str) -> Bool
+  (= s "--dump-after=root"))
+
+(defn is-dump-after-derive (s: Str) -> Bool
+  (= s "--dump-after=derive"))
+
+(defn is-dump-flag (s: Str) -> Bool
+  (or (is-dump-after-reader s)
+    (or (is-dump-after-desugar s)
+      (or (is-dump-after-type s)
+        (or (is-dump-after-close s) (or (is-dump-after-root s) (is-dump-after-derive s)))))))
+
+(defn has-dump-after-reader-from (i: Int) (n: Int) -> Bool
+  (if (>= i n)
+    false
+    (if (is-dump-after-reader (arg i)) true (has-dump-after-reader-from (+ i 1) n))))
+
+(defn has-dump-after-reader -> Bool
+  (has-dump-after-reader-from 0 (arg-count)))
+
+(defn has-dump-after-desugar-from (i: Int) (n: Int) -> Bool
+  (if (>= i n)
+    false
+    (if (is-dump-after-desugar (arg i)) true (has-dump-after-desugar-from (+ i 1) n))))
+
+(defn has-dump-after-desugar -> Bool
+  (has-dump-after-desugar-from 0 (arg-count)))
+
+(defn has-dump-after-type-from (i: Int) (n: Int) -> Bool
+  (if (>= i n)
+    false
+    (if (is-dump-after-type (arg i)) true (has-dump-after-type-from (+ i 1) n))))
+
+(defn has-dump-after-type -> Bool
+  (has-dump-after-type-from 0 (arg-count)))
+
+(defn has-dump-after-close-from (i: Int) (n: Int) -> Bool
+  (if (>= i n)
+    false
+    (if (is-dump-after-close (arg i)) true (has-dump-after-close-from (+ i 1) n))))
+
+(defn has-dump-after-close -> Bool
+  (has-dump-after-close-from 0 (arg-count)))
+
+(defn has-dump-after-root-from (i: Int) (n: Int) -> Bool
+  (if (>= i n)
+    false
+    (if (is-dump-after-root (arg i)) true (has-dump-after-root-from (+ i 1) n))))
+
+(defn has-dump-after-root -> Bool
+  (has-dump-after-root-from 0 (arg-count)))
+
+(defn has-dump-after-derive-from (i: Int) (n: Int) -> Bool
+  (if (>= i n)
+    false
+    (if (is-dump-after-derive (arg i)) true (has-dump-after-derive-from (+ i 1) n))))
+
+(defn has-dump-after-derive -> Bool
+  (has-dump-after-derive-from 0 (arg-count)))
+
+(defn positional-count-from (i: Int) (n: Int) (acc: Int) -> Int
+  (if (>= i n)
+    acc
+    (if (is-dump-flag (arg i))
+      (positional-count-from (+ i 1) n acc)
+      (positional-count-from (+ i 1) n (+ acc 1)))))
+
+(defn positional-count -> Int
+  (positional-count-from 0 (arg-count) 0))
+
+(defn positional-arg-from (want: Int) (i: Int) (seen: Int) (n: Int) -> Str
+  (if (>= i n)
+    ""
+    (if (is-dump-flag (arg i))
+      (positional-arg-from want (+ i 1) seen n)
+      (if (= seen want)
+        (arg i)
+        (positional-arg-from want (+ i 1) (+ seen 1) n)))))
+
+(defn positional-arg (want: Int) -> Str
+  (positional-arg-from want 0 0 (arg-count)))
+
+; ---------------------------------------------------------------------------
+; Diagnostics (byte-offset spans only — no line/col map yet, see plan).
+
+(defn report-parse-error (path: Str) (e: ParseError) -> Unit
+  (match e
+    (ParseError sp msg)
+      (do
+        (write 2 path)
+        (write 2 ":")
+        (write 2 (show (span-start sp)))
+        (write 2 "-")
+        (write 2 (show (span-end sp)))
+        (write 2 ": error: ")
+        (write-line 2 msg))))
+
+(defn report-casing-error (path: Str) (e: CasingError) -> Unit
+  (match e
+    (CasingError sp msg)
+      (do
+        (write 2 path)
+        (write 2 ":")
+        (write 2 (show (span-start sp)))
+        (write 2 "-")
+        (write 2 (show (span-end sp)))
+        (write 2 ": error: ")
+        (write-line 2 msg))))
+
+(defn report-desugar-error (path: Str) (e: DesugarError) -> Unit
+  (match e
+    (DesugarError sp code msg)
+      (do
+        (write 2 path)
+        (write 2 ":")
+        (write 2 (show (span-start sp)))
+        (write 2 "-")
+        (write 2 (show (span-end sp)))
+        (write 2 ": error: ")
+        (write 2 msg)
+        (write 2 " [")
+        (write 2 code)
+        (write-line 2 "]"))))
+
+(defn report-desugar-errors (path: Str) (es: (List DesugarError)) -> Unit
+  (match es
+    (Nil) ()
+    (Cons e rest) (do (report-desugar-error path e) (report-desugar-errors path rest))))
+
+(defn report-type-error (path: Str) (e: TypeError) -> Unit
+  (match e
+    (TypeError sp code msg)
+      (do
+        (write 2 path)
+        (write 2 ":")
+        (write 2 (show (span-start sp)))
+        (write 2 "-")
+        (write 2 (show (span-end sp)))
+        (write 2 ": error: ")
+        (write 2 msg)
+        (write 2 " [")
+        (write 2 code)
+        (write-line 2 "]"))))
+
+(defn report-type-errors (path: Str) (es: (List TypeError)) -> Unit
+  (match es
+    (Nil) ()
+    (Cons e rest) (do (report-type-error path e) (report-type-errors path rest))))
+
+(defn fail-cannot-read (path: Str) -> Unit
+  (do
+    (write-line 2 (str-concat "error: cannot read " path))
+    (exit 2)))
+
+(defn usage -> Unit
+  (do
+    (write-line 2 "usage: main.mnd <check|emit> <file.mnd> [out.bc] [--dump-after=reader|desugar|type|close|root|derive]")
+    (exit 2)))
+
+; ---------------------------------------------------------------------------
+; Shared front end: read-all → (dump reader) → casing → desugar → (dump
+; desugar) → typecheck → (dump type) → closure-convert → (dump close) →
+; rooting-analyze → (dump root) → plan-derives → (dump derive) → on-ok.
+
+(defn maybe-dump (forms: (List Ast)) (dump-after: Bool) -> Unit
+  (if dump-after (dump forms) ()))
+
+(defn front-end (path: Str) (src: Str) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
+  (match (read-all src)
+    (Ok forms) (front-end-checked path forms dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive on-ok)
+    (Err e) (do (report-parse-error path e) (exit 1))))
+
+(defn front-end-checked (path: Str) (forms: (List Ast)) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
+  (do
+    (maybe-dump forms dump-after-reader)
+    (match (check-casing-all forms)
+      (Ok _) (front-end-desugared path forms dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive on-ok)
+      (Err e) (do (report-casing-error path e) (exit 1)))))
+
+(defn front-end-desugared (path: Str) (forms: (List Ast)) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
+  (match (desugar-all forms)
+    (Ok desugared)
+      (do
+        (maybe-dump desugared dump-after-desugar)
+        (front-end-typechecked path desugared dump-after-type dump-after-close dump-after-root dump-after-derive on-ok))
+    (Err es) (do (report-desugar-errors path es) (exit 1))))
+
+(defn front-end-typechecked (path: Str) (forms: (List Ast)) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
+  (match (typecheck-forms forms)
+    (Ok checked)
+      (do
+        (maybe-dump checked dump-after-type)
+        (front-end-closed path checked dump-after-close dump-after-root dump-after-derive on-ok))
+    (Err es) (do (report-type-errors path es) (exit 1))))
+
+(defn front-end-closed (path: Str) (forms: (List Ast)) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
+  (do
+    (let closed (closure-convert forms))
+    (maybe-dump closed dump-after-close)
+    (front-end-rooted path closed dump-after-root dump-after-derive on-ok)))
+
+(defn front-end-rooted (path: Str) (forms: (List Ast)) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
+  (do
+    (let rooted (rooting-analyze forms))
+    (maybe-dump rooted dump-after-root)
+    (front-end-derived path rooted dump-after-derive on-ok)))
+
+(defn maybe-dump-derive-plan (forms: (List Ast)) (dump-after-derive: Bool) -> Unit
+  (if dump-after-derive (write-line 2 (describe-derives forms)) ()))
+
+(defn front-end-derived (path: Str) (forms: (List Ast)) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
+  (do
+    (let derived (plan-derives forms))
+    (maybe-dump derived dump-after-derive)
+    (maybe-dump-derive-plan derived dump-after-derive)
+    (on-ok derived)))
+
+(defn with-source (path: Str) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
+  (match (read-file path)
+    (Ok src) (front-end path src dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive on-ok)
+    (Err _) (fail-cannot-read path)))
+
+; ---------------------------------------------------------------------------
+; check
+
+(defn accept-check (forms: (List Ast)) -> Unit
+  (exit 0))
+
+(defn run-check (path: Str) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) -> Unit
+  (with-source path dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive accept-check))
+
+; ---------------------------------------------------------------------------
+; emit
+
+(defn ends-with (s: Str) (suffix: Str) -> Bool
+  (do
+    (let sn (str-byte-length s))
+    (let un (str-byte-length suffix))
+    (and (>= sn un) (= (str-slice s (- sn un) un) suffix))))
+
+(defn default-output-path (path: Str) -> Str
+  (if (ends-with path ".mnd")
+    (str-concat (str-slice path 0 (- (str-byte-length path) 4)) ".bc")
+    (str-concat path ".bc")))
+
+(defn output-path (path: Str) (has-out: Bool) (out: Str) -> Str
+  (if has-out out (default-output-path path)))
+
+(defn fail-cannot-write (out: Str) -> Unit
+  (do
+    (write-line 2 (str-concat "error: cannot write " out))
+    (exit 2)))
+
+(defn fail-emit (msg: Str) -> Unit
+  (do
+    (write-line 2 (str-concat "error: " msg))
+    (exit 1)))
+
+; `emit-program-bc` (src/emit/bitcode.mnd) lowers `forms` to a bitcode
+; module, or fails with a message if the program has no top-level
+; `defn main -> Int …` its real instruction lowerer (src/emit/lower.mnd)
+; can lower — see that module's header comment for what it does and does
+; not lower yet.
+(defn write-module (out: Str) (forms: (List Ast)) -> Unit
+  (match (emit-program-bc forms)
+    (Ok bytes) (write-module-bytes out bytes)
+    (Err msg) (fail-emit msg)))
+
+(defn write-module-bytes (out: Str) (bytes: Str) -> Unit
+  (match (write-file out bytes)
+    (Ok _) (exit 0)
+    (Err _) (fail-cannot-write out)))
+
+(defn accept-emit (path: Str) (has-out: Bool) (out: Str) (forms: (List Ast)) -> Unit
+  (write-module (output-path path has-out out) forms))
+
+(defn run-emit (path: Str) (has-out: Bool) (out: Str) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) -> Unit
+  (with-source path dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive (fn (forms) (accept-emit path has-out out forms))))
+
+; ---------------------------------------------------------------------------
+; Dispatch
+
+(defn dispatch (mode: Str) (file: Str) (has-out: Bool) (out: Str) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) -> Unit
+  (if (= mode "check")
+    (run-check file dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive)
+    (if (= mode "emit")
+      (run-emit file has-out out dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive)
+      (usage))))
+
+(defn main -> Unit
+  (do
+    (let n (positional-count))
+    (if (< n 2)
+      (usage)
+      (dispatch
+        (positional-arg 0)
+        (positional-arg 1)
+        (>= n 3)
+        (if (>= n 3) (positional-arg 2) "")
+        (has-dump-after-reader)
+        (has-dump-after-desugar)
+        (has-dump-after-type)
+        (has-dump-after-close)
+        (has-dump-after-root)
+        (has-dump-after-derive)))))

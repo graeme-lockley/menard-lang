@@ -1,0 +1,439 @@
+; Bitcode writer — the real (bit-level) LLVM bitcode encoder, per ADR 40:
+; the compiler's product is bitcode (`.bc`), never textual `.ll`, and
+; `llvm-as` is never invoked from Menard. This module writes real, valid,
+; **unwrapped** LLVM bitcode (magic `BC\xC0\xDE`, no Darwin wrapper) for an
+; arbitrary `src/emit/llvm-ir.mnd` `LlvmModule`: any number of `i64`
+; (tagged `Int`) functions, plus one `is-main` function returning `i32`,
+; each with a real, already-lowered instruction stream (`alloca`/`store`/
+; `load`/`binop`/`icmp`/`br`/`call`/`cast`/`ret` — see `llvm-ir.mnd`'s
+; header comment for exactly what each `Item` means and how its operands
+; are already relativized before this module ever sees them).
+;
+; This replaces slice 2B/2C's single-constant `write-int-main-bc` (`define
+; i32 @main() { ret i32 N }` for a compile-time-folded `N`, module format
+; version 0): `src/emit/lower.mnd` no longer folds `main` to one `Int` at
+; all — every program's `.bc` now carries real instructions that *compute*
+; its result, and `write-module-bc` (below) is the one entry point that
+; turns the `LlvmModule` `lower.mnd` builds into bytes.
+;
+; A TypeScript prototype of the exact same algorithm — written first, to
+; validate the bit-level encoding against `llvm-bcanalyzer` and clang
+; before porting it here — lives at `tools/bc-writer/write-ssa.ts`. Its
+; header comment is the fuller write-up of *why* the format is what it
+; is (module version 1's relative value ids, opaque pointers, the
+; `alloca`/`call` field shapes that are *not* obvious from the format's
+; own documentation and had to be confirmed against a hand-written `.ll`
+; assembled with the real `llvm-as` and read back with
+; `llvm-bcanalyzer --dump`); this file's comments point back to it rather
+; than repeat it. That TypeScript file is reference only: nothing here or
+; in the rest of the compiler imports or depends on it.
+;
+; ## Why an append-only `BitSink`, and why no backpatching
+;
+; See slice 2A's original note (still exactly true here): a block's
+; `ENTER_SUBBLOCK` header carries the block body's length in 32-bit words,
+; only known *after* the body is encoded, and Menard's `StringBuffer` is
+; append-only (ADR 33/34) — so every block body (including, now, each
+; function's own per-constant `CONSTANTS_BLOCK`, see `llvm-ir.mnd`'s
+; "Constants are interleaved" note) is rendered into its own fresh
+; `BitSink` first, then spliced into the parent as whole, already-aligned
+; bytes once its length is known — never patched after the fact.
+;
+; ## No abbreviations, module format version 1
+;
+; Every record here is still `UNABBREV_RECORD` (no `DEFINE_ABBREV`, no
+; `BLOCKINFO_BLOCK` — see slice 2A's rationale, unchanged), but the module
+; version is now **1**, not 0: version 1 is what switches every
+; instruction operand that references another value (a binop's operands,
+; a call's callee and arguments, a store's pointer and value, …) from an
+; absolute value id to a *relative* one (`nextValueNo - targetAbsoluteId`)
+; — the one feature multi-instruction, multi-block function bodies
+; actually need (a version-0 module could only ever reference the single
+; constant slice 2A/2B built). `src/emit/lower.mnd`'s `Builder` computes
+; every relative reference itself, at the point an instruction is
+; appended (see its header comment) — every operand `write-module-bc`
+; sees below is already exactly what belongs in the record; this module
+; does no value-numbering of its own.
+
+(import "./llvm-ir.mnd")
+
+(pub alias LlvmModule LlvmModule)
+(pub alias LFunc LFunc)
+(pub alias Item Item)
+
+(defn end-block-code -> Int 0)
+(defn enter-subblock-code -> Int 1)
+(defn unabbrev-record-code -> Int 3)
+(defn abbrev-width -> Int 2) ; every block here uses this; see header comment
+
+(pub defn bitstream-magic-byte-0 -> Int 66) ; 'B'
+(pub defn bitstream-magic-byte-1 -> Int 67) ; 'C'
+(pub defn bitstream-magic-byte-2 -> Int 192) ; 0xC0
+(pub defn bitstream-magic-byte-3 -> Int 222) ; 0xDE
+
+(pub defn wrapper-magic-byte-0 -> Int 222) ; 0xDE — 0x0B17C0DE, byte 0 (LE)
+(pub defn wrapper-magic-byte-1 -> Int 192) ; 0xC0 — byte 1
+(pub defn wrapper-magic-byte-2 -> Int 23) ; 0x17 — byte 2
+(pub defn wrapper-magic-byte-3 -> Int 11) ; 0x0B — byte 3
+
+; ---------------------------------------------------------------------------
+; Small local helpers (`src/`'s "no prelude import" rule — see
+; `type/check.mnd`'s equivalent header note — means these are restated
+; here rather than imported).
+
+; 2^n, for n small (every call site here passes n <= 32): the "shift" half
+; of the no-bitwise-operators translation in the header comment.
+(defn pow2 (n: Int) -> Int
+  (if (<= n 0) 1 (* 2 (pow2 (- n 1)))))
+
+(defn int-list-length (xs: (List Int)) -> Int
+  (match xs
+    (Nil) 0
+    (Cons _ rest) (+ 1 (int-list-length rest))))
+
+(defn max-int (a: Int) (b: Int) -> Int (if (> a b) a b))
+
+(defn str-byte-ops-from (s: Str) (i: Int) (n: Int) -> (List Int)
+  (if (>= i n)
+    (Nil)
+    (Cons (str-byte s i) (str-byte-ops-from s (+ i 1) n))))
+
+; A Str's bytes as a `(List Int)` — how a record's inline name operands
+; (`vst-code-entry`, below) are built from a function's literal name.
+(defn str-byte-ops (s: Str) -> (List Int)
+  (str-byte-ops-from s 0 (str-byte-length s)))
+
+; ---------------------------------------------------------------------------
+; BitSink: pending bits (`pending`, `pending-bits`) plus the accumulated
+; output bytes (`buf`). See the header comment.
+
+(defrec BitSink (buf: StringBuffer) (pending: (Ref Int)) (pending-bits: (Ref Int)))
+
+(defn sink-buf (s: BitSink) -> StringBuffer
+  (match s (BitSink b _ _) b))
+(defn sink-pending (s: BitSink) -> (Ref Int)
+  (match s (BitSink _ p _) p))
+(defn sink-pending-bits (s: BitSink) -> (Ref Int)
+  (match s (BitSink _ _ b) b))
+
+(defn bitsink-new -> BitSink
+  (BitSink (sb-new) (ref 0) (ref 0)))
+
+; Flush every whole byte currently pending (`pending-bits >= 8`) into
+; `buf`. Bits above the flushed byte survive in `pending`, shifted down.
+(defn bitsink-flush! (s: BitSink) -> Unit
+  (if (>= (deref (sink-pending-bits s)) 8)
+    (do
+      (sb-append-byte! (sink-buf s) (% (deref (sink-pending s)) 256))
+      (set! (sink-pending s) (/ (deref (sink-pending s)) 256))
+      (set! (sink-pending-bits s) (- (deref (sink-pending-bits s)) 8))
+      (bitsink-flush! s))
+    ()))
+
+; Write the low `width` bits of `value` (unsigned, `value < 2^width`).
+; `value`'s bits occupy positions [pending-bits, pending-bits+width) and
+; `pending`'s current bits occupy [0, pending-bits) — disjoint ranges, so
+; `+` here is exactly bitwise OR (see the header comment's no-bitwise-ops
+; note).
+(defn bitsink-write-fixed! (s: BitSink) (value: Int) (width: Int) -> Unit
+  (if (= width 0)
+    ()
+    (do
+      (set! (sink-pending s) (+ (deref (sink-pending s)) (* value (pow2 (deref (sink-pending-bits s))))))
+      (set! (sink-pending-bits s) (+ (deref (sink-pending-bits s)) width))
+      (bitsink-flush! s))))
+
+; VBR(width): `value` split into (width-1)-bit chunks, least-significant
+; chunk first, each chunk's high bit set iff another chunk follows.
+(defn bitsink-write-vbr-chunks! (s: BitSink) (value: Int) (cont-bit: Int) (width: Int) -> Unit
+  (do
+    (let chunk (% value cont-bit))
+    (let rest (/ value cont-bit))
+    (if (= rest 0)
+      (bitsink-write-fixed! s chunk width)
+      (do
+        (bitsink-write-fixed! s (+ chunk cont-bit) width)
+        (bitsink-write-vbr-chunks! s rest cont-bit width)))))
+
+(defn bitsink-write-vbr! (s: BitSink) (value: Int) (width: Int) -> Unit
+  (bitsink-write-vbr-chunks! s value (pow2 (- width 1)) width))
+
+(defn bitsink-total-bits (s: BitSink) -> Int
+  (+ (* (sb-length (sink-buf s)) 8) (deref (sink-pending-bits s))))
+
+; Pad with zero bits to the next 32-bit boundary. Every rendered block
+; body ends with one of these right after its `END_BLOCK` — see the
+; header comment on why that makes backpatching unnecessary.
+(defn bitsink-align32! (s: BitSink) -> Unit
+  (do
+    (let rem (% (bitsink-total-bits s) 32))
+    (if (= rem 0) () (bitsink-write-fixed! s 0 (- 32 rem)))))
+
+; Append already byte-aligned bytes verbatim. Only ever called right
+; after a `bitsink-align32!` (this sink's own, or — for a spliced-in
+; block body — the fact that `render-block-body!` always returns a whole
+; number of bytes), so `pending-bits` is always 0 here.
+(defn bitsink-append-raw! (s: BitSink) (raw: Str) -> Unit
+  (sb-append! (sink-buf s) raw))
+
+(defn bitsink-finish! (s: BitSink) -> Str
+  (sb-take-str! (sink-buf s)))
+
+; ---------------------------------------------------------------------------
+; Bitstream structure: blocks and unabbreviated records, built on BitSink.
+
+; One record: `UNABBREV_RECORD code numops op...`, every field VBR6.
+(defn write-record-ops! (s: BitSink) (ops: (List Int)) -> Unit
+  (match ops
+    (Nil) ()
+    (Cons op rest) (do (bitsink-write-vbr! s op 6) (write-record-ops! s rest))))
+
+(defn write-record! (s: BitSink) (code: Int) (ops: (List Int)) -> Unit
+  (do
+    (bitsink-write-fixed! s (unabbrev-record-code) (abbrev-width))
+    (bitsink-write-vbr! s code 6)
+    (bitsink-write-vbr! s (int-list-length ops) 6)
+    (write-record-ops! s ops)))
+
+; Render a block's body (records/subblocks written by `write-body!` into
+; a fresh sink) terminated by `END_BLOCK` + `align32`. The result is
+; always a whole number of 32-bit words — see the header comment.
+(defn render-block-body! (write-body: (Fn BitSink -> Unit)) -> Str
+  (do
+    (let s (bitsink-new))
+    (write-body s)
+    (bitsink-write-fixed! s (end-block-code) (abbrev-width))
+    (bitsink-align32! s)
+    (bitsink-finish! s)))
+
+(defn append-word32-le! (s: BitSink) (n: Int) -> Unit
+  (do
+    (sb-append-byte! (sink-buf s) (% n 256))
+    (sb-append-byte! (sink-buf s) (% (/ n 256) 256))
+    (sb-append-byte! (sink-buf s) (% (/ n 65536) 256))
+    (sb-append-byte! (sink-buf s) (% (/ n 16777216) 256))))
+
+; Enter a subblock of `parent`: render its body in isolation (so its
+; length in words is known), then write the `ENTER_SUBBLOCK` header, the
+; length word, and splice the body in as raw bytes — never backpatched.
+(defn enter-subblock! (parent: BitSink) (block-id: Int) (write-body: (Fn BitSink -> Unit)) -> Unit
+  (do
+    (let body (render-block-body! write-body))
+    (bitsink-write-fixed! parent (enter-subblock-code) (abbrev-width))
+    (bitsink-write-vbr! parent block-id 8)
+    (bitsink-write-vbr! parent (abbrev-width) 4)
+    (bitsink-align32! parent)
+    (append-word32-le! parent (/ (str-byte-length body) 4))
+    (bitsink-append-raw! parent body)))
+
+; ---------------------------------------------------------------------------
+; Block ids and record codes actually used here (see
+; `tools/bc-writer/write-ssa.ts`'s header comment for the upstream names
+; this subset comes from, and how each was confirmed; only what this
+; module needs is named).
+
+(defn module-block-id -> Int 8)
+(defn constants-block-id -> Int 11)
+(defn function-block-id -> Int 12)
+(defn value-symtab-block-id -> Int 14)
+(defn type-block-id -> Int 17)
+
+(defn module-code-version -> Int 1)
+(defn module-code-function -> Int 8)
+
+(defn type-code-numentry -> Int 1)
+(defn type-code-void -> Int 2)
+(defn type-code-integer -> Int 7)
+(defn type-code-function -> Int 21)
+(defn type-code-opaque-pointer -> Int 25)
+
+(defn cst-code-settype -> Int 1)
+(defn cst-code-null -> Int 2)
+(defn cst-code-integer -> Int 4)
+
+(defn func-code-declareblocks -> Int 1)
+(defn func-code-inst-binop -> Int 2)
+(defn func-code-inst-cast -> Int 3)
+(defn func-code-inst-ret -> Int 10)
+(defn func-code-inst-br -> Int 11)
+(defn func-code-inst-alloca -> Int 19)
+(defn func-code-inst-load -> Int 20)
+(defn func-code-inst-cmp2 -> Int 28)
+(defn func-code-inst-call -> Int 34)
+(defn func-code-inst-store -> Int 44)
+
+(defn vst-code-entry -> Int 1)
+
+; The fixed leading type-table indices every module here uses (see
+; `write-types!` below): `ptr`, `i64`, `i32`, `void`, then one function
+; type per distinct arity `0..max-arity` for `(i64 x arity) -> i64`, then
+; one trailing `() -> i32` for `main`.
+(defn ty-ptr -> Int 0)
+(defn ty-i64 -> Int 1)
+(defn ty-i32 -> Int 2)
+
+(defn func-type-idx-for-arity (arity: Int) -> Int (+ 4 arity))
+(defn main-type-idx (ma: Int) -> Int (+ 4 (+ ma 1)))
+
+(defn i64-param-types (n: Int) -> (List Int)
+  (if (<= n 0) (Nil) (Cons (ty-i64) (i64-param-types (- n 1)))))
+
+(defn write-func-types! (t: BitSink) (arity: Int) (ma: Int) -> Unit
+  (if (> arity ma)
+    ()
+    (do
+      (write-record! t (type-code-function) (Cons 0 (Cons (ty-i64) (i64-param-types arity))))
+      (write-func-types! t (+ arity 1) ma))))
+
+; `ptr`(0), `i64`(1), `i32`(2), `void`(3), one `(i64 x arity) -> i64` per
+; `arity` in `0..ma`, then `() -> i32` for `main` — see header comment.
+(defn write-types! (t: BitSink) (ma: Int) -> Unit
+  (do
+    (write-record! t (type-code-numentry) (Cons (+ 4 (+ (+ ma 1) 1)) (Nil)))
+    (write-record! t (type-code-opaque-pointer) (Cons 0 (Nil))) ; idx 0: ptr, addrspace 0
+    (write-record! t (type-code-integer) (Cons 64 (Nil))) ; idx 1: i64
+    (write-record! t (type-code-integer) (Cons 32 (Nil))) ; idx 2: i32
+    (write-record! t (type-code-void) (Nil)) ; idx 3: void
+    (write-func-types! t 0 ma)
+    (write-record! t (type-code-function) (Cons 0 (Cons (ty-i32) (Nil)))))) ; () -> i32 (main)
+
+; ---------------------------------------------------------------------------
+; `MODULE_CODE_FUNCTION` — one per function, in module order (this order
+; *is* each function's module-scope global value id, `0..N-1`; every
+; `ICall`'s callee-rel operand was computed by `lower.mnd`'s `Builder`
+; against exactly this ordering, so this list must not be reordered).
+; type idx, ccc, has a body (not a declaration-only proto), external
+; linkage; the remaining fields (paramattrs, alignment, section,
+; visibility) are left at their all-zero defaults, same as slice 2A.
+(defn write-function-decls! (m: BitSink) (fs: (List LFunc)) (ma: Int) -> Unit
+  (match fs
+    (Nil) ()
+    (Cons f rest)
+      (do
+        (let ty (if (lfunc-is-main f) (main-type-idx ma) (func-type-idx-for-arity (lfunc-nparams f))))
+        (write-record! m (module-code-function) (Cons ty (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Nil)))))))))) 
+        (write-function-decls! m rest ma))))
+
+; ---------------------------------------------------------------------------
+; Encoding an `Int` constant as LLVM's usual sign-rotated `i64`/`i32`
+; integer: non-negative `v` as `v*2`, negative `v` as `(-v)*2 + 1`
+; (`emitSignedInt64` upstream). `lower.mnd`'s `Builder` calls this once per
+; distinct constant it interns (see `llvm-ir.mnd`'s `IConstI64`/
+; `IConstI32`); this module only ever writes the already-encoded integer
+; it is handed.
+(pub defn encode-signed-i64 (v: Int) -> Int
+  (if (>= v 0) (* v 2) (+ (* (- 0 v) 2) 1)))
+
+; `SETTYPE ty; INTEGER encoded` (or `NULL` for the zero shortcut, exactly
+; as slice 2A's single-constant writer used) — one function-local constant,
+; consuming the next value id exactly like an instruction (see
+; `llvm-ir.mnd`'s "Constants are interleaved" note).
+(defn write-const! (c: BitSink) (ty: Int) (encoded: Int) -> Unit
+  (do
+    (write-record! c (cst-code-settype) (Cons ty (Nil)))
+    (if (= encoded 0)
+      (write-record! c (cst-code-null) (Nil))
+      (write-record! c (cst-code-integer) (Cons encoded (Nil))))))
+
+; `cc = 0` (ccc, spec §3.4's "C calling convention everywhere") with bit
+; 15 (`1 << 15`) set — "explicit callee type follows", required with
+; opaque pointers (the callee's function type can't be read off the
+; pointee type of an opaque `ptr @callee`). Confirmed against the dump —
+; see `write-ssa.ts`'s header comment.
+(defn call-cc-info -> Int 32768)
+
+(defn write-call! (f: BitSink) (callee-rel: Int) (arg-rels: (List Int)) -> Unit
+  (write-record! f (func-code-inst-call)
+    (Cons 0 (Cons (call-cc-info) (Cons (func-type-idx-for-arity (int-list-length arg-rels)) (Cons callee-rel arg-rels)))))) 
+
+; One `Item` -> one record (or, for a constant, one tiny nested
+; `CONSTANTS_BLOCK`). See `llvm-ir.mnd`'s header comment for exactly what
+; each field means and which are (and are not) already relative.
+(defn write-item! (f: BitSink) (item: Item) -> Unit
+  (match item
+    (IConstI64 enc) (enter-subblock! f (constants-block-id) (fn (c) (write-const! c (ty-i64) enc)))
+    (IConstI32 enc) (enter-subblock! f (constants-block-id) (fn (c) (write-const! c (ty-i32) enc)))
+    ; [allocatedTy(i64), sizeTy(i32), sizeValAbs, align|explicitType] —
+    ; align 8 -> log2(8)+1 = 4; bit 6 (64) is the opaque-pointer "explicit
+    ; allocated type" flag, always set here (confirmed against the dump).
+    (IAlloca size-abs) (write-record! f (func-code-inst-alloca) (Cons (ty-i64) (Cons (ty-i32) (Cons size-abs (Cons 68 (Nil))))))
+    (IBinop op lhs rhs) (write-record! f (func-code-inst-binop) (Cons lhs (Cons rhs (Cons op (Nil)))))
+    (ICmp2 pred lhs rhs) (write-record! f (func-code-inst-cmp2) (Cons lhs (Cons rhs (Cons pred (Nil)))))
+    (ICast op val ty) (write-record! f (func-code-inst-cast) (Cons val (Cons ty (Cons op (Nil)))))
+    ; [ptrRel, valRel, alignCode, isVolatile] — align 8 -> 4, no explicit
+    ; type bit (only `alloca` carries that one).
+    (IStore ptr val) (write-record! f (func-code-inst-store) (Cons ptr (Cons val (Cons 4 (Cons 0 (Nil))))))
+    ; [ptrRel, destTypeIdx, alignCode, isVolatile] — needs the explicit
+    ; type (the opposite direction from `store`: nothing else tells the
+    ; reader what is being loaded through an opaque `ptr`).
+    (ILoad ptr) (write-record! f (func-code-inst-load) (Cons ptr (Cons (ty-i64) (Cons 4 (Cons 0 (Nil))))))
+    (IBr bb) (write-record! f (func-code-inst-br) (Cons bb (Nil)))
+    (ICondBr t e cond) (write-record! f (func-code-inst-br) (Cons t (Cons e (Cons cond (Nil)))))
+    (ICall callee args) (write-call! f callee args)
+    (IRet val) (write-record! f (func-code-inst-ret) (Cons val (Nil)))))
+
+(defn write-items! (f: BitSink) (items: (List Item)) -> Unit
+  (match items
+    (Nil) ()
+    (Cons it rest) (do (write-item! f it) (write-items! f rest))))
+
+; One function's `FUNCTION_BLOCK`: `DECLAREBLOCKS`, then every `Item` in
+; stream order (see `llvm-ir.mnd`'s "Basic blocks are implicit" note — no
+; separate per-block structure is written; a new block begins right after
+; a terminator `Item`, exactly as the format itself represents it). No
+; `VALUE_SYMTAB` inside the function body — see slice 2A's rationale
+; (unnamed SSA values are perfectly valid IR; only the module-level
+; `VALUE_SYMTAB` naming each `@function` is written, below).
+(defn write-function-body! (f: BitSink) (lf: LFunc) -> Unit
+  (do
+    (write-record! f (func-code-declareblocks) (Cons (lfunc-nblocks lf) (Nil)))
+    (write-items! f (lfunc-items lf))))
+
+(defn write-function-bodies! (m: BitSink) (fs: (List LFunc)) -> Unit
+  (match fs
+    (Nil) ()
+    (Cons f rest)
+      (do
+        (enter-subblock! m (function-block-id) (fn (fb) (write-function-body! fb f)))
+        (write-function-bodies! m rest))))
+
+; `VST_CODE_ENTRY [valueid, char...]` — one per function, `valueid` its
+; module-scope global value id (`idx`, `0..N-1` in module order, matching
+; `write-function-decls!`'s numbering exactly).
+(defn write-vst-entries! (v: BitSink) (fs: (List LFunc)) (idx: Int) -> Unit
+  (match fs
+    (Nil) ()
+    (Cons f rest)
+      (do
+        (write-record! v (vst-code-entry) (Cons idx (str-byte-ops (lfunc-name f))))
+        (write-vst-entries! v rest (+ idx 1)))))
+
+(defn max-arity-of (fs: (List LFunc)) -> Int
+  (match fs
+    (Nil) 0
+    (Cons f rest) (max-int (lfunc-nparams f) (max-arity-of rest))))
+
+(defn write-module-body! (m: BitSink) (mod: LlvmModule) -> Unit
+  (do
+    (let fs (llvm-module-funcs mod))
+    (let ma (max-arity-of fs))
+    (write-record! m (module-code-version) (Cons 1 (Nil))) ; version 1: relative value ids
+    (enter-subblock! m (type-block-id) (fn (t) (write-types! t ma)))
+    (write-function-decls! m fs ma)
+    (write-function-bodies! m fs)
+    (enter-subblock! m (value-symtab-block-id) (fn (v) (write-vst-entries! v fs 0)))))
+
+; The raw (unwrapped) bitcode bytes for `mod` — magic `BC\xC0\xDE`
+; followed by the module block above. No Darwin wrapper (ADR 40).
+; `src/emit/lower.mnd` is the one caller: it lowers a program's forms to
+; an `LlvmModule` with real instructions and hands it here — this
+; function itself knows nothing about `Ast` or lowering.
+(pub defn write-module-bc (mod: LlvmModule) -> Str
+  (do
+    (let top (bitsink-new))
+    (sb-append-byte! (sink-buf top) (bitstream-magic-byte-0))
+    (sb-append-byte! (sink-buf top) (bitstream-magic-byte-1))
+    (sb-append-byte! (sink-buf top) (bitstream-magic-byte-2))
+    (sb-append-byte! (sink-buf top) (bitstream-magic-byte-3))
+    (enter-subblock! top (module-block-id) (fn (m) (write-module-body! m mod)))
+    (bitsink-finish! top)))

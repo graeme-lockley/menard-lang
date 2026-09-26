@@ -1,0 +1,7 @@
+; Slice 2B/2H oracle fixture: `main`'s body is a pure `Int` arithmetic
+; expression (`+`). `src/emit/lower.mnd` lowers this to a real tagged
+; `add` plus its required `sub 1` fixup (spec §2.2 — see that module's
+; header comment), not a folded `ret i32 42`. See
+; `tests/phase2/oracle.test.ts`.
+
+(defn main -> Int (+ 20 22))

@@ -1,0 +1,1 @@
+(defn Foo (x: Int) -> Int x)

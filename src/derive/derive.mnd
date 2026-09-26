@@ -1,0 +1,34 @@
+; Derive engine — slice 2.5 stub, planning added in slice 2F.
+;
+; The real derive engine (a later slice) synthesizes `show`, `=`,
+; `compare` and `dump` per type instantiation (spec §2.8.1, §2.8.4): it
+; is the one place in the compiler that generates code per instantiation,
+; and it is what the interpreter's oracle (host/src/interp/derive.ts)
+; already does for the reference semantics. `plan-derives` itself is
+; still the identity on the form list — no code is generated yet, so the
+; pipeline's shape exists end to end without committing to a derive-plan
+; representation before instantiation sites are known — but slice 2F adds
+; the "which types are ever shown/compared" traversal itself, in
+; `derive/plan.mnd`'s `describe-derives`: it walks a program's forms and
+; reports every type its `show`/`=`/`compare`/`dump` use sites need,
+; wired into `src/main.mnd`'s `--dump-after=derive` alongside the raw
+; forms dump. That traversal is exactly the "which types are ever shown/
+; compared" question a real derive engine's instantiation-site scan
+; (§2.8.4) will also have to answer.
+;
+; TODO(later slice): per-type/per-instantiation code generation — port
+; the synthesis in host/src/interp/derive.ts into Menard `defn`s emitted
+; per instantiation, keyed by `plan.mnd`'s traversal (or a typed
+; successor to it). See `derive/plan.mnd`'s own header comment for why
+; that generation step, specifically, is deferred rather than attempted
+; here.
+
+(import "../reader/ast.mnd")
+
+; Re-export shim: a `pub` signature may not mention a private nominal
+; type (ADR 27), even one imported `pub` from elsewhere — see
+; src/reader/read.mnd's header comment for why.
+(pub alias Ast Ast)
+
+(pub defn plan-derives (forms: (List Ast)) -> (List Ast)
+  forms)

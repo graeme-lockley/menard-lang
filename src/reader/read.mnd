@@ -1,0 +1,297 @@
+; Reader — turns source bytes into Ast forms. Mirrors host/src/reader/read.ts.
+;
+; The host's `Reader` class carries `pos` as a mutable field; here every
+; scanning function threads the same state through a `(Ref Int)` parameter,
+; which is the idiomatic Menard substitute (spec §2.3: "the prelude can
+; implement mutable scope chains… behind a Ref when a program wants O(1)
+; extension"). List elements are built by ordinary recursion rather than a
+; mutable accumulator, since that needs no reversal step.
+
+(import "./ast.mnd")
+(import "../util/result.mnd")
+
+; Re-export shim — see casing.mnd for why this is needed.
+(pub alias Ast Ast)
+(pub alias Span Span)
+
+(pub defrec ParseError (span: Span) (message: Str))
+
+(defn (mk-err [a]) (start: Int) (end: Int) (message: Str) -> (Result a ParseError)
+  (Err (ParseError (Span start end) message)))
+
+; `not` is prelude, not a builtin (see prelude/core.mnd) — restated locally
+; rather than importing the prelude, to keep the reader dependency-free.
+(defn not (b: Bool) -> Bool
+  (if b false true))
+
+; ---------------------------------------------------------------------------
+; Byte classes
+
+(defn is-ws (b: Int) -> Bool
+  (or (= b 32) (= b 9) (= b 10) (= b 13)))
+
+(defn is-digit (b: Int) -> Bool
+  (and (>= b 48) (<= b 57)))
+
+(defn byte-in-from (b: Int) (chars: Str) (i: Int) (n: Int) -> Bool
+  (if (>= i n) false
+    (if (= (str-byte chars i) b) true (byte-in-from b chars (+ i 1) n))))
+
+(defn byte-in (b: Int) (chars: Str) -> Bool
+  (byte-in-from b chars 0 (str-byte-length chars)))
+
+; The reader's non-alphanumeric identifier characters (host read.ts isIdentStart).
+(defn is-ident-symbol-char (b: Int) -> Bool
+  (byte-in b "!$%&*+-./:<=>?@^_|~"))
+
+(defn is-ident-start (b: Int) -> Bool
+  (if (and (>= b 65) (<= b 90)) true
+    (if (and (>= b 97) (<= b 122)) true
+      (is-ident-symbol-char b))))
+
+(defn is-ident-cont (b: Int) -> Bool
+  (or (is-ident-start b) (is-digit b)))
+
+; Byte at `pos`, or -1 past the end of `src` (str-byte itself returns 0 out
+; of range, which is a real byte value, so callers must not use it as EOF).
+(defn peek-byte (src: Str) (pos: Int) -> Int
+  (if (< pos (str-byte-length src)) (str-byte src pos) -1))
+
+; ---------------------------------------------------------------------------
+; Whitespace and `;` line comments
+
+(defn skip-ws (src: Str) (pos: (Ref Int)) -> Unit
+  (do
+    (while (and (< (deref pos) (str-byte-length src)) (is-ws (str-byte src (deref pos))))
+      (set! pos (+ (deref pos) 1)))
+    (if (and (< (deref pos) (str-byte-length src)) (= (str-byte src (deref pos)) 59))
+      (do
+        (while (and (< (deref pos) (str-byte-length src)) (not (= (str-byte src (deref pos)) 10)))
+          (set! pos (+ (deref pos) 1)))
+        (skip-ws src pos))
+      ())))
+
+; ---------------------------------------------------------------------------
+; Strings
+
+(defn read-string-escape-byte (src: Str) (pos: (Ref Int)) (start: Int) (sb: StringBuffer) (e: Int) -> (Result Unit ParseError)
+  (if (or (= e 92) (= e 34))
+    (do
+      (set! pos (+ (deref pos) 1))
+      (sb-append-byte! sb e)
+      (read-string-body src pos start sb))
+    (mk-err (- (deref pos) 1) (+ (deref pos) 1) "invalid string escape")))
+
+(defn read-string-escape (src: Str) (pos: (Ref Int)) (start: Int) (sb: StringBuffer) -> (Result Unit ParseError)
+  (if (>= (deref pos) (str-byte-length src))
+    (mk-err start (deref pos) "unterminated string")
+    (read-string-escape-byte src pos start sb (str-byte src (deref pos)))))
+
+(defn read-string-byte (src: Str) (pos: (Ref Int)) (start: Int) (sb: StringBuffer) (b: Int) -> (Result Unit ParseError)
+  (do
+    (set! pos (+ (deref pos) 1))
+    (if (= b 34)
+      (Ok ())
+      (if (= b 92)
+        (read-string-escape src pos start sb)
+        (do (sb-append-byte! sb b) (read-string-body src pos start sb))))))
+
+(defn read-string-body (src: Str) (pos: (Ref Int)) (start: Int) (sb: StringBuffer) -> (Result Unit ParseError)
+  (if (>= (deref pos) (str-byte-length src))
+    (mk-err start (deref pos) "unterminated string")
+    (read-string-byte src pos start sb (str-byte src (deref pos)))))
+
+(defn read-string (src: Str) (pos: (Ref Int)) -> (Result Ast ParseError)
+  (do
+    (let start (deref pos))
+    (set! pos (+ (deref pos) 1))
+    (let sb (sb-new))
+    (result-bind (read-string-body src pos start sb)
+      (fn (_) (Ok (StrNode (sb-take-str! sb) (Span start (deref pos))))))))
+
+; ---------------------------------------------------------------------------
+; Numbers — int and float. See ast.mnd for why floats keep raw source text.
+
+(defrec NumScan (saw-dot: Bool) (saw-exp: Bool) (saw-digit: Bool))
+
+(defn scan-exponent (src: Str) (pos: (Ref Int)) (saw-digit: Bool) -> (Result NumScan ParseError)
+  (do
+    (set! pos (+ (deref pos) 1))
+    (if (or (= (peek-byte src (deref pos)) 45) (= (peek-byte src (deref pos)) 43))
+      (set! pos (+ (deref pos) 1))
+      ())
+    (if (is-digit (peek-byte src (deref pos)))
+      (scan-number src pos true true saw-digit)
+      (mk-err (deref pos) (deref pos) "malformed float exponent"))))
+
+(defn scan-number-byte (src: Str) (pos: (Ref Int)) (saw-dot: Bool) (saw-exp: Bool) (saw-digit: Bool) (b: Int) -> (Result NumScan ParseError)
+  (if (is-digit b)
+    (do (set! pos (+ (deref pos) 1)) (scan-number src pos saw-dot saw-exp true))
+    (if (and (= b 46) (not saw-dot) (not saw-exp))
+      (do (set! pos (+ (deref pos) 1)) (scan-number src pos true saw-exp saw-digit))
+      (if (and (or (= b 101) (= b 69)) (not saw-exp) saw-digit)
+        (scan-exponent src pos saw-digit)
+        (Ok (NumScan saw-dot saw-exp saw-digit))))))
+
+(defn scan-number (src: Str) (pos: (Ref Int)) (saw-dot: Bool) (saw-exp: Bool) (saw-digit: Bool) -> (Result NumScan ParseError)
+  (if (>= (deref pos) (str-byte-length src))
+    (Ok (NumScan saw-dot saw-exp saw-digit))
+    (scan-number-byte src pos saw-dot saw-exp saw-digit (str-byte src (deref pos)))))
+
+(defn digit-value (b: Int) -> Int (- b 48))
+
+(defn digits-to-int (src: Str) (i: Int) (end: Int) (acc: Int) -> Int
+  (if (>= i end) acc (digits-to-int src (+ i 1) end (+ (* acc 10) (digit-value (str-byte src i))))))
+
+(defn parse-int-text (src: Str) (start: Int) (end: Int) -> Int
+  (if (= (str-byte src start) 45)
+    (- 0 (digits-to-int src (+ start 1) end 0))
+    (if (= (str-byte src start) 43)
+      (digits-to-int src (+ start 1) end 0)
+      (digits-to-int src start end 0))))
+
+(defn finish-number-value (src: Str) (pos: (Ref Int)) (start: Int) (saw-dot: Bool) (saw-exp: Bool) -> (Result Ast ParseError)
+  (let end (deref pos))
+  (let sp (Span start end))
+  (if (or saw-dot saw-exp)
+    (Ok (FloatNode (str-slice src start (- end start)) sp))
+    (Ok (IntNode (parse-int-text src start end) sp))))
+
+(defn finish-number (src: Str) (pos: (Ref Int)) (start: Int) (scan: NumScan) -> (Result Ast ParseError)
+  (match scan
+    (NumScan saw-dot saw-exp saw-digit)
+      (if (not saw-digit)
+        (do (set! pos start) (read-sym src pos))
+        (finish-number-value src pos start saw-dot saw-exp))))
+
+(defn read-number (src: Str) (pos: (Ref Int)) -> (Result Ast ParseError)
+  (do
+    (let start (deref pos))
+    (if (or (= (peek-byte src (deref pos)) 45) (= (peek-byte src (deref pos)) 43))
+      (set! pos (+ (deref pos) 1))
+      ())
+    (result-bind (scan-number src pos false false false) (fn (scan) (finish-number src pos start scan)))))
+
+; ---------------------------------------------------------------------------
+; Symbols, `true`/`false`, and the trailing-`!` hygiene rule (spec §2.1)
+
+(defn check-bang-at (src: Str) (start: Int) (end: Int) (i: Int) -> (Result Unit ParseError)
+  (if (>= i end)
+    (Ok ())
+    (if (and (= (str-byte src i) 33) (not (= i (- end 1))))
+      (mk-err start end "'!' may appear only as the final character of an identifier")
+      (check-bang-at src start end (+ i 1)))))
+
+(defn classify-sym (src: Str) (start: Int) (end: Int) -> (Result Ast ParseError)
+  (let text (str-slice src start (- end start)))
+  (let sp (Span start end))
+  (if (= text "true")
+    (Ok (BoolNode true sp))
+    (if (= text "false")
+      (Ok (BoolNode false sp))
+      (Ok (SymNode text sp)))))
+
+(defn finish-sym (src: Str) (start: Int) (end: Int) -> (Result Ast ParseError)
+  (result-bind (check-bang-at src start end start) (fn (_) (classify-sym src start end))))
+
+(defn scan-ident (src: Str) (pos: (Ref Int)) -> Unit
+  (while (and (< (deref pos) (str-byte-length src)) (is-ident-cont (str-byte src (deref pos))))
+    (set! pos (+ (deref pos) 1))))
+
+(defn read-sym (src: Str) (pos: (Ref Int)) -> (Result Ast ParseError)
+  (do
+    (let start (deref pos))
+    (if (and (< start (str-byte-length src)) (is-ident-start (str-byte src start)))
+      (do
+        (scan-ident src pos)
+        (finish-sym src start (deref pos)))
+      (mk-err start (+ start 1) "expected identifier"))))
+
+; ---------------------------------------------------------------------------
+; Lists
+
+(defn read-elems-at (src: Str) (pos: (Ref Int)) (list-start: Int) (close: Int) (open-text: Str) -> (Result (List Ast) ParseError)
+  (if (= (str-byte src (deref pos)) close)
+    (do (set! pos (+ (deref pos) 1)) (Ok (Nil)))
+    (result-bind (read-form src pos)
+      (fn (head)
+        (result-bind (read-elems src pos list-start close open-text)
+          (fn (tail) (Ok (Cons head tail))))))))
+
+(defn read-elems (src: Str) (pos: (Ref Int)) (list-start: Int) (close: Int) (open-text: Str) -> (Result (List Ast) ParseError)
+  (do
+    (skip-ws src pos)
+    (if (>= (deref pos) (str-byte-length src))
+      (mk-err list-start (deref pos) (str-concat "unclosed " open-text))
+      (read-elems-at src pos list-start close open-text))))
+
+(defn read-bracketed (src: Str) (pos: (Ref Int)) (close: Int) (open-text: Str) (mk: (Fn (List Ast) Span -> Ast)) -> (Result Ast ParseError)
+  (do
+    (let list-start (deref pos))
+    (set! pos (+ (deref pos) 1))
+    (result-bind (read-elems src pos list-start close open-text)
+      (fn (elems) (Ok (mk elems (Span list-start (deref pos))))))))
+
+(defn read-paren (src: Str) (pos: (Ref Int)) -> (Result Ast ParseError)
+  (read-bracketed src pos 41 "(" ParenNode))
+
+(defn read-bracket (src: Str) (pos: (Ref Int)) -> (Result Ast ParseError)
+  (read-bracketed src pos 93 "[" BracketNode))
+
+; ---------------------------------------------------------------------------
+; Top-level dispatch
+
+(defn dispatch-sign (src: Str) (pos: (Ref Int)) (next: Int) -> (Result Ast ParseError)
+  (if (or (is-digit next) (= next 46))
+    (read-number src pos)
+    (read-sym src pos)))
+
+(defn dispatch-form (src: Str) (pos: (Ref Int)) -> (Result Ast ParseError)
+  (let b (str-byte src (deref pos)))
+  (if (= b 40) (read-paren src pos)
+    (if (= b 91) (read-bracket src pos)
+      (if (= b 34) (read-string src pos)
+        (if (or (= b 45) (= b 43))
+          (dispatch-sign src pos (peek-byte src (+ (deref pos) 1)))
+          (if (or (is-digit b) (and (= b 46) (is-digit (peek-byte src (+ (deref pos) 1)))))
+            (read-number src pos)
+            (if (is-ident-start b)
+              (read-sym src pos)
+              (mk-err (deref pos) (+ (deref pos) 1) (str-concat "unexpected byte " (show b)))))))))) 
+
+(defn read-form (src: Str) (pos: (Ref Int)) -> (Result Ast ParseError)
+  (do
+    (skip-ws src pos)
+    (if (>= (deref pos) (str-byte-length src))
+      (mk-err (deref pos) (deref pos) "unexpected end of input")
+      (dispatch-form src pos))))
+
+; ---------------------------------------------------------------------------
+; Entry points
+
+(defn finish-read (src: Str) (pos: (Ref Int)) (form: Ast) -> (Result Ast ParseError)
+  (do
+    (skip-ws src pos)
+    (if (< (deref pos) (str-byte-length src))
+      (mk-err (deref pos) (+ (deref pos) 1) "unexpected trailing input")
+      (Ok form))))
+
+; Read a single top-level form. Trailing junk after the form is an error.
+(pub defn read (src: Str) -> (Result Ast ParseError)
+  (do
+    (let pos (ref 0))
+    (result-bind (read-form src pos) (fn (form) (finish-read src pos form)))))
+
+(defn read-all-from (src: Str) (pos: (Ref Int)) -> (Result (List Ast) ParseError)
+  (do
+    (skip-ws src pos)
+    (if (>= (deref pos) (str-byte-length src))
+      (Ok (Nil))
+      (result-bind (read-form src pos)
+        (fn (form) (result-bind (read-all-from src pos) (fn (rest) (Ok (Cons form rest)))))))))
+
+; Read all top-level forms (for corpus / multi-form files).
+(pub defn read-all (src: Str) -> (Result (List Ast) ParseError)
+  (do
+    (let pos (ref 0))
+    (read-all-from src pos)))

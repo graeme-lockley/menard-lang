@@ -1,0 +1,7 @@
+; References a variable that was never bound — the typer must reject this
+; with E_TYPE_UNBOUND, matching host/src/type/check.ts's `inferSym`.
+
+(defn f (x: Int) -> Int
+  (+ x nonexistent))
+
+(println (show (f 1)))

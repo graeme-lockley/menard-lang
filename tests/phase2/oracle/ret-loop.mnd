@@ -1,0 +1,16 @@
+; Slice 2G oracle fixture: `loop`/`recur` over Int bindings — under
+; slice 2G's since-replaced constant-folding evaluator this folded to
+; `ret i32 55` (`sum-to 10` is `0 + 1 + … + 10 = 55`) at compile time.
+; Slice 2H's real instruction selector (`src/emit/lower.mnd`) does not
+; lower `loop`/`recur` yet (a clean, documented `Err` — see that
+; module's header comment's "Scope"): still interpretable (still 55 —
+; see `tests/phase2/oracle.test.ts`'s own "unsupported" test), but no
+; longer part of the emit-and-run native oracle.
+
+(defn sum-to (n: Int) -> Int
+  (loop ((i 0) (acc 0))
+    (if (> i n)
+      acc
+      (recur (+ i 1) (+ acc i)))))
+
+(defn main -> Int (sum-to 10))

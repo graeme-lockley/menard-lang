@@ -1,0 +1,9 @@
+; Fixture for tests/phase2/derive.test.ts: a `show` use site whose
+; argument is an `Int` literal — the plan's own "does `(show 1)` report
+; `Int` as needing `show`" acceptance check.
+
+(defn use-show -> Str
+  (show 1))
+
+(defn main -> Int
+  0)

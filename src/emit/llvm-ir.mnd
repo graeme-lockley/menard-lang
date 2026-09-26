@@ -1,0 +1,165 @@
+; LLVM IR — a small, flat, already bitcode-shaped instruction set for the
+; tagged-`Int` subset `src/emit/lower.mnd` lowers to and
+; `src/emit/bc-writer.mnd`'s `write-module-bc` serializes.
+;
+; ## Why "already bitcode-shaped"
+;
+; This is not a general SSA IR with a separate value-numbering pass before
+; encoding: every `Item` below is, field for field, one bitcode record's
+; worth of information, with every value-operand **already relativized** —
+; an `Item` never carries an absolute value id. `lower.mnd`'s `Builder`
+; computes that arithmetic (`nextValueNo - targetAbsoluteId`, module format
+; version 1's convention) at the exact moment an instruction is appended,
+; the same way it is computed once, linearly, by a real bitcode writer —
+; see that module's header comment for the algorithm, and
+; `tools/bc-writer/write-ssa.ts`'s (fuller) one for how it was validated
+; against `llvm-bcanalyzer --dump`/`clang` before either Menard module was
+; written. `write-module-bc` therefore never needs to know what a "value"
+; even is, or track any numbering itself; it only serializes the integers
+; it is given, per `Item` variant, into the matching `FUNC_CODE_INST_*`
+; record.
+;
+; Two fields are deliberately **not** relative, because the format itself
+; doesn't relativize them (confirmed empirically, see `write-ssa.ts`):
+; `IAlloca`'s array-size operand is the plain absolute id of the small
+; integer constant it references, and both `IBr`'s and `ICondBr`'s
+; basic-block targets are absolute 0-based block indices, never adjusted
+; against a value-numbering timeline at all (blocks aren't "values").
+;
+; ## Basic blocks are implicit
+;
+; `LFunc` has no notion of "a block" as a container — a new block begins
+; right after a terminator (`IBr`/`ICondBr`/`IRet`), exactly as the
+; bitcode format itself represents a function body (a flat instruction
+; stream; block boundaries are inferred by the reader from where
+; terminators fall). `LFunc`'s `nblocks` is the one count `write-module-bc`
+; needs up front, for the `FUNC_CODE_DECLAREBLOCKS` record — `lower.mnd`'s
+; `Builder` tracks it as it allocates fresh block indices (`fresh-bb!`).
+;
+; ## Constants are interleaved, not pooled up front
+;
+; There is no separate "module constant pool" or "collect every literal
+; this function needs before emitting its first instruction" pass.
+; `IConstI64`/`IConstI32` are ordinary `Item`s that may appear anywhere in
+; a function's item stream — each one is serialized as its own tiny
+; `CONSTANTS_BLOCK` subblock, right there, and consumes the next value
+; id exactly like any instruction would. `lower.mnd`'s `Builder`
+; deliberately does **not** dedupe/cache constants across a function: a
+; value defined inside an `if`'s `then` block does not dominate its
+; `else` sibling, so caching "the constant `1`"'s id across both would
+; produce an invalid module the moment the two branches' uses of it
+; disagree about which block defined it. Materializing a fresh constant
+; at every use site instead (a little bitcode bigger, never wrong,
+; regardless of where the request happens to fall relative to whatever
+; control flow is open) sidesteps the whole dominance question — see
+; `lower.mnd`'s header comment for the (real, once-broken-then-fixed)
+; example that is why this module documents the decision at all.
+; `write-module-bc` itself does nothing special for this; it is exactly
+; as generic as every other `Item`.
+;
+; ## Two functions worth of "kind"
+;
+; Every function here has `i64` (tagged `Int`) parameters and, ordinarily,
+; an `i64` (tagged) return — `IRet`'s operand is that same tagged value.
+; The sole exception is whichever one function is `is-main` (there is at
+; most one, spec's C entry point): its *last* two items before `IRet` are
+; still ordinary `Item`s (an `IBinop` doing the `lshr 1` untag and an
+; `ICast` doing the `trunc i32`, both built by `lower.mnd`, not by this
+; module or `write-module-bc`) — `is-main` only changes which function
+; *type* `write-module-bc` gives it (`() -> i32` instead of `(i64 x N) ->
+; i64`) and that its `IRet`'s value is consequently already `i32`-typed by
+; the time it is written.
+
+(pub variant Item
+  ; An i64/i32 constant already encoded per LLVM's zig-zag signed
+  ; integer scheme (`v>=0: v*2`, `v<0: (-v)*2+1` — see `bc-writer.mnd`'s
+  ; `encode-signed-i64`) — consumes the next value id, like an instruction.
+  (IConstI64 Int)
+  (IConstI32 Int)
+  ; `alloca i64, align 8`: `sizeConstAbsId` is the **absolute** (not
+  ; relative) id of the i32 constant `1` this alloca's array size uses —
+  ; see header comment's "deliberately not relative".
+  (IAlloca Int)
+  ; opcode, lhs-rel, rhs-rel -> new i64 value (see llvm-ir opcode
+  ; constants below).
+  (IBinop Int Int Int)
+  ; predicate, lhs-rel, rhs-rel -> new i1 value.
+  (ICmp2 Int Int Int)
+  ; opcode, val-rel, dest-type-index -> new value (only `Trunc`, i32, used
+  ; here — `main`'s untagged return).
+  (ICast Int Int Int)
+  ; ptr-rel, val-rel (both i64) — no result.
+  (IStore Int Int)
+  ; ptr-rel -> new i64 value.
+  (ILoad Int)
+  ; unconditional branch: target block, absolute.
+  (IBr Int)
+  ; conditional branch: true-block, false-block (both absolute), cond-rel.
+  (ICondBr Int Int Int)
+  ; callee-rel, arg-rels -> new i64 value. The callee's own function type
+  ; is derived from `(List Int)`'s length (its arity) by `write-module-bc`
+  ; — every function of a given arity shares one function type (spec
+  ; §3.4: "compile each polymorphic function exactly once" extends
+  ; trivially here since there is no polymorphism in this ABI at all, only
+  ; one type per arity).
+  (ICall Int (List Int))
+  ; val-rel — the function's return value (already `i32`-typed, via a
+  ; preceding `ICast`, for `main`; tagged `i64` otherwise).
+  (IRet Int))
+
+; One function: `i64`/`i64 x nparams` -> `i64` ABI, except `is-main`
+; (`() -> i32`, spec: untag + trunc before this `IRet`). `nblocks` is the
+; `DECLAREBLOCKS` count; `items` is the full, already-ordered instruction
+; (+ inline constant) stream.
+(pub defrec LFunc (name: Str) (nparams: Int) (is-main: Bool) (nblocks: Int) (items: (List Item)))
+
+(pub defn lfunc-name (f: LFunc) -> Str (match f (LFunc n _ _ _ _) n))
+(pub defn lfunc-nparams (f: LFunc) -> Int (match f (LFunc _ n _ _ _) n))
+(pub defn lfunc-is-main (f: LFunc) -> Bool (match f (LFunc _ _ m _ _) m))
+(pub defn lfunc-nblocks (f: LFunc) -> Int (match f (LFunc _ _ _ b _) b))
+(pub defn lfunc-items (f: LFunc) -> (List Item) (match f (LFunc _ _ _ _ i) i))
+
+; The module: an ordered list of functions. Order fixes each function's
+; module-scope global value id (`0..N-1`, in list order) — `ICall`'s
+; `callee-rel` operands were computed against exactly that ordering by
+; `lower.mnd`'s `Builder`, so `write-module-bc` must not reorder `funcs`.
+(pub defrec LlvmModule (funcs: (List LFunc)))
+
+(pub defn llvm-module-funcs (m: LlvmModule) -> (List LFunc) (match m (LlvmModule fs) fs))
+
+; ---------------------------------------------------------------------------
+; Opcode/predicate constants (llvm/Bitcode/LLVMBitCodes.h's
+; `Instruction`/`CmpInst::Predicate` encodings; the small subset this
+; backend needs — confirmed against `llvm-bcanalyzer --dump` by
+; `tools/bc-writer/write-ssa.ts`, see its header comment).
+
+(pub defn binop-add -> Int 0)
+(pub defn binop-sub -> Int 1)
+(pub defn binop-mul -> Int 2)
+(pub defn binop-sdiv -> Int 4)
+(pub defn binop-srem -> Int 6)
+(pub defn binop-shl -> Int 7)
+(pub defn binop-lshr -> Int 8)
+(pub defn binop-ashr -> Int 9)
+(pub defn binop-or -> Int 11)
+
+(pub defn cast-trunc -> Int 0)
+
+(pub defn icmp-eq -> Int 32)
+(pub defn icmp-ne -> Int 33)
+(pub defn icmp-sgt -> Int 38)
+(pub defn icmp-sge -> Int 39)
+(pub defn icmp-slt -> Int 40)
+(pub defn icmp-sle -> Int 41)
+
+; ---------------------------------------------------------------------------
+; The fixed leading type-table indices every module `write-module-bc`
+; writes uses (see that module's `write-types!`): `ptr`, `i64`, `i32`,
+; `void`, then one function type per distinct arity actually
+; defined/called. `lower.mnd`'s `Builder` needs `ty-i64`/`ty-i32` itself
+; (an `IAlloca`'s "1" is `i32`; `main`'s untag-and-return sequence casts to
+; `i32`) — both modules import these from here rather than each defining
+; (and risking disagreeing about) their own copy.
+(pub defn ty-ptr -> Int 0)
+(pub defn ty-i64 -> Int 1)
+(pub defn ty-i32 -> Int 2)

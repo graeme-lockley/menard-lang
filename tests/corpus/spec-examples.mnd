@@ -2,15 +2,22 @@
 
 (defrec (Pair [a b]) (fst: a) (snd: b))
 
+; `Tree` refers to itself in `Node`'s payload, so — like `Ast` in
+; `src/reader/ast.mnd` — it needs an empty forward declaration before its
+; real definition (the typer registers a type's name only once its whole
+; `variant`/`defrec` form has been collected, so a single self-referential
+; form can't see its own name yet).
+(variant (Tree [a]))
 (variant (Tree [a])
   (Leaf a)
   (Node (Tree a) (Tree a))
   (Empty))
 
+(defrec (Env [v]))
 (defrec (Env [v]) (parent: (Maybe (Env v))) (bindings: (Map Str v)))
 
 (alias Ints (List Int))
-(alias EnvMap (Map Str Binding))
+(alias EnvMap (Map Str Str))
 
 (defn sign (n: Int) -> Str
   (if (< n 0) "negative"

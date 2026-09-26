@@ -1,1 +1,1 @@
-(defn go () -> Str "ÿþ")
+(defn go -> Str "ÿþ")

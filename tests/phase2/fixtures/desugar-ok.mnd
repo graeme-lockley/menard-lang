@@ -1,0 +1,5 @@
+(and true false)
+(or true false)
+(cond (true 1) (else 2))
+(when true 1 ())
+(while false 1)

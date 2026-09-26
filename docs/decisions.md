@@ -13,7 +13,7 @@ project, kept for reference only.
 When this file and the specification disagree, the specification wins and this
 file is wrong.
 
-**On ADR numbers.** The standing decisions are numbered 1–39 in the index below,
+**On ADR numbers.** The standing decisions are numbered 1–40 in the index below,
 and the dated entries refer to them by those numbers. The specification does not
 cite them; it states rules and gives reasons inline, so it stands alone.
 
@@ -46,11 +46,11 @@ bearing choices; everything in the specification follows from them.
 | 12 | Single-threaded, STW collector | Removes barriers, safepoints, atomics | No concurrency in v1 |
 | 13 | **The reference interpreter is TypeScript on Bun, and it is the bootstrap host** | Types help; `bigint` gives exact integers; an oracle that shares no code with the backend can judge it; and running the compiler as stage0 needs no other compiler | Two implementations of the semantics to keep aligned; the interpreter must be fast and robust enough to run the compiler |
 | 14 | No import cycles | Simpler module compilation order | Mild annoyance |
-| 15 | **One compiler, written in Menard; the bootstrap is source-only** (§3.5) | A second compiler doubles every feature and needs its own agreement harness; interpreting the one compiler reaches the fixed point a stage earlier (`ir0 == ir1`) and makes one side of the gate the oracle | The interpreter is on the critical path of every bootstrap; bugs in the compiler's own logic are invisible to the gate, since both sides run the same source |
+| 15 | **One compiler, written in Menard; the bootstrap is source-only** (§3.5) | A second compiler doubles every feature and needs its own agreement harness; interpreting the one compiler reaches the fixed point a stage earlier (`bc0 == bc1`) and makes one side of the gate the oracle | The interpreter is on the critical path of every bootstrap; bugs in the compiler's own logic are invisible to the gate, since both sides run the same source |
 | 16 | **No caller-supplied ordering predicate in output paths** | It would be viral, silently omittable, and could let stages disagree | Less flexibility in presentation |
 | 17 | **Determinism is four obligations** (order, identity, text, arithmetic), plus two weaker ones for I/O boundaries and seeds | Each fails silently and independently | Emission paths deterministic in order but leaking addresses or float spellings |
 | 18 | **Showable, orderable and equatable are separate positive predicates** | The three restrictions differ; exclusions alone are undecidable by a reader | A `Ref` nested in an emitted record prints an address and breaks the gate |
-| 19 | **`Int` arithmetic: only `+`/`−` are free on tagged words** | A naive tagged multiply is wrong but *deterministic*, so the gate cannot catch it | Silent wrong arithmetic that passes `ir0 == ir1` forever, because the compiler only multiplies small numbers |
+| 19 | **`Int` arithmetic: only `+`/`−` are free on tagged words** | A naive tagged multiply is wrong but *deterministic*, so the gate cannot catch it | Silent wrong arithmetic that passes `bc0 == bc1` forever, because the compiler only multiplies small numbers |
 | 20 | **The gate proves agreement, not correctness** | A bug in the compiler's own logic is present in both executions, and a miscompile the compiler's run never reaches is outside the comparison; either passes it every time | Over-trusting the bootstrap; skipping the oracle |
 | 21 | **Type parameters are explicit and declared — never inferred** | Gives the abstraction without unification, generalization, HM diagnostics, or the value-restriction problem that `Ref` would force | More annotation at declaration sites; no `let`-polymorphism |
 | 22 | **No Unicode normalisation, anywhere** | Equality and order must be over one representation or map key behaviour depends on spelling | Slightly surprising string equality for some users |
@@ -71,6 +71,35 @@ bearing choices; everything in the specification follows from them.
 | 37 | **Process spawning is admitted, in argv-vector form only; shell strings and `fork` are refused permanently** | The build driver must be Menard, or the language's own integration test lives in a shell script; argv is data the compiler can see and check, whereas a shell string is unbounded ambient state in one string; and `fork` copies a GC's heap and collector state | ~310 lines implemented twice; a `SpawnError` taxonomy to keep aligned; a non-hermetic test tier; one more way for a path to reach the artifact |
 | 38 | **Literals and nullary constructors are static objects; layout and location are separate axes** | A literal or a nullary constructor is a constant of the program, so allocating it at each evaluation is pure waste — and for `Str`, which is not interned, "each evaluation" means each loop iteration. Making the pool static deletes the allocation rather than optimising it; splitting location from layout is what lets a `bytes` object be static and lets a nullary variant be header-only | ~60 lines of compiler for the pool; two new determinism obligations (dedup and emission order); a layout/location pair to keep straight; and the invariance rules of §2.2.1 must hold |
 | 39 | **`print` / `println` are variadic stdout emitters: `Str` raw, other showables via `show`; no auto-newline on `print`** | Quoting every `Str` through `show` made hello-world and IR-shaped stdout unusable via `print`; bare `Str` bytes plus explicit `(print (show x))` when quotes are wanted keeps `show` injective and `write` as the arbitrary-fd primitive | Special variadic typing; six intrinsics; callers who wanted the old always-show behaviour must wrap with `show` |
+| 40 | **The compiler emits LLVM bitcode (`.bc`), never textual `.ll` as the product** | Textual IR is a second spelling of the same module and invites non-determinism (whitespace, type printing); bitcode is the binary artifact the gate and the driver consume; `llvm-dis` stays a debug aid only | A Menard bitcode writer (~subset of LLVM encoding) must stay deterministic and in sync with the pinned LLVM/clang |
+---
+
+## 2026-09-25 — Compiler product is LLVM bitcode (ADR 40)
+
+### The decision
+
+The Menard compiler’s compared and linked artifact is **LLVM bitcode** (`.bc`).
+It does **not** emit textual LLVM IR (`.ll`) as the product. The agreement gate
+is `bc0 == bc1`. Human-oriented textual dumps (`llvm-dis`, `--dump-after`) are
+allowed only as non-compared diagnostics.
+
+Adds ADR 40; amends §3.1, §3.4, §3.5, §5 and related wording that previously
+said `ir0 == ir1` / “emit LLVM IR”.
+
+### Why
+
+Phase 2 needs a binary code generator: a pretty-printed `.ll` is not a stable
+binary encoding and is the wrong object for a byte gate. Bitcode keeps §3.4’s
+naive LLVM lowering and clang linking while replacing only serialization.
+Rejected: hand-rolled machine code / ELF (out of finishability); emitting `.ll`
+and shelling to `llvm-as` (reintroduces text as the source of truth).
+
+### Cost
+
+A bitcode writer in Menard for the instruction subset Menard lowers to; CI must
+pin clang/LLVM and validate `.bc` with the toolchain without treating `llvm-dis`
+output as golden unless encoding variance forces it.
+
 ---
 
 ## 2026-09-25 — `print` / `println`: bare stdout, ADR 39

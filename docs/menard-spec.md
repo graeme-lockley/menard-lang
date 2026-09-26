@@ -1,6 +1,6 @@
 # Menard — Language Specification
 
-A small, statically typed, self-hosting language that compiles to LLVM IR, with
+A small, statically typed, self-hosting language that compiles to LLVM bitcode, with
 first-class closures, explicit type parameters, and a precise garbage collector.
 
 > *Menard did not want to write another Quixote, which is easy. He wanted to
@@ -20,7 +20,7 @@ through two different worlds.
 ## 0. Executive summary
 
 Menard answers one question: *can a language small enough for one person to
-finish express its own compiler, compile to LLVM IR, and still have closures and
+finish express its own compiler, compile to LLVM bitcode, and still have closures and
 a real collector?*
 
 Every decision below trades features for finishability. The design keeps the
@@ -33,7 +33,7 @@ deferred to late phases. And the **bootstrap is single-sourced**: the compiler
 is written only in Menard, and the reference interpreter runs it until it can
 compile itself (§3.5).
 
-The proof of agreement is a single byte-comparison: `ir0 == ir1` — the IR the
+The proof of agreement is a single byte-comparison: `bc0 == bc1` — the IR the
 interpreted compiler emits for its own source equals the IR the native compiler
 emits for the same source.
 
@@ -52,10 +52,10 @@ time.
   variants, exhaustive matching, a standard library, diagnostics with source
   spans.
 - A **self-hosting compiler**: the Menard compiler is written in Menard and
-  compiles itself to LLVM IR. It is the **only** compiler: there is no bootstrap
+  compiles itself to LLVM bitcode. It is the **only** compiler: there is no bootstrap
   compiler in another language. The reference interpreter runs it until it has
   compiled itself.
-- A **build tool written in its own language** (`mn`, §2.15): emit IR, invoke the
+- A **build tool written in its own language** (`mn`, §2.15): emit bitcode, invoke the
   C toolchain, link the runtime, produce a binary. The top-level build command is
   Menard code, not a shell script.
 - **Finishable by one person.** This is the primary constraint, and it outranks
@@ -71,7 +71,7 @@ All eight must hold, and each is testable.
 
 1. The compiler compiles itself identically by both routes: the IR emitted by
    **stage0** (the compiler running on the interpreter) and by **stage1** (the
-   native binary built from stage0's IR) is **byte-identical** — `ir0 == ir1` —
+   native binary built from stage0's IR) is **byte-identical** — `bc0 == bc1` —
    and consequently `stage1` and `stage2` are byte-identical binaries (§3.5).
 2. The determinism obligations of §2.11 hold, and are checked in CI rather than
    asserted in prose.
@@ -1142,7 +1142,7 @@ Consequences, all accepted:
 
 ### 2.11 Determinism
 
-The gate `ir0 == ir1` requires **four independent properties**, and each one
+The gate `bc0 == bc1` requires **four independent properties**, and each one
 fails silently and independently. The gate runs one compiler on two runtimes —
 the interpreter and the C runtime — so anything the compiler's output inherits
 from its runtime rather than from its source is a way for the two to differ. Two
@@ -1280,7 +1280,7 @@ visible to the compiler and to a lint.
 
 **The spawning case is the clearest instance of this rule.** A child process
 inherits the environment and the working directory, so a child's behaviour is
-ambient — but the *compiler's IR* is not, because IR emission never consults a
+ambient — but the *compiler's bitcode* is not, because bitcode emission never consults a
 child. The driver's success depends on the toolchain; the artifact does not. That
 asymmetry is what makes §2.15's `spawn` safe for the fixed point.
 
@@ -1386,7 +1386,7 @@ that would.
 what prevents the most dangerous version of the identity leak: a record such as
 `{ name: Str, owner: (Ref T) }` nested inside an emitted list would otherwise
 print a heap address, the interpreter and the native compiler would print
-different ones, and `ir0 != ir1` — with the defect occurring nowhere near the
+different ones, and `bc0 != bc1` — with the defect occurring nowhere near the
 gate that catches it.
 
 **Float is unorderable by choice.** A total order on floats is possible once NaN
@@ -1451,14 +1451,14 @@ formatter.
 
 ### 2.14 What the bootstrap gate proves, and what it does not
 
-`ir0 == ir1` is the project's headline criterion, and it is worth being precise
+`bc0 == bc1` is the project's headline criterion, and it is worth being precise
 about its power.
 
 **It proves agreement.** One compiler, executed by the reference interpreter
 (stage0) and executed as native code built from its own output (stage1),
-produces byte-identical IR for its own source. The two executions share nothing
+produces byte-identical bitcode for its own source. The two executions share nothing
 but the compiler's source text: one runs on the interpreter's evaluator and its
-TypeScript built-ins, the other on emitted LLVM IR and the C runtime. This is
+TypeScript built-ins, the other on emitted LLVM bitcode and the C runtime. This is
 strong evidence for all four determinism obligations (§2.11) and for the
 fidelity of the self-host.
 
@@ -1655,7 +1655,7 @@ The distinction that matters is not *whether* a child process starts. It is
 
 | Form | The caller writes | Verdict |
 |---|---|---|
-| Shell string | `"cc -O2 -o out out.ll"` | **Refused, permanently** |
+| Shell string | `"cc -O2 -o out out.bc"` | **Refused, permanently** |
 | **argv vector** | `(list cc "-O2" "-o" out ir)` | **Admitted** |
 
 A shell string is unbounded ambient state in one string: the shell does word
@@ -1710,7 +1710,7 @@ rest are the ones that keep this from becoming a process-control library.
    only workable default. The distinction from rule 2 is the point: the
    environment may affect *how* a known program behaves, but not *which* program
    runs. §2.11.B governs the consequence — a child's behaviour may not reach
-   emitted bytes — and it cannot, because IR emission never spawns. Passing an
+   emitted bytes — and it cannot, because bitcode emission never spawns. Passing an
    explicit environment is v2.
 4. **The child's working directory is inherited.** There is no `chdir!` in v1:
    it is a process-global mutation that would make the meaning of every relative
@@ -1754,7 +1754,7 @@ rest are the ones that keep this from becoming a process-control library.
 
 **What this does to the fixed point: nothing — and the asymmetry is the reason.**
 The compiler's *output* never consults a child. `spawn` is a **driver**
-operation: the driver runs the compiler, the compiler emits IR, and IR emission
+operation: the driver runs the compiler, the compiler emits bitcode, and bitcode emission
 is a pure function of the source text. So obligations O, I, T and A (§2.11) are
 untouched, and §2.11.B's rule does the work: the toolchain may determine whether
 the build *succeeds*, never what the compiler *emits*. Two rules do follow:
@@ -1785,9 +1785,9 @@ The client that justifies the whole seam. Written in Menard, shipped with the
 compiler, ~350 lines:
 
 ```
-mn emit  <file.mnd>              ; IR to stdout. Spawns nothing.
+mn emit  <file.mnd>              ; bitcode to stdout. Spawns nothing.
 mn check <file.mnd>              ; typecheck only, no output
-mn build <file.mnd> [-o out]     ; emit IR, spawn cc, link, rename
+mn build <file.mnd> [-o out]     ; emit bitcode, spawn cc, link, rename
 mn run   <file.mnd> [args…]      ; build, then spawn the binary
 ```
 
@@ -1798,7 +1798,7 @@ Its rules, all of which fall out of the subsections above:
   (`--cc`, `--runtime`) with build-time defaults recorded by the build. The
   default is a path, not a name, and `mn --print-toolchain` prints what it will
   use — which is the auditability rule 2 exists to make possible.
-- **Intermediates go beside the output, never in `TMPDIR`.** `out.ll` and the
+- **Intermediates go beside the output, never in `TMPDIR`.** `out.bc` and the
   linker's output are built at temporary paths next to `-o`, then `(rename)`d
   into place. `rename` is atomic, so an interrupted or failed build **never
   leaves a stale artifact** — which is what makes it safe to interrupt
@@ -2025,15 +2025,16 @@ flowchart LR
     C --> D["typer<br/>instantiation, may-collect"]
     D --> E["closure conversion<br/>shape descriptors"]
     E --> F["rooting analysis<br/>shadow-stack push/pop"]
-    F --> G["emit LLVM IR<br/>alloca + mem2reg, static pool"]
+    F --> G["emit LLVM bitcode (.bc)<br/>alloca + mem2reg, static pool"]
     G --> H["clang -O2"]
     I["runtime.c<br/>alloc, GC, intern, strings, maps, buffers"] --> H
     H --> J["native binary"]
 ```
 
-Below the point where IR leaves the compiler, the **driver** (§2.15) takes over:
-it writes the IR, spawns the toolchain, links the runtime and renames the result
-into place. The compiler proper stops at the IR box.
+Below the point where **bitcode** leaves the compiler, the **driver** (§2.15) takes over:
+it writes the `.bc` bytes, spawns the toolchain, links the runtime and renames the result
+into place. The compiler proper stops at the bitcode box. Textual LLVM (`llvm-dis`)
+is a human debug aid only — never the compared artifact or the driver's input.
 
 **Pass ordering constraints** (violating these causes subtle miscompiles):
 
@@ -2102,6 +2103,11 @@ implementation on every bootstrap, and the compiler then checks itself.
 
 ### 3.4 Backend
 
+- **The compiler's product is LLVM bitcode (`.bc`), not textual IR (`.ll`).**
+  An in-memory module is serialized with a Menard bitcode writer. `llvm-dis` may
+  assist humans in debugging; it is never an input to the driver or to the
+  agreement gate. The gate compares bitcode bytes: `bc0 == bc1` (§3.5).
+
 - **Emit naive IR; let LLVM optimise.** One `alloca` per local, load/store on
   every access, and let `mem2reg` produce SSA. **Never hand-build phi nodes or
   reason about dominance frontiers** — this single choice removes the largest
@@ -2149,26 +2155,26 @@ itself:
 | Stage | What it is | Built from |
 |---|---|---|
 | **stage0** | `C` running on the interpreter | the source of `C`, and nothing else |
-| **stage1** | a native binary | `ir0`: stage0's output for the source of `C`, linked with the runtime |
-| **stage2** | a native binary | `ir1`: stage1's output for the source of `C`, linked with the runtime |
+| **stage1** | a native binary | `bc0`: stage0's bitcode for the source of `C`, linked with the runtime |
+| **stage2** | a native binary | `bc1`: stage1's bitcode for the source of `C`, linked with the runtime |
 
 ```mermaid
 flowchart TD
     SRC["compiler source (src/)<br/>Menard, written once"] --> S0["stage0<br/>the compiler on the interpreter"]
     SRC --> S1run
-    S0 -->|"compiles its own source → ir0"| S1["stage1 binary<br/>clang(ir0 + runtime)"]
-    S1 --> S1run["stage1 compiles the same source → ir1"]
-    S0 --> CMP{"cmp ir0 ir1"}
+    S0 -->|"compiles its own source → bc0"| S1["stage1 binary<br/>clang(bc0 + runtime)"]
+    S1 --> S1run["stage1 compiles the same source → bc1"]
+    S0 --> CMP{"cmp bc0 bc1"}
     S1run --> CMP
-    CMP -->|identical| OK["Agreement proven<br/>stage2 = clang(ir1) is stage1, byte for byte<br/>(not correctness — §2.14)"]
+    CMP -->|identical| OK["Agreement proven<br/>stage2 = clang(bc1) is stage1, byte for byte<br/>(not correctness — §2.14)"]
     CMP -->|differs| BAD["The interpreter and the native build disagree<br/>about what the compiler does. Bisect by pass dumps."]
 ```
 
 The fixed point is
 
-$$\mathit{ir}_0 = \mathit{ir}_1$$
+$$\mathit{bc}_0 = \mathit{bc}_1$$
 
-byte-identical IR, and it is the project's definition of *agreement*.
+byte-identical bitcode, and it is the project's definition of *agreement*.
 
 **Why equality is expected one stage earlier than in a conventional
 bootstrap.** In a bootstrap that starts from a *different* compiler, stage1 is
@@ -2181,7 +2187,7 @@ interpreter and the compiled code about what `C` does: a miscompile, an
 interpreter bug, or a determinism failure (§2.11). The shape is that of
 diverse double-compiling, with the interpreter as the diverse route.
 
-**Consequences.** If `ir0 == ir1`, then `stage2 = clang(ir1)` is `stage1`, byte
+**Consequences.** If `bc0 == bc1`, then `stage2 = clang(bc1)` is `stage1`, byte
 for byte, provided the toolchain is itself deterministic. `make
 check-fixed-point` builds stage2 and compares the binaries anyway, because it is
 cheap and it is the check on that proviso. A third stage adds nothing.
@@ -2295,7 +2301,7 @@ self-hosting works at all — before stage1 exists — every corpus program is r
 by the interpreter and compiled by stage0, and the two outputs are compared. A
 corpus program is small and exercises one thing, so a divergence points at a
 specific construct, with a small failing case, long before it could surface as
-an `ir0 != ir1` somewhere in the compiler. Once stage1 exists, the IR stage0 and
+an `bc0 != bc1` somewhere in the compiler. Once stage1 exists, the IR stage0 and
 stage1 emit for each corpus program is compared as well, and a difference there
 points at a specific pass.
 
@@ -2710,8 +2716,8 @@ a phase before the previous one's test passes.
 |---|---|---|---|
 | **0** | Reader, printer, AST, spans, casing check, test harness (TypeScript) | Round-trips the whole corpus, including invalid UTF-8; fuzzing finds no crashes | 1–2 wk |
 | **1** | **Reference interpreter** in TypeScript — full semantics, no LLVM; §2.8.2 built-ins; **virtual and real filesystem** for the seam; **modules**; fit to be a **build host** (§3.5): host-stack-independent recursion, asymptotically honest built-ins, adequate throughput | Runs the prelude and a test suite and becomes the semantic oracle; **and** passes the build-host benchmark (§3.7) — a multi-module program that reads and writes files, recurses deeply and builds large maps, within its time budget | 4–5 wk |
-| **2** | **The compiler, in Menard, run as stage0**: reader, desugar, typing + instantiation, closure conversion, derive engine, IR emission, **static pool**, **leaking allocator**; the minimal C runtime | Compiles real programs with closures, parameterised records and variants; binaries run; every corpus program's compiled output matches the interpreter's; `show` and order match the golden corpus | 8–12 wk |
-| **3** | **Self-hosting**: stage0 compiles the compiler; `stage1`, `stage2`; **the `mn` driver** (§2.15) built natively | **`ir0 == ir1`** and `stage1 == stage2`; **and the driver's artifact is byte-identical to the harness's** | 2–4 wk |
+| **2** | **The compiler, in Menard, run as stage0**: reader, desugar, typing + instantiation, closure conversion, derive engine, **LLVM bitcode** emission, **static pool**, **leaking allocator**; the minimal C runtime | Compiles real programs with closures, parameterised records and variants; binaries run; every corpus program's compiled output matches the interpreter's; `show` and order match the golden corpus | 8–12 wk |
+| **3** | **Self-hosting**: stage0 compiles the compiler; `stage1`, `stage2`; **the `mn` driver** (§2.15) built natively | **`bc0 == bc1`** and `stage1 == stage2`; **and the driver's artifact is byte-identical to the harness's** | 2–4 wk |
 | **4** | Real collector: conservative (Boehm-style) first, then precise shadow-stack **with layout-kind and location scanning** | GC stress corpus runs in bounded memory; heap-verify asserts the §2.2 invariants, including no-partial-publication, and is clean | 3–6 wk |
 | **5** | Performance and polish: NaN-boxing, `-O2` tuning, diagnostics, docs | Compiler compiles itself in under N minutes | open |
 
@@ -2848,7 +2854,7 @@ The failure modes this design is most exposed to, and what holds each one off.
 | Derive engine: `show`, `=`, `compare`, `dump`, three predicates, parametrised | Menard | 500 |
 | Closure conversion | Menard | 300 |
 | Rooting analysis | Menard | 250 |
-| LLVM IR emitter (incl. §2.2 arithmetic rules and no-partial-publication) | Menard | 1,470 |
+| LLVM bitcode emitter (incl. §2.2 arithmetic rules and no-partial-publication) | Menard | 1,470 |
 | **Static pool**: literal collection, dedup by bytes, canonical order, descriptors | Menard | 60 |
 | Driver, CLI, diagnostics (incl. the display view, §2.3) | Menard | 350 |
 | `mn`: emit / check / build / run, argv construction, temp + rename (§2.15) | Menard | 350 |
@@ -2922,7 +2928,7 @@ in two well-understood places.
       that command runs the Menard driver.
 - [ ] There is exactly one compiler, and it is written in Menard. No compiler
       binary is committed, downloaded or cached between bootstraps.
-- [ ] `make check-fixed-point` passes in CI: `ir0 == ir1` and `stage1 == stage2`,
+- [ ] `make check-fixed-point` passes in CI: `bc0 == bc1` and `stage1 == stage2`,
       **and** the driver's artifact matches the harness's byte for byte.
 - [ ] All determinism obligations (§2.11, including §2.11.B) hold and are checked
       in CI, not asserted in prose.
@@ -2987,7 +2993,7 @@ in two well-understood places.
       tested.
 - [ ] **Debug text cannot reach the artifact**: `dump` writes only to fd 2, has no
       value form and no accessor, and no diagnostic path calls it. A forgotten
-      `dump` does not change `ir0 == ir1`. (§2.16)
+      `dump` does not change `bc0 == bc1`. (§2.16)
 - [ ] Every fixed bug has a permanent corpus file.
 - [ ] The reference interpreter is retained and documented as the reference
       semantics, and it runs every revision of the compiler.
@@ -3005,5 +3011,5 @@ in two well-understood places.
 > float literals, a precise tag-based collector, and a build driver written in
 > the language itself — compiled by a single compiler written in Menard, which
 > the reference interpreter runs until it can compile itself; proven self-hosting
-> when the interpreted and native compilers emit byte-identical IR for their own
+> when the interpreted and native compilers emit byte-identical bitcode for their own
 > source, and honest that the bootstrap proves agreement, not correctness.

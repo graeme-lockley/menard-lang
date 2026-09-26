@@ -1,0 +1,312 @@
+; Static pool collection — slice 2F.
+;
+; ADR 38/spec §2.2.1: the static pool holds `Str` literals, `Float`
+; literals, interned `Sym` names and every nullary variant constructor
+; (`None`, `(Empty)`, `(NotFound)`, …) — "one static `None` serves every
+; instantiation" (§2.2.1), because types are erased and a nullary
+; constructor's object is header-only. This module is the first slice of
+; the collector that will eventually feed `emit/bc-writer.mnd`'s global
+; emission: it walks a program's forms for `Str` literals and nullary
+; constructor *mentions*, then **dedups by byte content and sorts by
+; byte content** (§2.2.1's own two determinism obligations, spec §2.11) —
+; the same two rules the real pool must satisfy so stage0 and stage1
+; agree on it byte for byte.
+;
+; `pool-summary` renders the result as one line per unique entry,
+; `"str \"…\""` or `"ctor Name"`, sorted — a goldenable text form for
+; `tests/phase2/pool.test.ts`, driven through the small harness
+; `src/tools/pool-dump.mnd`. `Float` literals and interned `Sym` names
+; (the pool's other two entry kinds, per §2.2.1) are not collected yet —
+; `reader/ast.mnd`'s own header comment notes Menard has no float
+; arithmetic to *produce* a `Float` value yet, and no program under `src/`
+; interns a `Sym` at runtime (`quote` is the only source of one, and its
+; body is data, not a name to intern) — so there is nothing to exercise
+; for either today; add them here when either lands.
+;
+; ## Why "mention", not "provably-constructed"
+;
+; This module has no typer in hand any more than `derive/plan.mnd` does
+; (see that module's header comment for why): a zero-argument application
+; `(Name)` where `Name` is a declared nullary constructor (a builtin —
+; `None`, `Nil`, the payload-free `IoError` variants — or a locally
+; declared `variant`/zero-field `defrec`) is counted as a pool entry
+; whether it appears as a *value* (`(None)` returned from a function) or
+; as a `match` *pattern* (`(match x (None) …)`, spec §2.4's pattern
+; grammar uses the identical `(Name)` shape for a nullary constructor
+; pattern). This over-approximates: a pattern never allocates or needs
+; the static object at all, only compares a tag. The cost of the
+; over-approximation is at most one spurious pool entry per nullary
+; constructor a program ever pattern-matches on — a header word, not a
+; correctness problem, since the module is not wired to the emitter yet
+; (see below). Narrow this once it is.
+;
+; ## Wiring
+;
+; `emit/bitcode.mnd`'s `emit-program-bc` calls `pool-summary` before
+; handing `forms` to `emit/lower.mnd`'s `lower-program`, so the collector
+; runs on every real `emit`, exactly as the slice asks — but
+; `lower.mnd`'s real instruction selector only lowers `Int` (never a
+; `Str`, a `Float` or a constructor object, see that module's header
+; comment), so nothing downstream consumes the result yet.
+; `emit-program-bc` computes it and discards it: a real global
+; emission pass — one static object per pool entry, `align 8`, sorted —
+; is future work (spec §2.11's "candidates for the static pool, since it
+; is what knows their bytes").
+
+(import "../reader/ast.mnd")
+
+; Re-export shim — see `reader/casing.mnd`'s header comment for why this
+; is needed: a `pub` signature (`pool-summary`, below) may not mention a
+; private nominal type, even one imported `pub` from elsewhere.
+(pub alias Ast Ast)
+
+; ---------------------------------------------------------------------------
+; Small Ast helpers, restated locally per `src/`'s "no prelude import"
+; rule (see `type/check.mnd`'s equivalent header note).
+
+(defn sym-str (ast: Ast) -> (Maybe Str)
+  (match ast (SymNode n _) (Some n) _ (None)))
+
+(defn is-sym (ast: Ast) (name: Str) -> Bool
+  (match (sym-str ast) (Some n) (= n name) (None) false))
+
+(defn list-length (xs: (List Ast)) -> Int
+  (match xs
+    (Nil) 0
+    (Cons _ rest) (+ 1 (list-length rest))))
+
+(defn str-list-contains (xs: (List Str)) (x: Str) -> Bool
+  (match xs
+    (Nil) false
+    (Cons h rest) (if (= h x) true (str-list-contains rest x))))
+
+; `main` or `(f [a])` — the type-parameter list (if any) is irrelevant
+; here, only the bare declared name is.
+(defn decl-name-of (name-part: Ast) -> (Maybe Str)
+  (match name-part
+    (SymNode n _) (Some n)
+    (ParenNode (Cons n-ast _) _) (sym-str n-ast)
+    _ (None)))
+
+; `(pub defn …)`/`(pub variant …)`/`(pub defrec …)` — strip the `pub`
+; wrapper, exactly as `emit/lower.mnd`'s `unwrap-pub` does.
+(defn unwrap-pub (ast: Ast) -> Ast
+  (match ast
+    (ParenNode (Cons head rest) sp) (unwrap-pub-head head rest sp ast)
+    _ ast))
+
+(defn unwrap-pub-head (head: Ast) (rest: (List Ast)) (sp: Span) (ast: Ast) -> Ast
+  (if (is-sym head "pub") (unwrap-pub (ParenNode rest sp)) ast))
+
+; ---------------------------------------------------------------------------
+; Constructor arities: name -> declared payload count. Builtins first,
+; then every top-level `variant` ctor and zero-or-more-field `defrec` in
+; `forms` (a `defrec`'s own name is its one constructor, per
+; `type/check.mnd`'s `collect-defrec-fields`).
+
+(defn builtin-ctor-arities -> (Map Str Int)
+  (do
+    (let m0 (map-new))
+    (let m1 (map-set m0 "None" 0))
+    (let m2 (map-set m1 "Some" 1))
+    (let m3 (map-set m2 "Ok" 1))
+    (let m4 (map-set m3 "Err" 1))
+    (let m5 (map-set m4 "Nil" 0))
+    (let m6 (map-set m5 "Cons" 2))
+    (let m7 (map-set m6 "NotFound" 0))
+    (let m8 (map-set m7 "Permission" 0))
+    (let m9 (map-set m8 "Exists" 0))
+    (let m10 (map-set m9 "IsADirectory" 0))
+    (let m11 (map-set m10 "NotADirectory" 0))
+    (let m12 (map-set m11 "InvalidPath" 0))
+    (let m13 (map-set m12 "TooLarge" 0))
+    (map-set m13 "Other" 1)))
+
+(defn register-ctor-arity (cname-ast: Ast) (arity: Int) (acc: (Map Str Int)) -> (Map Str Int)
+  (match (sym-str cname-ast)
+    (None) acc
+    (Some cname) (map-set acc cname arity)))
+
+(defn register-one-variant-ctor-arity (c: Ast) (acc: (Map Str Int)) -> (Map Str Int)
+  (match c
+    (ParenNode (Cons cname-ast payload-asts) _) (register-ctor-arity cname-ast (list-length payload-asts) acc)
+    _ acc))
+
+(defn register-variant-ctor-arities (ctor-asts: (List Ast)) (acc: (Map Str Int)) -> (Map Str Int)
+  (match ctor-asts
+    (Nil) acc
+    (Cons c rest) (register-variant-ctor-arities rest (register-one-variant-ctor-arity c acc))))
+
+(defn collect-variant-decl-arities (rest: (List Ast)) (acc: (Map Str Int)) -> (Map Str Int)
+  (match rest
+    (Cons _ ctors) (register-variant-ctor-arities ctors acc)
+    (Nil) acc))
+
+(defn collect-defrec-decl-arities (rest: (List Ast)) (acc: (Map Str Int)) -> (Map Str Int)
+  (match rest
+    (Cons name-part fields) (collect-defrec-decl-arities-named name-part fields acc)
+    (Nil) acc))
+
+(defn collect-defrec-decl-arities-named (name-part: Ast) (fields: (List Ast)) (acc: (Map Str Int)) -> (Map Str Int)
+  (match (decl-name-of name-part)
+    (None) acc
+    (Some type-name) (map-set acc type-name (list-length fields))))
+
+(defn collect-arities-named (hn: Str) (rest: (List Ast)) (acc: (Map Str Int)) -> (Map Str Int)
+  (if (= hn "variant") (collect-variant-decl-arities rest acc)
+    (if (= hn "defrec") (collect-defrec-decl-arities rest acc)
+      acc)))
+
+(defn collect-arities-form-checked (ast: Ast) (acc: (Map Str Int)) -> (Map Str Int)
+  (match ast
+    (ParenNode (Cons head rest) _) (collect-arities-form-head head rest acc)
+    _ acc))
+
+(defn collect-arities-form-head (head: Ast) (rest: (List Ast)) (acc: (Map Str Int)) -> (Map Str Int)
+  (match (sym-str head)
+    (None) acc
+    (Some hn) (collect-arities-named hn rest acc)))
+
+(defn collect-arities-form (ast: Ast) (acc: (Map Str Int)) -> (Map Str Int)
+  (collect-arities-form-checked (unwrap-pub ast) acc))
+
+(defn collect-arities (forms: (List Ast)) (acc: (Map Str Int)) -> (Map Str Int)
+  (match forms
+    (Nil) acc
+    (Cons f rest) (collect-arities rest (collect-arities-form f acc))))
+
+(defn all-ctor-arities (forms: (List Ast)) -> (Map Str Int)
+  (collect-arities forms (builtin-ctor-arities)))
+
+(defn is-nullary-ctor (name: Str) (arities: (Map Str Int)) -> Bool
+  (match (map-get arities name)
+    (None) false
+    (Some a) (= a 0)))
+
+; ---------------------------------------------------------------------------
+; Entry collection. An entry is rendered directly to its final line —
+; `"str \"…\""` or `"ctor Name"` — as it is found; dedup and sort (below)
+; then operate on those lines' own bytes, which is exactly "dedup by byte
+; content, sort by byte content" for this text form.
+
+(defn quote-str (s: Str) -> Str
+  (str-concat "\"" (str-concat s "\"")))
+
+(defn record-str! (entries: (Ref (List Str))) (s: Str) -> Unit
+  (set! entries (Cons (str-concat "str " (quote-str s)) (deref entries))))
+
+(defn record-ctor! (entries: (Ref (List Str))) (name: Str) -> Unit
+  (set! entries (Cons (str-concat "ctor " name) (deref entries))))
+
+; Only a *zero-argument* application `(Name)` — `rest` empty — can be a
+; nullary constructor mention (spec §2.4's pattern grammar and ordinary
+; application share that shape; see the header comment's "mention, not
+; provably-constructed").
+(defn maybe-record-nullary-ctor (head: Ast) (rest: (List Ast)) (arities: (Map Str Int)) (entries: (Ref (List Str))) -> Unit
+  (match rest
+    (Nil) (maybe-record-nullary-ctor-sym head arities entries)
+    _ ()))
+
+(defn maybe-record-nullary-ctor-sym (head: Ast) (arities: (Map Str Int)) (entries: (Ref (List Str))) -> Unit
+  (match (sym-str head)
+    (None) ()
+    (Some hn) (if (is-nullary-ctor hn arities) (record-ctor! entries hn) ())))
+
+(defn walk-list (xs: (List Ast)) (arities: (Map Str Int)) (entries: (Ref (List Str))) -> Unit
+  (match xs
+    (Nil) ()
+    (Cons x rest) (do (walk-expr x arities entries) (walk-list rest arities entries))))
+
+(defn walk-expr (ast: Ast) (arities: (Map Str Int)) (entries: (Ref (List Str))) -> Unit
+  (match ast
+    (StrNode s _) (record-str! entries s)
+    (ParenNode elems _) (walk-paren elems arities entries)
+    (BracketNode elems _) (walk-list elems arities entries)
+    _ ()))
+
+(defn walk-paren (elems: (List Ast)) (arities: (Map Str Int)) (entries: (Ref (List Str))) -> Unit
+  (match elems
+    (Nil) ()
+    (Cons head rest) (walk-paren-head head rest arities entries)))
+
+(defn walk-paren-head (head: Ast) (rest: (List Ast)) (arities: (Map Str Int)) (entries: (Ref (List Str))) -> Unit
+  (if (is-sym head "quote") ()
+    (walk-paren-nonquote head rest arities entries)))
+
+(defn walk-paren-nonquote (head: Ast) (rest: (List Ast)) (arities: (Map Str Int)) (entries: (Ref (List Str))) -> Unit
+  (do
+    (maybe-record-nullary-ctor head rest arities entries)
+    (walk-list rest arities entries)))
+
+; Top-level dispatch: skip `alias`/`defrec`/`variant`/`extern`/`import`
+; (declarations only, never a runtime literal or constructor mention);
+; walk everything else — `defn` bodies, top-level `let`s, bare top-level
+; expressions — as ordinary code, exactly as `derive/plan.mnd`'s
+; `walk-top-form` does for use-site collection.
+
+(defn is-decl-head (name: Str) -> Bool
+  (or (= name "alias") (or (= name "defrec") (or (= name "variant") (or (= name "extern") (= name "import"))))))
+
+(defn walk-top-form-checked (ast: Ast) (arities: (Map Str Int)) (entries: (Ref (List Str))) -> Unit
+  (match ast
+    (ParenNode (Cons head _) _) (walk-top-form-head head ast arities entries)
+    _ (walk-expr ast arities entries)))
+
+(defn walk-top-form-head (head: Ast) (whole: Ast) (arities: (Map Str Int)) (entries: (Ref (List Str))) -> Unit
+  (match (sym-str head)
+    (Some hn) (if (is-decl-head hn) () (walk-expr whole arities entries))
+    (None) (walk-expr whole arities entries)))
+
+(defn walk-top-form (ast: Ast) (arities: (Map Str Int)) (entries: (Ref (List Str))) -> Unit
+  (walk-top-form-checked (unwrap-pub ast) arities entries))
+
+(defn walk-top-forms (forms: (List Ast)) (arities: (Map Str Int)) (entries: (Ref (List Str))) -> Unit
+  (match forms
+    (Nil) ()
+    (Cons f rest) (do (walk-top-form f arities entries) (walk-top-forms rest arities entries))))
+
+; ---------------------------------------------------------------------------
+; Dedup by byte content, sort by byte content (ADR 38/§2.2.1's own two
+; rules), then join one entry per line.
+
+(defn nl -> Str
+  (do
+    (let sb (sb-new))
+    (sb-append-byte! sb 10)
+    (sb-take-str! sb)))
+
+(defn str-insert-sorted (x: Str) (xs: (List Str)) -> (List Str)
+  (match xs
+    (Nil) (Cons x (Nil))
+    (Cons h rest) (if (<= (compare x h) 0) (Cons x (Cons h rest)) (Cons h (str-insert-sorted x rest)))))
+
+(defn sort-strs (xs: (List Str)) -> (List Str)
+  (match xs
+    (Nil) (Nil)
+    (Cons h rest) (str-insert-sorted h (sort-strs rest))))
+
+(defn insert-distinct (x: Str) (xs: (List Str)) -> (List Str)
+  (if (str-list-contains xs x) xs (Cons x xs)))
+
+(defn dedup-list (xs: (List Str)) -> (List Str)
+  (match xs
+    (Nil) (Nil)
+    (Cons x rest) (insert-distinct x (dedup-list rest))))
+
+(defn join-lines (xs: (List Str)) -> Str
+  (match xs
+    (Nil) ""
+    (Cons x (Nil)) x
+    (Cons x rest) (str-concat x (str-concat (nl) (join-lines rest)))))
+
+; The static pool candidates `forms` mentions — every distinct `Str`
+; literal and every distinct nullary constructor mention (see this
+; module's header comment) — one per line, `"str \"…\""` or `"ctor
+; Name"`, deduped and sorted by that line's own byte content (ADR 38).
+; Empty (`""`) if `forms` mentions neither.
+(pub defn pool-summary (forms: (List Ast)) -> Str
+  (do
+    (let arities (all-ctor-arities forms))
+    (let entries (ref (Nil)))
+    (walk-top-forms forms arities entries)
+    (join-lines (sort-strs (dedup-list (deref entries))))))

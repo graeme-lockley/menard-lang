@@ -1,0 +1,221 @@
+; Rooting analysis — Phase 2 slice 2E.
+;
+; ## What this pass does (and does not, yet)
+;
+; The real pass (spec §4.4's four rooting rules, ADR 10's alloca +
+; mem2reg discipline instead of LLVM statepoints) inserts a shadow-stack
+; push/pop around every call that can allocate while a live pointer is
+; held only in a register, so a later collector can find every root.
+; `emit/lower.mnd`'s real instruction selector only handles `Int`
+; (tagged, never heap-allocated) values today, and `runtime/src/alloc.c`
+; is a leaking bump allocator that never collects either (see that
+; module's and `runtime/src/shadow.c`'s header comments) — so there is,
+; today, nothing to actually root.
+;
+; What this slice adds instead is the pipeline *shape* the real pass
+; will grow into: every `defn` body is rewritten to call two new
+; top-level `defn`s, `shadow-push`/`shadow-pop`, once each — Menard-level
+; stand-ins for the runtime's real `mn_shadow_push`/`mn_shadow_pop` C
+; symbols (`runtime/src/shadow.c`), which a later slice's instruction
+; emission will lower these calls to directly. For now, both stand-ins
+; are Unit no-ops (`(defn shadow-push -> Unit ())`), and — same
+; rationale as `close/close.mnd`'s lambda lifting — `emit/lower.mnd`
+; recognises exactly this structural shape (`Unit` return, zero params,
+; an empty-parens `()` body) and skips a call to one entirely rather
+; than lowering it as a real call, so every rewritten body still
+; computes exactly the value it computed before wrapping.
+;
+; ## The wrapping shape, and why it is not the naively simpler one
+;
+; A `defn`'s body is a `(List Ast)` sequence whose *last* form's value is
+; the sequence's value (`emit/lower.mnd`'s `lower-sequence`). Simply
+; appending `(shadow-push) … (shadow-pop)` around the *whole* body —
+; the shape this slice's plan first sketches — would make `(shadow-pop)`
+; the new last form, and its (Unit) value would silently become the
+; `defn`'s own result instead of the real one. This pass instead
+; inserts `(shadow-push)` before the body and `(shadow-pop)` immediately
+; before the body's *last* form, leaving that last form itself last:
+;
+;   (defn f … -> T e1 e2 … en)
+;     -->
+;   (defn f … -> T (shadow-push) e1 e2 … (shadow-pop) en)
+;
+; (`e1..en-1` — everything but the last form — is `init`, below; `en` is
+; `last`.) A one-form body (`(defn main -> Int 41)`) still works: `init`
+; is empty, so the rewritten body is just `(shadow-push) (shadow-pop)
+; 41`. Popping immediately before rather than strictly after evaluating
+; the returned value is not what real rooting rules would want (the
+; return value itself might be the very thing that needs to stay rooted
+; until the caller has it) — but nothing here allocates yet, so it does
+; not matter *today*; this is exactly the kind of shape-not-semantics
+; shortcut `close/close.mnd`'s header comment takes too, and is called
+; out here for the same reason.
+;
+; ## Limitations
+;
+; - Every `defn` is wrapped unconditionally, not only ones that call a
+;   known allocator (`Cons`, `ref`, …) — the plan's "practical approach"
+;   alternative. Selective wrapping needs a call-graph reachability
+;   analysis this slice does not build; wrapping everything is simpler
+;   and, since the wrappers are free-standing no-ops, no less correct.
+;   `shadow-push`/`shadow-pop` themselves are the one exception — they
+;   are emitted directly by this pass, *after* wrapping every `defn`
+;   `rooting-analyze` was actually given, so they are never wrapped
+;   themselves — wrapping them would turn their one-form `()` body into
+;   a three-form `(shadow-push) () (shadow-pop)` one, which no longer
+;   matches the exact single-empty-parens shape `emit/lower.mnd`'s
+;   `is-unit-noop-ldefn` recognises, so they would stop being skippable
+;   no-ops and become ordinary (self-referential, unresolvable) calls
+;   instead.
+; - Like `close/close.mnd`, this pass only understands the top-level
+;   shape of a `defn` form (find `->`, split header/return/body); it
+;   never looks inside the body beyond splitting off its last form, so
+;   it cannot mis-handle whatever the body contains — but it also cannot
+;   be "smarter" about where pushes/pops would ideally go.
+
+(import "../reader/ast.mnd")
+
+; Re-export shim: a `pub` signature may not mention a private nominal
+; type (ADR 27), even one imported `pub` from elsewhere — see
+; src/reader/read.mnd's header comment for why.
+(pub alias Ast Ast)
+
+; ---------------------------------------------------------------------------
+; Small Ast helpers, restated locally per src/'s "no prelude import" rule
+; (see e.g. `close/close.mnd`'s equivalent header note).
+
+(defn sym-str (ast: Ast) -> (Maybe Str)
+  (match ast (SymNode n _) (Some n) _ (None)))
+
+(defn is-sym (ast: Ast) (name: Str) -> Bool
+  (match (sym-str ast) (Some n) (= n name) (None) false))
+
+(defn dummy-span -> Span (Span 0 0))
+
+(defn append-list (xs: (List Ast)) (ys: (List Ast)) -> (List Ast)
+  (match xs
+    (Nil) ys
+    (Cons x rest) (Cons x (append-list rest ys))))
+
+; ---------------------------------------------------------------------------
+; `(defn name params… -> Ret body…)` header/body split — see
+; `close/close.mnd`'s `ArrowSplit` for the identical shape (restated
+; locally here too, same "no prelude import" rule).
+
+(defrec ArrowSplit (header: (List Ast)) (arrow: Ast) (ret: Ast) (body: (List Ast)))
+
+(defn arrow-split-header (s: ArrowSplit) -> (List Ast) (match s (ArrowSplit h _ _ _) h))
+(defn arrow-split-arrow (s: ArrowSplit) -> Ast (match s (ArrowSplit _ a _ _) a))
+(defn arrow-split-ret (s: ArrowSplit) -> Ast (match s (ArrowSplit _ _ r _) r))
+(defn arrow-split-body (s: ArrowSplit) -> (List Ast) (match s (ArrowSplit _ _ _ b) b))
+
+(defn find-arrow (elems: (List Ast)) -> (Maybe ArrowSplit)
+  (match elems
+    (Nil) (None)
+    (Cons e rest) (find-arrow-step e rest)))
+
+(defn find-arrow-step (e: Ast) (rest: (List Ast)) -> (Maybe ArrowSplit)
+  (if (is-sym e "->") (find-arrow-tail e rest) (find-arrow-prepend e rest)))
+
+(defn find-arrow-tail (arrow: Ast) (rest: (List Ast)) -> (Maybe ArrowSplit)
+  (match rest
+    (Cons ret body) (Some (ArrowSplit (Nil) arrow ret body))
+    (Nil) (None)))
+
+(defn find-arrow-prepend (e: Ast) (rest: (List Ast)) -> (Maybe ArrowSplit)
+  (match (find-arrow rest)
+    (None) (None)
+    (Some s) (Some (ArrowSplit (Cons e (arrow-split-header s)) (arrow-split-arrow s) (arrow-split-ret s) (arrow-split-body s)))))
+
+; ---------------------------------------------------------------------------
+; Splitting a body into "everything but the last form" and "the last
+; form" — see header comment's "The wrapping shape" for why.
+
+(defrec SplitLast (init: (List Ast)) (last: Ast))
+
+(defn split-last (xs: (List Ast)) -> (Maybe SplitLast)
+  (match xs
+    (Nil) (None)
+    (Cons x (Nil)) (Some (SplitLast (Nil) x))
+    (Cons x rest) (split-last-cons x rest)))
+
+(defn split-last-cons (x: Ast) (rest: (List Ast)) -> (Maybe SplitLast)
+  (match (split-last rest)
+    (None) (Some (SplitLast (Nil) x))
+    (Some sl) (Some (SplitLast (Cons x (split-last-init sl)) (split-last-last sl)))))
+
+(defn split-last-init (sl: SplitLast) -> (List Ast) (match sl (SplitLast i _) i))
+(defn split-last-last (sl: SplitLast) -> Ast (match sl (SplitLast _ l) l))
+
+; ---------------------------------------------------------------------------
+; `(shadow-push)` / `(shadow-pop)` call sites, and the wrapping itself.
+
+(defn shadow-call (name: Str) -> Ast
+  (ParenNode (Cons (SymNode name (dummy-span)) (Nil)) (dummy-span)))
+
+(defn wrap-defn-body (body: (List Ast)) -> (List Ast)
+  (match (split-last body)
+    (None) body
+    (Some sl) (wrap-defn-body-split sl)))
+
+(defn wrap-defn-body-split (sl: SplitLast) -> (List Ast)
+  (append-list
+    (Cons (shadow-call "shadow-push") (split-last-init sl))
+    (Cons (shadow-call "shadow-pop") (Cons (split-last-last sl) (Nil)))))
+
+; ---------------------------------------------------------------------------
+; Top-level driver: every `defn` (through an optional `pub` wrapper) has
+; its body wrapped; every other top-level form (another declaration, or
+; a bare top-level expression) passes through unchanged.
+
+(defn root-top-level (ast: Ast) -> Ast
+  (match ast
+    (ParenNode (Cons head rest) sp) (root-top-level-head head rest sp ast)
+    _ ast))
+
+(defn root-top-level-head (head: Ast) (rest: (List Ast)) (sp: Span) (orig: Ast) -> Ast
+  (if (is-sym head "pub")
+    (prepend-pub (root-top-level (ParenNode rest sp)) sp)
+    (if (is-sym head "defn")
+      (root-defn-form (Cons head rest) sp)
+      orig)))
+
+(defn prepend-pub (inner: Ast) (sp: Span) -> Ast
+  (match inner
+    (ParenNode elems isp) (ParenNode (Cons (SymNode "pub" sp) elems) isp)
+    _ inner))
+
+(defn root-defn-form (elems: (List Ast)) (sp: Span) -> Ast
+  (match (find-arrow elems)
+    (None) (ParenNode elems sp)
+    (Some split) (rebuild-defn split sp)))
+
+(defn rebuild-defn (split: ArrowSplit) (sp: Span) -> Ast
+  (ParenNode
+    (append-list
+      (arrow-split-header split)
+      (Cons (arrow-split-arrow split) (Cons (arrow-split-ret split) (wrap-defn-body (arrow-split-body split)))))
+    sp))
+
+(defn root-all (forms: (List Ast)) -> (List Ast)
+  (match forms
+    (Nil) (Nil)
+    (Cons f rest) (Cons (root-top-level f) (root-all rest))))
+
+; The two Unit no-op `defn`s every wrapped body now calls — see header
+; comment for why they are added here, unwrapped, rather than being
+; subject to `root-top-level` themselves.
+(defn shadow-helper-defn (name: Str) -> Ast
+  (ParenNode
+    (Cons (SymNode "defn" (dummy-span))
+      (Cons (SymNode name (dummy-span))
+        (Cons (SymNode "->" (dummy-span))
+          (Cons (SymNode "Unit" (dummy-span))
+            (Cons (ParenNode (Nil) (dummy-span)) (Nil))))))
+    (dummy-span)))
+
+(defn shadow-helper-defns -> (List Ast)
+  (Cons (shadow-helper-defn "shadow-push") (Cons (shadow-helper-defn "shadow-pop") (Nil))))
+
+(pub defn rooting-analyze (forms: (List Ast)) -> (List Ast)
+  (append-list (root-all forms) (shadow-helper-defns)))
