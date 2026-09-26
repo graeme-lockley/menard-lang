@@ -37,6 +37,23 @@ void mn_write_stdout(const uint8_t *p, size_t n) {
 }
 
 /*
+ * `mn_write_stderr` — fd-2 counterpart to `mn_write_stdout` above, same
+ * short-write loop, same rationale (see this file's header comment):
+ * `(write 2 s)` (once lowered) is the one legitimate fd-2 writer other
+ * than `mn_panic`, and the two never share a code path.
+ */
+void mn_write_stderr(const uint8_t *p, size_t n) {
+  size_t off = 0;
+  while (off < n) {
+    ssize_t w = write(2, p + off, n - off);
+    if (w < 0) {
+      mn_panic("mn_write_stderr: write failed");
+    }
+    off += (size_t)w;
+  }
+}
+
+/*
  * Decimal digits of `v`, most-significant first, no trailing newline —
  * callers that want one (as `println` does) append it themselves, the
  * same division of labour the interpreter's `println` builtin uses

@@ -70,13 +70,19 @@ diagnostics, and a build-host benchmark in CI. Issues
 [#1](https://github.com/graeme-lockley/menard-lang/issues/1)–[#10](https://github.com/graeme-lockley/menard-lang/issues/10)
 are closed.
 
-**Phase 2 is complete for the accepted Int/if/let/calls subset**: Int `main`s
-(and every top-level `Int`-only `defn` they call, including lifted
-closures), arithmetic and comparisons, `if`/`let`/`do` — real SSA
-instructions computing the result, not a compile-time-folded exit code —
-see `tests/phase2/oracle/*.mnd` and the interp↔native CI oracle,
+**Phase 2 is complete for the accepted Int/if/let/calls subset, plus
+`println`/`print`/`write`**: Int `main`s (and every top-level `Int`-only
+`defn` they call, including lifted closures), arithmetic and comparisons,
+`if`/`let`/`do` — real SSA instructions computing the result, not a
+compile-time-folded exit code — and standalone top-level `println`/`print`
+of `Str` literals and `Int`s, plus `write` to fd 1/2, lowered to real LLVM
+string globals and calls into the runtime's fd-1/fd-2 print helpers
+(`mn_write_stdout`/`mn_print_i64`/`mn_write_stderr`), with non-`defn`
+top-level forms prepended into `main`'s body as effect steps — see
+`tests/phase2/oracle/*.mnd` and the interp↔native CI oracle,
 `tests/phase2/oracle.test.ts` (which asserts the emitted module's
-disassembly actually contains the instruction each fixture claims). The
+disassembly actually contains the instruction each fixture claims, and that
+interp/native stdout agree byte-for-byte for the `println` fixture). The
 compiler is written in Menard and run as stage0 on the interpreter
 (`bun run host/src/cli/menard.ts run src/main.mnd -- emit <file> [out.bc]`);
 `make ret-native` / `make hello-native` link and run its output with clang.
@@ -178,18 +184,19 @@ bun test ../tests
 ### Emit and link a native binary (Phase 2 smoke)
 
 ```bash
-make hello-native   # stage0 emit -> clang link -> run; prints the exit code
+make hello-native   # stage0 emit -> clang link -> run; prints "Hello, world!" and exit 0
 ```
 
 This runs the compiler (`src/main.mnd`, in Menard, interpreted by the Phase 1
 host — stage0) in `emit` mode over `hello.mnd`, links the resulting
-`build/hello.bc` with clang, and runs `build/hello`. The compiler does not
-yet lower a real program (see `src/emit/bitcode.mnd`), so every input
-currently produces the same bitcode module — `define i32 @main() { ret i32
-0 }` — and the smoke's point is that the **emitted bytes are bitcode clang
-can actually link**, not that the program has been compiled. `make
-runtime-smoke` (below) is the C runtime's equivalent smoke test; neither
-needs the other yet.
+`build/hello.bc` against the runtime (`RUNTIME_LIB_SRCS`) with clang, and runs
+`build/hello`. `hello.mnd`'s standalone top-level `(println "Hello,
+world!")` is real, lowered instruction selection (see `src/emit/lower.mnd`'s
+header comment for exactly what `println`/`print`/`write` and the
+Int/if/let/calls subset lower to) calling into the runtime's fd-1 print
+helpers (`runtime/src/print.c`), not a folded exit code — `make
+runtime-smoke` (below) is the C runtime's own smoke test; neither needs the
+other yet.
 
 ### Repository layout (current)
 

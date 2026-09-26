@@ -32,10 +32,16 @@
  *   (`BigInt.asUintN(8, …)`), matches how a process exit code is itself
  *   truncated to `[0, 256)` by the OS (`& 0xff`, spec-consistent with
  *   `Host.exit`'s own `code & 0xff` in host/src/host/host.ts).
- * - **stdout:** both sides must be empty for these fixtures — none of
- *   them call `print`/`println`. (`hello.mnd` does, so its oracle is
- *   deferred until a later slice lowers `println`; see its own comment
- *   and the Makefile's `hello-native`.)
+ * - **stdout:** empty for every fixture that never calls `print`/
+ *   `println`/`write`; `println-hello.mnd` (added alongside `src/emit/
+ *   lower.mnd`'s `println`/`print`/`write` lowering) does call
+ *   `println`, and both sides' captured stdout bytes are asserted equal
+ *   to each other (not just to a hardcoded string) — the same "agree
+ *   with each other, not just a hardcoded answer" discipline the exit
+ *   code comparison below already has. `hello.mnd` itself (`(println
+ *   "Hello, world!")`, `123`, `(defn main -> Int 0)`) is covered by
+ *   `tests/phase2/emit-link.test.ts` and `tests/phase2/bc-writer.test.ts`
+ *   instead, which both now also assert its stdout.
  *
  * Compiled against the real runtime (`RUNTIME_LIB_SRCS`, matching the
  * Makefile's `ret-native`/`hello-native` — slice 2C), not the bare `.bc`
@@ -150,7 +156,13 @@ function interpret(entryRelPath: string): { exitCode: number; stdout: string; st
   return { exitCode, stdout, stderr };
 }
 
-const fixtures: Array<{ name: string; entry: string; expectExit: number; expectDis: RegExp }> = [
+const fixtures: Array<{
+  name: string;
+  entry: string;
+  expectExit: number;
+  expectDis: RegExp;
+  expectStdout?: string;
+}> = [
   {
     name: "a literal `main` lowers to a real untag/trunc/ret sequence (no `add`/`call` needed)",
     entry: "tests/phase2/oracle/ret41.mnd",
@@ -175,14 +187,25 @@ const fixtures: Array<{ name: string; entry: string; expectExit: number; expectD
     expectExit: 41,
     expectDis: /\bcall i64 @__lam0\b/,
   },
+  {
+    name: "a standalone top-level `(println ...)` lowers to a real `mn_write_stdout` call, prepended into `main`",
+    entry: "tests/phase2/oracle/println-hello.mnd",
+    expectExit: 7,
+    expectDis: /\bcall void @mn_write_stdout\b/,
+    expectStdout: "Hello, oracle!\n",
+  },
 ];
 
 describe.skipIf(clang === null || llvmDis === null)("interp <-> native oracle (Phase 2 slice 2D/2H)", () => {
-  for (const { name, entry, expectExit, expectDis } of fixtures) {
+  for (const { name, entry, expectExit, expectDis, expectStdout } of fixtures) {
     test(name, async () => {
       // Interpreter side of the protocol.
       const interp = interpret(entry);
-      expect(interp.stdout).toBe("");
+      if (expectStdout === undefined) {
+        expect(interp.stdout).toBe("");
+      } else {
+        expect(interp.stdout).toBe(expectStdout);
+      }
 
       // Native side: emit -> llvm-dis (content check) -> clang(+runtime) -> run.
       const dir = await mkdtempP(join(tmpdir(), "menard-oracle-"));
@@ -215,19 +238,24 @@ describe.skipIf(clang === null || llvmDis === null)("interp <-> native oracle (P
         expect(link.status).toBe(0);
 
         const ran = spawnSync(binPath, [], { encoding: "utf-8" });
-        expect(ran.stdout).toBe("");
 
         // The oracle invariant slice 2D adds: interp and native must
         // agree with *each other*, independently of the hardcoded
-        // `expectExit` below — this is what would actually catch drift
-        // between `src/emit/lower.mnd`'s real instruction selector and
-        // the interpreter's own arithmetic semantics.
+        // `expectExit`/`expectStdout` below — this is what would
+        // actually catch drift between `src/emit/lower.mnd`'s real
+        // instruction selector and the interpreter's own semantics
+        // (arithmetic, and — this slice — `println`/`print`/`write`'s
+        // byte-for-byte fd-1 output).
+        expect(ran.stdout).toBe(interp.stdout);
         expect(ran.status).toBe(interp.exitCode);
 
         // Sanity anchor: confirm the shared expectation itself hasn't
         // drifted from what the fixture's header comment claims.
         expect(ran.status).toBe(expectExit);
         expect(interp.exitCode).toBe(expectExit);
+        if (expectStdout !== undefined) {
+          expect(ran.stdout).toBe(expectStdout);
+        }
       } finally {
         await rm(bcPath).catch(() => {});
         await rm(binPath).catch(() => {});

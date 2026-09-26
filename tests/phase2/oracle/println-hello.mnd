@@ -1,0 +1,12 @@
+; Slice adding `println`/`print`/`write` lowering — oracle fixture:
+; `src/emit/lower.mnd` collects this file's standalone top-level
+; `(println "Hello, oracle!")` (not a `defn`) and prepends it to
+; `main`'s own body (see that module's header comment's "Lowering",
+; point 1), so both the interpreted and the compiled run of this file
+; print the same bytes to fd 1 before computing `main`'s `Int` result —
+; see `tests/phase2/oracle.test.ts`'s stdout-comparing fixture entry for
+; this file.
+
+(println "Hello, oracle!")
+
+(defn main -> Int 7)

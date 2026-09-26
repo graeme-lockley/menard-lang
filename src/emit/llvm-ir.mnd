@@ -103,6 +103,20 @@
   ; trivially here since there is no polymorphism in this ABI at all, only
   ; one type per arity).
   (ICall Int (List Int))
+  ; A call to one of the three fixed runtime externs (`mn_write_stdout`/
+  ; `mn_write_stderr`, kind `extern-kind-write`; `mn_print_i64`, kind
+  ; `extern-kind-print`) — `println`/`print`/`write` lowering's one
+  ; instruction shape (`src/emit/lower.mnd`'s `emit-call-void!`). Every
+  ; one of these three externs returns `void`, so — unlike `ICall` —
+  ; this produces **no** SSA value at all (a void call consumes no value
+  ; id; `lower.mnd`'s `Builder` must not `bump-val!` after emitting one):
+  ; `kind` only tells `write-module-bc` which of the two fixed extern
+  ; function *types* (`void(ptr,i64)` vs `void(i64)`) the call record's
+  ; own `fnty` field must reference — arity alone cannot disambiguate
+  ; them the way it does for `ICall`, since a real one-`Int`-argument
+  ; user call and a call to `mn_print_i64` are both "one argument" but
+  ; need different function types and different result semantics.
+  (ICallVoid Int Int (List Int))
   ; val-rel — the function's return value (already `i32`-typed, via a
   ; preceding `ICast`, for `main`; tagged `i64` otherwise).
   (IRet Int))
@@ -119,13 +133,40 @@
 (pub defn lfunc-nblocks (f: LFunc) -> Int (match f (LFunc _ _ _ b _) b))
 (pub defn lfunc-items (f: LFunc) -> (List Item) (match f (LFunc _ _ _ _ i) i))
 
-; The module: an ordered list of functions. Order fixes each function's
-; module-scope global value id (`0..N-1`, in list order) — `ICall`'s
-; `callee-rel` operands were computed against exactly that ordering by
-; `lower.mnd`'s `Builder`, so `write-module-bc` must not reorder `funcs`.
-(pub defrec LlvmModule (funcs: (List LFunc)))
+; The module: an ordered list of user functions, plus every distinct
+; string literal `println`/`print`/`write` lowering needs a global for
+; (`src/emit/lower.mnd`'s `StrPool`, in id order `0..S-1`) — see that
+; module's header comment and `write-module-bc`'s "module value
+; numbering" note for exactly how `globals`, the three fixed runtime
+; externs, and `funcs` share one combined module-scope value-numbering
+; space, in that order (globals, then externs, then `funcs`), which both
+; modules must agree on byte-for-byte.
+(pub defrec LlvmModule (funcs: (List LFunc)) (globals: (List Str)))
 
-(pub defn llvm-module-funcs (m: LlvmModule) -> (List LFunc) (match m (LlvmModule fs) fs))
+(pub defn llvm-module-funcs (m: LlvmModule) -> (List LFunc) (match m (LlvmModule fs _) fs))
+(pub defn llvm-module-globals (m: LlvmModule) -> (List Str) (match m (LlvmModule _ gs) gs))
+
+; ---------------------------------------------------------------------------
+; The three fixed runtime externs `println`/`print`/`write` lowering
+; calls (`runtime/include/menard.h`) — always declared, in this fixed
+; order, regardless of whether a given program actually calls any of
+; them (an unused `declare` is harmless — see `lower.mnd`'s header
+; comment). `extern-count` is how many module-scope value ids they
+; occupy; `lower.mnd`'s `StrPool` and `write-module-bc` both derive every
+; extern's own abs id from `num-strings` (the string globals that
+; precede them) using the three functions below, so the two modules
+; can never disagree about which id is which extern.
+(pub defn extern-count -> Int 3)
+
+(pub defn extern-write-stdout-abs (num-strings: Int) -> Int num-strings)
+(pub defn extern-print-i64-abs (num-strings: Int) -> Int (+ num-strings 1))
+(pub defn extern-write-stderr-abs (num-strings: Int) -> Int (+ num-strings 2))
+
+; `ICallVoid`'s `kind` tag — which of the two fixed extern function
+; *types* a void call's `fnty` field references (see `ICallVoid`'s own
+; doc comment above for why arity alone can't disambiguate them).
+(pub defn extern-kind-write -> Int 0) ; void(ptr, i64) — write_stdout/write_stderr
+(pub defn extern-kind-print -> Int 1) ; void(i64) — print_i64
 
 ; ---------------------------------------------------------------------------
 ; Opcode/predicate constants (llvm/Bitcode/LLVMBitCodes.h's

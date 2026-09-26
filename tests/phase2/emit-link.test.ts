@@ -40,6 +40,19 @@ function abs(relPath: string): string {
 // PATH at run time, not hardcoded — see the Makefile's CC pin comment.
 const clang = Bun.which("clang");
 
+// `hello.mnd` now calls into the runtime's fd-1 print helpers
+// (`println` lowering, slice adding string-global support) — linking the
+// bare `.bc` alone (as this test did before that slice) leaves
+// `mn_write_stdout`/`mn_print_i64`/`mn_write_stderr` undefined; link
+// against the same runtime `oracle.test.ts` does.
+const RUNTIME_LIB_SRCS = [
+  "runtime/src/alloc.c",
+  "runtime/src/panic.c",
+  "runtime/src/print.c",
+  "runtime/src/shadow.c",
+].map(abs);
+const RUNTIME_INCLUDE = abs("runtime/include");
+
 /** Run `src/main.mnd emit <entry> <out>` exactly as the CLI would. */
 function emit(entryRelPath: string, outPath: string): { exitCode: number; stderr: string } {
   const entryPath = abs("src/main.mnd");
@@ -71,11 +84,16 @@ describe.skipIf(clang === null)("emit -> clang -> run (Goal B smoke)", () => {
       expect(emitted.stderr).toBe("");
       expect(emitted.exitCode).toBe(0);
 
-      const link = spawnSync(clang!, [bcPath, "-o", binPath], { encoding: "utf-8" });
+      const link = spawnSync(
+        clang!,
+        [bcPath, ...RUNTIME_LIB_SRCS, "-I", RUNTIME_INCLUDE, "-o", binPath],
+        { encoding: "utf-8" },
+      );
       expect(link.status).toBe(0);
 
       const ran = spawnSync(binPath, [], { encoding: "utf-8" });
       expect(ran.status).toBe(0);
+      expect(ran.stdout).toBe("Hello, world!\n");
     } finally {
       await rm(bcPath).catch(() => {});
       await rm(binPath).catch(() => {});

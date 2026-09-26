@@ -85,6 +85,17 @@ _Noreturn void mn_panic(const char *message);
 void mn_write_stdout(const uint8_t *p, size_t n);
 
 /*
+ * mn_write_stderr — write `n` raw bytes to fd 2 (`runtime/src/print.c`),
+ * mirroring `mn_write_stdout`'s fd-1 loop exactly. Used by `(write 2 s)`
+ * once `src/emit/lower.mnd` lowers it — fd 2 is otherwise `mn_panic`'s
+ * own, disjoint output path (see `mn_write_stdout`'s comment above); a
+ * compiled program's own explicit `(write 2 ...)` calls are the one
+ * legitimate other fd-2 writer, and go through this function, never
+ * `mn_panic`.
+ */
+void mn_write_stderr(const uint8_t *p, size_t n);
+
+/*
  * mn_print_i64 — write `v`'s decimal representation (no trailing
  * newline) to fd 1 via `mn_write_stdout`. A small helper for whatever
  * later slice lowers `show`/`print` on `Int` to a direct runtime call

@@ -42,14 +42,17 @@ runtime-clean:
 
 # Phase 2, Goal B: emit a bitcode module for hello.mnd with the (stage0)
 # compiler, link it with $(CC) — never `llvm-as` (ADR 40) — and run the
-# result. `src/emit/lower.mnd` lowers hello.mnd's `(defn main -> Int 0)`
-# to a real untag/trunc/`ret` sequence over the tagged literal `0`, so
-# this still returns 0.
+# result. `src/emit/lower.mnd` lowers hello.mnd's standalone top-level
+# `(println "Hello, world!")` into a real `mn_write_stdout` call
+# prepended to `main`'s body, then its `(defn main -> Int 0)` to a real
+# untag/trunc/`ret` sequence over the tagged literal `0` — so this now
+# prints "Hello, world!" (via the runtime's fd-1 print helpers) and still
+# returns 0.
 #
 # Linked against the runtime (RUNTIME_LIB_SRCS), not the bare `.bc`: slice
 # 2C's oracle (tests/phase2/oracle.test.ts) links the same way, and this
-# target is meant to match it, even though this particular module does not
-# yet call into the runtime.
+# module now genuinely needs it — `mn_write_stdout`/`mn_print_i64`/
+# `mn_write_stderr` are undefined without it.
 hello-native:
 	@mkdir -p $(BUILD_DIR)
 	bun run host/src/cli/menard.ts run src/main.mnd -- emit hello.mnd $(BUILD_DIR)/hello.bc

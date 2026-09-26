@@ -46,7 +46,7 @@ result with `clang`, and runs it — the current end-to-end smoke test (root
 | `pool/pool.mnd` | Static pool collection (spec §2.2.1/ADR 38): walks a program for `Str` literals and nullary-constructor mentions, dedups and sorts by byte content | Wired — collected on every real `emit` (`emit/bitcode.mnd`'s `run-pool-collection`) and asserted goldenly in `tests/phase2/pool.test.ts`, but the result is computed and discarded; nothing downstream (`lower.mnd`'s real instruction selector only handles `Int`, not `Str`/constructor values yet) consumes a pool entry, and none of its bytes reach the module image — future work |
 | `emit/llvm-ir.mnd` | `Item` (a small, already bitcode-shaped instruction set — `IConstI64`/`IAlloca`/`IBinop`/`ICmp2`/`ICast`/`IStore`/`ILoad`/`IBr`/`ICondBr`/`ICall`/`IRet`), `LFunc`/`LlvmModule`, and the opcode/predicate/type-index constants both `lower.mnd` and `bc-writer.mnd` share | Wired |
 | `emit/bc-writer.mnd` | The real bit-level LLVM bitcode encoder (ADR 40): `BitSink`, block/record writer, `write-module-bc` (a full multi-function module from an `LlvmModule` — real types, constants, functions, DECLAREBLOCKS, and every `Item` variant's own `FUNC_CODE_INST_*` record) | Wired — writes real, valid, unwrapped bitcode for any number of `i64`-params-and-return functions plus one `main` (`() -> i32`), with real instructions, not just `ret i32 N` |
-| `emit/lower.mnd` | Lowers a typechecked, desugared program to the `Item`s `bc-writer.mnd` emits: finds top-level `defn main -> Int`, and lowers `Int` literals, `+ - * / %`, comparisons (`if`'s test only), `if`/`let`/`do`, and calls to other top-level `Int`-only `defn`s (including lambda-lifted ones) to real `alloca`/`store`/`load`/`binop`/`icmp`/`br`/`call`/`ret` instructions over the tagged-`Int` ABI (spec §2.2/§3.4) | Wired for the Int/if/let/calls subset — errors (no `emit`) if `main` is missing/wrong-arity, or its body needs `loop`/`recur`, `match`, `fn`, or any non-`Int` value (a `Bool`/`Str`/list/other value); see its header comment's "Scope" for exactly what's deferred and why |
+| `emit/lower.mnd` | Lowers a typechecked, desugared program to the `Item`s `bc-writer.mnd` emits: finds top-level `defn main -> Int`, and lowers `Int` literals, `+ - * / %`, comparisons (`if`'s test only), `if`/`let`/`do`, calls to other top-level `Int`-only `defn`s (including lambda-lifted ones), and standalone top-level `println`/`print` of `Str` literals/`Int`s and `write` to fd 1/2 (prepended into `main`'s body as effect steps) to real `alloca`/`store`/`load`/`binop`/`icmp`/`br`/`call`/`ret` instructions over the tagged-`Int` ABI (spec §2.2/§3.4), plus real LLVM string globals and calls into the runtime's `mn_write_stdout`/`mn_print_i64`/`mn_write_stderr` | Wired for the Int/if/let/calls subset plus `println`/`print`/`write` — errors (no `emit`) if `main` is missing/wrong-arity, or its body needs `loop`/`recur`, `match`, `fn`, or any other non-`Int` value; see its header comment's "Scope" for exactly what's deferred and why |
 | `emit/bitcode.mnd` | `emit-program-bc`: the `emit` CLI's entry into code generation | Wired — runs pool collection, then delegates to `lower.mnd`, returning `(Result Str Str)` so a lowering failure becomes a clean CLI error rather than a crash |
 | `tools/read-roundtrip.mnd` | Test harness (not part of the compiler): read → print → read → structural-equality | Wired |
 | `tools/pool-dump.mnd` | Test harness (not part of the compiler): renders `pool/pool.mnd`'s collected entries as goldenable text | Wired |
@@ -88,26 +88,35 @@ does real instruction selection for the accepted subset: every top-level
 `Int`-only `defn` (params and return both bare `Int`), reachable from a
 zero-arg `main -> Int`, whose body is built from `Int` literals,
 `+ - * / %`, comparisons (`if`'s test only), `if`/`let`/`do`, and calls
-to other such `defn`s (including lambda-lifted `__lamN`s). `lower.mnd`
-lowers that body to real `alloca`/`store`/`load`/`binop`/`icmp`/`br`/
-`call`/`ret` instructions over the tagged-`Int` ABI (spec §2.2/§3.4:
-`t(v) = (v<<1)|1`; `+`/`-` free plus a one-instruction fixup; `*`/`/`/`%`
-untag/native-op/retag; `main` alone untags and truncates to `i32` before
-its own `ret`) and hands the result to `bc-writer.mnd`'s
-`write-module-bc`, which serializes any number of `i64`-params-and-
-return functions plus `main`'s `() -> i32` — real instructions that
-*compute* the result, not `define i32 @main() { ret i32 N }` for a
-constant `N` folded at compile time. `loop`/`recur`, `match`, `fn`
-left over from a failed lambda-lift, and any non-`Int` value are a
-clean, documented `Err` instead (see `emit/lower.mnd`'s header comment's
-"Scope" for exactly what and why); that is future work (see the root
+to other such `defn`s (including lambda-lifted `__lamN`s) — plus
+standalone top-level `println`/`print` of `Str` literals/`Int`s and
+`write` to fd 1/2, which are collected and prepended into `main`'s own
+body as effect steps that don't feed its `Int` result. `lower.mnd`
+lowers `Int`/if/let/calls to real `alloca`/`store`/`load`/`binop`/
+`icmp`/`br`/`call`/`ret` instructions over the tagged-`Int` ABI (spec
+§2.2/§3.4: `t(v) = (v<<1)|1`; `+`/`-` free plus a one-instruction fixup;
+`*`/`/`/`%` untag/native-op/retag; `main` alone untags and truncates to
+`i32` before its own `ret`), and `println`/`print`/`write` to real LLVM
+string globals plus calls into the runtime's `mn_write_stdout`/
+`mn_print_i64`/`mn_write_stderr` (fd-1/fd-2 print helpers), and hands the
+result to `bc-writer.mnd`'s `write-module-bc`, which serializes those
+string globals, the three runtime extern declarations, any number of
+`i64`-params-and-return functions, and `main`'s `() -> i32` — real
+instructions that *compute* the result and *produce* the program's
+actual output, not `define i32 @main() { ret i32 N }` for a constant `N`
+folded at compile time. `loop`/`recur`, `match`, `fn` left over from a
+failed lambda-lift, and any other non-`Int` value are a clean, documented
+`Err` instead (see `emit/lower.mnd`'s header comment's "Scope" for
+exactly what and why); that is future work (see the root
 [`README.md`](../README.md#status)'s Status section for exactly what's
 left before Phase 3). `make hello-native` and `make ret-native` both
 prove the *bitcode is valid, linkable, and carries the program's actual
-computed result* — see `tests/phase2/oracle.test.ts` for the interp↔
-native oracle this proves it on (asserting the emitted module's
-`llvm-dis` text actually contains the instruction its fixture claims,
-not just the right exit code), across every fixture in
+computed result* (now including `hello.mnd`'s real "Hello, world!"
+output) — see `tests/phase2/oracle.test.ts` for the interp↔native oracle
+this proves it on (asserting the emitted module's `llvm-dis` text
+actually contains the instruction its fixture claims, and that interp
+and native stdout agree byte-for-byte for the `println` fixture — not
+just the right exit code), across every fixture in
 `tests/phase2/oracle/`.
 
 ## Adding a slice

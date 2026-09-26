@@ -239,17 +239,20 @@
 (defn type-block-id -> Int 17)
 
 (defn module-code-version -> Int 1)
+(defn module-code-globalvar -> Int 7)
 (defn module-code-function -> Int 8)
 
 (defn type-code-numentry -> Int 1)
 (defn type-code-void -> Int 2)
 (defn type-code-integer -> Int 7)
+(defn type-code-array -> Int 11)
 (defn type-code-function -> Int 21)
 (defn type-code-opaque-pointer -> Int 25)
 
 (defn cst-code-settype -> Int 1)
 (defn cst-code-null -> Int 2)
 (defn cst-code-integer -> Int 4)
+(defn cst-code-string -> Int 8)
 
 (defn func-code-declareblocks -> Int 1)
 (defn func-code-inst-binop -> Int 2)
@@ -267,13 +270,24 @@
 ; The fixed leading type-table indices every module here uses (see
 ; `write-types!` below): `ptr`, `i64`, `i32`, `void`, then one function
 ; type per distinct arity `0..max-arity` for `(i64 x arity) -> i64`, then
-; one trailing `() -> i32` for `main`.
+; one trailing `() -> i32` for `main`, then (slice adding `println`/
+; `print`/`write` lowering) `i8`, the two fixed extern function types
+; (`void(ptr,i64)`, `void(i64)` — see `llvm-ir.mnd`'s `ICallVoid` doc
+; comment), then one `[len x i8]` array type per string global, in
+; `LlvmModule`'s `globals` order.
 (defn ty-ptr -> Int 0)
 (defn ty-i64 -> Int 1)
 (defn ty-i32 -> Int 2)
+(defn ty-void -> Int 3)
 
 (defn func-type-idx-for-arity (arity: Int) -> Int (+ 4 arity))
 (defn main-type-idx (ma: Int) -> Int (+ 4 (+ ma 1)))
+; One slot right after `main`'s own type — see header comment's ordering.
+(defn ty-i8-idx (ma: Int) -> Int (+ (main-type-idx ma) 1))
+(defn ty-write-sig-idx (ma: Int) -> Int (+ (ty-i8-idx ma) 1)) ; void(ptr, i64)
+(defn ty-print-sig-idx (ma: Int) -> Int (+ (ty-write-sig-idx ma) 1)) ; void(i64)
+; String `i`'s (0-indexed, in `globals` order) own `[len x i8]` array type.
+(defn ty-str-array-idx (ma: Int) (i: Int) -> Int (+ (ty-print-sig-idx ma) (+ i 1)))
 
 (defn i64-param-types (n: Int) -> (List Int)
   (if (<= n 0) (Nil) (Cons (ty-i64) (i64-param-types (- n 1)))))
@@ -285,17 +299,39 @@
       (write-record! t (type-code-function) (Cons 0 (Cons (ty-i64) (i64-param-types arity))))
       (write-func-types! t (+ arity 1) ma))))
 
+; One `[len x i8]` array type per string in `globals`, in order — see
+; header comment's trailing "then one ... array type per string global".
+(defn str-lengths (globals: (List Str)) -> (List Int)
+  (match globals
+    (Nil) (Nil)
+    (Cons g rest) (Cons (str-byte-length g) (str-lengths rest))))
+
+(defn write-array-types! (t: BitSink) (ma: Int) (lens: (List Int)) -> Unit
+  (match lens
+    (Nil) ()
+    (Cons len rest)
+      (do
+        (write-record! t (type-code-array) (Cons len (Cons (ty-i8-idx ma) (Nil))))
+        (write-array-types! t ma rest))))
+
 ; `ptr`(0), `i64`(1), `i32`(2), `void`(3), one `(i64 x arity) -> i64` per
-; `arity` in `0..ma`, then `() -> i32` for `main` — see header comment.
-(defn write-types! (t: BitSink) (ma: Int) -> Unit
+; `arity` in `0..ma`, then `() -> i32` for `main`, then `i8`, the two
+; fixed extern function types, then one `[len x i8]` array type per
+; string global — see header comment.
+(defn write-types! (t: BitSink) (ma: Int) (globals: (List Str)) -> Unit
   (do
-    (write-record! t (type-code-numentry) (Cons (+ 4 (+ (+ ma 1) 1)) (Nil)))
+    (let ns (int-list-length (str-lengths globals)))
+    (write-record! t (type-code-numentry) (Cons (+ 4 (+ (+ ma 1) (+ 4 ns))) (Nil)))
     (write-record! t (type-code-opaque-pointer) (Cons 0 (Nil))) ; idx 0: ptr, addrspace 0
     (write-record! t (type-code-integer) (Cons 64 (Nil))) ; idx 1: i64
     (write-record! t (type-code-integer) (Cons 32 (Nil))) ; idx 2: i32
     (write-record! t (type-code-void) (Nil)) ; idx 3: void
     (write-func-types! t 0 ma)
-    (write-record! t (type-code-function) (Cons 0 (Cons (ty-i32) (Nil)))))) ; () -> i32 (main)
+    (write-record! t (type-code-function) (Cons 0 (Cons (ty-i32) (Nil)))) ; () -> i32 (main)
+    (write-record! t (type-code-integer) (Cons 8 (Nil))) ; i8
+    (write-record! t (type-code-function) (Cons 0 (Cons (ty-void) (Cons (ty-ptr) (Cons (ty-i64) (Nil)))))) ; void(ptr,i64)
+    (write-record! t (type-code-function) (Cons 0 (Cons (ty-void) (Cons (ty-i64) (Nil))))) ; void(i64)
+    (write-array-types! t ma (str-lengths globals))))
 
 ; ---------------------------------------------------------------------------
 ; `MODULE_CODE_FUNCTION` — one per function, in module order (this order
@@ -313,6 +349,93 @@
         (let ty (if (lfunc-is-main f) (main-type-idx ma) (func-type-idx-for-arity (lfunc-nparams f))))
         (write-record! m (module-code-function) (Cons ty (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Nil)))))))))) 
         (write-function-decls! m rest ma))))
+
+; ---------------------------------------------------------------------------
+; The three fixed runtime externs (`llvm-ir.mnd`'s `extern-count`) —
+; `MODULE_CODE_FUNCTION` records exactly like a user function's, except
+; `isproto = 1` (a declaration, no body: no matching `FUNCTION_BLOCK` is
+; ever written for these three) and each one's own fixed signature type
+; (`ty-write-sig-idx`/`ty-print-sig-idx`, not a `(i64^n)->i64` family
+; member). Written right after every string `GLOBALVAR` and before any
+; user function's own `MODULE_CODE_FUNCTION` — see `write-module-body!`'s
+; ordering and `llvm-ir.mnd`'s `extern-write-stdout-abs`/etc. for why
+; that fixes each extern's abs id to `num-strings + 0/1/2`.
+(defn write-extern-decl! (m: BitSink) (ty: Int) -> Unit
+  (write-record! m (module-code-function) (Cons ty (Cons 0 (Cons 1 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Nil)))))))))))
+
+(defn write-extern-decls! (m: BitSink) (ma: Int) -> Unit
+  (do
+    (write-extern-decl! m (ty-write-sig-idx ma)) ; mn_write_stdout
+    (write-extern-decl! m (ty-print-sig-idx ma)) ; mn_print_i64
+    (write-extern-decl! m (ty-write-sig-idx ma)))) ; mn_write_stderr
+
+; ---------------------------------------------------------------------------
+; `MODULE_CODE_GLOBALVAR` — one per string in `LlvmModule`'s `globals`,
+; in order (fixing each one's own module-scope abs id `0..S-1`, ahead of
+; every extern and every user function — see `llvm-ir.mnd`'s header
+; comment and `write-module-body!`'s ordering). No strtab in this
+; module (module format version 1, slice 2A's choice, unchanged): the
+; name is not written here at all — same as a user function, a global
+; needs no `VALUE_SYMTAB` entry either, since nothing outside the module
+; ever references a string constant by name (only `lower.mnd`'s own
+; `ICallVoid`/`ICall` operands reference it, by abs id).
+;
+; Fields (confirmed against a hand-assembled `.ll`'s `llvm-bcanalyzer
+; --dump`, per `lower.mnd`'s header comment): `[type, isconst|explicit,
+; initid(1-biased), linkage, alignment, section, visibility, threadlocal,
+; unnamed_addr, ext_init, dllstorageclass, comdat, attrs, preempt]`.
+; `type` is the *value* type (the string's own `[len x i8]` array type,
+; opaque pointers meaning a global's pointer type is always simply
+; `ptr`); bit 0 of the second field is `isconst` (always `1`, every
+; string global here is a `constant`), bit 1 is the opaque-pointer
+; "explicit type" flag (always set, same rationale as `alloca`'s own
+; bit 6) — combined, always `3`. `initid` is `1 +` the abs id of this
+; string's own initializer constant in the module-level `CONSTANTS_BLOCK`
+; `write-global-constants!` writes right after every declaration (see
+; that function): with `S` strings declared as `GLOBALVAR`s first, string
+; `i`'s initializer is the `i`-th constant declared there, at abs id
+; `num-strings + extern-count + num-funcs + i` — `init-base` below.
+(defn globalvar-flags -> Int 3) ; isconst(1) | explicit-type(2)
+
+(defn write-globalvar! (m: BitSink) (ma: Int) (i: Int) (len: Int) (init-base: Int) -> Unit
+  (write-record! m (module-code-globalvar)
+    (Cons (ty-str-array-idx ma i)
+      (Cons (globalvar-flags)
+        (Cons (+ (+ init-base i) 1) ; initid, 1-biased
+          (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Nil)))))))))))))))))
+
+(defn write-globalvars! (m: BitSink) (ma: Int) (lens: (List Int)) (i: Int) (init-base: Int) -> Unit
+  (match lens
+    (Nil) ()
+    (Cons len rest)
+      (do
+        (write-globalvar! m ma i len init-base)
+        (write-globalvars! m ma rest (+ i 1) init-base))))
+
+; ---------------------------------------------------------------------------
+; The module-level `CONSTANTS_BLOCK` holding every string global's own
+; initializer — `CST_CODE_STRING`, the raw bytes as record operands
+; (confirmed against the dump: unlike a per-function `IConstI64`'s
+; `CST_CODE_INTEGER`, a string constant's operands *are* its literal
+; byte values, not a single zig-zag-encoded integer). One `SETTYPE` +
+; `STRING` pair per string, all inside one subblock, written right after
+; every module-scope declaration (`GLOBALVAR`s, extern `FUNCTION`s, user
+; `FUNCTION`s) and before any `FUNCTION_BLOCK` body — matching exactly
+; where a real `llvm-as`-assembled module places it, which is what fixes
+; each initializer's own abs id to continue the same numbering `write-
+; globalvar!`'s `init-base` already assumes.
+(defn write-global-const! (c: BitSink) (ma: Int) (i: Int) (s: Str) -> Unit
+  (do
+    (write-record! c (cst-code-settype) (Cons (ty-str-array-idx ma i) (Nil)))
+    (write-record! c (cst-code-string) (str-byte-ops s))))
+
+(defn write-global-consts! (c: BitSink) (ma: Int) (globals: (List Str)) (i: Int) -> Unit
+  (match globals
+    (Nil) ()
+    (Cons s rest)
+      (do
+        (write-global-const! c ma i s)
+        (write-global-consts! c ma rest (+ i 1)))))
 
 ; ---------------------------------------------------------------------------
 ; Encoding an `Int` constant as LLVM's usual sign-rotated `i64`/`i32`
@@ -346,10 +469,25 @@
   (write-record! f (func-code-inst-call)
     (Cons 0 (Cons (call-cc-info) (Cons (func-type-idx-for-arity (int-list-length arg-rels)) (Cons callee-rel arg-rels)))))) 
 
+; `println`/`print`/`write` lowering's void call — same record shape as
+; `write-call!` (the format doesn't distinguish "produces a value" from
+; "doesn't" in the record itself; that's purely a consequence of the
+; callee's own function type, which the reader already knows from
+; `fnty`), except `fnty` is one of the two fixed extern signatures
+; (`llvm-ir.mnd`'s `ICallVoid` doc comment for why `kind`, not arity,
+; picks it) rather than a `(i64^n)->i64` family member.
+(defn write-call-void! (f: BitSink) (ma: Int) (kind: Int) (callee-rel: Int) (arg-rels: (List Int)) -> Unit
+  (do
+    (let fnty (if (= kind (extern-kind-write)) (ty-write-sig-idx ma) (ty-print-sig-idx ma)))
+    (write-record! f (func-code-inst-call)
+      (Cons 0 (Cons (call-cc-info) (Cons fnty (Cons callee-rel arg-rels)))))))
+
 ; One `Item` -> one record (or, for a constant, one tiny nested
 ; `CONSTANTS_BLOCK`). See `llvm-ir.mnd`'s header comment for exactly what
-; each field means and which are (and are not) already relative.
-(defn write-item! (f: BitSink) (item: Item) -> Unit
+; each field means and which are (and are not) already relative. `ma`
+; (max user-function arity) is only needed for `ICallVoid`'s `fnty`
+; lookup above.
+(defn write-item! (f: BitSink) (ma: Int) (item: Item) -> Unit
   (match item
     (IConstI64 enc) (enter-subblock! f (constants-block-id) (fn (c) (write-const! c (ty-i64) enc)))
     (IConstI32 enc) (enter-subblock! f (constants-block-id) (fn (c) (write-const! c (ty-i32) enc)))
@@ -370,12 +508,13 @@
     (IBr bb) (write-record! f (func-code-inst-br) (Cons bb (Nil)))
     (ICondBr t e cond) (write-record! f (func-code-inst-br) (Cons t (Cons e (Cons cond (Nil)))))
     (ICall callee args) (write-call! f callee args)
+    (ICallVoid kind callee args) (write-call-void! f ma kind callee args)
     (IRet val) (write-record! f (func-code-inst-ret) (Cons val (Nil)))))
 
-(defn write-items! (f: BitSink) (items: (List Item)) -> Unit
+(defn write-items! (f: BitSink) (ma: Int) (items: (List Item)) -> Unit
   (match items
     (Nil) ()
-    (Cons it rest) (do (write-item! f it) (write-items! f rest))))
+    (Cons it rest) (do (write-item! f ma it) (write-items! f ma rest))))
 
 ; One function's `FUNCTION_BLOCK`: `DECLAREBLOCKS`, then every `Item` in
 ; stream order (see `llvm-ir.mnd`'s "Basic blocks are implicit" note — no
@@ -384,22 +523,24 @@
 ; `VALUE_SYMTAB` inside the function body — see slice 2A's rationale
 ; (unnamed SSA values are perfectly valid IR; only the module-level
 ; `VALUE_SYMTAB` naming each `@function` is written, below).
-(defn write-function-body! (f: BitSink) (lf: LFunc) -> Unit
+(defn write-function-body! (f: BitSink) (ma: Int) (lf: LFunc) -> Unit
   (do
     (write-record! f (func-code-declareblocks) (Cons (lfunc-nblocks lf) (Nil)))
-    (write-items! f (lfunc-items lf))))
+    (write-items! f ma (lfunc-items lf))))
 
-(defn write-function-bodies! (m: BitSink) (fs: (List LFunc)) -> Unit
+(defn write-function-bodies! (m: BitSink) (ma: Int) (fs: (List LFunc)) -> Unit
   (match fs
     (Nil) ()
     (Cons f rest)
       (do
-        (enter-subblock! m (function-block-id) (fn (fb) (write-function-body! fb f)))
-        (write-function-bodies! m rest))))
+        (enter-subblock! m (function-block-id) (fn (fb) (write-function-body! fb ma f)))
+        (write-function-bodies! m ma rest))))
 
-; `VST_CODE_ENTRY [valueid, char...]` — one per function, `valueid` its
-; module-scope global value id (`idx`, `0..N-1` in module order, matching
-; `write-function-decls!`'s numbering exactly).
+; `VST_CODE_ENTRY [valueid, char...]` — one per user function, `valueid`
+; its module-scope global value id (`idx`, matching `write-function-
+; decls!`'s numbering exactly: `num-strings + extern-count + list
+; position`, since `write-module-body!` writes strings, then externs,
+; then every user function's own declaration, in that fixed order).
 (defn write-vst-entries! (v: BitSink) (fs: (List LFunc)) (idx: Int) -> Unit
   (match fs
     (Nil) ()
@@ -408,20 +549,49 @@
         (write-record! v (vst-code-entry) (Cons idx (str-byte-ops (lfunc-name f))))
         (write-vst-entries! v rest (+ idx 1)))))
 
+; The three fixed runtime externs' own `VST_CODE_ENTRY`s — unlike a
+; string global (never named, see `write-globalvar!`'s doc comment),
+; these *must* be named: the linker resolves each one against the real
+; `mn_write_stdout`/`mn_print_i64`/`mn_write_stderr` C symbol
+; (`runtime/src/print.c`) by exactly this name.
+(defn write-extern-vst-entries! (v: BitSink) (num-strings: Int) -> Unit
+  (do
+    (write-record! v (vst-code-entry) (Cons (extern-write-stdout-abs num-strings) (str-byte-ops "mn_write_stdout")))
+    (write-record! v (vst-code-entry) (Cons (extern-print-i64-abs num-strings) (str-byte-ops "mn_print_i64")))
+    (write-record! v (vst-code-entry) (Cons (extern-write-stderr-abs num-strings) (str-byte-ops "mn_write_stderr")))))
+
+(defn lfunc-list-length (fs: (List LFunc)) -> Int
+  (match fs (Nil) 0 (Cons _ rest) (+ 1 (lfunc-list-length rest))))
+
 (defn max-arity-of (fs: (List LFunc)) -> Int
   (match fs
     (Nil) 0
     (Cons f rest) (max-int (lfunc-nparams f) (max-arity-of rest))))
 
+; ---------------------------------------------------------------------------
+; Module value numbering, spelled out once (see `llvm-ir.mnd`'s header
+; comment and `lower.mnd`'s header comment's "Globals design" for the
+; full derivation, confirmed against a hand-assembled `.ll`'s dump):
+; string globals first (`0..num-strings-1`), then the three fixed
+; runtime externs (`num-strings..num-strings+2`), then every user
+; function (`num-strings+3..`) — in that fixed bitstream order, matching
+; exactly what `write-module-body!` below writes. `lower.mnd`'s `Builder`
+; computes every relative operand against this same numbering; the two
+; modules must never disagree about it.
 (defn write-module-body! (m: BitSink) (mod: LlvmModule) -> Unit
   (do
     (let fs (llvm-module-funcs mod))
+    (let globals (llvm-module-globals mod))
     (let ma (max-arity-of fs))
+    (let ns (int-list-length (str-lengths globals)))
     (write-record! m (module-code-version) (Cons 1 (Nil))) ; version 1: relative value ids
-    (enter-subblock! m (type-block-id) (fn (t) (write-types! t ma)))
+    (enter-subblock! m (type-block-id) (fn (t) (write-types! t ma globals)))
+    (write-globalvars! m ma (str-lengths globals) 0 (+ ns (+ (extern-count) (lfunc-list-length fs))))
+    (write-extern-decls! m ma)
     (write-function-decls! m fs ma)
-    (write-function-bodies! m fs)
-    (enter-subblock! m (value-symtab-block-id) (fn (v) (write-vst-entries! v fs 0)))))
+    (enter-subblock! m (constants-block-id) (fn (c) (write-global-consts! c ma globals 0)))
+    (write-function-bodies! m ma fs)
+    (enter-subblock! m (value-symtab-block-id) (fn (v) (do (write-extern-vst-entries! v ns) (write-vst-entries! v fs (+ ns (extern-count))))))))
 
 ; The raw (unwrapped) bitcode bytes for `mod` — magic `BC\xC0\xDE`
 ; followed by the module block above. No Darwin wrapper (ADR 40).
