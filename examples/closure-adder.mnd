@@ -6,7 +6,7 @@
 (defn adder (n: Int) -> (Fn Int -> Int)
   (fn (m) (+ n m)))
 
-(defn map (f: (Fn Int -> Int)) (xs: (List Int)) -> (List Int)
+(defn (map [a]) (f: (Fn a -> a)) (xs: (List a)) -> (List a)
   (match xs
     (Nil) (Nil)
     (Cons h t) (Cons (f h) (map f t))))
