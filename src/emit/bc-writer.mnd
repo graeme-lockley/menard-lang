@@ -88,14 +88,14 @@
 
 (defn int-list-length (xs: (List Int)) -> Int
   (match xs
-    (Nil) 0
+    [] 0
     (Cons _ rest) (+ 1 (int-list-length rest))))
 
 (defn max-int (a: Int) (b: Int) -> Int (if (> a b) a b))
 
 (defn str-byte-ops-from (s: Str) (i: Int) (n: Int) -> (List Int)
   (if (>= i n)
-    (Nil)
+    []
     (Cons (str-byte s i) (str-byte-ops-from s (+ i 1) n))))
 
 ; A Str's bytes as a `(List Int)` — how a record's inline name operands
@@ -185,7 +185,7 @@
 ; One record: `UNABBREV_RECORD code numops op...`, every field VBR6.
 (defn write-record-ops! (s: BitSink) (ops: (List Int)) -> Unit
   (match ops
-    (Nil) ()
+    [] ()
     (Cons op rest) (do (bitsink-write-vbr! s op 6) (write-record-ops! s rest))))
 
 (defn write-record! (s: BitSink) (code: Int) (ops: (List Int)) -> Unit
@@ -291,7 +291,7 @@
 (defn ty-str-array-idx (ma: Int) (i: Int) -> Int (+ (ty-init-sig-idx ma) (+ i 1)))
 
 (defn i64-param-types (n: Int) -> (List Int)
-  (if (<= n 0) (Nil) (Cons (ty-i64) (i64-param-types (- n 1)))))
+  (if (<= n 0) [] (Cons (ty-i64) (i64-param-types (- n 1)))))
 
 (defn write-func-types! (t: BitSink) (arity: Int) (ma: Int) -> Unit
   (if (> arity ma)
@@ -304,15 +304,15 @@
 ; header comment's trailing "then one ... array type per string global".
 (defn str-lengths (globals: (List Str)) -> (List Int)
   (match globals
-    (Nil) (Nil)
+    [] []
     (Cons g rest) (Cons (str-byte-length g) (str-lengths rest))))
 
 (defn write-array-types! (t: BitSink) (ma: Int) (lens: (List Int)) -> Unit
   (match lens
-    (Nil) ()
+    [] ()
     (Cons len rest)
       (do
-        (write-record! t (type-code-array) (Cons len (Cons (ty-i8-idx ma) (Nil))))
+        (write-record! t (type-code-array) [len (ty-i8-idx ma)])
         (write-array-types! t ma rest))))
 
 ; `ptr`(0), `i64`(1), `i32`(2), `void`(3), one `(i64 x arity) -> i64` per
@@ -322,18 +322,18 @@
 (defn write-types! (t: BitSink) (ma: Int) (globals: (List Str)) -> Unit
   (do
     (let ns (int-list-length (str-lengths globals)))
-    (write-record! t (type-code-numentry) (Cons (+ 4 (+ (+ ma 1) (+ 6 ns))) (Nil)))
-    (write-record! t (type-code-opaque-pointer) (Cons 0 (Nil))) ; idx 0: ptr, addrspace 0
-    (write-record! t (type-code-integer) (Cons 64 (Nil))) ; idx 1: i64
-    (write-record! t (type-code-integer) (Cons 32 (Nil))) ; idx 2: i32
-    (write-record! t (type-code-void) (Nil)) ; idx 3: void
+    (write-record! t (type-code-numentry) [(+ 4 (+ (+ ma 1) (+ 6 ns)))])
+    (write-record! t (type-code-opaque-pointer) [0]) ; idx 0: ptr, addrspace 0
+    (write-record! t (type-code-integer) [64]) ; idx 1: i64
+    (write-record! t (type-code-integer) [32]) ; idx 2: i32
+    (write-record! t (type-code-void) []) ; idx 3: void
     (write-func-types! t 0 ma)
-    (write-record! t (type-code-function) (Cons 0 (Cons (ty-i32) (Cons (ty-i32) (Cons (ty-ptr) (Nil)))))) ; (i32, ptr) -> i32 (main)
-    (write-record! t (type-code-integer) (Cons 8 (Nil))) ; i8
-    (write-record! t (type-code-function) (Cons 0 (Cons (ty-void) (Cons (ty-ptr) (Cons (ty-i64) (Nil)))))) ; void(ptr,i64)
-    (write-record! t (type-code-function) (Cons 0 (Cons (ty-void) (Cons (ty-i64) (Nil))))) ; void(i64)
-    (write-record! t (type-code-function) (Cons 0 (Cons (ty-ptr) (Cons (ty-i64) (Cons (ty-ptr) (Nil)))))) ; ptr(i64,ptr) mn_alloc
-    (write-record! t (type-code-function) (Cons 0 (Cons (ty-void) (Cons (ty-i32) (Cons (ty-ptr) (Nil)))))) ; void(i32,ptr) mn_init
+    (write-record! t (type-code-function) [0 (ty-i32) (ty-i32) (ty-ptr)]) ; (i32, ptr) -> i32 (main)
+    (write-record! t (type-code-integer) [8]) ; i8
+    (write-record! t (type-code-function) [0 (ty-void) (ty-ptr) (ty-i64)]) ; void(ptr,i64)
+    (write-record! t (type-code-function) [0 (ty-void) (ty-i64)]) ; void(i64)
+    (write-record! t (type-code-function) [0 (ty-ptr) (ty-i64) (ty-ptr)]) ; ptr(i64,ptr) mn_alloc
+    (write-record! t (type-code-function) [0 (ty-void) (ty-i32) (ty-ptr)]) ; void(i32,ptr) mn_init
     (write-array-types! t ma (str-lengths globals))))
 
 ; ---------------------------------------------------------------------------
@@ -346,11 +346,11 @@
 ; visibility) are left at their all-zero defaults, same as slice 2A.
 (defn write-function-decls! (m: BitSink) (fs: (List LFunc)) (ma: Int) -> Unit
   (match fs
-    (Nil) ()
+    [] ()
     (Cons f rest)
       (do
         (let ty (if (lfunc-is-main f) (main-type-idx ma) (func-type-idx-for-arity (lfunc-nparams f))))
-        (write-record! m (module-code-function) (Cons ty (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Nil)))))))))) 
+        (write-record! m (module-code-function) [ty 0 0 0 0 0 0 0]) 
         (write-function-decls! m rest ma))))
 
 ; ---------------------------------------------------------------------------
@@ -364,7 +364,7 @@
 ; ordering and `llvm-ir.mnd`'s `extern-write-stdout-abs`/etc. for why
 ; that fixes each extern's abs id to `num-strings + 0/1/2`.
 (defn write-extern-decl! (m: BitSink) (ty: Int) -> Unit
-  (write-record! m (module-code-function) (Cons ty (Cons 0 (Cons 1 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Nil)))))))))))
+  (write-record! m (module-code-function) [ty 0 1 0 0 0 0 0]))
 
 (defn write-extern-decls! (m: BitSink) (ma: Int) -> Unit
   (do
@@ -463,14 +463,11 @@
 
 (defn write-globalvar! (m: BitSink) (ma: Int) (i: Int) (len: Int) (init-base: Int) -> Unit
   (write-record! m (module-code-globalvar)
-    (Cons (ty-str-array-idx ma i)
-      (Cons (globalvar-flags)
-        (Cons (+ (+ init-base i) 1) ; initid, 1-biased
-          (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Cons 0 (Nil)))))))))))))))))
+    [(ty-str-array-idx ma i) (globalvar-flags) (+ (+ init-base i) 1) 0 0 0 0 0 0 0 0 0 0 0]))
 
 (defn write-globalvars! (m: BitSink) (ma: Int) (lens: (List Int)) (i: Int) (init-base: Int) -> Unit
   (match lens
-    (Nil) ()
+    [] ()
     (Cons len rest)
       (do
         (write-globalvar! m ma i len init-base)
@@ -490,16 +487,16 @@
 ; globalvar!`'s `init-base` already assumes.
 (defn write-global-const! (c: BitSink) (ma: Int) (i: Int) (s: Str) -> Unit
   (do
-    (write-record! c (cst-code-settype) (Cons (ty-str-array-idx ma i) (Nil)))
+    (write-record! c (cst-code-settype) [(ty-str-array-idx ma i)])
     ; A zero-length array is `zeroinitializer` (`CST_CODE_NULL`). An empty
     ; `CST_CODE_STRING` record is rejected as "Invalid string record".
     (if (= (str-byte-length s) 0)
-      (write-record! c (cst-code-null) (Nil))
+      (write-record! c (cst-code-null) [])
       (write-record! c (cst-code-string) (str-byte-ops s)))))
 
 (defn write-global-consts! (c: BitSink) (ma: Int) (globals: (List Str)) (i: Int) -> Unit
   (match globals
-    (Nil) ()
+    [] ()
     (Cons s rest)
       (do
         (write-global-const! c ma i s)
@@ -521,10 +518,10 @@
 ; `llvm-ir.mnd`'s "Constants are interleaved" note).
 (defn write-const! (c: BitSink) (ty: Int) (encoded: Int) -> Unit
   (do
-    (write-record! c (cst-code-settype) (Cons ty (Nil)))
+    (write-record! c (cst-code-settype) [ty])
     (if (= encoded 0)
-      (write-record! c (cst-code-null) (Nil))
-      (write-record! c (cst-code-integer) (Cons encoded (Nil))))))
+      (write-record! c (cst-code-null) [])
+      (write-record! c (cst-code-integer) [encoded]))))
 
 ; `cc = 0` (ccc, spec §3.4's "C calling convention everywhere") with bit
 ; 15 (`1 << 15`) set — "explicit callee type follows", required with
@@ -563,26 +560,26 @@
     ; [allocatedTy(i64), sizeTy(i32), sizeValAbs, align|explicitType] —
     ; align 8 -> log2(8)+1 = 4; bit 6 (64) is the opaque-pointer "explicit
     ; allocated type" flag, always set here (confirmed against the dump).
-    (IAlloca size-abs) (write-record! f (func-code-inst-alloca) (Cons (ty-i64) (Cons (ty-i32) (Cons size-abs (Cons 68 (Nil))))))
-    (IBinop op lhs rhs) (write-record! f (func-code-inst-binop) (Cons lhs (Cons rhs (Cons op (Nil)))))
-    (ICmp2 pred lhs rhs) (write-record! f (func-code-inst-cmp2) (Cons lhs (Cons rhs (Cons pred (Nil)))))
-    (ICast op val ty) (write-record! f (func-code-inst-cast) (Cons val (Cons ty (Cons op (Nil)))))
+    (IAlloca size-abs) (write-record! f (func-code-inst-alloca) [(ty-i64) (ty-i32) size-abs 68])
+    (IBinop op lhs rhs) (write-record! f (func-code-inst-binop) [lhs rhs op])
+    (ICmp2 pred lhs rhs) (write-record! f (func-code-inst-cmp2) [lhs rhs pred])
+    (ICast op val ty) (write-record! f (func-code-inst-cast) [val ty op])
     ; [ptrRel, valRel, alignCode, isVolatile] — align 8 -> 4, no explicit
     ; type bit (only `alloca` carries that one).
-    (IStore ptr val) (write-record! f (func-code-inst-store) (Cons ptr (Cons val (Cons 4 (Cons 0 (Nil))))))
+    (IStore ptr val) (write-record! f (func-code-inst-store) [ptr val 4 0])
     ; [ptrRel, destTypeIdx, alignCode, isVolatile] — needs the explicit
     ; type (the opposite direction from `store`: nothing else tells the
     ; reader what is being loaded through an opaque `ptr`).
-    (ILoad ptr) (write-record! f (func-code-inst-load) (Cons ptr (Cons (ty-i64) (Cons 4 (Cons 0 (Nil))))))
-    (IBr bb) (write-record! f (func-code-inst-br) (Cons bb (Nil)))
-    (ICondBr t e cond) (write-record! f (func-code-inst-br) (Cons t (Cons e (Cons cond (Nil)))))
+    (ILoad ptr) (write-record! f (func-code-inst-load) [ptr (ty-i64) 4 0])
+    (IBr bb) (write-record! f (func-code-inst-br) [bb])
+    (ICondBr t e cond) (write-record! f (func-code-inst-br) [t e cond])
     (ICall callee args) (write-call! f callee args)
     (ICallVoid kind callee args) (write-call-void! f ma kind callee args)
-    (IRet val) (write-record! f (func-code-inst-ret) (Cons val (Nil)))))
+    (IRet val) (write-record! f (func-code-inst-ret) [val])))
 
 (defn write-items! (f: BitSink) (ma: Int) (items: (List Item)) -> Unit
   (match items
-    (Nil) ()
+    [] ()
     (Cons it rest) (do (write-item! f ma it) (write-items! f ma rest))))
 
 ; One function's `FUNCTION_BLOCK`: `DECLAREBLOCKS`, then every `Item` in
@@ -594,12 +591,12 @@
 ; `VALUE_SYMTAB` naming each `@function` is written, below).
 (defn write-function-body! (f: BitSink) (ma: Int) (lf: LFunc) -> Unit
   (do
-    (write-record! f (func-code-declareblocks) (Cons (lfunc-nblocks lf) (Nil)))
+    (write-record! f (func-code-declareblocks) [(lfunc-nblocks lf)])
     (write-items! f ma (lfunc-items lf))))
 
 (defn write-function-bodies! (m: BitSink) (ma: Int) (fs: (List LFunc)) -> Unit
   (match fs
-    (Nil) ()
+    [] ()
     (Cons f rest)
       (do
         (enter-subblock! m (function-block-id) (fn (fb) (write-function-body! fb ma f)))
@@ -612,7 +609,7 @@
 ; then every user function's own declaration, in that fixed order).
 (defn write-vst-entries! (v: BitSink) (fs: (List LFunc)) (idx: Int) -> Unit
   (match fs
-    (Nil) ()
+    [] ()
     (Cons f rest)
       (do
         (write-record! v (vst-code-entry) (Cons idx (str-byte-ops (lfunc-name f))))
@@ -691,11 +688,11 @@
     (write-record! v (vst-code-entry) (Cons (extern-root-push-abs num-strings) (str-byte-ops "mn_root_push")))))
 
 (defn lfunc-list-length (fs: (List LFunc)) -> Int
-  (match fs (Nil) 0 (Cons _ rest) (+ 1 (lfunc-list-length rest))))
+  (match fs [] 0 (Cons _ rest) (+ 1 (lfunc-list-length rest))))
 
 (defn max-arity-of (fs: (List LFunc)) -> Int
   (match fs
-    (Nil) 0
+    [] 0
     (Cons f rest) (max-int (lfunc-nparams f) (max-arity-of rest))))
 
 ; ---------------------------------------------------------------------------
@@ -716,7 +713,7 @@
     (let ma0 (max-arity-of fs))
     (let ma (if (< ma0 3) 3 ma0))
     (let ns (int-list-length (str-lengths globals)))
-    (write-record! m (module-code-version) (Cons 1 (Nil))) ; version 1: relative value ids
+    (write-record! m (module-code-version) [1]) ; version 1: relative value ids
     (enter-subblock! m (type-block-id) (fn (t) (write-types! t ma globals)))
     (write-globalvars! m ma (str-lengths globals) 0 (+ ns (+ (extern-count) (lfunc-list-length fs))))
     (write-extern-decls! m ma)

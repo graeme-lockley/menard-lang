@@ -144,7 +144,7 @@
 
 (defn str-list-contains (xs: (List Str)) (x: Str) -> Bool
   (match xs
-    (Nil) false
+    [] false
     (Cons h rest) (if (= h x) true (str-list-contains rest x))))
 
 ; ---------------------------------------------------------------------------
@@ -154,137 +154,138 @@
 
 (defn install-arith (env: TypeEnv) -> Unit
   (do
-    (value-set env "+" (Scheme (Nil) (t-fn (Cons (t-int) (Cons (t-int) (Nil))) (t-int))))
-    (value-set env "-" (Scheme (Nil) (t-fn (Cons (t-int) (Cons (t-int) (Nil))) (t-int))))
-    (value-set env "*" (Scheme (Nil) (t-fn (Cons (t-int) (Cons (t-int) (Nil))) (t-int))))
-    (value-set env "/" (Scheme (Nil) (t-fn (Cons (t-int) (Cons (t-int) (Nil))) (t-int))))
-    (value-set env "%" (Scheme (Nil) (t-fn (Cons (t-int) (Cons (t-int) (Nil))) (t-int))))
-    (value-set env "<" (Scheme (Nil) (t-fn (Cons (t-int) (Cons (t-int) (Nil))) (t-bool))))
-    (value-set env ">" (Scheme (Nil) (t-fn (Cons (t-int) (Cons (t-int) (Nil))) (t-bool))))
-    (value-set env "<=" (Scheme (Nil) (t-fn (Cons (t-int) (Cons (t-int) (Nil))) (t-bool))))
-    (value-set env ">=" (Scheme (Nil) (t-fn (Cons (t-int) (Cons (t-int) (Nil))) (t-bool))))))
+    (value-set env "+" (Scheme [] (t-fn [(t-int) (t-int)] (t-int))))
+    (value-set env "-" (Scheme [] (t-fn [(t-int) (t-int)] (t-int))))
+    (value-set env "*" (Scheme [] (t-fn [(t-int) (t-int)] (t-int))))
+    (value-set env "/" (Scheme [] (t-fn [(t-int) (t-int)] (t-int))))
+    (value-set env "%" (Scheme [] (t-fn [(t-int) (t-int)] (t-int))))
+    (value-set env "<" (Scheme [] (t-fn [(t-int) (t-int)] (t-bool))))
+    (value-set env ">" (Scheme [] (t-fn [(t-int) (t-int)] (t-bool))))
+    (value-set env "<=" (Scheme [] (t-fn [(t-int) (t-int)] (t-bool))))
+    (value-set env ">=" (Scheme [] (t-fn [(t-int) (t-int)] (t-bool))))))
 
 (defn install-intrinsics (env: TypeEnv) -> Unit
   (do
-    (value-set env "show" (Scheme (Cons "a" (Nil)) (t-fn (Cons (TParam "a") (Nil)) (t-str))))
-    (value-set env "print" (Scheme (Nil) (t-fn (Nil) (t-unit))))
-    (value-set env "println" (Scheme (Nil) (t-fn (Nil) (t-unit))))
-    (value-set env "=" (Scheme (Cons "a" (Nil)) (t-fn (Cons (TParam "a") (Cons (TParam "a") (Nil))) (t-bool))))
-    (value-set env "compare" (Scheme (Cons "a" (Nil)) (t-fn (Cons (TParam "a") (Cons (TParam "a") (Nil))) (t-int))))
-    (value-set env "dump" (Scheme (Cons "a" (Nil)) (t-fn (Cons (TParam "a") (Nil)) (t-unit))))))
+    (value-set env "show" (Scheme ["a"] (t-fn [(TParam "a")] (t-str))))
+    (value-set env "print" (Scheme [] (t-fn [] (t-unit))))
+    (value-set env "println" (Scheme [] (t-fn [] (t-unit))))
+    (value-set env "=" (Scheme ["a"] (t-fn [(TParam "a") (TParam "a")] (t-bool))))
+    (value-set env "compare" (Scheme ["a"] (t-fn [(TParam "a") (TParam "a")] (t-int))))
+    (value-set env "dump" (Scheme ["a"] (t-fn [(TParam "a")] (t-unit))))))
 
 (defn install-ref-ops (env: TypeEnv) -> Unit
   (do
-    (value-set env "ref" (Scheme (Cons "a" (Nil)) (t-fn (Cons (TParam "a") (Nil)) (t-ref (TParam "a")))))
-    (value-set env "deref" (Scheme (Cons "a" (Nil)) (t-fn (Cons (t-ref (TParam "a")) (Nil)) (TParam "a"))))))
+    (value-set env "ref" (Scheme ["a"] (t-fn [(TParam "a")] (t-ref (TParam "a")))))
+    (value-set env "deref" (Scheme ["a"] (t-fn [(t-ref (TParam "a"))] (TParam "a"))))))
 
 (defn install-str-ops (env: TypeEnv) -> Unit
   (do
-    (value-set env "str-byte-length" (Scheme (Nil) (t-fn (Cons (t-str) (Nil)) (t-int))))
-    (value-set env "str-byte" (Scheme (Nil) (t-fn (Cons (t-str) (Cons (t-int) (Nil))) (t-int))))
-    (value-set env "str-slice" (Scheme (Nil) (t-fn (Cons (t-str) (Cons (t-int) (Cons (t-int) (Nil)))) (t-str))))
-    (value-set env "str-concat" (Scheme (Nil) (t-fn (Cons (t-str) (Cons (t-str) (Nil))) (t-str))))
-    (value-set env "char->str" (Scheme (Nil) (t-fn (Cons (t-char) (Nil)) (t-str))))))
+    (value-set env "str-byte-length" (Scheme [] (t-fn [(t-str)] (t-int))))
+    (value-set env "str-byte" (Scheme [] (t-fn [(t-str) (t-int)] (t-int))))
+    (value-set env "str-slice" (Scheme [] (t-fn [(t-str) (t-int) (t-int)] (t-str))))
+    (value-set env "str-concat" (Scheme [] (t-fn [(t-str) (t-str)] (t-str))))
+    (value-set env "char->str" (Scheme [] (t-fn [(t-char)] (t-str))))))
 
 (defn install-map-ops (env: TypeEnv) -> Unit
   (do
-    (value-set env "map-new" (Scheme (Cons "k" (Cons "v" (Nil))) (t-fn (Nil) (t-map (TParam "k") (TParam "v")))))
-    (value-set env "map-get" (Scheme (Cons "k" (Cons "v" (Nil))) (t-fn (Cons (t-map (TParam "k") (TParam "v")) (Cons (TParam "k") (Nil))) (t-maybe (TParam "v")))))
-    (value-set env "map-set" (Scheme (Cons "k" (Cons "v" (Nil))) (t-fn (Cons (t-map (TParam "k") (TParam "v")) (Cons (TParam "k") (Cons (TParam "v") (Nil)))) (t-map (TParam "k") (TParam "v")))))
-    (value-set env "map-has" (Scheme (Cons "k" (Cons "v" (Nil))) (t-fn (Cons (t-map (TParam "k") (TParam "v")) (Cons (TParam "k") (Nil))) (t-bool))))
-    (value-set env "map-size" (Scheme (Cons "k" (Cons "v" (Nil))) (t-fn (Cons (t-map (TParam "k") (TParam "v")) (Nil)) (t-int))))
-    (value-set env "map-keys" (Scheme (Cons "k" (Cons "v" (Nil))) (t-fn (Cons (t-map (TParam "k") (TParam "v")) (Nil)) (t-list (TParam "k")))))))
+    (value-set env "map-new" (Scheme ["k" "v"] (t-fn [] (t-map (TParam "k") (TParam "v")))))
+    (value-set env "map-get" (Scheme ["k" "v"] (t-fn [(t-map (TParam "k") (TParam "v")) (TParam "k")] (t-maybe (TParam "v")))))
+    (value-set env "map-set" (Scheme ["k" "v"] (t-fn [(t-map (TParam "k") (TParam "v")) (TParam "k") (TParam "v")] (t-map (TParam "k") (TParam "v")))))
+    (value-set env "map-has" (Scheme ["k" "v"] (t-fn [(t-map (TParam "k") (TParam "v")) (TParam "k")] (t-bool))))
+    (value-set env "map-size" (Scheme ["k" "v"] (t-fn [(t-map (TParam "k") (TParam "v"))] (t-int))))
+    (value-set env "map-keys" (Scheme ["k" "v"] (t-fn [(t-map (TParam "k") (TParam "v"))] (t-list (TParam "k")))))))
 
 (defn install-sb-ops (env: TypeEnv) -> Unit
   (do
-    (value-set env "sb-new" (Scheme (Nil) (t-fn (Nil) (t-string-buffer))))
-    (value-set env "sb-append!" (Scheme (Nil) (t-fn (Cons (t-string-buffer) (Cons (t-str) (Nil))) (t-unit))))
-    (value-set env "sb-append-byte!" (Scheme (Nil) (t-fn (Cons (t-string-buffer) (Cons (t-int) (Nil))) (t-unit))))
-    (value-set env "sb-length" (Scheme (Nil) (t-fn (Cons (t-string-buffer) (Nil)) (t-int))))
-    (value-set env "sb-clear!" (Scheme (Nil) (t-fn (Cons (t-string-buffer) (Nil)) (t-unit))))
-    (value-set env "sb-to-str" (Scheme (Nil) (t-fn (Cons (t-string-buffer) (Nil)) (t-str))))
-    (value-set env "sb-take-str!" (Scheme (Nil) (t-fn (Cons (t-string-buffer) (Nil)) (t-str))))))
+    (value-set env "sb-new" (Scheme [] (t-fn [] (t-string-buffer))))
+    (value-set env "sb-append!" (Scheme [] (t-fn [(t-string-buffer) (t-str)] (t-unit))))
+    (value-set env "sb-append-byte!" (Scheme [] (t-fn [(t-string-buffer) (t-int)] (t-unit))))
+    (value-set env "sb-length" (Scheme [] (t-fn [(t-string-buffer)] (t-int))))
+    (value-set env "sb-clear!" (Scheme [] (t-fn [(t-string-buffer)] (t-unit))))
+    (value-set env "sb-to-str" (Scheme [] (t-fn [(t-string-buffer)] (t-str))))
+    (value-set env "sb-take-str!" (Scheme [] (t-fn [(t-string-buffer)] (t-str))))))
 
 (defn install-maybe (env: TypeEnv) -> Unit
   (do
     (type-set env "Maybe"
-      (VariantDef "Maybe" (Cons "a" (Nil))
-        (Cons (VariantCtor "None" (Nil)) (Cons (VariantCtor "Some" (Cons (TParam "a") (Nil))) (Nil)))))
-    (ctor-set env "None" (CtorInfo "Maybe" (Nil) (Cons "a" (Nil))))
-    (ctor-set env "Some" (CtorInfo "Maybe" (Cons (TParam "a") (Nil)) (Cons "a" (Nil))))
-    (value-set env "None" (Scheme (Cons "a" (Nil)) (t-fn (Nil) (t-maybe (TParam "a")))))
-    (value-set env "Some" (Scheme (Cons "a" (Nil)) (t-fn (Cons (TParam "a") (Nil)) (t-maybe (TParam "a")))))))
+      (VariantDef "Maybe" ["a"]
+        [(VariantCtor "None" (Nil)) (VariantCtor "Some" (Cons (TParam "a") (Nil)))]))
+    (ctor-set env "None" (CtorInfo "Maybe" [] ["a"]))
+    (ctor-set env "Some" (CtorInfo "Maybe" [(TParam "a")] ["a"]))
+    (value-set env "None" (Scheme ["a"] (t-fn [] (t-maybe (TParam "a")))))
+    (value-set env "Some" (Scheme ["a"] (t-fn [(TParam "a")] (t-maybe (TParam "a")))))))
 
 (defn install-result (env: TypeEnv) -> Unit
   (do
     (type-set env "Result"
-      (VariantDef "Result" (Cons "t" (Cons "e" (Nil)))
-        (Cons (VariantCtor "Ok" (Cons (TParam "t") (Nil))) (Cons (VariantCtor "Err" (Cons (TParam "e") (Nil))) (Nil)))))
-    (ctor-set env "Ok" (CtorInfo "Result" (Cons (TParam "t") (Nil)) (Cons "t" (Cons "e" (Nil)))))
-    (ctor-set env "Err" (CtorInfo "Result" (Cons (TParam "e") (Nil)) (Cons "t" (Cons "e" (Nil)))))
-    (value-set env "Ok" (Scheme (Cons "t" (Cons "e" (Nil))) (t-fn (Cons (TParam "t") (Nil)) (t-result (TParam "t") (TParam "e")))))
-    (value-set env "Err" (Scheme (Cons "t" (Cons "e" (Nil))) (t-fn (Cons (TParam "e") (Nil)) (t-result (TParam "t") (TParam "e")))))))
+      (VariantDef "Result" ["t" "e"]
+        [(VariantCtor "Ok" (Cons (TParam "t") (Nil))) (VariantCtor "Err" (Cons (TParam "e") (Nil)))]))
+    (ctor-set env "Ok" (CtorInfo "Result" [(TParam "t")] ["t" "e"]))
+    (ctor-set env "Err" (CtorInfo "Result" [(TParam "e")] ["t" "e"]))
+    (value-set env "Ok" (Scheme ["t" "e"] (t-fn [(TParam "t")] (t-result (TParam "t") (TParam "e")))))
+    (value-set env "Err" (Scheme ["t" "e"] (t-fn [(TParam "e")] (t-result (TParam "t") (TParam "e")))))))
 
 (defn install-list-type (env: TypeEnv) -> Unit
   (do
     (type-set env "List"
-      (VariantDef "List" (Cons "a" (Nil))
-        (Cons (VariantCtor "Nil" (Nil))
-          (Cons (VariantCtor "Cons" (Cons (TParam "a") (Cons (t-list (TParam "a")) (Nil)))) (Nil)))))
-    (ctor-set env "Nil" (CtorInfo "List" (Nil) (Cons "a" (Nil))))
-    (ctor-set env "Cons" (CtorInfo "List" (Cons (TParam "a") (Cons (t-list (TParam "a")) (Nil))) (Cons "a" (Nil))))
-    (value-set env "Nil" (Scheme (Cons "a" (Nil)) (t-fn (Nil) (t-list (TParam "a")))))
-    (value-set env "Cons" (Scheme (Cons "a" (Nil)) (t-fn (Cons (TParam "a") (Cons (t-list (TParam "a")) (Nil))) (t-list (TParam "a")))))))
+      (VariantDef "List" ["a"]
+        [
+  (VariantCtor "Nil" (Nil))
+  (VariantCtor "Cons" (Cons (TParam "a") (Cons (t-list (TParam "a")) (Nil))))]))
+    (ctor-set env "Nil" (CtorInfo "List" [] ["a"]))
+    (ctor-set env "Cons" (CtorInfo "List" [(TParam "a") (t-list (TParam "a"))] ["a"]))
+    (value-set env "Nil" (Scheme ["a"] (t-fn [] (t-list (TParam "a")))))
+    (value-set env "Cons" (Scheme ["a"] (t-fn [(TParam "a") (t-list (TParam "a"))] (t-list (TParam "a")))))))
 
 (defn register-io-error-ctor (env: TypeEnv) (name: Str) (payloads: (List Type)) -> Unit
   (do
-    (ctor-set env name (CtorInfo "IoError" payloads (Nil)))
-    (value-set env name (Scheme (Nil) (t-fn payloads (t-nominal "IoError" (Nil) "variant"))))))
+    (ctor-set env name (CtorInfo "IoError" payloads []))
+    (value-set env name (Scheme [] (t-fn payloads (t-nominal "IoError" [] "variant"))))))
 
 (defn install-io-error (env: TypeEnv) -> Unit
   (do
     (type-set env "IoError"
-      (VariantDef "IoError" (Nil)
-        (Cons (VariantCtor "NotFound" (Nil))
-        (Cons (VariantCtor "Permission" (Nil))
-        (Cons (VariantCtor "Exists" (Nil))
-        (Cons (VariantCtor "IsADirectory" (Nil))
-        (Cons (VariantCtor "NotADirectory" (Nil))
-        (Cons (VariantCtor "InvalidPath" (Nil))
-        (Cons (VariantCtor "TooLarge" (Nil))
-        (Cons (VariantCtor "Other" (Cons (t-int) (Nil))) (Nil)))))))))))
-    (register-io-error-ctor env "NotFound" (Nil))
-    (register-io-error-ctor env "Permission" (Nil))
-    (register-io-error-ctor env "Exists" (Nil))
-    (register-io-error-ctor env "IsADirectory" (Nil))
-    (register-io-error-ctor env "NotADirectory" (Nil))
-    (register-io-error-ctor env "InvalidPath" (Nil))
-    (register-io-error-ctor env "TooLarge" (Nil))
-    (register-io-error-ctor env "Other" (Cons (t-int) (Nil)))))
+      (VariantDef "IoError" []
+        [
+  (VariantCtor "NotFound" (Nil))
+  (VariantCtor "Permission" (Nil))
+  (VariantCtor "Exists" (Nil))
+  (VariantCtor "IsADirectory" (Nil))
+  (VariantCtor "NotADirectory" (Nil))
+  (VariantCtor "InvalidPath" (Nil))
+  (VariantCtor "TooLarge" (Nil))
+  (VariantCtor "Other" (Cons (t-int) (Nil)))]))
+    (register-io-error-ctor env "NotFound" [])
+    (register-io-error-ctor env "Permission" [])
+    (register-io-error-ctor env "Exists" [])
+    (register-io-error-ctor env "IsADirectory" [])
+    (register-io-error-ctor env "NotADirectory" [])
+    (register-io-error-ctor env "InvalidPath" [])
+    (register-io-error-ctor env "TooLarge" [])
+    (register-io-error-ctor env "Other" [(t-int)])))
 
 (defn install-spawn-status (env: TypeEnv) -> Unit
   (do
     (type-set env "SpawnStatus"
-      (VariantDef "SpawnStatus" (Nil)
-        (Cons (VariantCtor "Exited" (Cons (t-int) (Nil)))
-          (Cons (VariantCtor "Signalled" (Cons (t-int) (Nil))) (Nil)))))
-    (ctor-set env "Exited" (CtorInfo "SpawnStatus" (Cons (t-int) (Nil)) (Nil)))
-    (ctor-set env "Signalled" (CtorInfo "SpawnStatus" (Cons (t-int) (Nil)) (Nil)))
-    (value-set env "Exited" (Scheme (Nil) (t-fn (Cons (t-int) (Nil)) (t-nominal "SpawnStatus" (Nil) "variant"))))
-    (value-set env "Signalled" (Scheme (Nil) (t-fn (Cons (t-int) (Nil)) (t-nominal "SpawnStatus" (Nil) "variant"))))))
+      (VariantDef "SpawnStatus" []
+        [(VariantCtor "Exited" (Cons (t-int) (Nil))) (VariantCtor "Signalled" (Cons (t-int) (Nil)))]))
+    (ctor-set env "Exited" (CtorInfo "SpawnStatus" [(t-int)] []))
+    (ctor-set env "Signalled" (CtorInfo "SpawnStatus" [(t-int)] []))
+    (value-set env "Exited" (Scheme [] (t-fn [(t-int)] (t-nominal "SpawnStatus" [] "variant"))))
+    (value-set env "Signalled" (Scheme [] (t-fn [(t-int)] (t-nominal "SpawnStatus" [] "variant"))))))
 
 (defn install-host-seam (env: TypeEnv) -> Unit
   (do
-    (value-set env "exit" (Scheme (Nil) (t-fn (Cons (t-int) (Nil)) (t-unit))))
-    (value-set env "arg-count" (Scheme (Nil) (t-fn (Nil) (t-int))))
-    (value-set env "arg" (Scheme (Nil) (t-fn (Cons (t-int) (Nil)) (t-str))))
-    (value-set env "write" (Scheme (Nil) (t-fn (Cons (t-int) (Cons (t-str) (Nil))) (t-result (t-unit) (t-nominal "IoError" (Nil) "variant")))))
-    (value-set env "read-file" (Scheme (Nil) (t-fn (Cons (t-str) (Nil)) (t-result (t-str) (t-nominal "IoError" (Nil) "variant")))))
-    (value-set env "write-file" (Scheme (Nil) (t-fn (Cons (t-str) (Cons (t-str) (Nil))) (t-result (t-unit) (t-nominal "IoError" (Nil) "variant")))))
-    (value-set env "spawn" (Scheme (Nil) (t-fn (Cons (t-list (t-str)) (Nil)) (t-result (t-nominal "SpawnStatus" (Nil) "variant") (t-nominal "IoError" (Nil) "variant")))))
-    (value-set env "getenv" (Scheme (Nil) (t-fn (Cons (t-str) (Nil)) (t-maybe (t-str)))))
-    (value-set env "exists" (Scheme (Nil) (t-fn (Cons (t-str) (Nil)) (t-bool))))
-    (value-set env "rename" (Scheme (Nil) (t-fn (Cons (t-str) (Cons (t-str) (Nil))) (t-result (t-unit) (t-nominal "IoError" (Nil) "variant")))))))
+    (value-set env "exit" (Scheme [] (t-fn [(t-int)] (t-unit))))
+    (value-set env "arg-count" (Scheme [] (t-fn [] (t-int))))
+    (value-set env "arg" (Scheme [] (t-fn [(t-int)] (t-str))))
+    (value-set env "write" (Scheme [] (t-fn [(t-int) (t-str)] (t-result (t-unit) (t-nominal "IoError" [] "variant")))))
+    (value-set env "read-file" (Scheme [] (t-fn [(t-str)] (t-result (t-str) (t-nominal "IoError" [] "variant")))))
+    (value-set env "write-file" (Scheme [] (t-fn [(t-str) (t-str)] (t-result (t-unit) (t-nominal "IoError" [] "variant")))))
+    (value-set env "spawn" (Scheme [] (t-fn [(t-list (t-str))] (t-result (t-nominal "SpawnStatus" [] "variant") (t-nominal "IoError" [] "variant")))))
+    (value-set env "getenv" (Scheme [] (t-fn [(t-str)] (t-maybe (t-str)))))
+    (value-set env "exists" (Scheme [] (t-fn [(t-str)] (t-bool))))
+    (value-set env "rename" (Scheme [] (t-fn [(t-str) (t-str)] (t-result (t-unit) (t-nominal "IoError" [] "variant")))))))
 
 (defn install-builtins (env: TypeEnv) -> Unit
   (do
@@ -310,7 +311,7 @@
         (ref (map-new))
         (ref (map-new))
         (ref 0)
-        (ref (Nil))
+        (ref [])
         (ref (map-new))
         (ref (None))))
     (install-builtins env)
@@ -339,7 +340,7 @@
 
 (defn apply-subst-list (env: TypeEnv) (xs: (List Type)) -> (List Type)
   (match xs
-    (Nil) (Nil)
+    [] []
     (Cons x rest) (Cons (apply-subst env x) (apply-subst-list env rest))))
 
 (defn occurs (env: TypeEnv) (id: Int) (t: Type) -> Bool
@@ -359,7 +360,7 @@
 
 (defn occurs-list (env: TypeEnv) (id: Int) (xs: (List Type)) -> Bool
   (match xs
-    (Nil) false
+    [] false
     (Cons x rest) (or (occurs env id x) (occurs-list env id rest))))
 
 (defn unify (env: TypeEnv) (a: Type) (b: Type) (span: Span) -> Bool
@@ -441,10 +442,10 @@
 
 (defn unify-list-pairwise (env: TypeEnv) (xs: (List Type)) (ys: (List Type)) (span: Span) -> Bool
   (match xs
-    (Nil) true
+    [] true
     (Cons x xrest)
       (match ys
-        (Nil) true
+        [] true
         (Cons y yrest) (if (unify env x y span) (unify-list-pairwise env xrest yrest span) false))))
 
 (defn unify-nominal (env: TypeEnv) (na: Str) (aa: (List Type)) (ka: Str) (tb: Type) (span: Span) -> Bool
@@ -476,7 +477,7 @@
 
 (defn fresh-param-map (env: TypeEnv) (params: (List Str)) -> (Map Str Type)
   (match params
-    (Nil) (map-new)
+    [] (map-new)
     (Cons p rest) (map-set (fresh-param-map env rest) p (fresh-var env p))))
 
 (defn replace-params (t: Type) (m: (Map Str Type)) -> Type
@@ -498,12 +499,12 @@
 
 (defn replace-params-list (xs: (List Type)) (m: (Map Str Type)) -> (List Type)
   (match xs
-    (Nil) (Nil)
+    [] []
     (Cons x rest) (Cons (replace-params x m) (replace-params-list rest m))))
 
 (defn instantiate-with (env: TypeEnv) (params: (List Str)) (ty: Type) -> Type
   (match params
-    (Nil) ty
+    [] ty
     _ (replace-params ty (fresh-param-map env params))))
 
 (defn instantiate (env: TypeEnv) (scheme: Scheme) -> Type
@@ -520,11 +521,11 @@
 
 (defn find-arrow (elems: (List Ast)) -> (Maybe ArrowSplit)
   (match elems
-    (Nil) (None)
+    [] (None)
     (Cons e rest) (find-arrow-cons e rest)))
 
 (defn find-arrow-cons (e: Ast) (rest: (List Ast)) -> (Maybe ArrowSplit)
-  (if (is-sym e "->") (Some (ArrowSplit (Nil) rest))
+  (if (is-sym e "->") (Some (ArrowSplit [] rest))
     (find-arrow-cons-recurse e rest)))
 
 (defn find-arrow-cons-recurse (e: Ast) (rest: (List Ast)) -> (Maybe ArrowSplit)
@@ -537,7 +538,7 @@
 
 (defn parse-type-exprs (env: TypeEnv) (asts: (List Ast)) (params: (List Str)) -> (List Type)
   (match asts
-    (Nil) (Nil)
+    [] []
     (Cons a rest) (Cons (parse-type-expr env a params) (parse-type-exprs env rest params))))
 
 (defn parse-type-expr (env: TypeEnv) (ast: Ast) (params: (List Str)) -> Type
@@ -568,12 +569,12 @@
 
 (defn parse-type-expr-sym-nominal (env: TypeEnv) (name: Str) (sp: Span) -> Type
   (match (type-get env name)
-    (Some td) (t-nominal name (Nil) (type-def-kind td))
+    (Some td) (t-nominal name [] (type-def-kind td))
     (None) (do (err! env "E_TYPE_UNKNOWN" (str-concat "unknown type " name) sp) (fresh-var-anon env))))
 
 (defn parse-type-expr-paren (env: TypeEnv) (elems: (List Ast)) (sp: Span) (params: (List Str)) -> Type
   (match elems
-    (Nil) (t-unit)
+    [] (t-unit)
     (Cons head args) (parse-type-expr-app env head args sp params)))
 
 (defn parse-type-expr-app (env: TypeEnv) (head: Ast) (args: (List Ast)) (sp: Span) (params: (List Str)) -> Type
@@ -596,12 +597,12 @@
 
 (defn parse-type-expr-one (env: TypeEnv) (name: Str) (args: (List Ast)) (sp: Span) (params: (List Str)) (mk: (Fn Type -> Type)) -> Type
   (match args
-    (Cons a (Nil)) (mk (parse-type-expr env a params))
+    [a] (mk (parse-type-expr env a params))
     _ (do (err! env "E_TYPE_EXPR" (str-concat name " requires exactly one type argument") sp) (fresh-var-anon env))))
 
 (defn parse-type-expr-two (env: TypeEnv) (name: Str) (args: (List Ast)) (sp: Span) (params: (List Str)) (mk: (Fn Type Type -> Type)) -> Type
   (match args
-    (Cons a (Cons b (Nil))) (mk (parse-type-expr env a params) (parse-type-expr env b params))
+    [a b] (mk (parse-type-expr env a params) (parse-type-expr env b params))
     _ (do (err! env "E_TYPE_EXPR" (str-concat name " requires exactly two type arguments") sp) (fresh-var-anon env))))
 
 (defn parse-type-expr-fn (env: TypeEnv) (args: (List Ast)) (sp: Span) (params: (List Str)) -> Type
@@ -615,7 +616,7 @@
 (defn parse-type-expr-first (env: TypeEnv) (after: (List Ast)) (sp: Span) (params: (List Str)) -> Type
   (match after
     (Cons r _) (parse-type-expr env r params)
-    (Nil) (do (err! env "E_TYPE_FN" "Fn type requires a return type after ->" sp) (fresh-var-anon env))))
+    [] (do (err! env "E_TYPE_FN" "Fn type requires a return type after ->" sp) (fresh-var-anon env))))
 
 (defn parse-type-expr-nominal (env: TypeEnv) (hn: Str) (args: (List Ast)) (sp: Span) (params: (List Str)) -> Type
   (match (type-get env hn)
@@ -631,7 +632,7 @@
 
 (defn syms-of (elems: (List Ast)) -> (List Str)
   (match elems
-    (Nil) (Nil)
+    [] []
     (Cons e rest) (syms-of-cons e rest)))
 
 (defn syms-of-cons (e: Ast) (rest: (List Ast)) -> (List Str)
@@ -642,12 +643,12 @@
 (defn parse-bracket-syms (ast: Ast) -> (List Str)
   (match ast
     (BracketNode elems _) (syms-of elems)
-    _ (Nil)))
+    _ []))
 
 (defn parse-type-name-params (more: (List Ast)) -> (List Str)
   (match more
     (Cons tp-ast _) (parse-bracket-syms tp-ast)
-    (Nil) (Nil)))
+    [] []))
 
 (defn parse-type-name-paren-named (name-ast: Ast) (more: (List Ast)) -> (Maybe NameParams)
   (match (sym-str name-ast)
@@ -657,17 +658,17 @@
 (defn parse-type-name-paren (elems: (List Ast)) -> (Maybe NameParams)
   (match elems
     (Cons name-ast more) (parse-type-name-paren-named name-ast more)
-    (Nil) (None)))
+    [] (None)))
 
 (defn parse-type-name (ast: Ast) -> (Maybe NameParams)
   (match ast
-    (SymNode name _) (Some (NameParams name (Nil)))
+    (SymNode name _) (Some (NameParams name []))
     (ParenNode elems _) (parse-type-name-paren elems)
     _ (None)))
 
 (defn params-to-types (params: (List Str)) -> (List Type)
   (match params
-    (Nil) (Nil)
+    [] []
     (Cons p rest) (Cons (TParam p) (params-to-types rest))))
 
 ; ---------------------------------------------------------------------------
@@ -684,7 +685,7 @@
 
 (defn collect-def-elems (env: TypeEnv) (elems: (List Ast)) (sp: Span) -> Unit
   (match elems
-    (Nil) ()
+    [] ()
     (Cons head rest) (collect-def-head env head rest sp)))
 
 (defn collect-def-head (env: TypeEnv) (head: Ast) (rest: (List Ast)) (sp: Span) -> Unit
@@ -709,7 +710,7 @@
 (defn collect-alias-named (env: TypeEnv) (name-part: Ast) (type-part: Ast) -> Unit
   (match (sym-str name-part)
     (None) ()
-    (Some name) (alias-set env name (parse-type-expr env type-part (Nil)))))
+    (Some name) (alias-set env name (parse-type-expr env type-part []))))
 
 ; defrec
 
@@ -718,7 +719,7 @@
 
 (defn record-field-types (fields: (List RecordField)) -> (List Type)
   (match fields
-    (Nil) (Nil)
+    [] []
     (Cons f rest) (Cons (record-field-type f) (record-field-types rest))))
 
 (defn parse-record-field-named (env: TypeEnv) (name-ast: Ast) (type-ast: Ast) (params: (List Str)) -> (Maybe RecordField)
@@ -738,7 +739,7 @@
 
 (defn parse-record-fields (env: TypeEnv) (fields: (List Ast)) (params: (List Str)) -> (List RecordField)
   (match fields
-    (Nil) (Nil)
+    [] []
     (Cons f rest) (parse-record-fields-cons env f rest params)))
 
 (defn parse-record-fields-cons (env: TypeEnv) (f: Ast) (rest: (List Ast)) (params: (List Str)) -> (List RecordField)
@@ -764,7 +765,7 @@
 (defn collect-defrec (env: TypeEnv) (rest: (List Ast)) (sp: Span) -> Unit
   (match rest
     (Cons name-part fields) (collect-defrec-named env name-part fields)
-    (Nil) ()))
+    [] ()))
 
 ; variant
 
@@ -783,7 +784,7 @@
 (defn parse-variant-ctor-elems (env: TypeEnv) (celems: (List Ast)) (params: (List Str)) -> (Maybe VariantCtor)
   (match celems
     (Cons cname-ast payload-asts) (parse-variant-ctor-named env cname-ast payload-asts params)
-    (Nil) (None)))
+    [] (None)))
 
 (defn parse-variant-ctor (env: TypeEnv) (c: Ast) (params: (List Str)) -> (Maybe VariantCtor)
   (match c
@@ -792,7 +793,7 @@
 
 (defn collect-variant-ctor-list (env: TypeEnv) (type-name: Str) (params: (List Str)) (ctor-asts: (List Ast)) -> (List VariantCtor)
   (match ctor-asts
-    (Nil) (Nil)
+    [] []
     (Cons c rest) (collect-variant-ctor-cons env type-name params c rest)))
 
 (defn collect-variant-ctor-cons (env: TypeEnv) (type-name: Str) (params: (List Str)) (c: Ast) (rest: (List Ast)) -> (List VariantCtor)
@@ -818,7 +819,7 @@
 (defn collect-variant (env: TypeEnv) (rest: (List Ast)) (sp: Span) -> Unit
   (match rest
     (Cons name-part ctors) (collect-variant-named env name-part ctors)
-    (Nil) ()))
+    [] ()))
 
 ; ---------------------------------------------------------------------------
 ; defn header parsing, shared by scheme-collection (pass 1) and body
@@ -838,17 +839,17 @@
   (match tail (ParamsSplit ns ts rs) (ParamsSplit (Cons name ns) (Cons t ts) rs)))
 
 (defn parse-params-elem (env: TypeEnv) (e: Ast) (rest: (List Ast)) (param-set: (List Str)) -> ParamsSplit
-  (if (is-sym e "->") (ParamsSplit (Nil) (Nil) rest)
+  (if (is-sym e "->") (ParamsSplit [] [] rest)
     (parse-params-elem-field env e rest param-set)))
 
 (defn parse-params-elem-field (env: TypeEnv) (e: Ast) (rest: (List Ast)) (param-set: (List Str)) -> ParamsSplit
   (match e
     (ParenNode (Cons name-ast (Cons type-ast _)) _) (parse-params-field env name-ast type-ast rest param-set)
-    _ (ParamsSplit (Nil) (Nil) (Cons e rest))))
+    _ (ParamsSplit [] [] (Cons e rest))))
 
 (defn parse-params (env: TypeEnv) (elems: (List Ast)) (param-set: (List Str)) -> ParamsSplit
   (match elems
-    (Nil) (ParamsSplit (Nil) (Nil) (Nil))
+    [] (ParamsSplit [] [] [])
     (Cons e rest) (parse-params-elem env e rest param-set)))
 
 (defrec ParsedDefn
@@ -866,7 +867,7 @@
 (defn parse-defn-return-rest (env: TypeEnv) (name: Str) (type-params: (List Str)) (pnames: (List Str)) (ptypes: (List Type)) (rest2: (List Ast)) (whole-span: Span) (report: Bool) -> (Maybe ParsedDefn)
   (match rest2
     (Cons ret-ast body) (Some (ParsedDefn name type-params pnames ptypes (parse-type-expr env ret-ast type-params) body))
-    (Nil) (do (if report (err! env "E_TYPE_DEFN" "defn missing return type" whole-span) ()) (None))))
+    [] (do (if report (err! env "E_TYPE_DEFN" "defn missing return type" whole-span) ()) (None))))
 
 (defn parse-defn-header (env: TypeEnv) (name: Str) (type-params: (List Str)) (rest: (List Ast)) (whole-span: Span) (report: Bool) -> (Maybe ParsedDefn)
   (parse-defn-return env name type-params (parse-params env rest type-params) whole-span report))
@@ -907,7 +908,7 @@
 
 (defn collect-defn-scheme-elems (env: TypeEnv) (elems: (List Ast)) (sp: Span) -> Unit
   (match elems
-    (Nil) ()
+    [] ()
     (Cons head rest) (collect-defn-scheme-head env head rest elems sp)))
 
 (defn collect-defn-scheme (env: TypeEnv) (ast: Ast) -> Unit
@@ -920,16 +921,16 @@
 
 (defn build-param-local (names: (List Str)) (types: (List Type)) -> (Map Str Type)
   (match names
-    (Nil) (map-new)
+    [] (map-new)
     (Cons n nrest)
       (match types
-        (Nil) (map-new)
+        [] (map-new)
         (Cons t trest) (map-set (build-param-local nrest trest) n t))))
 
 (defn last-of (xs: (List Ast)) -> (Maybe Ast)
   (match xs
-    (Nil) (None)
-    (Cons x (Nil)) (Some x)
+    [] (None)
+    [x] (Some x)
     (Cons _ rest) (last-of rest)))
 
 (defn defn-body-span (body: (List Ast)) (fallback: Span) -> Span
@@ -937,7 +938,7 @@
 
 (defn typecheck-defn-body-type (env: TypeEnv) (body: (List Ast)) (local: (Map Str Type)) -> Type
   (match body
-    (Nil) (t-unit)
+    [] (t-unit)
     _ (infer-sequence env body local)))
 
 (defn typecheck-defn-body (env: TypeEnv) (p: ParsedDefn) (sp: Span) -> Unit
@@ -981,7 +982,7 @@
 
 (defn check-bracket-rest (env: TypeEnv) (rest: (List Ast)) (et: Type) (local: (Map Str Type)) -> Unit
   (match rest
-    (Nil) ()
+    [] ()
     (Cons e more)
       (do
         (expect-type env (infer env e local) et (ast-span e))
@@ -995,14 +996,14 @@
 
 (defn infer-bracket (env: TypeEnv) (elems: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
   (match elems
-    (Nil) (t-list (fresh-var-anon env))
+    [] (t-list (fresh-var-anon env))
     (Cons first rest) (infer-bracket-nonempty env first rest local)))
 
 ; -- if --
 
 (defn infer-if (env: TypeEnv) (elems: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
   (match elems
-    (Cons _ (Cons test (Cons then (Cons els (Nil))))) (infer-if-checked env test then els local)
+    [_ test then els] (infer-if-checked env test then els local)
     _ (do (err! env "E_TYPE_ARITY" "if expects test, then, else" sp) (fresh-var-anon env))))
 
 (defn infer-if-checked (env: TypeEnv) (test: Ast) (then: Ast) (els: Ast) (local: (Map Str Type)) -> Type
@@ -1017,7 +1018,7 @@
 
 (defn infer-let-body (env: TypeEnv) (body: (List Ast)) (bound-type: Type) (next: (Map Str Type)) -> Type
   (match body
-    (Nil) bound-type
+    [] bound-type
     _ (infer-sequence env body next)))
 
 (defn infer-let-named (env: TypeEnv) (name-ast: Ast) (expr-ast: Ast) (body: (List Ast)) (local: (Map Str Type)) -> Type
@@ -1042,12 +1043,12 @@
 
 (defn as-simple-let (f: Ast) -> (Maybe SimpleLet)
   (match f
-    (ParenNode (Cons head (Cons name-ast (Cons expr-ast (Nil)))) _) (as-simple-let-named head name-ast expr-ast)
+    (ParenNode [head name-ast expr-ast] _) (as-simple-let-named head name-ast expr-ast)
     _ (None)))
 
 (defn infer-sequence-rest (env: TypeEnv) (rest: (List Ast)) (local: (Map Str Type)) (fallback: Type) -> Type
   (match rest
-    (Nil) fallback
+    [] fallback
     _ (infer-sequence env rest local)))
 
 (defn infer-sequence-let (env: TypeEnv) (sl: SimpleLet) (rest: (List Ast)) (local: (Map Str Type)) -> Type
@@ -1069,7 +1070,7 @@
 
 (defn infer-sequence (env: TypeEnv) (forms: (List Ast)) (local: (Map Str Type)) -> Type
   (match forms
-    (Nil) (t-unit)
+    [] (t-unit)
     (Cons f rest) (infer-sequence-step env f rest local)))
 
 (defn infer-do (env: TypeEnv) (rest: (List Ast)) (local: (Map Str Type)) -> Type
@@ -1084,7 +1085,7 @@
 
 (defn loop-binding-pairs (env: TypeEnv) (belems: (List Ast)) (outer: (Map Str Type)) -> LoopAcc
   (match belems
-    (Nil) (LoopAcc outer (Nil))
+    [] (LoopAcc outer [])
     (Cons b rest) (loop-binding-pairs-cons env b rest outer)))
 
 (defn loop-binding-one (env: TypeEnv) (name-ast: Ast) (init-ast: Ast) (rest: (List Ast)) (outer: (Map Str Type)) -> LoopAcc
@@ -1114,7 +1115,7 @@
 (defn infer-loop-bindings-of (env: TypeEnv) (bindings-ast: Ast) (body-ast: Ast) (local: (Map Str Type)) -> Type
   (match bindings-ast
     (ParenNode belems _) (infer-loop-run env (loop-binding-pairs env belems local) body-ast)
-    _ (infer-loop-run env (LoopAcc local (Nil)) body-ast)))
+    _ (infer-loop-run env (LoopAcc local []) body-ast)))
 
 (defn infer-loop (env: TypeEnv) (elems: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
   (match elems
@@ -1123,10 +1124,10 @@
 
 (defn check-recur-args (env: TypeEnv) (args: (List Ast)) (expected: (List Type)) (local: (Map Str Type)) -> Unit
   (match args
-    (Nil) ()
+    [] ()
     (Cons a arest)
       (match expected
-        (Nil) ()
+        [] ()
         (Cons e erest)
           (do (expect-type env (infer env a local) e (ast-span a)) (check-recur-args env arest erest local)))))
 
@@ -1150,18 +1151,18 @@
 (defn infer-recur (env: TypeEnv) (elems: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
   (match elems
     (Cons _ args) (infer-recur-args env args sp local)
-    (Nil) (do (err! env "E_TYPE_RECUR" "recur outside loop" sp) (fresh-var-anon env))))
+    [] (do (err! env "E_TYPE_RECUR" "recur outside loop" sp) (fresh-var-anon env))))
 
 ; -- panic / return --
 
 (defn infer-panic-arg (env: TypeEnv) (rest: (List Ast)) (local: (Map Str Type)) -> Unit
-  (match rest (Nil) () (Cons a _) (do (infer env a local) ())))
+  (match rest [] () (Cons a _) (do (infer env a local) ())))
 
 (defn infer-panic (env: TypeEnv) (rest: (List Ast)) (local: (Map Str Type)) -> Type
   (do (infer-panic-arg env rest local) (fresh-var-anon env)))
 
 (defn infer-return (env: TypeEnv) (rest: (List Ast)) (local: (Map Str Type)) -> Type
-  (match rest (Nil) (t-unit) (Cons a _) (infer env a local)))
+  (match rest [] (t-unit) (Cons a _) (infer env a local)))
 
 ; -- quote --
 
@@ -1176,7 +1177,7 @@
     (BracketNode _ _) (t-list (t-sym))))
 
 (defn infer-quote-form (rest: (List Ast)) -> Type
-  (match rest (Cons a _) (infer-quote a) (Nil) (t-unit)))
+  (match rest (Cons a _) (infer-quote a) [] (t-unit)))
 
 ; -- set! --
 
@@ -1191,7 +1192,7 @@
 
 (defn infer-set-bang (env: TypeEnv) (elems: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
   (match elems
-    (Cons _ (Cons r-ast (Cons v-ast (Nil)))) (infer-set-bang-checked env r-ast v-ast local)
+    [_ r-ast v-ast] (infer-set-bang-checked env r-ast v-ast local)
     _ (do (err! env "E_TYPE_ARITY" "set! expects 2 arguments" sp) (t-unit))))
 
 ; -- fn / lambda --
@@ -1211,13 +1212,13 @@
 
 (defn lambda-param-list (env: TypeEnv) (pelems: (List Ast)) (local: (Map Str Type)) -> LambdaAcc
   (match pelems
-    (Nil) (LambdaAcc local (Nil))
+    [] (LambdaAcc local [])
     (Cons p rest) (lambda-param-list-cons env p rest local)))
 
 (defn infer-lambda-acc (env: TypeEnv) (params-ast: Ast) (local: (Map Str Type)) -> LambdaAcc
   (match params-ast
     (ParenNode pelems _) (lambda-param-list env pelems local)
-    _ (LambdaAcc local (Nil))))
+    _ (LambdaAcc local [])))
 
 (defn infer-lambda-build (env: TypeEnv) (acc: LambdaAcc) (body-ast: Ast) -> Type
   (match acc
@@ -1240,7 +1241,7 @@
   (match (type-get env type-name) (Some td) (type-def-kind td) (None) "variant"))
 
 (defn nth-or-fresh (xs: (List Type)) (i: Int) (env: TypeEnv) -> Type
-  (match xs (Nil) (fresh-var-anon env) (Cons x rest) (if (= i 0) x (nth-or-fresh rest (- i 1) env))))
+  (match xs [] (fresh-var-anon env) (Cons x rest) (if (= i 0) x (nth-or-fresh rest (- i 1) env))))
 
 (defn bind-ctor-scrut-specific (env: TypeEnv) (type-name: Str) (arg-vars: (List Type)) (scrut: Type) (sp: Span) -> Unit
   (if (= type-name "Maybe") (do (unify env scrut (t-maybe (nth-or-fresh arg-vars 0 env)) sp) ())
@@ -1250,14 +1251,14 @@
 
 (defn zip-param-map (params: (List Str)) (vars: (List Type)) -> (Map Str Type)
   (match params
-    (Nil) (map-new)
+    [] (map-new)
     (Cons p prest)
       (match vars
-        (Nil) (map-new)
+        [] (map-new)
         (Cons v vrest) (map-set (zip-param-map prest vrest) p v))))
 
 (defn fresh-vars-for (params: (List Str)) (env: TypeEnv) -> (List Type)
-  (match params (Nil) (Nil) (Cons _ rest) (Cons (fresh-var-anon env) (fresh-vars-for rest env))))
+  (match params [] [] (Cons _ rest) (Cons (fresh-var-anon env) (fresh-vars-for rest env))))
 
 ; Forward declaration: `bind-pattern` and `bind-pattern-args` recurse into
 ; each other (a ctor pattern's own arguments are themselves patterns).
@@ -1288,13 +1289,13 @@
 
 (defn bind-pattern-args (env: TypeEnv) (arg-pats: (List Ast)) (payloads: (List Type)) (loc: (Ref (Map Str Type))) -> Unit
   (match payloads
-    (Nil) ()
+    [] ()
     (Cons pt prest)
       (match arg-pats
-        (Nil) ()
+        [] ()
         (Cons pa parest)
           (do
-            (bind-pattern env pa pt loc (ref (Nil)))
+            (bind-pattern env pa pt loc (ref []))
             (bind-pattern-args env parest prest loc)))))
 
 (defn bind-pattern-ctor-info (env: TypeEnv) (cname: Str) (ctor: CtorInfo) (arg-pats: (List Ast)) (psp: Span) (scrut: Type) (loc: (Ref (Map Str Type))) (covered: (Ref (List Str))) -> Unit
@@ -1318,7 +1319,7 @@
 (defn bind-pattern-ctor (env: TypeEnv) (pelems: (List Ast)) (psp: Span) (scrut: Type) (loc: (Ref (Map Str Type))) (covered: (Ref (List Str))) -> Unit
   (match pelems
     (Cons cname-ast arg-pats) (bind-pattern-ctor-named env cname-ast arg-pats psp scrut loc covered)
-    (Nil) ()))
+    [] ()))
 
 (defn nominal-type-name-of (t: Type) -> (Maybe Str)
   (match t
@@ -1336,7 +1337,7 @@
 
 (defn check-ctors-covered (env: TypeEnv) (ctors: (List VariantCtor)) (covered: (List Str)) (sp: Span) -> Unit
   (match ctors
-    (Nil) ()
+    [] ()
     (Cons c rest) (do (check-ctor-covered env c covered sp) (check-ctors-covered env rest covered sp))))
 
 (defn check-match-exhaustive-def (env: TypeEnv) (td: TypeDef) (covered: (List Str)) (has-wild: Bool) (sp: Span) -> Unit
@@ -1373,13 +1374,13 @@
     (run-match-clauses env more scrut local covered has-wild (combine-match-result env bt result (ast-span body)))))
 
 (defn list-odd-length (xs: (List Ast)) -> Bool
-  (match xs (Nil) false (Cons _ (Nil)) true (Cons _ (Cons _ rest)) (list-odd-length rest)))
+  (match xs [] false [_] true (Cons _ (Cons _ rest)) (list-odd-length rest)))
 
 (defn infer-match-scrut (env: TypeEnv) (scrut-ast: Ast) (clauses: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
   (do
     (let scrut (infer env scrut-ast local))
     (if (list-odd-length clauses) (err! env "E_TYPE_MATCH" "match clauses must be pattern/body pairs" sp) ())
-    (let covered (ref (Nil)))
+    (let covered (ref []))
     (let has-wild (ref false))
     (let result (run-match-clauses env clauses scrut local covered has-wild (None)))
     (check-match-exhaustive env scrut (deref covered) (deref has-wild) sp)
@@ -1403,7 +1404,7 @@
 
 (defn check-print-args (env: TypeEnv) (args: (List Ast)) (local: (Map Str Type)) -> Unit
   (match args
-    (Nil) ()
+    [] ()
     (Cons a rest) (do (check-print-arg env a local) (check-print-args env rest local))))
 
 (defn infer-print-args (env: TypeEnv) (args: (List Ast)) (local: (Map Str Type)) -> Type
@@ -1411,14 +1412,14 @@
 
 (defn infer-args (env: TypeEnv) (args: (List Ast)) (local: (Map Str Type)) -> (List Type)
   (match args
-    (Nil) (Nil)
+    [] []
     (Cons a rest) (Cons (infer env a local) (infer-args env rest local))))
 
 (defn first-type-or-fresh (xs: (List Type)) (env: TypeEnv) -> Type
-  (match xs (Cons x _) x (Nil) (fresh-var-anon env)))
+  (match xs (Cons x _) x [] (fresh-var-anon env)))
 
 (defn first-span-or (args: (List Ast)) (fallback: Span) -> Span
-  (match args (Cons a _) (ast-span a) (Nil) fallback))
+  (match args (Cons a _) (ast-span a) [] fallback))
 
 (defn check-predicate-arg (env: TypeEnv) (arg-types: (List Type)) (args: (List Ast)) (sp: Span) (pred: (Fn Type -> Bool)) (code: Str) (label: Str) -> Unit
   (do
@@ -1447,7 +1448,7 @@
 
 (defn infer-app (env: TypeEnv) (elems: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
   (match elems
-    (Nil) (t-unit)
+    [] (t-unit)
     (Cons head args) (infer-app-dispatch env head args sp local)))
 
 ; -- paren dispatch --
@@ -1474,7 +1475,7 @@
 
 (defn infer-paren (env: TypeEnv) (elems: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
   (match elems
-    (Nil) (t-unit)
+    [] (t-unit)
     (Cons head rest) (infer-paren-head env head rest elems sp local)))
 
 ; ---------------------------------------------------------------------------
@@ -1492,7 +1493,7 @@
 
 (defn typecheck-top-let (env: TypeEnv) (elems: (List Ast)) (sp: Span) (ast: Ast) (top-local: (Ref (Map Str Type))) -> Unit
   (match elems
-    (Cons _ (Cons name-ast (Cons expr-ast (Nil)))) (typecheck-top-let-named env name-ast expr-ast top-local)
+    [_ name-ast expr-ast] (typecheck-top-let-named env name-ast expr-ast top-local)
     _ (do (infer env ast (deref top-local)) ())))
 
 (defn typecheck-top-named (env: TypeEnv) (hn: Str) (rest: (List Ast)) (elems: (List Ast)) (sp: Span) (ast: Ast) (top-local: (Ref (Map Str Type))) -> Unit
@@ -1514,7 +1515,7 @@
 (defn typecheck-top-paren (env: TypeEnv) (elems: (List Ast)) (sp: Span) (ast: Ast) (top-local: (Ref (Map Str Type))) -> Unit
   (match elems
     (Cons head rest) (typecheck-top-dispatch env head rest elems sp ast top-local)
-    (Nil) (do (infer env ast (deref top-local)) ())))
+    [] (do (infer env ast (deref top-local)) ())))
 
 (defn typecheck-top (env: TypeEnv) (ast: Ast) (top-local: (Ref (Map Str Type))) -> Unit
   (match ast
@@ -1526,30 +1527,30 @@
 
 (defn collect-defs (env: TypeEnv) (forms: (List Ast)) -> Unit
   (match forms
-    (Nil) ()
+    [] ()
     (Cons f rest) (do (collect-def env f) (collect-defs env rest))))
 
 (defn collect-defn-schemes (env: TypeEnv) (forms: (List Ast)) -> Unit
   (match forms
-    (Nil) ()
+    [] ()
     (Cons f rest) (do (collect-defn-scheme env f) (collect-defn-schemes env rest))))
 
 (defn run-typecheck-top (env: TypeEnv) (forms: (List Ast)) (top-local: (Ref (Map Str Type))) -> Unit
   (match forms
-    (Nil) ()
+    [] ()
     (Cons f rest) (do (typecheck-top env f top-local) (run-typecheck-top env rest top-local))))
 
 (defn reverse-errs-onto (xs: (List TypeError)) (acc: (List TypeError)) -> (List TypeError)
   (match xs
-    (Nil) acc
+    [] acc
     (Cons x rest) (reverse-errs-onto rest (Cons x acc))))
 
 (defn reverse-errs (xs: (List TypeError)) -> (List TypeError)
-  (reverse-errs-onto xs (Nil)))
+  (reverse-errs-onto xs []))
 
 (defn finish-typecheck (forms: (List Ast)) (errs: (List TypeError)) -> (Result (List Ast) (List TypeError))
   (match errs
-    (Nil) (Ok forms)
+    [] (Ok forms)
     _ (Err (reverse-errs errs))))
 
 ; Typecheck a single-file program's top-level forms (post-desugar). Two

@@ -22,7 +22,7 @@
     (match (getenv "PATH")
       (Some _) (println "PATH is set")
       (None) (println "PATH is unset"))
-    (match (spawn (Cons "/usr/bin/true" (Nil)))
+    (match (spawn ["/usr/bin/true"])
       (Ok st)
         (match st
           (Exited n) (line (str-concat "true exited " (show n)))

@@ -83,7 +83,7 @@
 
 (defn append-list (xs: (List Ast)) (ys: (List Ast)) -> (List Ast)
   (match xs
-    (Nil) ys
+    [] ys
     (Cons x rest) (Cons x (append-list rest ys))))
 
 ; ---------------------------------------------------------------------------
@@ -100,7 +100,7 @@
 
 (defn find-arrow (elems: (List Ast)) -> (Maybe ArrowSplit)
   (match elems
-    (Nil) (None)
+    [] (None)
     (Cons e rest) (find-arrow-step e rest)))
 
 (defn find-arrow-step (e: Ast) (rest: (List Ast)) -> (Maybe ArrowSplit)
@@ -108,8 +108,8 @@
 
 (defn find-arrow-tail (arrow: Ast) (rest: (List Ast)) -> (Maybe ArrowSplit)
   (match rest
-    (Cons ret body) (Some (ArrowSplit (Nil) arrow ret body))
-    (Nil) (None)))
+    (Cons ret body) (Some (ArrowSplit [] arrow ret body))
+    [] (None)))
 
 (defn find-arrow-prepend (e: Ast) (rest: (List Ast)) -> (Maybe ArrowSplit)
   (match (find-arrow rest)
@@ -124,13 +124,13 @@
 
 (defn split-last (xs: (List Ast)) -> (Maybe SplitLast)
   (match xs
-    (Nil) (None)
-    (Cons x (Nil)) (Some (SplitLast (Nil) x))
+    [] (None)
+    [x] (Some (SplitLast [] x))
     (Cons x rest) (split-last-cons x rest)))
 
 (defn split-last-cons (x: Ast) (rest: (List Ast)) -> (Maybe SplitLast)
   (match (split-last rest)
-    (None) (Some (SplitLast (Nil) x))
+    (None) (Some (SplitLast [] x))
     (Some sl) (Some (SplitLast (Cons x (split-last-init sl)) (split-last-last sl)))))
 
 (defn split-last-init (sl: SplitLast) -> (List Ast) (match sl (SplitLast i _) i))
@@ -140,7 +140,7 @@
 ; `(shadow-push)` / `(shadow-pop)` call sites, and the wrapping itself.
 
 (defn shadow-call (name: Str) -> Ast
-  (ParenNode (Cons (SymNode name (dummy-span)) (Nil)) (dummy-span)))
+  (ParenNode [(SymNode name (dummy-span))] (dummy-span)))
 
 (defn wrap-defn-body (body: (List Ast)) -> (List Ast)
   (match (split-last body)
@@ -150,7 +150,7 @@
 (defn wrap-defn-body-split (sl: SplitLast) -> (List Ast)
   (append-list
     (Cons (shadow-call "shadow-push") (split-last-init sl))
-    (Cons (shadow-call "shadow-pop") (Cons (split-last-last sl) (Nil)))))
+    [(shadow-call "shadow-pop") (split-last-last sl)]))
 
 ; ---------------------------------------------------------------------------
 ; Top-level driver: every `defn` (through an optional `pub` wrapper) has
@@ -188,7 +188,7 @@
 
 (defn root-all (forms: (List Ast)) -> (List Ast)
   (match forms
-    (Nil) (Nil)
+    [] []
     (Cons f rest) (Cons (root-top-level f) (root-all rest))))
 
 ; The two Unit no-op `defn`s every wrapped body now calls — see header
@@ -196,15 +196,16 @@
 ; subject to `root-top-level` themselves.
 (defn shadow-helper-defn (name: Str) -> Ast
   (ParenNode
-    (Cons (SymNode "defn" (dummy-span))
-      (Cons (SymNode name (dummy-span))
-        (Cons (SymNode "->" (dummy-span))
-          (Cons (SymNode "Unit" (dummy-span))
-            (Cons (ParenNode (Nil) (dummy-span)) (Nil))))))
+    [
+  (SymNode "defn" (dummy-span))
+  (SymNode name (dummy-span))
+  (SymNode "->" (dummy-span))
+  (SymNode "Unit" (dummy-span))
+  (ParenNode (Nil) (dummy-span))]
     (dummy-span)))
 
 (defn shadow-helper-defns -> (List Ast)
-  (Cons (shadow-helper-defn "shadow-push") (Cons (shadow-helper-defn "shadow-pop") (Nil))))
+  [(shadow-helper-defn "shadow-push") (shadow-helper-defn "shadow-pop")])
 
 (pub defn rooting-analyze (forms: (List Ast)) -> (List Ast)
   (append-list (root-all forms) (shadow-helper-defns)))

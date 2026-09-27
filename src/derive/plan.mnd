@@ -73,18 +73,18 @@
 
 (defn list-length (xs: (List Ast)) -> Int
   (match xs
-    (Nil) 0
+    [] 0
     (Cons _ rest) (+ 1 (list-length rest))))
 
 (defn last-of (xs: (List Ast)) -> (Maybe Ast)
   (match xs
-    (Nil) (None)
-    (Cons x (Nil)) (Some x)
+    [] (None)
+    [x] (Some x)
     (Cons _ rest) (last-of rest)))
 
 (defn str-list-contains (xs: (List Str)) (x: Str) -> Bool
   (match xs
-    (Nil) false
+    [] false
     (Cons h rest) (if (= h x) true (str-list-contains rest x))))
 
 ; `main` or `(f [a])` — the type-parameter list (if any) is irrelevant
@@ -146,13 +146,13 @@
 
 (defn register-variant-ctors (type-name: Str) (ctor-asts: (List Ast)) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
   (match ctor-asts
-    (Nil) acc
+    [] acc
     (Cons c rest) (register-variant-ctors type-name rest (register-one-variant-ctor type-name c acc))))
 
 (defn collect-variant-decl (rest: (List Ast)) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
   (match rest
     (Cons name-part ctors) (collect-variant-decl-named name-part ctors acc)
-    (Nil) acc))
+    [] acc))
 
 (defn collect-variant-decl-named (name-part: Ast) (ctors: (List Ast)) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
   (match (decl-name-of name-part)
@@ -162,7 +162,7 @@
 (defn collect-defrec-decl (rest: (List Ast)) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
   (match rest
     (Cons name-part fields) (collect-defrec-decl-named name-part fields acc)
-    (Nil) acc))
+    [] acc))
 
 (defn collect-defrec-decl-named (name-part: Ast) (fields: (List Ast)) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
   (match (decl-name-of name-part)
@@ -189,7 +189,7 @@
 
 (defn collect-ctors (forms: (List Ast)) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
   (match forms
-    (Nil) acc
+    [] acc
     (Cons f rest) (collect-ctors rest (collect-ctors-form f acc))))
 
 (defn all-ctor-metas (forms: (List Ast)) -> (Map Str CtorMeta)
@@ -228,7 +228,7 @@
 
 (defn classify-paren (elems: (List Ast)) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
   (match elems
-    (Nil) (None)
+    [] (None)
     (Cons head args) (classify-paren-head head args ctors)))
 
 (defn classify-paren-head (head: Ast) (args: (List Ast)) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
@@ -258,7 +258,7 @@
 
 (defn classify-let-body (expr-ast: Ast) (body: (List Ast)) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
   (match body
-    (Nil) (classify-expr-type expr-ast ctors)
+    [] (classify-expr-type expr-ast ctors)
     _ (classify-do body ctors)))
 
 (defn classify-do (args: (List Ast)) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
@@ -297,11 +297,11 @@
 (defn maybe-record-op-args (hn: Str) (args: (List Ast)) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
   (match args
     (Cons a _) (maybe-record-classified hn a ctors usages)
-    (Nil) ()))
+    [] ()))
 
 (defn walk-list (xs: (List Ast)) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
   (match xs
-    (Nil) ()
+    [] ()
     (Cons x rest) (do (walk-expr x ctors usages) (walk-list rest ctors usages))))
 
 (defn walk-expr (ast: Ast) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
@@ -312,7 +312,7 @@
 
 (defn walk-paren (elems: (List Ast)) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
   (match elems
-    (Nil) ()
+    [] ()
     (Cons head rest) (walk-paren-head head rest ctors usages)))
 
 (defn walk-paren-head (head: Ast) (rest: (List Ast)) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
@@ -347,7 +347,7 @@
 
 (defn walk-top-forms (forms: (List Ast)) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
   (match forms
-    (Nil) ()
+    [] ()
     (Cons f rest) (do (walk-top-form f ctors usages) (walk-top-forms rest ctors usages))))
 
 ; ---------------------------------------------------------------------------
@@ -365,12 +365,12 @@
 
 (defn str-insert-sorted (x: Str) (xs: (List Str)) -> (List Str)
   (match xs
-    (Nil) (Cons x (Nil))
+    [] [x]
     (Cons h rest) (if (<= (compare x h) 0) (Cons x (Cons h rest)) (Cons h (str-insert-sorted x rest)))))
 
 (defn sort-strs (xs: (List Str)) -> (List Str)
   (match xs
-    (Nil) (Nil)
+    [] []
     (Cons h rest) (str-insert-sorted h (sort-strs rest))))
 
 (defn insert-distinct (x: Str) (xs: (List Str)) -> (List Str)
@@ -378,20 +378,20 @@
 
 (defn collect-type-names (usages: (List Usage)) -> (List Str)
   (match usages
-    (Nil) (Nil)
+    [] []
     (Cons u rest) (insert-distinct (usage-type-name u) (collect-type-names rest))))
 
 (defn usages-has (usages: (List Usage)) (t: Str) (op: Str) -> Bool
   (match usages
-    (Nil) false
+    [] false
     (Cons u rest) (if (and (= (usage-type-name u) t) (= (usage-op u) op)) true (usages-has rest t op))))
 
 (defn derive-op-order -> (List Str)
-  (Cons "show" (Cons "=" (Cons "compare" (Cons "dump" (Nil))))))
+  ["show" "=" "compare" "dump"])
 
 (defn filter-present (ops: (List Str)) (usages: (List Usage)) (t: Str) -> (List Str)
   (match ops
-    (Nil) (Nil)
+    [] []
     (Cons op rest) (filter-present-cons op rest usages t)))
 
 (defn filter-present-cons (op: Str) (rest: (List Str)) (usages: (List Usage)) (t: Str) -> (List Str)
@@ -404,8 +404,8 @@
 
 (defn join-with-commas (xs: (List Str)) -> Str
   (match xs
-    (Nil) ""
-    (Cons x (Nil)) x
+    [] ""
+    [x] x
     (Cons x rest) (str-concat x (str-concat ", " (join-with-commas rest)))))
 
 (defn render-line (t: Str) (usages: (List Usage)) -> Str
@@ -413,8 +413,8 @@
 
 (defn render-lines (type-names: (List Str)) (usages: (List Usage)) -> Str
   (match type-names
-    (Nil) ""
-    (Cons t (Nil)) (render-line t usages)
+    [] ""
+    [t] (render-line t usages)
     (Cons t rest) (str-concat (render-line t usages) (str-concat (nl) (render-lines rest usages)))))
 
 (defn render-usages (usages: (List Usage)) -> Str
@@ -428,6 +428,6 @@
 (pub defn describe-derives (forms: (List Ast)) -> Str
   (do
     (let ctors (all-ctor-metas forms))
-    (let usages (ref (Nil)))
+    (let usages (ref []))
     (walk-top-forms forms ctors usages)
     (render-usages (deref usages))))

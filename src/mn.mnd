@@ -212,7 +212,7 @@
 
 (defn report-desugar-errors (path: Str) (es: (List DesugarError)) -> Unit
   (match es
-    (Nil) ()
+    [] ()
     (Cons e rest) (do (report-desugar-error path e) (report-desugar-errors path rest))))
 
 (defn report-type-error (path: Str) (e: TypeError) -> Unit
@@ -232,7 +232,7 @@
 
 (defn report-type-errors (path: Str) (es: (List TypeError)) -> Unit
   (match es
-    (Nil) ()
+    [] ()
     (Cons e rest) (do (report-type-error path e) (report-type-errors path rest))))
 
 (defn fail-cannot-read (path: Str) -> Unit
@@ -265,7 +265,7 @@
 
 (defn has-import (forms: (List Ast)) -> Bool
   (match forms
-    (Nil) false
+    [] false
     (Cons f rest) (if (form-is-import f) true (has-import rest))))
 
 (defn front-end (path: Str) (src: Str) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
@@ -429,11 +429,11 @@
   (flag-value-from name 0 (arg-count)))
 
 (defn collect-args (i: Int) (n: Int) -> (List Str)
-  (if (>= i n) (Nil)
+  (if (>= i n) []
     (Cons (arg i) (collect-args (+ i 1) n))))
 
 (defn prog-args-from (i: Int) (n: Int) -> (List Str)
-  (if (>= i n) (Nil)
+  (if (>= i n) []
     (if (= (arg i) "--")
       (collect-args (+ i 1) n)
       (prog-args-from (+ i 1) n))))
@@ -467,25 +467,27 @@
   (str-concat runtime (str-concat "/src/" name)))
 
 (defn clang-argv (cc: Str) (runtime: Str) (bc: Str) (link-out: Str) -> (List Str)
-  (Cons cc
-    (Cons "-std=c11"
-      (Cons "-Wall"
-        (Cons "-Wextra"
-          (Cons "-O1"
-            (Cons (str-concat "-I" (str-concat runtime "/include"))
-              (Cons bc
-                (Cons (rt-src runtime "alloc.c")
-                  (Cons (rt-src runtime "gc.c")
-                  (Cons (rt-src runtime "panic.c")
-                    (Cons (rt-src runtime "print.c")
-                      (Cons (rt-src runtime "shadow.c")
-                        (Cons (rt-src runtime "variants.c")
-                          (Cons (rt-src runtime "str.c")
-                            (Cons (rt-src runtime "map.c")
-                              (Cons (rt-src runtime "closure.c")
-                                (Cons (rt-src runtime "io.c")
-                                  (Cons (rt-src runtime "equal.c")
-                                    (Cons "-o" (Cons link-out (Nil))))))))))))))))))))))
+  [
+  cc
+  "-std=c11"
+  "-Wall"
+  "-Wextra"
+  "-O1"
+  (str-concat "-I" (str-concat runtime "/include"))
+  bc
+  (rt-src runtime "alloc.c")
+  (rt-src runtime "gc.c")
+  (rt-src runtime "panic.c")
+  (rt-src runtime "print.c")
+  (rt-src runtime "shadow.c")
+  (rt-src runtime "variants.c")
+  (rt-src runtime "str.c")
+  (rt-src runtime "map.c")
+  (rt-src runtime "closure.c")
+  (rt-src runtime "io.c")
+  (rt-src runtime "equal.c")
+  "-o"
+  link-out])
 
 (defn fail-spawn (what: Str) -> Unit
   (do
@@ -575,17 +577,17 @@
 
 (defn append-strs (a: (List Str)) (b: (List Str)) -> (List Str)
   (match a
-    (Nil) b
+    [] b
     (Cons h t) (Cons h (append-strs t b))))
 
 (defn inter-tail (file: Str) (show: Bool) (args: (List Str)) -> (List Str)
   (do
     (let head
       (if show
-        (Cons "--show-result" (Cons file (Nil)))
-        (Cons file (Nil))))
+        ["--show-result" file]
+        [file]))
     (match args
-      (Nil) head
+      [] head
       _ (append-strs head (Cons "--" args)))))
 
 (defn inter-argv (bun: Str) (file: Str) (show: Bool) (args: (List Str)) -> (List Str)

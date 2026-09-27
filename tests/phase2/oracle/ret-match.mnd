@@ -3,8 +3,8 @@
 
 (defn list-sum (xs: (List Int)) -> Int
   (match xs
-    (Nil) 0
+    [] 0
     (Cons h t) (+ h (list-sum t))))
 
 (defn main -> Int
-  (list-sum (Cons 10 (Cons 20 (Cons 30 (Nil))))))
+  (list-sum [10 20 30]))

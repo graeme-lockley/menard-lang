@@ -4,7 +4,7 @@
 
 (defn first-plus-rest-flag (xs: (List Int)) -> Int
   (match xs
-    (Nil)
+    []
       (do
         (println "empty list, total 0")
         0)
@@ -13,7 +13,7 @@
          (do
            (let flag
              (match rest
-               (Nil) 0
+               [] 0
                _ 1))
            (let total (+ h flag))
            (print "head ")
@@ -26,5 +26,5 @@
            total)))))
 
 (defn main -> Int
-  (first-plus-rest-flag (Cons 10 (Cons 1 (Nil))))
+  (first-plus-rest-flag [10 1])
   0)

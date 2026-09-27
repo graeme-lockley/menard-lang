@@ -5,11 +5,11 @@
 
 (defn list-sum (xs: (List Int)) -> Int
   (match xs
-    (Nil) 0
+    [] 0
     (Cons h t) (+ h (list-sum t))))
 
 (defn build-list (n: Int) -> (List Int)
-  (loop ((i n) (acc (Nil)))
+  (loop ((i n) (acc []))
     (if (= i 0)
       acc
       (recur (- i 1) (Cons i acc)))))

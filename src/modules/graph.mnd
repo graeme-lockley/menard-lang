@@ -30,7 +30,7 @@
   (match (sym-str a) (Some n) (= n name) (None) false))
 
 (defn append-asts (xs: (List Ast)) (ys: (List Ast)) -> (List Ast)
-  (match xs (Nil) ys (Cons x rest) (Cons x (append-asts rest ys))))
+  (match xs [] ys (Cons x rest) (Cons x (append-asts rest ys))))
 
 (defn str-byte-at (s: Str) (i: Int) -> Int
   (str-byte s i))
@@ -66,7 +66,7 @@
   (if (= seg ".")
     acc
     (if (= seg "..")
-      (match acc (Nil) (Nil) (Cons _ rest) rest)
+      (match acc [] [] (Cons _ rest) rest)
       (Cons seg acc))))
 
 (defn split-segments-from (s: Str) (i: Int) (n: Int) (start: Int) (acc: (List Str)) -> (List Str)
@@ -78,16 +78,16 @@
       (split-segments-from s (+ i 1) n start acc))))
 
 (defn reverse-strs (xs: (List Str)) (acc: (List Str)) -> (List Str)
-  (match xs (Nil) acc (Cons x rest) (reverse-strs rest (Cons x acc))))
+  (match xs [] acc (Cons x rest) (reverse-strs rest (Cons x acc))))
 
 (defn join-segments (xs: (List Str)) (abs: Bool) -> Str
   (match xs
-    (Nil) (if abs "/" ".")
+    [] (if abs "/" ".")
     (Cons h rest) (join-segments-cons h rest abs)))
 
 (defn join-segments-cons (h: Str) (rest: (List Str)) (abs: Bool) -> Str
   (match rest
-    (Nil) (if abs (str-concat "/" h) h)
+    [] (if abs (str-concat "/" h) h)
     (Cons n more)
       (str-concat (if abs (str-concat "/" h) h)
         (str-concat "/" (join-segments-cons n more false)))))
@@ -96,8 +96,8 @@
   (do
     (let abs (path-is-abs path))
     (let n (str-byte-length path))
-    (let segs-rev (split-segments-from path 0 n 0 (Nil)))
-    (let segs (reverse-strs segs-rev (Nil)))
+    (let segs-rev (split-segments-from path 0 n 0 []))
+    (let segs (reverse-strs segs-rev []))
     (join-segments segs abs)))
 
 (defn resolve-import-path (from-path: Str) (spec: Str) -> Str
@@ -105,7 +105,7 @@
 
 (defn parse-import-spec (form: Ast) -> (Maybe Str)
   (match form
-    (ParenNode (Cons head (Cons spec (Nil))) _)
+    (ParenNode [head spec] _)
       (if (is-sym head "import")
         (match spec (StrNode s _) (Some s) _ (None))
         (None))
@@ -120,11 +120,11 @@
     _ form))
 
 (defn reverse-asts (xs: (List Ast)) (acc: (List Ast)) -> (List Ast)
-  (match xs (Nil) acc (Cons x rest) (reverse-asts rest (Cons x acc))))
+  (match xs [] acc (Cons x rest) (reverse-asts rest (Cons x acc))))
 
 (defn strip-imports-and-pub (forms: (List Ast)) (acc: (List Ast)) -> (List Ast)
   (match forms
-    (Nil) (reverse-asts acc (Nil))
+    [] (reverse-asts acc [])
     (Cons f rest)
       (match (parse-import-spec f)
         (Some _) (strip-imports-and-pub rest acc)
@@ -132,7 +132,7 @@
 
 (defn collect-import-specs (forms: (List Ast)) (acc: (List Str)) -> (List Str)
   (match forms
-    (Nil) (reverse-strs acc (Nil))
+    [] (reverse-strs acc [])
     (Cons f rest)
       (match (parse-import-spec f)
         (Some spec) (collect-import-specs rest (Cons spec acc))
@@ -149,12 +149,12 @@
 
 (defn push-unique (xs: (List Str)) (x: Str) -> (List Str)
   (match xs
-    (Nil) (Cons x (Nil))
+    [] [x]
     (Cons h rest) (if (= h x) xs (Cons h (push-unique rest x)))))
 
 (defn gather-ctor-names (ctors: (List Ast)) (acc: (List Str)) -> (List Str)
   (match ctors
-    (Nil) acc
+    [] acc
     (Cons c rest)
       (match c
         (ParenNode (Cons cname-ast _) _)
@@ -173,19 +173,19 @@
   (if (= head "defn")
     (match rest
       (Cons name-part _) (match (decl-name-of name-part) (Some n) (push-unique acc n) (None) acc)
-      (Nil) acc)
+      [] acc)
     (if (= head "alias")
       (match rest
         (Cons name-part _) (match (sym-str name-part) (Some n) (push-unique acc n) (None) acc)
-        (Nil) acc)
+        [] acc)
       (if (= head "defrec")
         (match rest
           (Cons name-part _) (match (decl-name-of name-part) (Some n) (push-unique acc n) (None) acc)
-          (Nil) acc)
+          [] acc)
         (if (= head "variant")
           (match rest
             (Cons name-part ctors) (gather-variant-names name-part ctors acc)
-            (Nil) acc)
+            [] acc)
           acc)))))
 
 (defn gather-form-names (form: Ast) (acc: (List Str)) -> (List Str)
@@ -202,7 +202,7 @@
 
 (defn gather-forms-names (forms: (List Ast)) (acc: (List Str)) -> (List Str)
   (match forms
-    (Nil) acc
+    [] acc
     (Cons f rest) (gather-forms-names rest (gather-form-names f acc))))
 
 ; Only names introduced by `(pub …)` forms.
@@ -216,12 +216,12 @@
 
 (defn gather-pub-forms-names (forms: (List Ast)) (acc: (List Str)) -> (List Str)
   (match forms
-    (Nil) acc
+    [] acc
     (Cons f rest) (gather-pub-forms-names rest (gather-pub-form-names f acc))))
 
 (defn list-to-bool-map (xs: (List Str)) (acc: (Map Str Bool)) -> (Map Str Bool)
   (match xs
-    (Nil) acc
+    [] acc
     (Cons n rest) (list-to-bool-map rest (map-set acc n true))))
 
 (defn name-is-pub (pub-names: (Map Str Bool)) (name: Str) -> Bool
@@ -235,7 +235,7 @@
 
 (defn build-renames-from-list (names: (List Str)) (pub-names: (Map Str Bool)) (prefix: Str) (acc: (Map Str Str)) -> (Map Str Str)
   (match names
-    (Nil) acc
+    [] acc
     (Cons n rest)
       ; Never rename `main` — the lowerer looks for the program entry by that name.
       (if (or (= n "main") (name-is-pub pub-names n))
@@ -244,8 +244,8 @@
 
 (defn build-renames (forms: (List Ast)) (mid: Int) -> (Map Str Str)
   (do
-    (let pub-list (gather-pub-forms-names forms (Nil)))
-    (let all-list (gather-forms-names forms (Nil)))
+    (let pub-list (gather-pub-forms-names forms []))
+    (let all-list (gather-forms-names forms []))
     (let pub-names (list-to-bool-map pub-list (map-new)))
     (build-renames-from-list all-list pub-names (module-prefix mid) (map-new))))
 
@@ -259,7 +259,7 @@
       (if (is-sym head "quote")
         (ParenNode xs sp)
         (ParenNode (rename-ast-list xs renames) sp))
-    (Nil) (ParenNode xs sp)))
+    [] (ParenNode xs sp)))
 
 (defn rename-ast (a: Ast) (renames: (Map Str Str)) -> Ast
   (match a
@@ -270,7 +270,7 @@
 
 (defn rename-ast-list (xs: (List Ast)) (renames: (Map Str Str)) -> (List Ast)
   (match xs
-    (Nil) (Nil)
+    [] []
     (Cons x rest) (Cons (rename-ast x renames) (rename-ast-list rest renames))))
 
 (defn rename-forms (forms: (List Ast)) (renames: (Map Str Str)) -> (List Ast)
@@ -302,7 +302,7 @@
 
 (defn register-export-names! (exports: (Ref (Map Str Str))) (path: Str) (names: (List Str)) (kind: Str) -> (Result Unit Str)
   (match names
-    (Nil) (Ok ())
+    [] (Ok ())
     (Cons n rest)
       (result-bind (register-one-export! exports path n kind)
         (fn (_) (register-export-names! exports path rest kind)))))
@@ -314,14 +314,14 @@
         (do
           (let inner (ParenNode rest sp))
           (let kind (form-decl-kind inner))
-          (let names (gather-form-names inner (Nil)))
+          (let names (gather-form-names inner []))
           (register-export-names! exports path names kind))
         (Ok ()))
     _ (Ok ())))
 
 (defn register-forms-exports! (exports: (Ref (Map Str Str))) (path: Str) (forms: (List Ast)) -> (Result Unit Str)
   (match forms
-    (Nil) (Ok ())
+    [] (Ok ())
     (Cons f rest)
       (result-bind (register-form-exports! exports path f)
         (fn (_) (register-forms-exports! exports path rest)))))
@@ -332,7 +332,7 @@
     (fn (_)
       (do
         (let renames (build-renames forms mid))
-        (let stripped (strip-imports-and-pub forms (Nil)))
+        (let stripped (strip-imports-and-pub forms []))
         (Ok (rename-forms stripped renames))))))
 
 ; ---------------------------------------------------------------------------
@@ -365,7 +365,7 @@
 
 (defn load-module-deps (path: Str) (forms: (List Ast)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) -> (Result Unit Str)
   (do
-    (let specs (collect-import-specs forms (Nil)))
+    (let specs (collect-import-specs forms []))
     (result-bind (load-deps-list path specs visited acc mid exports)
       (fn (_)
         (do
@@ -379,7 +379,7 @@
 
 (defn load-deps-list (from: Str) (specs: (List Str)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) -> (Result Unit Str)
   (match specs
-    (Nil) (Ok ())
+    [] (Ok ())
     (Cons spec rest)
       (result-bind (load-module-into (resolve-import-path from spec) visited acc mid exports)
         (fn (_) (load-deps-list from rest visited acc mid exports)))))
@@ -388,7 +388,7 @@
 (pub defn flatten-module-graph (entry-path: Str) (src: Str) -> (Result (List Ast) Str)
   (do
     (let visited (ref (map-new)))
-    (let acc (ref (Nil)))
+    (let acc (ref []))
     (let mid (ref 0))
     (let exports (ref (map-new)))
     (set! visited (map-set (deref visited) entry-path true))

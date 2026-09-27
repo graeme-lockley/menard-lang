@@ -41,7 +41,82 @@ function mapElems(elems: Ast[], diags: Diagnostic[]): Ast[] {
   return elems.map((e) => desugarNode(e, diags));
 }
 
+/** `[e1 e2 …]` → `(Cons e1 (Cons e2 (Nil)))`. `[]` → `(Nil)`. */
+function consChain(elems: Ast[], span: Ast["span"]): Ast {
+  let acc = list("paren", [sym("Nil", span)], span);
+  for (let i = elems.length - 1; i >= 0; i--) {
+    acc = list("paren", [sym("Cons", span), elems[i]!, acc], span);
+  }
+  return acc;
+}
+
+function isDeclKeyword(ast: Ast): boolean {
+  return isSym(ast, "defn") || isSym(ast, "defrec") || isSym(ast, "variant");
+}
+
+/**
+ * `(name [params…])` in a defn/defrec/variant head. The bracket list is
+ * type parameters, not a value list.
+ */
+function desugarNameForm(ast: Ast & { tag: "list" }, diags: Diagnostic[]): Ast {
+  const name = ast.elems[0];
+  const params = ast.elems[1];
+  if (
+    name !== undefined &&
+    params !== undefined &&
+    params.tag === "list" &&
+    params.kind === "bracket"
+  ) {
+    const rest = ast.elems.slice(2).map((e) => desugarNode(e, diags));
+    return list(
+      "paren",
+      [
+        desugarNode(name, diags),
+        list("bracket", mapElems(params.elems, diags), params.span),
+        ...rest,
+      ],
+      ast.span,
+    );
+  }
+  return list("paren", mapElems(ast.elems, diags), ast.span);
+}
+
+function desugarDecl(ast: Ast & { tag: "list" }, diags: Diagnostic[]): Ast {
+  const kw = ast.elems[0]!;
+  const name = ast.elems[1];
+  if (name === undefined) {
+    return list("paren", mapElems(ast.elems, diags), ast.span);
+  }
+  const nameOut =
+    name.tag === "list" && name.kind === "paren"
+      ? desugarNameForm(name, diags)
+      : desugarNode(name, diags);
+  const rest = ast.elems.slice(2).map((e) => desugarNode(e, diags));
+  return list("paren", [desugarNode(kw, diags), nameOut, ...rest], ast.span);
+}
+
+function desugarPub(ast: Ast & { tag: "list" }, diags: Diagnostic[]): Ast {
+  const kw = ast.elems[1];
+  const name = ast.elems[2];
+  if (kw === undefined || !isDeclKeyword(kw) || name === undefined) {
+    return list("paren", mapElems(ast.elems, diags), ast.span);
+  }
+  const nameOut =
+    name.tag === "list" && name.kind === "paren"
+      ? desugarNameForm(name, diags)
+      : desugarNode(name, diags);
+  const rest = ast.elems.slice(3).map((e) => desugarNode(e, diags));
+  return list(
+    "paren",
+    [desugarNode(ast.elems[0]!, diags), desugarNode(kw, diags), nameOut, ...rest],
+    ast.span,
+  );
+}
+
 function desugarNode(ast: Ast, diags: Diagnostic[]): Ast {
+  if (ast.tag === "list" && ast.kind === "bracket") {
+    return consChain(mapElems(ast.elems, diags), ast.span);
+  }
   if (ast.tag !== "list" || ast.kind !== "paren" || ast.elems.length === 0) {
     if (ast.tag === "list") {
       return list(ast.kind, mapElems(ast.elems, diags), ast.span);
@@ -54,6 +129,8 @@ function desugarNode(ast: Ast, diags: Diagnostic[]): Ast {
     return list("paren", mapElems(ast.elems, diags), ast.span);
   }
 
+  if (isDeclKeyword(head)) return desugarDecl(ast, diags);
+  if (nameEquals(head.name, "pub")) return desugarPub(ast, diags);
   if (nameEquals(head.name, "and")) return desugarAnd(ast, diags);
   if (nameEquals(head.name, "or")) return desugarOr(ast, diags);
   if (nameEquals(head.name, "cond")) return desugarCond(ast, diags);

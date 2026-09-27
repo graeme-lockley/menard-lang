@@ -6,5 +6,5 @@
 
 (pub defn (list-length [a]) (xs: (List a)) -> Int
   (match xs
-    (Nil) 0
+    [] 0
     (Cons _ t) (+ 1 (list-length t))))

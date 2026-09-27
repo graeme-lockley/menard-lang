@@ -79,7 +79,7 @@
 
 (pub defn (list-length [a]) (xs: (List a)) -> Int
   (match xs
-    (Nil) 0
+    [] 0
     (Cons _ rest) (+ 1 (list-length rest))))
 
 ; ---------------------------------------------------------------------------
@@ -108,10 +108,10 @@
 
 (pub defn type-list-equal (xs: (List Type)) (ys: (List Type)) -> Bool
   (match xs
-    (Nil) (match ys (Nil) true _ false)
+    [] (match ys [] true _ false)
     (Cons x xrest)
       (match ys
-        (Nil) false
+        [] false
         (Cons y yrest) (and (type-equal x y) (type-list-equal xrest yrest)))))
 
 ; ---------------------------------------------------------------------------
@@ -140,13 +140,13 @@
 
 (defn type-show-nominal (name: Str) (args: (List Type)) -> Str
   (match args
-    (Nil) name
+    [] name
     _ (str-concat "(" (str-concat name (str-concat " " (str-concat (type-show-list args) ")"))))))
 
 (defn type-show-list (xs: (List Type)) -> Str
   (match xs
-    (Nil) ""
-    (Cons x (Nil)) (type-show x)
+    [] ""
+    [x] (type-show x)
     (Cons x rest) (str-concat (type-show x) (str-concat " " (type-show-list rest)))))
 
 ; ---------------------------------------------------------------------------
@@ -176,7 +176,7 @@
 
 (defn type-list-all-showable (xs: (List Type)) -> Bool
   (match xs
-    (Nil) true
+    [] true
     (Cons x rest) (and (is-showable x) (type-list-all-showable rest))))
 
 (pub defn is-orderable (t: Type) -> Bool
@@ -201,5 +201,5 @@
 
 (defn type-list-all-orderable (xs: (List Type)) -> Bool
   (match xs
-    (Nil) true
+    [] true
     (Cons x rest) (and (is-orderable x) (type-list-all-orderable rest))))

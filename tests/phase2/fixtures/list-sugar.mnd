@@ -1,0 +1,11 @@
+(defn (id [a]) (x: a) -> a
+  x)
+
+(defn sum2 (xs: (List Int)) -> Int
+  (match xs
+    [] 0
+    [h t] (+ h t)
+    _ 0))
+
+(defn main -> Int
+  (sum2 [10 20]))

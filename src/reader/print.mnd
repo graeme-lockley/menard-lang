@@ -27,7 +27,7 @@
 
 (defn print-list-elems-into (elems: (List Ast)) (sb: StringBuffer) (first: Bool) -> Unit
   (match elems
-    (Nil) ()
+    [] ()
     (Cons x rest)
       (do
         (if first () (sb-append-byte! sb 32))
@@ -61,7 +61,7 @@
 
 (defn print-all-into (xs: (List Ast)) (sb: StringBuffer) (first: Bool) -> Unit
   (match xs
-    (Nil) ()
+    [] ()
     (Cons x rest)
       (do
         (if first () (sb-append-byte! sb 10))
@@ -74,5 +74,5 @@
   (do
     (let sb (sb-new))
     (print-all-into xs sb true)
-    (match xs (Nil) () _ (sb-append-byte! sb 10))
+    (match xs [] () _ (sb-append-byte! sb 10))
     (sb-take-str! sb)))

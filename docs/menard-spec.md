@@ -692,7 +692,10 @@ ref   deref   set!     quote
 ```
 
 `cond`, `when`, `while` and `and`/`or` are sugar over `if` and `loop`, expanded
-during desugaring (before typing).
+during desugaring (before typing). `[e1 e2 …]` and `[]` are sugar for a
+`Cons`/`Nil` chain, in expression position and in `match` patterns. A bracket
+list in a `defn`, `defrec`, or `variant` name form is a type-parameter list
+and is not expanded. `(Cons h t)` remains the open list pattern.
 
 Note what is **not** here: `show`, `print`, `println`, `=`, `compare` and `dump`
 are **compiler-known intrinsics** (§2.8.1), not special forms, because they are

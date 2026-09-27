@@ -105,6 +105,16 @@ describe("src/mn.mnd check — desugar wired after casing", () => {
     expect(out.stderr).not.toContain('"while"');
   });
 
+  test("bracket lists desugar to Cons/Nil and still typecheck", () => {
+    const file = abs("tests/phase2/fixtures/list-sugar.mnd");
+    const before = runMenard("src/mn.mnd", ["check", file, "--dump-after=reader"]);
+    expect(before.exitCode).toBe(0);
+    expect(before.stderr).toContain("BracketNode");
+    const checked = runMenard("src/mn.mnd", ["check", file]);
+    expect(checked.exitCode).toBe(0);
+    expect(checked.stderr).toBe("");
+  });
+
   test("still fails a parse error before desugar ever runs", () => {
     const out = runMenard("src/mn.mnd", ["check", abs("tests/phase2/fixtures/bad-parse.mnd")]);
     expect(out.exitCode).toBe(1);

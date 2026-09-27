@@ -68,10 +68,10 @@
 
 (pub defn ast-list-equal (xs: (List Ast)) (ys: (List Ast)) -> Bool
   (match xs
-    (Nil) (match ys (Nil) true _ false)
+    [] (match ys [] true _ false)
     (Cons hx tx)
       (match ys
-        (Nil) false
+        [] false
         (Cons hy ty) (and (ast-equal hx hy) (ast-list-equal tx ty)))))
 
 ; Structural equality, ignoring spans. Mirrors host astEqual (host/src/reader/ast.ts).

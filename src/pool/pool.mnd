@@ -72,12 +72,12 @@
 
 (defn list-length (xs: (List Ast)) -> Int
   (match xs
-    (Nil) 0
+    [] 0
     (Cons _ rest) (+ 1 (list-length rest))))
 
 (defn str-list-contains (xs: (List Str)) (x: Str) -> Bool
   (match xs
-    (Nil) false
+    [] false
     (Cons h rest) (if (= h x) true (str-list-contains rest x))))
 
 ; `main` or `(f [a])` — the type-parameter list (if any) is irrelevant
@@ -134,18 +134,18 @@
 
 (defn register-variant-ctor-arities (ctor-asts: (List Ast)) (acc: (Map Str Int)) -> (Map Str Int)
   (match ctor-asts
-    (Nil) acc
+    [] acc
     (Cons c rest) (register-variant-ctor-arities rest (register-one-variant-ctor-arity c acc))))
 
 (defn collect-variant-decl-arities (rest: (List Ast)) (acc: (Map Str Int)) -> (Map Str Int)
   (match rest
     (Cons _ ctors) (register-variant-ctor-arities ctors acc)
-    (Nil) acc))
+    [] acc))
 
 (defn collect-defrec-decl-arities (rest: (List Ast)) (acc: (Map Str Int)) -> (Map Str Int)
   (match rest
     (Cons name-part fields) (collect-defrec-decl-arities-named name-part fields acc)
-    (Nil) acc))
+    [] acc))
 
 (defn collect-defrec-decl-arities-named (name-part: Ast) (fields: (List Ast)) (acc: (Map Str Int)) -> (Map Str Int)
   (match (decl-name-of name-part)
@@ -172,7 +172,7 @@
 
 (defn collect-arities (forms: (List Ast)) (acc: (Map Str Int)) -> (Map Str Int)
   (match forms
-    (Nil) acc
+    [] acc
     (Cons f rest) (collect-arities rest (collect-arities-form f acc))))
 
 (defn all-ctor-arities (forms: (List Ast)) -> (Map Str Int)
@@ -204,7 +204,7 @@
 ; provably-constructed").
 (defn maybe-record-nullary-ctor (head: Ast) (rest: (List Ast)) (arities: (Map Str Int)) (entries: (Ref (List Str))) -> Unit
   (match rest
-    (Nil) (maybe-record-nullary-ctor-sym head arities entries)
+    [] (maybe-record-nullary-ctor-sym head arities entries)
     _ ()))
 
 (defn maybe-record-nullary-ctor-sym (head: Ast) (arities: (Map Str Int)) (entries: (Ref (List Str))) -> Unit
@@ -214,7 +214,7 @@
 
 (defn walk-list (xs: (List Ast)) (arities: (Map Str Int)) (entries: (Ref (List Str))) -> Unit
   (match xs
-    (Nil) ()
+    [] ()
     (Cons x rest) (do (walk-expr x arities entries) (walk-list rest arities entries))))
 
 (defn walk-expr (ast: Ast) (arities: (Map Str Int)) (entries: (Ref (List Str))) -> Unit
@@ -226,7 +226,7 @@
 
 (defn walk-paren (elems: (List Ast)) (arities: (Map Str Int)) (entries: (Ref (List Str))) -> Unit
   (match elems
-    (Nil) ()
+    [] ()
     (Cons head rest) (walk-paren-head head rest arities entries)))
 
 (defn walk-paren-head (head: Ast) (rest: (List Ast)) (arities: (Map Str Int)) (entries: (Ref (List Str))) -> Unit
@@ -262,7 +262,7 @@
 
 (defn walk-top-forms (forms: (List Ast)) (arities: (Map Str Int)) (entries: (Ref (List Str))) -> Unit
   (match forms
-    (Nil) ()
+    [] ()
     (Cons f rest) (do (walk-top-form f arities entries) (walk-top-forms rest arities entries))))
 
 ; ---------------------------------------------------------------------------
@@ -277,12 +277,12 @@
 
 (defn str-insert-sorted (x: Str) (xs: (List Str)) -> (List Str)
   (match xs
-    (Nil) (Cons x (Nil))
+    [] [x]
     (Cons h rest) (if (<= (compare x h) 0) (Cons x (Cons h rest)) (Cons h (str-insert-sorted x rest)))))
 
 (defn sort-strs (xs: (List Str)) -> (List Str)
   (match xs
-    (Nil) (Nil)
+    [] []
     (Cons h rest) (str-insert-sorted h (sort-strs rest))))
 
 (defn insert-distinct (x: Str) (xs: (List Str)) -> (List Str)
@@ -290,13 +290,13 @@
 
 (defn dedup-list (xs: (List Str)) -> (List Str)
   (match xs
-    (Nil) (Nil)
+    [] []
     (Cons x rest) (insert-distinct x (dedup-list rest))))
 
 (defn join-lines (xs: (List Str)) -> Str
   (match xs
-    (Nil) ""
-    (Cons x (Nil)) x
+    [] ""
+    [x] x
     (Cons x rest) (str-concat x (str-concat (nl) (join-lines rest)))))
 
 ; The static pool candidates `forms` mentions — every distinct `Str`
@@ -307,6 +307,6 @@
 (pub defn pool-summary (forms: (List Ast)) -> Str
   (do
     (let arities (all-ctor-arities forms))
-    (let entries (ref (Nil)))
+    (let entries (ref []))
     (walk-top-forms forms arities entries)
     (join-lines (sort-strs (dedup-list (deref entries))))))

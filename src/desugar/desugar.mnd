@@ -1,5 +1,7 @@
-; Desugar — expands `and`/`or`/`cond`/`when`/`while` sugar into `if`/`do`/
-; `loop`/`recur`. Mirrors host/src/desugar/desugar.ts.
+; Desugar — expands `and`/`or`/`cond`/`when`/`while` into `if`/`do`/`loop`/
+; `recur`, and `[e1 e2 …]` / `[]` into a `Cons`/`Nil` chain (expressions and
+; `match` patterns). A bracket list in a `defn`/`defrec`/`variant` name form
+; is a type-parameter list and is left alone. Mirrors host/src/desugar/desugar.ts.
 ;
 ; The host threads a single mutable `Diagnostic[]` accumulator through every
 ; recursive call so a form can keep producing *some* output even after an
@@ -32,11 +34,11 @@
 
 (defn reverse-onto (xs: (List DesugarError)) (acc: (List DesugarError)) -> (List DesugarError)
   (match xs
-    (Nil) acc
+    [] acc
     (Cons x rest) (reverse-onto rest (Cons x acc))))
 
 (defn reverse-diags (xs: (List DesugarError)) -> (List DesugarError)
-  (reverse-onto xs (Nil)))
+  (reverse-onto xs []))
 
 ; ---------------------------------------------------------------------------
 ; Small Ast builders
@@ -51,20 +53,20 @@
 
 (defn elems-tail (elems: (List Ast)) -> (List Ast)
   (match elems
-    (Nil) (Nil)
+    [] []
     (Cons _ rest) rest))
 
 (defn append-list (xs: (List Ast)) (ys: (List Ast)) -> (List Ast)
   (match xs
-    (Nil) ys
+    [] ys
     (Cons x rest) (Cons x (append-list rest ys))))
 
 ; `(do body…)` when there is more than one body form, `body[0]` when there
 ; is exactly one, or Unit `()` when there is none. Shared by cond/when.
 (defn wrap-do (body: (List Ast)) (sp: Span) -> Ast
   (match body
-    (Nil) (ParenNode (Nil) sp)
-    (Cons b (Nil)) b
+    [] (ParenNode [] sp)
+    [b] b
     _ (ParenNode (Cons (mk-sym "do" sp) body) sp)))
 
 ; ---------------------------------------------------------------------------
@@ -72,18 +74,68 @@
 
 (defn map-desugar (elems: (List Ast)) (diags: (Ref (List DesugarError))) -> (List Ast)
   (match elems
-    (Nil) (Nil)
+    [] []
     (Cons x rest) (Cons (desugar-node x diags) (map-desugar rest diags))))
+
+; `[e …]` → `(Cons e … (Nil))`. `[]` → `(Nil)`.
+(defn cons-chain (elems: (List Ast)) (sp: Span) -> Ast
+  (match elems
+    [] (ParenNode [(mk-sym "Nil" sp)] sp)
+    (Cons e rest)
+      (ParenNode
+        [(mk-sym "Cons" sp) e (cons-chain rest sp)]
+        sp)))
+
+(defn is-decl-keyword (ast: Ast) -> Bool
+  (match ast
+    (SymNode n _) (or (= n "defn") (or (= n "defrec") (= n "variant")))
+    _ false))
+
+; `(name [params…])` — the bracket list is type parameters.
+(defn desugar-name-form (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
+  (match elems
+    (Cons name (Cons (BracketNode ps psp) rest))
+      (ParenNode
+        (Cons (desugar-node name diags)
+          (Cons (BracketNode (map-desugar ps diags) psp) (map-desugar rest diags)))
+        sp)
+    _ (ParenNode (map-desugar elems diags) sp)))
+
+(defn desugar-maybe-name (name: Ast) (diags: (Ref (List DesugarError))) -> Ast
+  (match name
+    (ParenNode elems sp) (desugar-name-form elems sp diags)
+    _ (desugar-node name diags)))
+
+(defn desugar-decl (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
+  (match elems
+    (Cons kw (Cons name rest))
+      (ParenNode
+        (Cons (desugar-node kw diags)
+          (Cons (desugar-maybe-name name diags) (map-desugar rest diags)))
+        sp)
+    _ (ParenNode (map-desugar elems diags) sp)))
+
+(defn desugar-pub (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
+  (match elems
+    (Cons pub-kw (Cons kw (Cons name rest)))
+      (if (is-decl-keyword kw)
+        (ParenNode
+          (Cons (desugar-node pub-kw diags)
+            (Cons (desugar-node kw diags)
+              (Cons (desugar-maybe-name name diags) (map-desugar rest diags))))
+          sp)
+        (ParenNode (map-desugar elems diags) sp))
+    _ (ParenNode (map-desugar elems diags) sp)))
 
 (defn desugar-node (ast: Ast) (diags: (Ref (List DesugarError))) -> Ast
   (match ast
     (ParenNode elems sp) (desugar-paren elems sp diags)
-    (BracketNode elems sp) (BracketNode (map-desugar elems diags) sp)
+    (BracketNode elems sp) (cons-chain (map-desugar elems diags) sp)
     _ ast))
 
 (defn desugar-paren (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
   (match elems
-    (Nil) (ParenNode (Nil) sp)
+    [] (ParenNode [] sp)
     (Cons head _) (desugar-paren-head head elems sp diags)))
 
 (defn desugar-paren-head (head: Ast) (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
@@ -92,12 +144,21 @@
     _ (ParenNode (map-desugar elems diags) sp)))
 
 (defn desugar-paren-named (name: Str) (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (if (= name "and") (desugar-and elems sp diags)
-    (if (= name "or") (desugar-or elems sp diags)
-      (if (= name "cond") (desugar-cond elems sp diags)
-        (if (= name "when") (desugar-when elems sp diags)
-          (if (= name "while") (desugar-while elems sp diags)
-            (ParenNode (map-desugar elems diags) sp)))))))
+  (if (or (= name "defn") (or (= name "defrec") (= name "variant")))
+    (desugar-decl elems sp diags)
+    (if (= name "pub")
+      (desugar-pub elems sp diags)
+      (if (= name "and")
+        (desugar-and elems sp diags)
+        (if (= name "or")
+          (desugar-or elems sp diags)
+          (if (= name "cond")
+            (desugar-cond elems sp diags)
+            (if (= name "when")
+              (desugar-when elems sp diags)
+              (if (= name "while")
+                (desugar-while elems sp diags)
+                (ParenNode (map-desugar elems diags) sp)))))))))
 
 ; ---------------------------------------------------------------------------
 ; (and) → true; (and x) → x; (and x y …) → (if x (and y …) false)
@@ -107,14 +168,14 @@
 
 (defn desugar-and-args (args: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
   (match args
-    (Nil) (BoolNode true sp)
-    (Cons x (Nil)) (desugar-node x diags)
+    [] (BoolNode true sp)
+    [x] (desugar-node x diags)
     (Cons x rest) (desugar-and-rest x rest sp diags)))
 
 (defn desugar-and-rest (x: Ast) (rest: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
   (let rest-form (ParenNode (Cons (mk-sym "and" sp) rest) sp))
   (desugar-node
-    (ParenNode (Cons (mk-sym "if" sp) (Cons x (Cons rest-form (Cons (BoolNode false sp) (Nil))))) sp)
+    (ParenNode [(mk-sym "if" sp) x rest-form (BoolNode false sp)] sp)
     diags))
 
 ; ---------------------------------------------------------------------------
@@ -125,28 +186,28 @@
 
 (defn desugar-or-args (args: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
   (match args
-    (Nil) (BoolNode false sp)
-    (Cons x (Nil)) (desugar-node x diags)
+    [] (BoolNode false sp)
+    [x] (desugar-node x diags)
     (Cons x rest) (desugar-or-rest x rest sp diags)))
 
 (defn desugar-or-rest (x: Ast) (rest: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
   (let rest-form (ParenNode (Cons (mk-sym "or" sp) rest) sp))
   (desugar-node
-    (ParenNode (Cons (mk-sym "if" sp) (Cons x (Cons x (Cons rest-form (Nil))))) sp)
+    (ParenNode [(mk-sym "if" sp) x x rest-form] sp)
     diags))
 
 ; ---------------------------------------------------------------------------
 ; (cond (test e…) … (else e…)) → nested (if test (do e…) …)
 
 (defn cond-no-match (sp: Span) -> Ast
-  (ParenNode (Cons (mk-sym "panic" sp) (Cons (StrNode "cond: no match" sp) (Nil))) sp))
+  (ParenNode [(mk-sym "panic" sp) (StrNode "cond: no match" sp)] sp))
 
 (defn desugar-cond (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
   (desugar-cond-dispatch (elems-tail elems) elems sp diags))
 
 (defn desugar-cond-dispatch (clauses: (List Ast)) (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
   (match clauses
-    (Nil)
+    []
       (do
         (push-diag! diags sp "E_DESUGAR_COND_EMPTY" "cond requires at least one clause")
         (ParenNode elems sp))
@@ -154,7 +215,7 @@
 
 (defn desugar-cond-clauses (clauses: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
   (match clauses
-    (Nil) (cond-no-match sp)
+    [] (cond-no-match sp)
     (Cons first rest) (desugar-cond-clause first rest sp diags)))
 
 (defn desugar-cond-clause (first: Ast) (rest: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
@@ -167,7 +228,7 @@
 
 (defn desugar-cond-clause-elems (first: Ast) (felems: (List Ast)) (fsp: Span) (rest: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
   (match felems
-    (Nil)
+    []
       (do
         (push-diag! diags fsp "E_DESUGAR_COND_CLAUSE" "cond clause must be a list (test exprs...)")
         first)
@@ -181,21 +242,21 @@
 (defn desugar-cond-else (test: Ast) (body: (List Ast)) (rest: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
   (do
     (match rest
-      (Nil) ()
+      [] ()
       (Cons _ _) (push-diag! diags (ast-span test) "E_DESUGAR_COND_ELSE" "else must be the last cond clause"))
     (desugar-cond-else-body body sp diags)))
 
 (defn desugar-cond-else-body (body: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
   (match body
-    (Nil) (ParenNode (Nil) sp)
-    (Cons b (Nil)) (desugar-node b diags)
+    [] (ParenNode [] sp)
+    [b] (desugar-node b diags)
     _ (desugar-node (ParenNode (Cons (mk-sym "do" sp) body) sp) diags)))
 
 (defn desugar-cond-if (test: Ast) (body: (List Ast)) (rest: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
   (let then-expr (wrap-do body sp))
   (let else-expr (desugar-cond-clauses rest sp diags))
   (desugar-node
-    (ParenNode (Cons (mk-sym "if" sp) (Cons test (Cons then-expr (Cons else-expr (Nil))))) sp)
+    (ParenNode [(mk-sym "if" sp) test then-expr else-expr] sp)
     diags))
 
 ; ---------------------------------------------------------------------------
@@ -212,7 +273,7 @@
 (defn desugar-when-body (test: Ast) (body: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
   (let then-expr (wrap-do body sp))
   (desugar-node
-    (ParenNode (Cons (mk-sym "if" sp) (Cons test (Cons then-expr (Cons (ParenNode (Nil) sp) (Nil))))) sp)
+    (ParenNode [(mk-sym "if" sp) test then-expr (ParenNode (Nil) sp)] sp)
     diags))
 
 ; ---------------------------------------------------------------------------
@@ -228,15 +289,15 @@
 
 (defn while-body-do (body: (List Ast)) (recur-form: Ast) (sp: Span) -> Ast
   (match body
-    (Nil) recur-form
-    _ (ParenNode (Cons (mk-sym "do" sp) (append-list body (Cons recur-form (Nil)))) sp)))
+    [] recur-form
+    _ (ParenNode (Cons (mk-sym "do" sp) (append-list body [recur-form])) sp)))
 
 (defn desugar-while-body (test: Ast) (body: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (let recur-form (ParenNode (Cons (mk-sym "recur" sp) (Nil)) sp))
+  (let recur-form (ParenNode [(mk-sym "recur" sp)] sp))
   (let body-do (while-body-do body recur-form sp))
-  (let if-form (ParenNode (Cons (mk-sym "if" sp) (Cons test (Cons body-do (Cons (ParenNode (Nil) sp) (Nil))))) sp))
+  (let if-form (ParenNode [(mk-sym "if" sp) test body-do (ParenNode (Nil) sp)] sp))
   (desugar-node
-    (ParenNode (Cons (mk-sym "loop" sp) (Cons (ParenNode (Nil) sp) (Cons if-form (Nil)))) sp)
+    (ParenNode [(mk-sym "loop" sp) (ParenNode (Nil) sp) if-form] sp)
     diags))
 
 ; ---------------------------------------------------------------------------
@@ -245,19 +306,19 @@
 (defn finish-desugar (forms: (List Ast)) (diags: (Ref (List DesugarError))) -> (Result (List Ast) (List DesugarError))
   (let ds (deref diags))
   (match ds
-    (Nil) (Ok forms)
+    [] (Ok forms)
     (Cons _ _) (Err (reverse-diags ds))))
 
 ; Desugar one form; recursively desugars children. Returns a one-element
 ; list on success, mirroring the host's `{ ok: true; forms: [out] }`.
 (pub defn desugar-form (form: Ast) -> (Result (List Ast) (List DesugarError))
   (do
-    (let diags (ref (Nil)))
+    (let diags (ref []))
     (let out (desugar-node form diags))
-    (finish-desugar (Cons out (Nil)) diags)))
+    (finish-desugar [out] diags)))
 
 (pub defn desugar-all (forms: (List Ast)) -> (Result (List Ast) (List DesugarError))
   (do
-    (let diags (ref (Nil)))
+    (let diags (ref []))
     (let out (map-desugar forms diags))
     (finish-desugar out diags)))

@@ -29,4 +29,30 @@ describe("desugar", () => {
     const r = desugarSrc("(when true 1)");
     expect(r.ok).toBe(true);
   });
+
+  test("a bracket list desugars to Cons/Nil, including inside match", () => {
+    const r = desugarSrc("(match xs [] 0 [h t] (+ h t) _ (f [1 2]))");
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const s = new TextDecoder().decode(print(r.forms[0]!));
+    expect(s).toBe(
+      "(match xs (Nil) 0 (Cons h (Cons t (Nil))) (+ h t) _ (f (Cons 1 (Cons 2 (Nil)))))",
+    );
+  });
+
+  test("a type-parameter bracket is not a list literal", () => {
+    const r = desugarSrc("(defn (id [a]) (x: a) -> a x)");
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const s = new TextDecoder().decode(print(r.forms[0]!));
+    expect(s).toBe("(defn (id [a]) (x: a) -> a x)");
+  });
+
+  test("pub defn keeps its type-parameter bracket", () => {
+    const r = desugarSrc("(pub defn (id [a]) (x: a) -> a x)");
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const s = new TextDecoder().decode(print(r.forms[0]!));
+    expect(s).toBe("(pub defn (id [a]) (x: a) -> a x)");
+  });
 });

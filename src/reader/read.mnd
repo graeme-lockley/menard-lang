@@ -212,7 +212,7 @@
 
 (defn read-elems-at (src: Str) (pos: (Ref Int)) (list-start: Int) (close: Int) (open-text: Str) -> (Result (List Ast) ParseError)
   (if (= (str-byte src (deref pos)) close)
-    (do (set! pos (+ (deref pos) 1)) (Ok (Nil)))
+    (do (set! pos (+ (deref pos) 1)) (Ok []))
     (result-bind (read-form src pos)
       (fn (head)
         (result-bind (read-elems src pos list-start close open-text)
@@ -286,7 +286,7 @@
   (do
     (skip-ws src pos)
     (if (>= (deref pos) (str-byte-length src))
-      (Ok (Nil))
+      (Ok [])
       (result-bind (read-form src pos)
         (fn (form) (result-bind (read-all-from src pos) (fn (rest) (Ok (Cons form rest)))))))))
 

@@ -50,7 +50,7 @@
 ; Run `f` over every element of `xs`, stopping at the first failure.
 (defn check-all (xs: (List Ast)) (f: (Fn Ast -> (Result Unit CasingError))) -> (Result Unit CasingError)
   (match xs
-    (Nil) (Ok ())
+    [] (Ok ())
     (Cons x rest) (result-then (f x) (fn () (check-all rest f)))))
 
 (defn check-type-params (node: Ast) -> (Result Unit CasingError)
@@ -71,7 +71,7 @@
 
 (defn check-type-expr-app (elems: (List Ast)) (sp: Span) -> (Result Unit CasingError)
   (match elems
-    (Nil) (Ok ())
+    [] (Ok ())
     (Cons head rest) (check-type-expr-app-head head rest elems)))
 
 (defn check-type-expr-app-head (head: Ast) (rest: (List Ast)) (elems: (List Ast)) -> (Result Unit CasingError)
@@ -87,7 +87,7 @@
 
 (defn check-field-elems (elems: (List Ast)) (sp: Span) -> (Result Unit CasingError)
   (match elems
-    (Nil) (mk-err sp "expected field form (name: Type)")
+    [] (mk-err sp "expected field form (name: Type)")
     (Cons name rest) (check-field-name-and-types name rest)))
 
 (defn check-field-name-and-types (name: Ast) (rest: (List Ast)) -> (Result Unit CasingError)
@@ -114,7 +114,7 @@
 
 (defn check-variant-ctor-elems (elems: (List Ast)) (sp: Span) -> (Result Unit CasingError)
   (match elems
-    (Nil) (mk-err sp "expected variant constructor form")
+    [] (mk-err sp "expected variant constructor form")
     (Cons head rest) (result-then (expect-upper head "variant constructor") (fn () (check-all rest check-type-expr)))))
 
 ; Shared by defn/defrec/variant: `Name` or `(Name [params…])`.
@@ -126,13 +126,13 @@
 
 (defn check-decl-name-app (np-elems: (List Ast)) (name-part: Ast) (role: Str) (whole-message: Str) (expect: (Fn Ast Str -> (Result Unit CasingError))) -> (Result Unit CasingError)
   (match np-elems
-    (Nil) (mk-err (ast-span name-part) whole-message)
+    [] (mk-err (ast-span name-part) whole-message)
     (Cons the-name more)
       (result-then (expect the-name role) (fn () (check-decl-tparams more)))))
 
 (defn check-decl-tparams (more: (List Ast)) -> (Result Unit CasingError)
   (match more
-    (Nil) (Ok ())
+    [] (Ok ())
     (Cons tparams _) (check-type-params tparams)))
 
 ; (defn name … ) or (defn (name [params…]) … )
@@ -188,7 +188,7 @@
 
 (defn check-form-paren (elems: (List Ast)) (sp: Span) -> (Result Unit CasingError)
   (match elems
-    (Nil) (Ok ())
+    [] (Ok ())
     (Cons head rest) (check-form-nonempty head rest elems sp)))
 
 (pub defn check-casing (node: Ast) -> (Result Unit CasingError)

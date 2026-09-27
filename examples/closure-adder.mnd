@@ -8,17 +8,17 @@
 
 (defn (map [a]) (f: (Fn a -> a)) (xs: (List a)) -> (List a)
   (match xs
-    (Nil) (Nil)
+    [] []
     (Cons h t) (Cons (f h) (map f t))))
 
 (defn print-elems (xs: (List Int)) -> Int
   (match xs
-    (Nil) 0
+    [] 0
     (Cons h t)
       (do
         (print h)
         (match t
-          (Nil) 0
+          [] 0
           _
             (do
               (print " ")
@@ -32,7 +32,7 @@
     0))
 
 (defn main -> Int
-  (let before (Cons 1 (Cons 2 (Cons 3 (Nil)))))
+  (let before [1 2 3])
   (let add40 (adder 40))
   (let after (map add40 before))
   (print "before: ")
