@@ -4,7 +4,7 @@
  * the compiler — see that module's own header comment) and, separately,
  * confirmed to be wired into the real `emit` path.
  *
- * Runs `src/main.mnd`/`src/tools/pool-dump.mnd` (compiled/interpreted by
+ * Runs `src/mn.mnd`/`src/tools/pool-dump.mnd` (compiled/interpreted by
  * the Phase 1 host, exactly as `bun run host/src/cli/menard.ts run …`
  * would) against real fixture files and checks that:
  *   - `pool-summary` dedups two identical `Str` literals to one entry,
@@ -99,12 +99,12 @@ describe("src/tools/pool-dump.mnd", () => {
   });
 });
 
-describe("src/main.mnd emit — pool collection wired ahead of lowering", () => {
+describe("src/mn.mnd emit — pool collection wired ahead of lowering", () => {
   test("emit still succeeds on hello.mnd once pool collection runs first", async () => {
     const dir = await mkdtempP(join(tmpdir(), "menard-pool-"));
     const outPath = join(dir, "hello.bc");
     try {
-      const out = runMenard("src/main.mnd", ["emit", abs("hello.mnd"), outPath]);
+      const out = runMenard("src/mn.mnd", ["emit", abs("hello.mnd"), outPath]);
       expect(out.stderr).toBe("");
       expect(out.exitCode).toBe(0);
     } finally {

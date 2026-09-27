@@ -19,11 +19,11 @@
 ;     scope for the single-file programs this slice targets.
 ;   - No `ImportBundle`/cross-module typing (host's `imports`/`exports`
 ;     options to `typecheckForms`, and `checkPubPrivateTypes`, ADR 27):
-;     `src/main.mnd` runs one file at a time with no module graph of its
+;     `src/mn.mnd` runs one file at a time with no module graph of its
 ;     own yet, so there is nothing to bundle. Revisit alongside a Menard
 ;     module loader.
 ;   - `spawn`/`spawn-capture` and the SpawnStatus/SpawnError/SpawnOutput
-;     types are not registered: `src/main.mnd` and its own dependencies
+;     types are not registered: `src/mn.mnd` and its own dependencies
 ;     never call them. Add if a later slice needs process spawning typed.
 ;   - Predicate coverage: `is-showable`/`is-orderable` (types.mnd) are
 ;     structurally complete for every type this typer can itself build,
@@ -32,7 +32,7 @@
 ;     `a` is actually equatable, matching host/src/type/check.ts exactly
 ;     (it has no such check either).
 ;   - `and`/`or`/`cond`/`when`/`while` are not special-cased here because
-;     `src/main.mnd`'s pipeline runs desugar before typecheck (spec §2.5:
+;     `src/mn.mnd`'s pipeline runs desugar before typecheck (spec §2.5:
 ;     "expanded during desugaring, before typing"), so this typer never
 ;     sees them on a real pipeline run. A caller that typechecks
 ;     un-desugared forms directly will see `E_TYPE_UNBOUND` on those heads.

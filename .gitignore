@@ -4,8 +4,9 @@ host/node_modules/
 # Runtime build artifacts
 runtime/build/
 
-# Compiler (make hello-native) build artifacts
+# Compiler build artifacts. ./mn is the native driver from `make`.
 build/
+/mn
 
 # OS
 .DS_Store

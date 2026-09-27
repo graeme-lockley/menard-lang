@@ -6,7 +6,7 @@
  * real filesystem, and checks:
  *   - `src/tools/read-roundtrip.mnd` round-trips corpus files through
  *     read → print → read → structural-equality.
- *   - `src/main.mnd`'s `check` and `emit` CLI modes behave per the plan's
+ *   - `src/mn.mnd`'s `check` and `emit` CLI modes behave per the plan's
  *     acceptance criteria.
  */
 import { describe, expect, test } from "bun:test";
@@ -80,40 +80,40 @@ describe("src/tools/read-roundtrip.mnd", () => {
   }
 });
 
-describe("src/main.mnd check", () => {
+describe("src/mn.mnd check", () => {
   for (const rel of CORPUS_FILES) {
     test(`exits 0 on ${rel}`, () => {
-      const out = runMenard("src/main.mnd", ["check", abs(rel)]);
+      const out = runMenard("src/mn.mnd", ["check", abs(rel)]);
       expect(out.stderr).toBe("");
       expect(out.exitCode).toBe(0);
     });
   }
 
   test("exits 1 with a diagnostic on a parse error", () => {
-    const out = runMenard("src/main.mnd", ["check", abs("tests/phase2/fixtures/bad-parse.mnd")]);
+    const out = runMenard("src/mn.mnd", ["check", abs("tests/phase2/fixtures/bad-parse.mnd")]);
     expect(out.exitCode).toBe(1);
     expect(out.stderr).toContain("error:");
   });
 
   test("exits 1 with a diagnostic on a casing error", () => {
-    const out = runMenard("src/main.mnd", ["check", abs("tests/phase2/fixtures/bad-casing.mnd")]);
+    const out = runMenard("src/mn.mnd", ["check", abs("tests/phase2/fixtures/bad-casing.mnd")]);
     expect(out.exitCode).toBe(1);
     expect(out.stderr).toContain("must begin with a lowercase letter");
   });
 
   test("exits 2 on a missing file", () => {
-    const out = runMenard("src/main.mnd", ["check", abs("tests/corpus/does-not-exist.mnd")]);
+    const out = runMenard("src/mn.mnd", ["check", abs("tests/corpus/does-not-exist.mnd")]);
     expect(out.exitCode).toBe(2);
   });
 
   test("exits 2 with usage on missing arguments", () => {
-    const out = runMenard("src/main.mnd", []);
+    const out = runMenard("src/mn.mnd", []);
     expect(out.exitCode).toBe(2);
     expect(out.stderr).toContain("usage:");
   });
 
   test("--dump-after=reader dumps forms to stderr and still checks", () => {
-    const out = runMenard("src/main.mnd", ["check", abs("hello.mnd"), "--dump-after=reader"]);
+    const out = runMenard("src/mn.mnd", ["check", abs("hello.mnd"), "--dump-after=reader"]);
     expect(out.exitCode).toBe(0);
     expect(out.stderr).toContain("SymNode");
     expect(out.stderr).toContain("println");
@@ -139,12 +139,12 @@ describe("src/main.mnd check", () => {
 const BITSTREAM_MAGIC = Buffer.from([0x42, 0x43, 0xc0, 0xde]); // 'B' 'C' 0xC0 0xDE
 const WRAPPER_MAGIC = Buffer.from([0xde, 0xc0, 0x17, 0x0b]); // 0x0B17C0DE, little-endian
 
-describe("src/main.mnd emit", () => {
+describe("src/mn.mnd emit", () => {
   test("writes a raw bitcode module to an explicit output path", async () => {
     const dir = await mkdtempP(join(tmpdir(), "menard-phase2-"));
     const outPath = join(dir, "hello.bc");
     try {
-      const out = runMenard("src/main.mnd", ["emit", abs("hello.mnd"), outPath]);
+      const out = runMenard("src/mn.mnd", ["emit", abs("hello.mnd"), outPath]);
       expect(out.stderr).toBe("");
       expect(out.exitCode).toBe(0);
       const bytes = await readFile(outPath);
@@ -161,7 +161,7 @@ describe("src/main.mnd emit", () => {
     const defaultOut = join(dir, "hello.bc");
     const { writeFile: writeFileCb } = await import("node:fs");
     await promisify(writeFileCb)(inPath, readFileSync(abs("hello.mnd")));
-    const out = runMenard("src/main.mnd", ["emit", inPath]);
+    const out = runMenard("src/mn.mnd", ["emit", inPath]);
     expect(out.exitCode).toBe(0);
     const bytes = await readFile(defaultOut);
     expect(bytes.subarray(0, 4).equals(BITSTREAM_MAGIC)).toBe(true);

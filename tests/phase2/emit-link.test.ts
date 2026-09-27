@@ -1,7 +1,7 @@
 /**
  * Phase 2 (slices 2.7/2.8/2A) — emit → clang → run, end to end.
  *
- * `src/main.mnd emit` writes a bitcode module using the real bit-level
+ * `src/mn.mnd emit` writes a bitcode module using the real bit-level
  * encoder in `src/emit/bc-writer.mnd` (slice 2A) — see that module's and
  * `src/emit/bitcode.mnd`'s header comments for what it does and does not
  * lower yet. This test checks that module is *actually valid LLVM
@@ -60,9 +60,9 @@ const RUNTIME_LIB_SRCS = [
 ].map(abs);
 const RUNTIME_INCLUDE = abs("runtime/include");
 
-/** Run `src/main.mnd emit <entry> <out>` exactly as the CLI would. */
+/** Run `src/mn.mnd emit <entry> <out>` exactly as the CLI would. */
 function emit(entryRelPath: string, outPath: string): { exitCode: number; stderr: string } {
-  const entryPath = abs("src/main.mnd");
+  const entryPath = abs("src/mn.mnd");
   const source = readFileSync(entryPath);
   const stderrChunks: Uint8Array[] = [];
   const host = createLiveHost({

@@ -1,6 +1,6 @@
 /**
  * Phase 2 slice 2A — the real bit-level LLVM bitcode encoder
- * (`src/emit/bc-writer.mnd`), wired into `src/main.mnd emit` via
+ * (`src/emit/bc-writer.mnd`), wired into `src/mn.mnd emit` via
  * `src/emit/bitcode.mnd`.
  *
  * Checks that `menard emit`'s output is:
@@ -57,9 +57,9 @@ const RUNTIME_LIB_SRCS = [
 ].map(abs);
 const RUNTIME_INCLUDE = abs("runtime/include");
 
-/** Run `src/main.mnd emit <entry> <out>` exactly as the CLI would. */
+/** Run `src/mn.mnd emit <entry> <out>` exactly as the CLI would. */
 function emit(entryRelPath: string, outPath: string): { exitCode: number; stderr: string } {
-  const entryPath = abs("src/main.mnd");
+  const entryPath = abs("src/mn.mnd");
   const source = readFileSync(entryPath);
   const stderrChunks: Uint8Array[] = [];
   const host = createLiveHost({

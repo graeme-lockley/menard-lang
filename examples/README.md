@@ -27,6 +27,6 @@ short description of its result and exits 0. Run with
 ## Fixed point
 
 `make check-fixed-point` is green: `bc0 == bc1`, `stage1 == stage2`, and
-the Menard driver's linked artifact matches the harness. `emit` of
-`src/main.mnd` writes bitcode and spawns nothing. `hello.mnd` at the repo
+the installed `./mn` and stage1 link the same artifact. `emit` of
+`src/mn.mnd` writes bitcode and spawns nothing. `hello.mnd` at the repo
 root remains the smoke test.

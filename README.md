@@ -88,13 +88,14 @@ CI. **The Phase 3 gate is green.** `make check-fixed-point` checks
 `bc0 == bc1`, `stage1 == stage2`, and that `build/fp/stage1 build` (the
 Menard driver: in-process emit, `spawn` of the recorded `cc`, `rename`
 into place) produces a binary byte-identical to `./mn build` on the same
-`-o` path. `./mn` stays the TypeScript harness. `emit` spawns nothing.
+`-o` path. `./mn` is that native driver, built from `src/mn.mnd`. `emit`
+spawns nothing.
 
 **Phase 4 is complete.** `mn_alloc` bumps a 256 KiB nursery. A minor
 collection copies young survivors into old space from the shadow stack and
 the remembered set; it does not scan old space. A major mark-sweep runs
 only after old space crosses a growth threshold, and static objects stay
-leaves. On a native compile of `src/main.mnd`, `mn_gc_stats` reported a
+leaves. On a native compile of `src/mn.mnd`, `mn_gc_stats` reported a
 last minor pause of 143µs with old space at about 32 MiB (first minor 35µs
 at 75 KiB; minor max 441µs). Five majors ran, the longest about 8 ms.
 `MENARD_GC_STRESS` and `MENARD_HEAP_VERIFY` cover the oracle corpus and
@@ -140,9 +141,10 @@ make typecheck   # tsc --noEmit
 make ci          # typecheck + test (mirrors GitHub Actions)
 ```
 
-### `mn` — build / run / interpret
+### `mn` — the native driver
 
 ```bash
+make                                 # compile src/mn.mnd → ./mn
 ./mn build path/to/file.mnd          # emit bitcode, link → build/<name>
 ./mn build path/to/file.mnd -o out   # same, write binary to out
 ./mn run   path/to/file.mnd          # build, then execute
@@ -151,9 +153,10 @@ make ci          # typecheck + test (mirrors GitHub Actions)
 ./mn inter path/to/file.mnd --show-result
 ```
 
-`build` / `run` use stage0 (`src/main.mnd` on the host) then `clang` + the
-leaking runtime. `inter` is the Phase 1 host CLI. Override the linker with
-`CC` or `MENARD_CC`.
+`make` bootstraps `./mn` with the interpreter (stage0) and links it with
+clang. After that, `build` / `run` emit in-process and spawn the recorded
+`cc`. `inter` still spawns the Phase 1 host. Override the linker with `CC`
+or `MENARD_CC`, and the bootstrap host with `MENARD_BUN`.
 
 ### Check / run a program (Phase 1 host CLI)
 
@@ -167,7 +170,7 @@ bun run host/src/cli/menard.ts run path/to/file.mnd -- arg1 arg2
 `run` writes `print` / `println` / `dump` **live** to the process streams.
 `--show-result` also prints the final non-`Unit` value (REPL-style).
 Arguments after `--` become `(arg)` / `(arg-count)` — the stage0 shape is
-`run src/main.mnd -- file.mnd`.
+`run src/mn.mnd -- file.mnd`.
 
 Exit codes: `0` ok, `1` program error/panic, `2` usage or I/O fault.
 
@@ -184,7 +187,7 @@ bun test ../tests
 make hello-native   # stage0 emit -> clang link -> run; prints "Hello, world!" and exit 0
 ```
 
-This runs the compiler (`src/main.mnd`, in Menard, interpreted by the Phase 1
+This runs the compiler (`src/mn.mnd`, in Menard, interpreted by the Phase 1
 host — stage0) in `emit` mode over `hello.mnd`, links the resulting
 `build/hello.bc` against the runtime (`RUNTIME_LIB_SRCS`) with clang, and runs
 `build/hello`. `hello.mnd`'s standalone top-level `(println "Hello,

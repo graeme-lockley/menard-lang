@@ -4,11 +4,11 @@ This is **the** compiler (ADR 15: one compiler, written once). It is a
 multi-module Menard program (ADR 14: no import cycles), run two ways:
 
 - as **stage0**, interpreted by the Phase 1 host (`bun run
-  host/src/cli/menard.ts run src/main.mnd -- …`) — the only way it runs
-  today;
-- eventually as **stage1/stage2**, the native binary stage0 (and then
-  stage1) compiles from this same source — see the root
-  [`README.md`](../README.md#the-bootstrap) and spec §3.5.
+  host/src/cli/menard.ts run src/mn.mnd -- …`) — how `make` bootstraps
+  `./mn`;
+- as **stage1/stage2**, the native `./mn` binary stage0 (and then stage1)
+  compiles from this same source — see the root [`README.md`](../README.md)
+  and spec §3.5.
 
 Nothing under `src/` is TypeScript, and nothing here is committed as a
 binary: every run starts from this source, on the interpreter or on a
@@ -17,8 +17,8 @@ previously-built native compiler.
 ## Running it (stage0)
 
 ```bash
-bun run host/src/cli/menard.ts run src/main.mnd -- check <file.mnd>
-bun run host/src/cli/menard.ts run src/main.mnd -- emit  <file.mnd> [out.bc]
+bun run host/src/cli/menard.ts run src/mn.mnd -- check <file.mnd>
+bun run host/src/cli/menard.ts run src/mn.mnd -- emit  <file.mnd> [out.bc]
 ```
 
 `check` reads, casing-checks, desugars and typechecks a program; `emit`
@@ -31,7 +31,7 @@ result with `clang`, and runs it — the current end-to-end smoke test (root
 
 | Path | Role | Status |
 | --- | --- | --- |
-| `main.mnd` | CLI entry point: argv parsing, `check`/`emit` dispatch, the front-end pipeline, diagnostics reporting | Wired |
+| `mn.mnd` | CLI entry point: argv parsing, `check`/`emit`/`build`/`run`/`inter` dispatch, the front-end pipeline, diagnostics reporting. `make` links this to `./mn` | Wired |
 | `reader/ast.mnd` | `Ast` (the reader's output shape) and `Span` | Wired |
 | `reader/read.mnd` | Source bytes → `Ast` forms (mirrors `host/src/reader/read.ts`) | Wired |
 | `reader/print.mnd` | `Ast` forms → source text (round-trip printer) | Wired |
@@ -52,7 +52,7 @@ result with `clang`, and runs it — the current end-to-end smoke test (root
 | `tools/pool-dump.mnd` | Test harness (not part of the compiler): renders `pool/pool.mnd`'s collected entries as goldenable text | Wired |
 | `util/result.mnd` | `result-bind`/`result-then` — `Result` plumbing shared by the reader, casing checker and emitter (ADR 6: no exceptions) | Wired |
 
-"Wired" modules are exercised by `src/main.mnd`'s pipeline today. "Stub" and
+"Wired" modules are exercised by `src/mn.mnd`'s pipeline today. "Stub" and
 "Skeleton"/"Placeholder" modules exist so the pipeline's *shape* — reader →
 casing → desugar → type → closure-convert → rooting-analyze → derive → emit
 (spec §5's Phase 2 diagram) — is in place end to end, and so each later
@@ -62,7 +62,7 @@ replaces it.
 
 ## Where the pipeline really is today
 
-`src/main.mnd`'s `check`/`emit` front end runs: read → (dump `reader`) →
+`src/mn.mnd`'s `check`/`emit` front end runs: read → (dump `reader`) →
 casing → desugar → (dump `desugar`) → typecheck → (dump `type`) →
 closure-convert → (dump `close`) → rooting-analyze → (dump `root`) →
 plan-derives → (dump `derive`) → `on-ok`. Type errors still abort before

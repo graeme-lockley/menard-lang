@@ -108,9 +108,9 @@ const RUNTIME_LIB_SRCS = [
 ].map(abs);
 const RUNTIME_INCLUDE = abs("runtime/include");
 
-/** Run `src/main.mnd emit <entry> <out>` exactly as the CLI would. */
+/** Run `src/mn.mnd emit <entry> <out>` exactly as the CLI would. */
 function emit(entryRelPath: string, outPath: string): { exitCode: number; stderr: string } {
-  const entryPath = abs("src/main.mnd");
+  const entryPath = abs("src/mn.mnd");
   const source = readFileSync(entryPath);
   const stderrChunks: Uint8Array[] = [];
   const host = createLiveHost({

@@ -11,7 +11,7 @@
 ; the "which types are ever shown/compared" traversal itself, in
 ; `derive/plan.mnd`'s `describe-derives`: it walks a program's forms and
 ; reports every type its `show`/`=`/`compare`/`dump` use sites need,
-; wired into `src/main.mnd`'s `--dump-after=derive` alongside the raw
+; wired into `src/mn.mnd`'s `--dump-after=derive` alongside the raw
 ; forms dump. That traversal is exactly the "which types are ever shown/
 ; compared" question a real derive engine's instantiation-site scan
 ; (§2.8.4) will also have to answer.

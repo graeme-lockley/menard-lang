@@ -1838,7 +1838,7 @@
     (None) false))
 
 ; A one-byte "\n" `Str`, `println`'s own trailing newline — built the
-; same way `src/main.mnd`'s `nl` is, and deliberately run through the
+; same way `src/mn.mnd`'s `nl` is, and deliberately run through the
 ; very same `StrPool` (deduped by content) every `println` call needs,
 ; rather than kept as some separate always-present global: a program
 ; with no `println` at all pays for zero string globals, not one.

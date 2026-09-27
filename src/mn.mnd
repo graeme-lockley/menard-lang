@@ -1,7 +1,7 @@
-; Menard compiler CLI entry point (slice 2.0 scaffold).
+; Menard driver. `make` compiles this file to the `./mn` binary.
 ;
-; Usage (via the host, per README/spec §3.5):
-;   bun run host/src/cli/menard.ts run src/main.mnd -- <check|emit|build|run> <file.mnd> [out.bc] [-o bin] [--cc path] [--runtime dir]
+; Bootstrap (stage0, before `./mn` exists):
+;   bun run host/src/cli/menard.ts run src/mn.mnd -- <check|emit|build|run|inter> <file.mnd> [out.bc] [-o bin] [--cc path] [--runtime dir]
 ;
 ; `check` runs the full front end through derive planning (see below).
 ; `emit` does the same, then writes a bitcode module to `out.bc`, or to
@@ -76,6 +76,9 @@
       (or (is-dump-after-type s)
         (or (is-dump-after-close s) (or (is-dump-after-root s) (is-dump-after-derive s)))))))
 
+(defn is-bare-flag (s: Str) -> Bool
+  (or (is-dump-flag s) (= s "--show-result")))
+
 (defn is-valued-flag (s: Str) -> Bool
   (or (= s "-o") (or (= s "--cc") (= s "--runtime"))))
 
@@ -127,10 +130,18 @@
 (defn has-dump-after-derive -> Bool
   (has-dump-after-derive-from 0 (arg-count)))
 
+(defn has-show-result-from (i: Int) (n: Int) -> Bool
+  (if (>= i n)
+    false
+    (if (= (arg i) "--show-result") true (has-show-result-from (+ i 1) n))))
+
+(defn has-show-result -> Bool
+  (has-show-result-from 0 (arg-count)))
+
 (defn positional-count-from (i: Int) (n: Int) (acc: Int) -> Int
   (if (>= i n)
     acc
-    (if (is-dump-flag (arg i))
+    (if (is-bare-flag (arg i))
       (positional-count-from (+ i 1) n acc)
       (if (is-valued-flag (arg i))
         (positional-count-from (+ i 2) n acc)
@@ -144,7 +155,7 @@
 (defn positional-arg-from (want: Int) (i: Int) (seen: Int) (n: Int) -> Str
   (if (>= i n)
     ""
-    (if (is-dump-flag (arg i))
+    (if (is-bare-flag (arg i))
       (positional-arg-from want (+ i 1) seen n)
       (if (is-valued-flag (arg i))
         (positional-arg-from want (+ i 2) seen n)
@@ -231,7 +242,7 @@
 
 (defn usage -> Unit
   (do
-    (write-line 2 "usage: main.mnd <check|emit|build|run> <file.mnd> [out.bc] [-o bin] [--cc path] [--runtime dir] [--dump-after=reader|desugar|type|close|root|derive]")
+    (write-line 2 "usage: mn <check|emit|build|run|inter> <file.mnd> [out.bc] [-o bin] [--cc path] [--runtime dir] [--show-result] [--dump-after=reader|desugar|type|close|root|derive]")
     (exit 2)))
 
 ; ---------------------------------------------------------------------------
@@ -549,6 +560,52 @@
     (Some path) (search-path path name 0)))
 
 ; ---------------------------------------------------------------------------
+; `inter` is the reference interpreter. The host stays TypeScript; this
+; only spawns it.
+
+(defn bun-on-path -> Str
+  (match (find-on-path "bun")
+    (Some b) b
+    (None) ""))
+
+(defn chosen-bun -> Str
+  (match (getenv "MENARD_BUN")
+    (Some s) (if (> (str-byte-length s) 0) s (bun-on-path))
+    (None) (bun-on-path)))
+
+(defn append-strs (a: (List Str)) (b: (List Str)) -> (List Str)
+  (match a
+    (Nil) b
+    (Cons h t) (Cons h (append-strs t b))))
+
+(defn inter-tail (file: Str) (show: Bool) (args: (List Str)) -> (List Str)
+  (do
+    (let head
+      (if show
+        (Cons "--show-result" (Cons file (Nil)))
+        (Cons file (Nil))))
+    (match args
+      (Nil) head
+      _ (append-strs head (Cons "--" args)))))
+
+(defn inter-argv (bun: Str) (file: Str) (show: Bool) (args: (List Str)) -> (List Str)
+  (Cons bun
+    (Cons "run"
+      (Cons "host/src/cli/menard.ts"
+        (Cons "run" (inter-tail file show args))))))
+
+(defn run-inter (file: Str) -> Unit
+  (if (exists file)
+    (do
+      (let bun (chosen-bun))
+      (if (= (str-byte-length bun) 0)
+        (fail-spawn "bun")
+        (match (spawn (inter-argv bun file (has-show-result) (prog-args)))
+          (Err _) (fail-spawn bun)
+          (Ok st) (exit (status-exit-code st)))))
+    (fail-cannot-read file)))
+
+; ---------------------------------------------------------------------------
 ; Dispatch
 
 (defn dispatch (mode: Str) (file: Str) (has-out: Bool) (out: Str) (bin: Str) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) -> Unit
@@ -558,7 +615,9 @@
       (run-emit file has-out out dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive)
       (if (or (= mode "build") (= mode "run"))
         (run-build file (chosen-cc (flag-value "--cc")) (chosen-runtime (flag-value "--runtime")) bin (= mode "run") dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive)
-        (usage)))))
+        (if (= mode "inter")
+          (run-inter file)
+          (usage))))))
 
 (defn main -> Unit
   (do

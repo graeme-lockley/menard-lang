@@ -7,7 +7,7 @@
 ; forms and reports, for every type the program actually asks the
 ; compiler to derive something for, which of `show`/`=`/`compare`/`dump`
 ; it needs — the exact question the real derive engine will have to
-; answer to know what to generate. `src/main.mnd` prints this to stderr
+; answer to know what to generate. `src/mn.mnd` prints this to stderr
 ; whenever `--dump-after=derive` is given, alongside the existing raw
 ; `dump` of the forms.
 ;
@@ -23,7 +23,7 @@
 ;
 ; ## How a use site's argument type is found, with no typer in hand
 ;
-; This pass runs on the same bare `Ast` the rest of `src/main.mnd`'s
+; This pass runs on the same bare `Ast` the rest of `src/mn.mnd`'s
 ; post-type pipeline passes around — `type/check.mnd`'s `typecheck-forms`
 ; accepts or rejects a program but returns the same forms it was given,
 ; not a type-annotated tree (see that module's own header comment and

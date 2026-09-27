@@ -2736,7 +2736,7 @@ works, so it can be written and tested against the oracle long before a native
 binary exists.
 
 **Phase 2 is written in the language it implements, from the first line.** The
-compiler is developed on the interpreter: `menard run src/main.mnd -- file.mnd`
+compiler is developed on the interpreter: `menard run src/mn.mnd -- file.mnd`
 is stage0 compiling one file. That makes phase 2 the language's first large
 program as well as its compiler, and it is where interpreter bugs and missing
 features surface. The rule from §3.8 governs: a feature reaches the interpreter

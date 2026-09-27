@@ -1,8 +1,8 @@
 /**
  * Phase 2 — the Menard-in-Menard desugarer (`src/desugar/desugar.mnd`),
- * wired into `src/main.mnd`'s `check`/`emit` pipeline.
+ * wired into `src/mn.mnd`'s `check`/`emit` pipeline.
  *
- * Runs `src/main.mnd` (compiled/interpreted by the Phase 1 host, exactly as
+ * Runs `src/mn.mnd` (compiled/interpreted by the Phase 1 host, exactly as
  * `bun run host/src/cli/menard.ts run …` would) against real fixture files
  * and checks that:
  *   - `check` accepts programs using `and`/`or`/`cond`/`when`/`while` sugar.
@@ -61,15 +61,15 @@ function runMenard(entryRelPath: string, argv: string[]): RunOut {
 
 const DESUGAR_HEADS = ["and", "or", "cond", "when", "while"];
 
-describe("src/main.mnd check — desugar wired after casing", () => {
+describe("src/mn.mnd check — desugar wired after casing", () => {
   test("accepts and/or/cond/when/while sugar", () => {
-    const out = runMenard("src/main.mnd", ["check", abs("tests/phase2/fixtures/desugar-ok.mnd")]);
+    const out = runMenard("src/mn.mnd", ["check", abs("tests/phase2/fixtures/desugar-ok.mnd")]);
     expect(out.stderr).toBe("");
     expect(out.exitCode).toBe(0);
   });
 
   test("--dump-after=reader dumps the original, un-expanded forms", () => {
-    const out = runMenard("src/main.mnd", [
+    const out = runMenard("src/mn.mnd", [
       "check",
       abs("tests/phase2/fixtures/desugar-ok.mnd"),
       "--dump-after=reader",
@@ -81,7 +81,7 @@ describe("src/main.mnd check — desugar wired after casing", () => {
   });
 
   test("--dump-after=desugar dumps forms with sugar heads fully expanded", () => {
-    const out = runMenard("src/main.mnd", [
+    const out = runMenard("src/mn.mnd", [
       "check",
       abs("tests/phase2/fixtures/desugar-ok.mnd"),
       "--dump-after=desugar",
@@ -95,7 +95,7 @@ describe("src/main.mnd check — desugar wired after casing", () => {
   });
 
   test("while desugars to loop/recur, not left as sugar", () => {
-    const out = runMenard("src/main.mnd", [
+    const out = runMenard("src/mn.mnd", [
       "check",
       abs("tests/phase2/fixtures/desugar-while.mnd"),
       "--dump-after=desugar",
@@ -106,13 +106,13 @@ describe("src/main.mnd check — desugar wired after casing", () => {
   });
 
   test("still fails a parse error before desugar ever runs", () => {
-    const out = runMenard("src/main.mnd", ["check", abs("tests/phase2/fixtures/bad-parse.mnd")]);
+    const out = runMenard("src/mn.mnd", ["check", abs("tests/phase2/fixtures/bad-parse.mnd")]);
     expect(out.exitCode).toBe(1);
     expect(out.stderr).toContain("error:");
   });
 
   test("still fails a casing error before desugar ever runs", () => {
-    const out = runMenard("src/main.mnd", ["check", abs("tests/phase2/fixtures/bad-casing.mnd")]);
+    const out = runMenard("src/mn.mnd", ["check", abs("tests/phase2/fixtures/bad-casing.mnd")]);
     expect(out.exitCode).toBe(1);
     expect(out.stderr).toContain("must begin with a lowercase letter");
   });
@@ -127,7 +127,7 @@ describe("src/main.mnd check — desugar wired after casing", () => {
 
   for (const { fixture, code } of desugarErrorCases) {
     test(`exits 1 with ${code} on ${fixture}`, () => {
-      const out = runMenard("src/main.mnd", ["check", abs(`tests/phase2/fixtures/${fixture}`)]);
+      const out = runMenard("src/mn.mnd", ["check", abs(`tests/phase2/fixtures/${fixture}`)]);
       expect(out.exitCode).toBe(1);
       expect(out.stderr).toContain(`[${code}]`);
     });

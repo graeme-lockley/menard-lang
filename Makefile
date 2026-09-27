@@ -19,7 +19,17 @@ RUNTIME_LIB_SRCS := $(RUNTIME_DIR)/src/alloc.c $(RUNTIME_DIR)/src/gc.c $(RUNTIME
 
 BUILD_DIR := build
 
-.PHONY: test typecheck ci runtime-smoke runtime-clean hello-native ret-native check-fixed-point
+.DEFAULT_GOAL := mn
+
+.PHONY: mn test typecheck ci runtime-smoke runtime-clean hello-native ret-native check-fixed-point
+
+# Bootstrap the native driver. Stage0 (the interpreter) compiles
+# src/mn.mnd; clang links it to ./mn. The binary is not committed.
+mn:
+	@mkdir -p $(BUILD_DIR)
+	bun run host/src/cli/menard.ts run src/mn.mnd -- emit src/mn.mnd $(BUILD_DIR)/mn.bc
+	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/mn.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/mn.tmp
+	mv $(BUILD_DIR)/mn.tmp mn
 
 test:
 	cd host && bun test ../tests
@@ -53,7 +63,7 @@ runtime-clean:
 # `mn_write_stderr` are undefined without it.
 hello-native:
 	@mkdir -p $(BUILD_DIR)
-	bun run host/src/cli/menard.ts run src/main.mnd -- emit hello.mnd $(BUILD_DIR)/hello.bc
+	bun run host/src/cli/menard.ts run src/mn.mnd -- emit hello.mnd $(BUILD_DIR)/hello.bc
 	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/hello.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/hello
 	$(BUILD_DIR)/hello; echo $$?
 
@@ -64,11 +74,11 @@ hello-native:
 # the runtime, same rationale as hello-native above.
 ret-native:
 	@mkdir -p $(BUILD_DIR)
-	bun run host/src/cli/menard.ts run src/main.mnd -- emit tests/phase2/oracle/ret41.mnd $(BUILD_DIR)/ret41.bc
+	bun run host/src/cli/menard.ts run src/mn.mnd -- emit tests/phase2/oracle/ret41.mnd $(BUILD_DIR)/ret41.bc
 	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/ret41.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/ret41
 	$(BUILD_DIR)/ret41; echo $$?
 
-# Phase 3 fixed-point gate (spec §5): stage0 emit of src/main.mnd → bc0;
+# Phase 3 fixed-point gate (spec §5): stage0 emit of src/mn.mnd → bc0;
 # link stage1; stage1 emit → bc1; cmp bc0 bc1; link stage2; cmp the binaries.
 # Both stages are linked from the same input and output path (`mod.bc` /
 # `stage`), then copied aside. ld hashes the output path into LC_UUID and
@@ -76,14 +86,14 @@ ret-native:
 # compiles compare unequal.
 check-fixed-point:
 	@mkdir -p $(BUILD_DIR)/fp
-	@echo "==> stage0 emit src/main.mnd → bc0"
-	bun run host/src/cli/menard.ts run src/main.mnd -- emit src/main.mnd $(BUILD_DIR)/fp/bc0.bc
+	@echo "==> stage0 emit src/mn.mnd → bc0"
+	bun run host/src/cli/menard.ts run src/mn.mnd -- emit src/mn.mnd $(BUILD_DIR)/fp/bc0.bc
 	@echo "==> link stage1"
 	cp $(BUILD_DIR)/fp/bc0.bc $(BUILD_DIR)/fp/mod.bc
 	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/fp/mod.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/fp/stage
 	cp $(BUILD_DIR)/fp/stage $(BUILD_DIR)/fp/stage1
-	@echo "==> stage1 emit src/main.mnd → bc1"
-	$(BUILD_DIR)/fp/stage1 emit src/main.mnd $(BUILD_DIR)/fp/bc1.bc
+	@echo "==> stage1 emit src/mn.mnd → bc1"
+	$(BUILD_DIR)/fp/stage1 emit src/mn.mnd $(BUILD_DIR)/fp/bc1.bc
 	@echo "==> cmp bc0 bc1"
 	cmp $(BUILD_DIR)/fp/bc0.bc $(BUILD_DIR)/fp/bc1.bc && echo "bc0 == bc1 OK"
 	@echo "==> link stage2"
@@ -92,8 +102,10 @@ check-fixed-point:
 	cp $(BUILD_DIR)/fp/stage $(BUILD_DIR)/fp/stage2
 	@echo "==> cmp stage1 stage2"
 	cmp $(BUILD_DIR)/fp/stage1 $(BUILD_DIR)/fp/stage2 && echo "stage1 == stage2 OK"
-	@echo "==> harness vs Menard driver artifact"
+	@echo "==> install ./mn from the stage1 link"
+	cp $(BUILD_DIR)/fp/stage1 mn
+	@echo "==> installed mn vs stage1 artifact"
 	./mn build examples/loop-sum.mnd -o $(BUILD_DIR)/fp/art
-	cp $(BUILD_DIR)/fp/art $(BUILD_DIR)/fp/art-harness
+	cp $(BUILD_DIR)/fp/art $(BUILD_DIR)/fp/art-mn
 	$(BUILD_DIR)/fp/stage1 build examples/loop-sum.mnd -o $(BUILD_DIR)/fp/art
-	cmp $(BUILD_DIR)/fp/art-harness $(BUILD_DIR)/fp/art && echo "driver artifact == harness OK"
+	cmp $(BUILD_DIR)/fp/art-mn $(BUILD_DIR)/fp/art && echo "driver artifact == mn OK"

@@ -1,8 +1,8 @@
 /**
  * Phase 2 slice 2F — derive planning (`src/derive/plan.mnd`), wired into
- * `src/main.mnd`'s `--dump-after=derive`.
+ * `src/mn.mnd`'s `--dump-after=derive`.
  *
- * Runs `src/main.mnd` (compiled/interpreted by the Phase 1 host, exactly as
+ * Runs `src/mn.mnd` (compiled/interpreted by the Phase 1 host, exactly as
  * `bun run host/src/cli/menard.ts run …` would) against real fixture files
  * and checks that:
  *   - `--dump-after=derive` prints `describe-derives`'s plan to stderr,
@@ -63,15 +63,15 @@ function runMenard(entryRelPath: string, argv: string[]): RunOut {
   return { exitCode: 2, stdout, stderr: stderr + "\n[panic] " + r.message };
 }
 
-describe("src/main.mnd check — derive planning wired after rooting", () => {
+describe("src/mn.mnd check — derive planning wired after rooting", () => {
   test("accepts a program using (show 1) with no --dump-after flag", () => {
-    const out = runMenard("src/main.mnd", ["check", abs("tests/phase2/fixtures/derive-show-int.mnd")]);
+    const out = runMenard("src/mn.mnd", ["check", abs("tests/phase2/fixtures/derive-show-int.mnd")]);
     expect(out.stderr).toBe("");
     expect(out.exitCode).toBe(0);
   });
 
   test("--dump-after=derive reports Int as needing show for (show 1)", () => {
-    const out = runMenard("src/main.mnd", [
+    const out = runMenard("src/mn.mnd", [
       "check",
       abs("tests/phase2/fixtures/derive-show-int.mnd"),
       "--dump-after=derive",
@@ -84,7 +84,7 @@ describe("src/main.mnd check — derive planning wired after rooting", () => {
   });
 
   test("--dump-after=derive resolves a user variant's declared type name, not its ctor name", () => {
-    const out = runMenard("src/main.mnd", [
+    const out = runMenard("src/mn.mnd", [
       "check",
       abs("tests/phase2/fixtures/derive-show-variant.mnd"),
       "--dump-after=derive",
@@ -95,7 +95,7 @@ describe("src/main.mnd check — derive planning wired after rooting", () => {
   });
 
   test("--dump-after=derive never fires when typechecking fails", () => {
-    const out = runMenard("src/main.mnd", [
+    const out = runMenard("src/mn.mnd", [
       "check",
       abs("tests/phase2/fixtures/bad-type-unbound.mnd"),
       "--dump-after=derive",

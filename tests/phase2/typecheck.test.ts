@@ -1,8 +1,8 @@
 /**
  * Phase 2 — the Menard-in-Menard typer (`src/type/check.mnd`), wired into
- * `src/main.mnd`'s `check`/`emit` pipeline as the stage after desugaring.
+ * `src/mn.mnd`'s `check`/`emit` pipeline as the stage after desugaring.
  *
- * Runs `src/main.mnd` (compiled/interpreted by the Phase 1 host, exactly as
+ * Runs `src/mn.mnd` (compiled/interpreted by the Phase 1 host, exactly as
  * `bun run host/src/cli/menard.ts run …` would) against real fixture files
  * and checks that:
  *   - `check` accepts a well-typed program (simple `defn` + Int arithmetic).
@@ -62,15 +62,15 @@ function runMenard(entryRelPath: string, argv: string[]): RunOut {
   return { exitCode: 2, stdout, stderr: stderr + "\n[panic] " + r.message };
 }
 
-describe("src/main.mnd check — typer wired after desugar", () => {
+describe("src/mn.mnd check — typer wired after desugar", () => {
   test("accepts a well-typed defn using Int arithmetic", () => {
-    const out = runMenard("src/main.mnd", ["check", abs("tests/phase2/fixtures/type-ok.mnd")]);
+    const out = runMenard("src/mn.mnd", ["check", abs("tests/phase2/fixtures/type-ok.mnd")]);
     expect(out.stderr).toBe("");
     expect(out.exitCode).toBe(0);
   });
 
   test("rejects an unbound variable with E_TYPE_UNBOUND", () => {
-    const out = runMenard("src/main.mnd", [
+    const out = runMenard("src/mn.mnd", [
       "check",
       abs("tests/phase2/fixtures/bad-type-unbound.mnd"),
     ]);
@@ -79,7 +79,7 @@ describe("src/main.mnd check — typer wired after desugar", () => {
   });
 
   test("rejects a non-Bool if test with E_TYPE_MISMATCH", () => {
-    const out = runMenard("src/main.mnd", [
+    const out = runMenard("src/mn.mnd", [
       "check",
       abs("tests/phase2/fixtures/bad-type-if-nonbool.mnd"),
     ]);
@@ -88,7 +88,7 @@ describe("src/main.mnd check — typer wired after desugar", () => {
   });
 
   test("--dump-after=type dumps the post-typecheck forms on success", () => {
-    const out = runMenard("src/main.mnd", [
+    const out = runMenard("src/mn.mnd", [
       "check",
       abs("tests/phase2/fixtures/type-ok.mnd"),
       "--dump-after=type",
@@ -99,7 +99,7 @@ describe("src/main.mnd check — typer wired after desugar", () => {
   });
 
   test("--dump-after=type never fires when typechecking fails", () => {
-    const out = runMenard("src/main.mnd", [
+    const out = runMenard("src/mn.mnd", [
       "check",
       abs("tests/phase2/fixtures/bad-type-unbound.mnd"),
       "--dump-after=type",
@@ -109,7 +109,7 @@ describe("src/main.mnd check — typer wired after desugar", () => {
   });
 
   test("still fails a desugar error before the typer ever runs", () => {
-    const out = runMenard("src/main.mnd", [
+    const out = runMenard("src/mn.mnd", [
       "check",
       abs("tests/phase2/fixtures/bad-desugar-when.mnd"),
     ]);

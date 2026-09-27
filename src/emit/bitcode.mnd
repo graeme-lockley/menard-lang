@@ -12,7 +12,7 @@
 ; support yet, and why. A program with no such `main`, or whose `main`
 ; needs a form this lowerer does not yet handle (`loop`/`recur`,
 ; `match`, a non-`Int` value, …), is an `Err`: `emit` fails (see
-; `src/main.mnd`'s `write-module`) rather than writing a wrong or stale
+; `src/mn.mnd`'s `write-module`) rather than writing a wrong or stale
 ; module.
 
 (import "../reader/ast.mnd")
