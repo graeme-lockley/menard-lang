@@ -157,16 +157,26 @@ MnWord mn_str_byte_length(MnWord s);
 MnWord mn_str_byte(MnWord s, MnWord i_tagged);
 MnWord mn_str_slice(MnWord s, MnWord start_t, MnWord end_t);
 void mn_print_str(MnWord s);
+/* `(write fd s)` when `fd` or `s` is not a literal. `fd` is a tagged Int, 1 or 2. Returns Unit. */
+MnWord mn_write(MnWord fd_tagged, MnWord s);
 MnWord mn_ref_new(MnWord v);
 MnWord mn_ref_deref(MnWord r);
 MnWord mn_ref_set(MnWord r, MnWord v);
 MnWord mn_sb_new(void);
+MnWord mn_sb_length(MnWord sb);
 MnWord mn_sb_append(MnWord sb, MnWord s);
 MnWord mn_sb_append_byte(MnWord sb, MnWord b_tagged);
 MnWord mn_sb_take_str(MnWord sb);
 
 /* Loose `show` for diagnostics (Phase 3 slice H) — Int decimal or #<obj>. */
 MnWord mn_show(MnWord v);
+/* `(dump v)` is a diagnostic builtin. The fixed-point emit never calls it;
+ * a Unit no-op keeps the call lowerable without an AST printer. */
+MnWord mn_dump(MnWord v);
+
+/* Value-directed equality and ordering (`runtime/src/equal.c`). */
+MnWord mn_equal(MnWord a, MnWord b);   /* → Bool */
+MnWord mn_compare(MnWord a, MnWord b); /* → Int, <0 / 0 / >0 */
 
 /* Persistent Map (`runtime/src/map.c`, Phase 3 slice F). */
 MnWord mn_map_new(void);
@@ -191,7 +201,8 @@ MnWord mn_apply_2(MnWord clo, MnWord a0, MnWord a1);
 /*
  * Tier-0 I/O (`runtime/src/io.c`, Phase 3 slice G). Emitted `@main` is
  * `i32(i32 argc, ptr argv)` and must call `mn_init` before any of the
- * arg / file helpers. `mn_read_file` / `mn_write_file` return
+ * arg / file helpers. `mn_init` drops the process name, so `(arg 0)` is
+ * the first user argument. `mn_read_file` / `mn_write_file` return
  * `(Result … IoError)` via `mn_ok` / `mn_err`.
  */
 void mn_init(int argc, char **argv);
@@ -200,6 +211,12 @@ MnWord mn_arg(MnWord i_tagged); /* → Str; panics if out of range */
 MnWord mn_read_file(MnWord path_str); /* → (Result Str IoError) */
 MnWord mn_write_file(MnWord path_str, MnWord content_str); /* → (Result Unit IoError) */
 _Noreturn void mn_exit(MnWord code_tagged);
+/* `(spawn argv)` — posix_spawn, inherited stdio and cwd, no PATH search.
+ * → (Result SpawnStatus IoError). Exited tag 30, Signalled tag 31. */
+MnWord mn_spawn(MnWord argv_list);
+MnWord mn_getenv(MnWord name);                 /* → (Maybe Str) */
+MnWord mn_exists(MnWord path_str);             /* → Bool */
+MnWord mn_rename(MnWord from_str, MnWord to_str); /* → (Result Unit IoError) */
 
 #ifdef __cplusplus
 }

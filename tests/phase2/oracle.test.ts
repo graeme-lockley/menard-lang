@@ -50,15 +50,17 @@
  * targets this test mirrors will keep doing once a fixture does.
  *
  * Not hermetic: spawns real `clang`/`llvm-dis` processes and executes a
- * real binary. Skipped (not failed) when either is not on `PATH` — see
- * `emit-link.test.ts` for the same convention.
+ * real binary. Skipped (not failed) when either tool cannot be found.
+ * `clang` is looked up on `PATH` (Apple's `/usr/bin/clang` is enough to
+ * link). `llvm-dis` is keg-only under Homebrew, so it is also checked at
+ * the LLVM prefix when it is absent from `PATH`.
  *
  * `ret-loop.mnd` and `ret-match.mnd` are active oracle fixtures (slices
  * 3A / 3C). `ret-bool-unit.mnd` covers Bool/Unit immediates (slice 3B).
  */
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { readFileSync, unlink, mkdtemp } from "node:fs";
+import { existsSync, readFileSync, unlink, mkdtemp } from "node:fs";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -74,8 +76,18 @@ function abs(relPath: string): string {
   return join(ROOT, relPath);
 }
 
-const clang = Bun.which("clang");
-const llvmDis = Bun.which("llvm-dis");
+function whichTool(name: string): string | null {
+  const onPath = Bun.which(name);
+  if (onPath !== null) return onPath;
+  for (const prefix of ["/opt/homebrew/opt/llvm/bin", "/usr/local/opt/llvm/bin"]) {
+    const candidate = join(prefix, name);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+const clang = whichTool("clang");
+const llvmDis = whichTool("llvm-dis");
 
 // The runtime a compiled Menard program links against (Makefile's
 // RUNTIME_LIB_SRCS — slice 2C): alloc + panic + the fd-1 print helpers +
@@ -91,6 +103,7 @@ const RUNTIME_LIB_SRCS = [
   "runtime/src/map.c",
   "runtime/src/closure.c",
   "runtime/src/io.c",
+  "runtime/src/equal.c",
 ].map(abs);
 const RUNTIME_INCLUDE = abs("runtime/include");
 

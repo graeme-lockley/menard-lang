@@ -246,6 +246,9 @@ function installBuiltins(env: TypeEnv): void {
   env.values.set("write", { params: [], type: tFn([I, S], tResult(U, ioType)) });
   env.values.set("read-file", { params: [], type: tFn([S], tResult(S, ioType)) });
   env.values.set("write-file", { params: [], type: tFn([S, S], tResult(U, ioType)) });
+  env.values.set("getenv", { params: [], type: tFn([S], tMaybe(S)) });
+  env.values.set("exists", { params: [], type: tFn([S], B) });
+  env.values.set("rename", { params: [], type: tFn([S, S], tResult(U, ioType)) });
 
   // Tier 1½ — process spawning (§2.15)
   const spawnSpan = { start: 0, end: 0 };

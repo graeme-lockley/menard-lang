@@ -5,9 +5,10 @@
 ; Every `fn`/`lambda` is lifted to a top-level `defn __lamN` that takes a
 ; hidden environment word as its first parameter. Free variables are
 ; packed into a heap env at creation (`mn-env-0` / `mn-env-new`) and read
-; back in the lifted body via `(mn-env-get env i)`. Creation produces a
-; heap closure with `(mn-closure-new __lamN env)`; call sites of
-; let-bound closures become `(mn-apply-1 clo arg)`.
+; back in the lifted body via `(mn-env-get __menv i)`. The parameter is
+; `__menv`, not `env`, so a free variable named `env` cannot shadow it.
+; Creation produces a heap closure with `(mn-closure-new __lamN env)`;
+; call sites of let-bound closures become `(mn-apply-1 clo arg)`.
 ;
 ; Transform, worked through:
 ;
@@ -20,7 +21,7 @@
 ;   (defn main -> Int
 ;     (let add (mn-closure-new __lam0 (mn-env-0)))
 ;     (mn-apply-1 add 40))
-;   (defn __lam0 (env: Int) (x: Int) -> Int (+ x 1))
+;   (defn __lam0 (__menv: Int) (x: Int) -> Int (+ x 1))
 ;
 ; With a captured free variable:
 ;
@@ -34,8 +35,8 @@
 ;       (let __menv (mn-env-new 1))
 ;       (let __menv (mn-env-set __menv 0 n))
 ;       (mn-closure-new __lam0 __menv)))
-;   (defn __lam0 (env: Int) (m: Int) -> Int
-;     (do (let n (mn-env-get env 0)) (+ n m)))
+;   (defn __lam0 (__menv: Int) (m: Int) -> Int
+;     (do (let n (mn-env-get __menv 0)) (+ n m)))
 ;
 ; ## Limitations (deliberate for this slice)
 ;
@@ -333,7 +334,7 @@
         (Cons (IntNode i (dummy-span)) (Nil))))
     (dummy-span)))
 
-; `(do (let c0 (mn-env-get env 0)) … body)` — or just `body` when no frees.
+; `(do (let c0 (mn-env-get __menv 0)) … body)` — or just `body` when no frees.
 (defn wrap-env-binds (free-vars: (List Str)) (body: Ast) -> Ast
   (match free-vars
     (Nil) body
@@ -343,7 +344,7 @@
   (match free-vars
     (Nil) (Nil)
     (Cons name rest)
-      (Cons (make-simple-let name (make-env-get "env" i)) (env-bind-lets rest (+ i 1)))))
+      (Cons (make-simple-let name (make-env-get "__menv" i)) (env-bind-lets rest (+ i 1)))))
 
 ; ---------------------------------------------------------------------------
 ; Lifting.
@@ -370,7 +371,7 @@
 (defn lift-out-lam-name (r: LiftOut) -> Str (match r (LiftOut _ _ n _) n))
 (defn lift-out-free-vars (r: LiftOut) -> (List Str) (match r (LiftOut _ _ _ f) f))
 
-; Build the lifted `defn __lamN (env: Int) (params…) -> Int body`.
+; Build the lifted `defn __lamN (__menv: Int) (params…) -> Int body`.
 ; If `bind-name` is Some, record it in subst for mn-apply-1 rewriting.
 (defn lift-lambda (bind-name: (Maybe Str)) (params-ast: Ast) (body-expr: Ast) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> LiftOut
   (do
@@ -381,7 +382,7 @@
     (let inner-scope (append-str-list free-vars param-names))
     (let converted (close-expr body-expr inner-scope subst counter))
     (let lam-name (fresh-lam-name counter))
-    (let new-params (Cons (int-param-for "env") (int-params-for param-names)))
+    (let new-params (Cons (int-param-for "__menv") (int-params-for param-names)))
     (let wrapped-body (wrap-env-binds free-vars (expr-result-ast converted)))
     (let defn-form
       (ParenNode

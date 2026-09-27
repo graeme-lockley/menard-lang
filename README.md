@@ -84,11 +84,12 @@ emitter and runtime —
   flatten for emit (see `examples/echo-file.mnd`, `examples/mod-main.mnd`)
 
 See [`examples/`](examples/) for a tour and `tests/phase2/oracle.test.ts` for
-CI. **Slice H** (`bc0 == bc1`): private-name uniquify + `check src/main.mnd`
-pass; match/let/loop binders are in scope for nested closures (N-slot env);
-examples print their results; emit of `src/main.mnd` now stops on an unlowered `compare` call —
-`make check-fixed-point` is scaffolded but not green yet. Spawn (#11) is closed. Phase 4 adds the
-collector — see §5 of the spec.
+CI. **The Phase 3 gate is green.** `make check-fixed-point` checks
+`bc0 == bc1`, `stage1 == stage2`, and that `build/fp/stage1 build` (the
+Menard driver: in-process emit, `spawn` of the recorded `cc`, `rename`
+into place) produces a binary byte-identical to `./mn build` on the same
+`-o` path. `./mn` stays the TypeScript harness. `emit` spawns nothing.
+The collector is still Phase 4 — see §5 of the spec.
 
 ## Build
 

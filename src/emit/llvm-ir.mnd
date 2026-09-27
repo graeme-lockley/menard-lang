@@ -159,7 +159,7 @@
 ; Order: mn_write_stdout, mn_print_i64, mn_write_stderr, mn_alloc,
 ; heap helpers (3C), mn_print_str, Str/Ref/SB (3D), Map (3F), closures (3E),
 ; tier-0 I/O (3G: mn_init … mn_exit).
-(pub defn extern-count -> Int 50)
+(pub defn extern-count -> Int 59)
 
 (pub defn extern-write-stdout-abs (num-strings: Int) -> Int num-strings)
 (pub defn extern-print-i64-abs (num-strings: Int) -> Int (+ num-strings 1))
@@ -211,6 +211,15 @@
 (pub defn extern-show-abs (num-strings: Int) -> Int (+ num-strings 47))
 (pub defn extern-env-new-abs (num-strings: Int) -> Int (+ num-strings 48))
 (pub defn extern-env-set-abs (num-strings: Int) -> Int (+ num-strings 49))
+(pub defn extern-equal-abs (num-strings: Int) -> Int (+ num-strings 50))
+(pub defn extern-compare-abs (num-strings: Int) -> Int (+ num-strings 51))
+(pub defn extern-write-abs (num-strings: Int) -> Int (+ num-strings 52))
+(pub defn extern-sb-length-abs (num-strings: Int) -> Int (+ num-strings 53))
+(pub defn extern-dump-abs (num-strings: Int) -> Int (+ num-strings 54))
+(pub defn extern-spawn-abs (num-strings: Int) -> Int (+ num-strings 55))
+(pub defn extern-getenv-abs (num-strings: Int) -> Int (+ num-strings 56))
+(pub defn extern-exists-abs (num-strings: Int) -> Int (+ num-strings 57))
+(pub defn extern-rename-abs (num-strings: Int) -> Int (+ num-strings 58))
 
 ; Builtin constructor tags — must match runtime/src/variants.c.
 (pub defn tag-nil -> Int 0)

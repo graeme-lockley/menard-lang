@@ -12,26 +12,27 @@
  *
  * Exit codes mirror the underlying tools: 0 ok, non-zero from compile/link/program.
  */
-import { mkdirSync, existsSync } from "node:fs";
+import { mkdirSync, existsSync, renameSync } from "node:fs";
 import { dirname, join, basename, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const ROOT = import.meta.dir;
 const HOST_CLI = join(ROOT, "host/src/cli/menard.ts");
 const COMPILER = join(ROOT, "src/main.mnd");
-const RUNTIME_DIR = join(ROOT, "runtime");
-const RUNTIME_SRCS = [
-  join(RUNTIME_DIR, "src/alloc.c"),
-  join(RUNTIME_DIR, "src/panic.c"),
-  join(RUNTIME_DIR, "src/print.c"),
-  join(RUNTIME_DIR, "src/shadow.c"),
-  join(RUNTIME_DIR, "src/variants.c"),
-  join(RUNTIME_DIR, "src/str.c"),
-  join(RUNTIME_DIR, "src/map.c"),
-  join(RUNTIME_DIR, "src/closure.c"),
-  join(RUNTIME_DIR, "src/io.c"),
+const RECORDED_CC = "/usr/bin/clang";
+const RECORDED_RUNTIME = "runtime";
+const RUNTIME_NAMES = [
+  "alloc.c",
+  "panic.c",
+  "print.c",
+  "shadow.c",
+  "variants.c",
+  "str.c",
+  "map.c",
+  "closure.c",
+  "io.c",
+  "equal.c",
 ];
-const BUILD_DIR = join(ROOT, "build");
 const CFLAGS = ["-std=c11", "-Wall", "-Wextra", "-O1"];
 
 function usage(): never {
@@ -42,15 +43,15 @@ function usage(): never {
   process.exit(2);
 }
 
-function whichClang(): string {
+function whichClang(flag?: string): string {
+  if (flag && flag.length > 0) return flag;
   const fromEnv = process.env.CC ?? process.env.MENARD_CC;
   if (fromEnv && fromEnv.length > 0) return fromEnv;
-  const found = Bun.which("clang");
-  if (!found) {
-    console.error("error: clang not found on PATH (set CC or MENARD_CC)");
-    process.exit(2);
-  }
-  return found;
+  return RECORDED_CC;
+}
+
+function runtimeSrcs(runtime: string): string[] {
+  return RUNTIME_NAMES.map((name) => `${runtime}/src/${name}`);
 }
 
 function stem(file: string): string {
@@ -59,11 +60,7 @@ function stem(file: string): string {
 }
 
 function defaultBinary(file: string): string {
-  return join(BUILD_DIR, stem(file));
-}
-
-function defaultBitcode(file: string): string {
-  return join(BUILD_DIR, stem(file) + ".bc");
+  return `build/${stem(file)}`;
 }
 
 function runCmd(
@@ -83,9 +80,15 @@ function runCmd(
   return r.status ?? 2;
 }
 
+function ensureParent(pathFromRoot: string): void {
+  const dir = dirname(pathFromRoot);
+  const abs = dir === "" || dir === "." ? ROOT : join(ROOT, dir);
+  mkdirSync(abs, { recursive: true });
+}
+
 /** Stage0 emit via the Menard compiler on the interpreter. */
 function emitBitcode(src: string, bcOut: string): void {
-  mkdirSync(dirname(bcOut), { recursive: true });
+  ensureParent(bcOut);
   const code = runCmd(process.execPath, [
     "run",
     HOST_CLI,
@@ -99,36 +102,38 @@ function emitBitcode(src: string, bcOut: string): void {
   if (code !== 0) process.exit(code);
 }
 
-/** Link .bc + leaking runtime → native binary. */
-function linkBinary(bc: string, bin: string): void {
-  mkdirSync(dirname(bin), { recursive: true });
-  const clang = whichClang();
-  const code = runCmd(clang, [
+/** Link .bc + leaking runtime → native binary. Paths are the strings clang sees. */
+function linkBinary(bc: string, bin: string, cc: string, runtime: string): void {
+  ensureParent(bin);
+  const linkOut = `${bin}.tmp`;
+  const code = runCmd(cc, [
     ...CFLAGS,
-    `-I${join(RUNTIME_DIR, "include")}`,
+    `-I${runtime}/include`,
     bc,
-    ...RUNTIME_SRCS,
+    ...runtimeSrcs(runtime),
     "-o",
-    bin,
+    linkOut,
   ]);
   if (code !== 0) process.exit(code);
+  renameSync(join(ROOT, linkOut), join(ROOT, bin));
 }
 
-function build(src: string, bin: string): void {
-  const absSrc = resolve(src);
-  if (!existsSync(absSrc)) {
+function build(src: string, bin: string, cc: string, runtime: string): void {
+  if (!existsSync(resolve(src))) {
     console.error(`error: cannot read ${src}`);
     process.exit(2);
   }
-  const bc = defaultBitcode(src);
-  emitBitcode(absSrc, bc);
-  linkBinary(bc, bin);
+  const bc = `${bin}.bc`;
+  emitBitcode(src, bc);
+  linkBinary(bc, bin, cc, runtime);
 }
 
 function parseArgs(argv: string[]): {
   cmd: string;
   file: string | undefined;
   out: string | undefined;
+  cc: string | undefined;
+  runtime: string | undefined;
   showResult: boolean;
   progArgs: string[];
 } {
@@ -140,6 +145,8 @@ function parseArgs(argv: string[]): {
   const progArgs = dash >= 0 ? rest.slice(dash + 1) : [];
 
   let out: string | undefined;
+  let cc: string | undefined;
+  let runtime: string | undefined;
   let showResult = false;
   const positional: string[] = [];
   for (let i = 0; i < before.length; i++) {
@@ -147,6 +154,12 @@ function parseArgs(argv: string[]): {
     if (a === "-o") {
       out = before[++i];
       if (!out) usage();
+    } else if (a === "--cc") {
+      cc = before[++i];
+      if (!cc) usage();
+    } else if (a === "--runtime") {
+      runtime = before[++i];
+      if (!runtime) usage();
     } else if (a === "--show-result") {
       showResult = true;
     } else if (a.startsWith("-")) {
@@ -156,10 +169,10 @@ function parseArgs(argv: string[]): {
       positional.push(a);
     }
   }
-  return { cmd, file: positional[0], out, showResult, progArgs };
+  return { cmd, file: positional[0], out, cc, runtime, showResult, progArgs };
 }
 
-const { cmd, file, out, showResult, progArgs } = parseArgs(process.argv.slice(2));
+const { cmd, file, out, cc, runtime, showResult, progArgs } = parseArgs(process.argv.slice(2));
 if (!file || (cmd !== "build" && cmd !== "run" && cmd !== "inter")) usage();
 
 const absFile = resolve(file);
@@ -176,8 +189,10 @@ if (cmd === "inter") {
   process.exit(runCmd(process.execPath, args));
 }
 
-const bin = out ? resolve(out) : defaultBinary(file);
-build(absFile, bin);
+const bin = out ?? defaultBinary(file);
+const clang = whichClang(cc);
+const runtimeDir = runtime && runtime.length > 0 ? runtime : RECORDED_RUNTIME;
+build(file, bin, clang, runtimeDir);
 
 if (cmd === "build") {
   console.error(`wrote ${bin}`);

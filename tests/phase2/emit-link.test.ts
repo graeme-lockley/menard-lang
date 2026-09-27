@@ -55,6 +55,7 @@ const RUNTIME_LIB_SRCS = [
   "runtime/src/map.c",
   "runtime/src/closure.c",
   "runtime/src/io.c",
+  "runtime/src/equal.c",
 ].map(abs);
 const RUNTIME_INCLUDE = abs("runtime/include");
 

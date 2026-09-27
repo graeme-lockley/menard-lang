@@ -75,20 +75,23 @@ MnWord mn_str_byte(MnWord s, MnWord i_tagged) {
   return mn_int_to_word((int64_t)str_bytes(s)[i]);
 }
 
-MnWord mn_str_slice(MnWord s, MnWord start_t, MnWord end_t) {
+MnWord mn_str_slice(MnWord s, MnWord start_t, MnWord len_t) {
   int64_t start = mn_word_to_int(start_t);
-  int64_t end = mn_word_to_int(end_t);
+  int64_t len = mn_word_to_int(len_t);
   int64_t n = str_len(s);
+  /* `(str-slice s start len)` — length, matching the interpreter. */
   if (start < 0) {
     start = 0;
   }
-  if (end > n) {
-    end = n;
+  if (start > n) {
+    start = n;
   }
-  if (start > end) {
-    start = end;
+  if (len < 0) {
+    len = 0;
   }
-  int64_t len = end - start;
+  if (start + len > n) {
+    len = n - start;
+  }
   int64_t total = HDR + 8 + len;
   MnWord *obj = (MnWord *)mn_alloc(total, &shape_str);
   obj[1] = (MnWord)len;
@@ -103,6 +106,21 @@ void mn_print_str(MnWord s) {
   if (n > 0) {
     mn_write_stdout(str_bytes(s), (size_t)n);
   }
+}
+
+MnWord mn_write(MnWord fd_tagged, MnWord s) {
+  int64_t fd = mn_word_to_int(fd_tagged);
+  int64_t n = str_len(s);
+  if (n > 0) {
+    if (fd == 1) {
+      mn_write_stdout(str_bytes(s), (size_t)n);
+    } else if (fd == 2) {
+      mn_write_stderr(str_bytes(s), (size_t)n);
+    } else {
+      mn_panic("mn_write: fd must be 1 or 2");
+    }
+  }
+  return MN_UNIT;
 }
 
 MnWord mn_ref_new(MnWord v) {
@@ -153,6 +171,13 @@ static void sb_grow(MnWord *obj, int64_t need) {
   }
   obj[1] = (MnWord)(uintptr_t)buf;
   obj[3] = (MnWord)cap;
+}
+
+MnWord mn_sb_length(MnWord sb) {
+  if (mn_is_immediate(sb)) {
+    mn_panic("mn_sb_length: expected StringBuffer");
+  }
+  return mn_int_to_word((int64_t)((MnWord *)(uintptr_t)sb)[2]);
 }
 
 MnWord mn_sb_append(MnWord sb, MnWord s) {
@@ -214,4 +239,9 @@ MnWord mn_show(MnWord v) {
     mn_panic("mn_show: snprintf failed");
   }
   return mn_str_new((int64_t)(uintptr_t)buf, (int64_t)n);
+}
+
+MnWord mn_dump(MnWord v) {
+  (void)v;
+  return MN_UNIT;
 }

@@ -15,7 +15,7 @@ RUNTIME_SRCS := $(RUNTIME_DIR)/src/alloc.c $(RUNTIME_DIR)/src/panic.c $(RUNTIME_
 # the fd-1 print helpers + the (stub) shadow-stack rooting ABI. Deliberately
 # excludes smoke_main.c: that file defines its own `main`, which would
 # collide with the `main` an emitted `.bc` module already defines.
-RUNTIME_LIB_SRCS := $(RUNTIME_DIR)/src/alloc.c $(RUNTIME_DIR)/src/panic.c $(RUNTIME_DIR)/src/print.c $(RUNTIME_DIR)/src/shadow.c $(RUNTIME_DIR)/src/variants.c $(RUNTIME_DIR)/src/str.c $(RUNTIME_DIR)/src/map.c $(RUNTIME_DIR)/src/closure.c $(RUNTIME_DIR)/src/io.c
+RUNTIME_LIB_SRCS := $(RUNTIME_DIR)/src/alloc.c $(RUNTIME_DIR)/src/panic.c $(RUNTIME_DIR)/src/print.c $(RUNTIME_DIR)/src/shadow.c $(RUNTIME_DIR)/src/variants.c $(RUNTIME_DIR)/src/str.c $(RUNTIME_DIR)/src/map.c $(RUNTIME_DIR)/src/closure.c $(RUNTIME_DIR)/src/io.c $(RUNTIME_DIR)/src/equal.c
 
 BUILD_DIR := build
 
@@ -70,20 +70,32 @@ ret-native:
 	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/ret41.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/ret41
 	$(BUILD_DIR)/ret41; echo $$?
 
-# Phase 3 slice H — fixed-point gate: stage0 emit of src/main.mnd
-# → bc0; link stage1; stage1 emit → bc1; cmp bc0 bc1.
-# Private-name uniquify on flatten is in; full `src/` emit still blocked on
-# first-class top-level fn/ctor values (see examples/README.md). This recipe
-# fails at stage0 emit until that lands; when emit+link+cmp succeeds, it is
-# the agreement gate.
+# Phase 3 fixed-point gate (spec §5): stage0 emit of src/main.mnd → bc0;
+# link stage1; stage1 emit → bc1; cmp bc0 bc1; link stage2; cmp the binaries.
+# Both stages are linked from the same input and output path (`mod.bc` /
+# `stage`), then copied aside. ld hashes the output path into LC_UUID and
+# records the bitcode filename; distinct paths would make identical
+# compiles compare unequal.
 check-fixed-point:
 	@mkdir -p $(BUILD_DIR)/fp
 	@echo "==> stage0 emit src/main.mnd → bc0"
-	@bun run host/src/cli/menard.ts run src/main.mnd -- emit src/main.mnd $(BUILD_DIR)/fp/bc0.bc \
-		|| (echo "check-fixed-point: stage0 emit of src/main.mnd failed (slice H: need top-level-as-closure / trampolines; see examples/README.md)" >&2; exit 1)
+	bun run host/src/cli/menard.ts run src/main.mnd -- emit src/main.mnd $(BUILD_DIR)/fp/bc0.bc
 	@echo "==> link stage1"
-	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/fp/bc0.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/fp/stage1
+	cp $(BUILD_DIR)/fp/bc0.bc $(BUILD_DIR)/fp/mod.bc
+	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/fp/mod.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/fp/stage
+	cp $(BUILD_DIR)/fp/stage $(BUILD_DIR)/fp/stage1
 	@echo "==> stage1 emit src/main.mnd → bc1"
 	$(BUILD_DIR)/fp/stage1 emit src/main.mnd $(BUILD_DIR)/fp/bc1.bc
 	@echo "==> cmp bc0 bc1"
 	cmp $(BUILD_DIR)/fp/bc0.bc $(BUILD_DIR)/fp/bc1.bc && echo "bc0 == bc1 OK"
+	@echo "==> link stage2"
+	cp $(BUILD_DIR)/fp/bc1.bc $(BUILD_DIR)/fp/mod.bc
+	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/fp/mod.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/fp/stage
+	cp $(BUILD_DIR)/fp/stage $(BUILD_DIR)/fp/stage2
+	@echo "==> cmp stage1 stage2"
+	cmp $(BUILD_DIR)/fp/stage1 $(BUILD_DIR)/fp/stage2 && echo "stage1 == stage2 OK"
+	@echo "==> harness vs Menard driver artifact"
+	./mn build examples/loop-sum.mnd -o $(BUILD_DIR)/fp/art
+	cp $(BUILD_DIR)/fp/art $(BUILD_DIR)/fp/art-harness
+	$(BUILD_DIR)/fp/stage1 build examples/loop-sum.mnd -o $(BUILD_DIR)/fp/art
+	cmp $(BUILD_DIR)/fp/art-harness $(BUILD_DIR)/fp/art && echo "driver artifact == harness OK"

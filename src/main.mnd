@@ -1,12 +1,15 @@
 ; Menard compiler CLI entry point (slice 2.0 scaffold).
 ;
 ; Usage (via the host, per README/spec §3.5):
-;   bun run host/src/cli/menard.ts run src/main.mnd -- <check|emit> <file.mnd> [out.bc] [--dump-after=reader|desugar|type|close|root|derive]
+;   bun run host/src/cli/menard.ts run src/main.mnd -- <check|emit|build|run> <file.mnd> [out.bc] [-o bin] [--cc path] [--runtime dir]
 ;
 ; `check` runs the full front end through derive planning (see below).
 ; `emit` does the same, then writes a bitcode module to `out.bc`, or to
 ; `<file>.bc` (replacing a trailing `.mnd`, or appending `.bc`) when no
-; output path is given.
+; output path is given. `emit` spawns nothing.
+; `build` emits bitcode beside `-o`, spawns the recorded `cc` with an
+; argv list, and renames the linker output into place. `run` builds,
+; then spawns the binary.
 ;
 ; `--dump-after=reader`, `--dump-after=desugar`, `--dump-after=type`,
 ; `--dump-after=close`, `--dump-after=root`, and `--dump-after=derive`
@@ -73,6 +76,9 @@
       (or (is-dump-after-type s)
         (or (is-dump-after-close s) (or (is-dump-after-root s) (is-dump-after-derive s)))))))
 
+(defn is-valued-flag (s: Str) -> Bool
+  (or (= s "-o") (or (= s "--cc") (= s "--runtime"))))
+
 (defn has-dump-after-reader-from (i: Int) (n: Int) -> Bool
   (if (>= i n)
     false
@@ -126,7 +132,11 @@
     acc
     (if (is-dump-flag (arg i))
       (positional-count-from (+ i 1) n acc)
-      (positional-count-from (+ i 1) n (+ acc 1)))))
+      (if (is-valued-flag (arg i))
+        (positional-count-from (+ i 2) n acc)
+        (if (= (arg i) "--")
+          acc
+          (positional-count-from (+ i 1) n (+ acc 1)))))))
 
 (defn positional-count -> Int
   (positional-count-from 0 (arg-count) 0))
@@ -136,9 +146,13 @@
     ""
     (if (is-dump-flag (arg i))
       (positional-arg-from want (+ i 1) seen n)
-      (if (= seen want)
-        (arg i)
-        (positional-arg-from want (+ i 1) (+ seen 1) n)))))
+      (if (is-valued-flag (arg i))
+        (positional-arg-from want (+ i 2) seen n)
+        (if (= (arg i) "--")
+          ""
+          (if (= seen want)
+            (arg i)
+            (positional-arg-from want (+ i 1) (+ seen 1) n)))))))
 
 (defn positional-arg (want: Int) -> Str
   (positional-arg-from want 0 0 (arg-count)))
@@ -217,12 +231,12 @@
 
 (defn usage -> Unit
   (do
-    (write-line 2 "usage: main.mnd <check|emit> <file.mnd> [out.bc] [--dump-after=reader|desugar|type|close|root|derive]")
+    (write-line 2 "usage: main.mnd <check|emit|build|run> <file.mnd> [out.bc] [-o bin] [--cc path] [--runtime dir] [--dump-after=reader|desugar|type|close|root|derive]")
     (exit 2)))
 
 ; ---------------------------------------------------------------------------
-; Shared front end: flatten import graph → (dump reader/desugar) → typecheck
-; → … → on-ok. Flatten already runs read/casing/desugar per module.
+; Shared front end: read-all → (dump reader) → casing → desugar → (dump
+; desugar) → flatten imports when the entry has any → typecheck → …
 
 (defn maybe-dump (forms: (List Ast)) (dump-after: Bool) -> Unit
   (if dump-after (dump forms) ()))
@@ -232,14 +246,45 @@
     (write-line 2 (str-concat "error: " msg))
     (exit 1)))
 
+(defn form-is-import (form: Ast) -> Bool
+  (match form
+    (ParenNode (Cons head _) _)
+      (match head (SymNode n _) (= n "import") _ false)
+    _ false))
+
+(defn has-import (forms: (List Ast)) -> Bool
+  (match forms
+    (Nil) false
+    (Cons f rest) (if (form-is-import f) true (has-import rest))))
+
 (defn front-end (path: Str) (src: Str) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
-  (match (flatten-module-graph path src)
-    (Ok forms)
+  (match (read-all src)
+    (Ok forms) (front-end-checked path src forms dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive on-ok)
+    (Err e) (do (report-parse-error path e) (exit 1))))
+
+(defn front-end-checked (path: Str) (src: Str) (forms: (List Ast)) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
+  (do
+    (maybe-dump forms dump-after-reader)
+    (match (check-casing-all forms)
+      (Ok _) (front-end-desugared path src forms dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive on-ok)
+      (Err e) (do (report-casing-error path e) (exit 1)))))
+
+(defn front-end-desugared (path: Str) (src: Str) (forms: (List Ast)) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
+  (match (desugar-all forms)
+    (Ok desugared)
       (do
-        (maybe-dump forms dump-after-reader)
-        (maybe-dump forms dump-after-desugar)
-        (front-end-typechecked path forms dump-after-type dump-after-close dump-after-root dump-after-derive on-ok))
-    (Err msg) (fail-load msg)))
+        (maybe-dump desugared dump-after-desugar)
+        (front-end-loaded path src desugared dump-after-type dump-after-close dump-after-root dump-after-derive on-ok))
+    (Err es) (do (report-desugar-errors path es) (exit 1))))
+
+; A single file keeps the names the reader saw. An import graph is flattened
+; and its private bindings renamed before typechecking.
+(defn front-end-loaded (path: Str) (src: Str) (desugared: (List Ast)) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
+  (if (has-import desugared)
+    (match (flatten-module-graph path src)
+      (Ok flat) (front-end-typechecked path flat dump-after-type dump-after-close dump-after-root dump-after-derive on-ok)
+      (Err msg) (fail-load msg))
+    (front-end-typechecked path desugared dump-after-type dump-after-close dump-after-root dump-after-derive on-ok)))
 
 (defn front-end-typechecked (path: Str) (forms: (List Ast)) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
   (match (typecheck-forms forms)
@@ -334,28 +379,205 @@
   (with-source path dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive (fn (forms) (accept-emit path has-out out forms))))
 
 ; ---------------------------------------------------------------------------
+; Driver. `cc` and the runtime directory are recorded paths (or flags),
+; never a PATH search inside `spawn`. `find-on-path` is the visible
+; search a caller can opt into. `status-exit-code` folds `Signalled n`
+; to `128 + n` here, not in the primitive.
+
+(defn recorded-cc -> Str "/usr/bin/clang")
+
+(defn recorded-runtime -> Str "runtime")
+
+(defn chosen-cc-menard -> Str
+  (match (getenv "MENARD_CC")
+    (Some s) (if (> (str-byte-length s) 0) s (recorded-cc))
+    (None) (recorded-cc)))
+
+(defn chosen-cc (flag: Str) -> Str
+  (if (> (str-byte-length flag) 0) flag
+    (match (getenv "CC")
+      (Some s) (if (> (str-byte-length s) 0) s (chosen-cc-menard))
+      (None) (chosen-cc-menard))))
+
+(defn chosen-runtime (flag: Str) -> Str
+  (if (> (str-byte-length flag) 0) flag (recorded-runtime)))
+
+(defn status-exit-code (st: SpawnStatus) -> Int
+  (match st
+    (Exited n) n
+    (Signalled n) (+ 128 n)))
+
+(defn flag-value-from (name: Str) (i: Int) (n: Int) -> Str
+  (if (>= i n) ""
+    (if (= (arg i) "--") ""
+      (if (= (arg i) name)
+        (if (< (+ i 1) n) (arg (+ i 1)) "")
+        (flag-value-from name (+ i 1) n)))))
+
+(defn flag-value (name: Str) -> Str
+  (flag-value-from name 0 (arg-count)))
+
+(defn collect-args (i: Int) (n: Int) -> (List Str)
+  (if (>= i n) (Nil)
+    (Cons (arg i) (collect-args (+ i 1) n))))
+
+(defn prog-args-from (i: Int) (n: Int) -> (List Str)
+  (if (>= i n) (Nil)
+    (if (= (arg i) "--")
+      (collect-args (+ i 1) n)
+      (prog-args-from (+ i 1) n))))
+
+(defn prog-args -> (List Str)
+  (prog-args-from 0 (arg-count)))
+
+(defn last-slash-from (s: Str) (i: Int) (last: Int) (n: Int) -> Int
+  (if (>= i n) last
+    (if (= (str-byte s i) 47)
+      (last-slash-from s (+ i 1) (+ i 1) n)
+      (last-slash-from s (+ i 1) last n))))
+
+(defn basename (s: Str) -> Str
+  (do
+    (let n (str-byte-length s))
+    (let i (last-slash-from s 0 0 n))
+    (str-slice s i (- n i))))
+
+(defn stem-of (file: Str) -> Str
+  (do
+    (let b (basename file))
+    (if (ends-with b ".mnd")
+      (str-slice b 0 (- (str-byte-length b) 4))
+      b)))
+
+(defn default-bin (file: Str) -> Str
+  (str-concat "build/" (stem-of file)))
+
+(defn rt-src (runtime: Str) (name: Str) -> Str
+  (str-concat runtime (str-concat "/src/" name)))
+
+(defn clang-argv (cc: Str) (runtime: Str) (bc: Str) (link-out: Str) -> (List Str)
+  (Cons cc
+    (Cons "-std=c11"
+      (Cons "-Wall"
+        (Cons "-Wextra"
+          (Cons "-O1"
+            (Cons (str-concat "-I" (str-concat runtime "/include"))
+              (Cons bc
+                (Cons (rt-src runtime "alloc.c")
+                  (Cons (rt-src runtime "panic.c")
+                    (Cons (rt-src runtime "print.c")
+                      (Cons (rt-src runtime "shadow.c")
+                        (Cons (rt-src runtime "variants.c")
+                          (Cons (rt-src runtime "str.c")
+                            (Cons (rt-src runtime "map.c")
+                              (Cons (rt-src runtime "closure.c")
+                                (Cons (rt-src runtime "io.c")
+                                  (Cons (rt-src runtime "equal.c")
+                                    (Cons "-o" (Cons link-out (Nil)))))))))))))))))))))
+
+(defn fail-spawn (what: Str) -> Unit
+  (do
+    (write-line 2 (str-concat "error: cannot spawn " what))
+    (exit 2)))
+
+(defn link-rename (cc: Str) (runtime: Str) (bc: Str) (link-out: Str) (bin: Str) -> Unit
+  (match (spawn (clang-argv cc runtime bc link-out))
+    (Err _) (fail-spawn cc)
+    (Ok st)
+      (do
+        (let code (status-exit-code st))
+        (if (= code 0)
+          (match (rename link-out bin)
+            (Ok _) ()
+            (Err _) (do (write-line 2 (str-concat "error: cannot rename " bin)) (exit 2)))
+          (exit code)))))
+
+(defn run-built (bin: Str) -> Unit
+  (match (spawn (Cons bin (prog-args)))
+    (Err _) (fail-spawn bin)
+    (Ok st) (exit (status-exit-code st))))
+
+(defn accept-build (cc: Str) (runtime: Str) (bin: Str) (and-run: Bool) (forms: (List Ast)) -> Unit
+  (do
+    (let bc (str-concat bin ".bc"))
+    (let link-out (str-concat bin ".tmp"))
+    (match (emit-program-bc forms)
+      (Err msg) (fail-emit msg)
+      (Ok bytes)
+        (match (write-file bc bytes)
+          (Err _) (fail-cannot-write bc)
+          (Ok _)
+            (do
+              (link-rename cc runtime bc link-out bin)
+              (if and-run
+                (run-built bin)
+                (do (write-line 2 (str-concat "wrote " bin)) (exit 0))))))))
+
+(defn run-build (file: Str) (cc: Str) (runtime: Str) (bin: Str) (and-run: Bool) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) -> Unit
+  (with-source file dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive (fn (forms) (accept-build cc runtime bin and-run forms))))
+
+; Visible PATH search. The driver does not call this for `cc`.
+(defn path-dir-end (s: Str) (i: Int) (n: Int) -> Int
+  (if (>= i n) n
+    (if (= (str-byte s i) 58) i
+      (path-dir-end s (+ i 1) n))))
+
+(defn probe-dir (dir: Str) (name: Str) -> (Maybe Str)
+  (do
+    (let candidate
+      (if (= (str-byte-length dir) 0) name
+        (str-concat dir (str-concat "/" name))))
+    (if (exists candidate) (Some candidate) (None))))
+
+(defn search-path (path: Str) (name: Str) (i: Int) -> (Maybe Str)
+  (do
+    (let n (str-byte-length path))
+    (if (> i n) (None)
+      (do
+        (let end (path-dir-end path i n))
+        (let dir (str-slice path i (- end i)))
+        (match (probe-dir dir name)
+          (Some c) (Some c)
+          (None)
+            (if (>= end n) (None)
+              (search-path path name (+ end 1))))))))
+
+(defn find-on-path (name: Str) -> (Maybe Str)
+  (match (getenv "PATH")
+    (None) (None)
+    (Some path) (search-path path name 0)))
+
+; ---------------------------------------------------------------------------
 ; Dispatch
 
-(defn dispatch (mode: Str) (file: Str) (has-out: Bool) (out: Str) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) -> Unit
+(defn dispatch (mode: Str) (file: Str) (has-out: Bool) (out: Str) (bin: Str) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) -> Unit
   (if (= mode "check")
     (run-check file dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive)
     (if (= mode "emit")
       (run-emit file has-out out dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive)
-      (usage))))
+      (if (or (= mode "build") (= mode "run"))
+        (run-build file (chosen-cc (flag-value "--cc")) (chosen-runtime (flag-value "--runtime")) bin (= mode "run") dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive)
+        (usage)))))
 
 (defn main -> Unit
   (do
     (let n (positional-count))
     (if (< n 2)
       (usage)
-      (dispatch
-        (positional-arg 0)
-        (positional-arg 1)
-        (>= n 3)
-        (if (>= n 3) (positional-arg 2) "")
-        (has-dump-after-reader)
-        (has-dump-after-desugar)
-        (has-dump-after-type)
-        (has-dump-after-close)
-        (has-dump-after-root)
-        (has-dump-after-derive)))))
+      (do
+        (let mode (positional-arg 0))
+        (let file (positional-arg 1))
+        (let o-flag (flag-value "-o"))
+        (let bin (if (> (str-byte-length o-flag) 0) o-flag (default-bin file)))
+        (dispatch
+          mode
+          file
+          (>= n 3)
+          (if (>= n 3) (positional-arg 2) "")
+          bin
+          (has-dump-after-reader)
+          (has-dump-after-desugar)
+          (has-dump-after-type)
+          (has-dump-after-close)
+          (has-dump-after-root)
+          (has-dump-after-derive))))))

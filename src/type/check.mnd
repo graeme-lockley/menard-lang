@@ -262,6 +262,17 @@
     (register-io-error-ctor env "TooLarge" (Nil))
     (register-io-error-ctor env "Other" (Cons (t-int) (Nil)))))
 
+(defn install-spawn-status (env: TypeEnv) -> Unit
+  (do
+    (type-set env "SpawnStatus"
+      (VariantDef "SpawnStatus" (Nil)
+        (Cons (VariantCtor "Exited" (Cons (t-int) (Nil)))
+          (Cons (VariantCtor "Signalled" (Cons (t-int) (Nil))) (Nil)))))
+    (ctor-set env "Exited" (CtorInfo "SpawnStatus" (Cons (t-int) (Nil)) (Nil)))
+    (ctor-set env "Signalled" (CtorInfo "SpawnStatus" (Cons (t-int) (Nil)) (Nil)))
+    (value-set env "Exited" (Scheme (Nil) (t-fn (Cons (t-int) (Nil)) (t-nominal "SpawnStatus" (Nil) "variant"))))
+    (value-set env "Signalled" (Scheme (Nil) (t-fn (Cons (t-int) (Nil)) (t-nominal "SpawnStatus" (Nil) "variant"))))))
+
 (defn install-host-seam (env: TypeEnv) -> Unit
   (do
     (value-set env "exit" (Scheme (Nil) (t-fn (Cons (t-int) (Nil)) (t-unit))))
@@ -269,7 +280,11 @@
     (value-set env "arg" (Scheme (Nil) (t-fn (Cons (t-int) (Nil)) (t-str))))
     (value-set env "write" (Scheme (Nil) (t-fn (Cons (t-int) (Cons (t-str) (Nil))) (t-result (t-unit) (t-nominal "IoError" (Nil) "variant")))))
     (value-set env "read-file" (Scheme (Nil) (t-fn (Cons (t-str) (Nil)) (t-result (t-str) (t-nominal "IoError" (Nil) "variant")))))
-    (value-set env "write-file" (Scheme (Nil) (t-fn (Cons (t-str) (Cons (t-str) (Nil))) (t-result (t-unit) (t-nominal "IoError" (Nil) "variant")))))))
+    (value-set env "write-file" (Scheme (Nil) (t-fn (Cons (t-str) (Cons (t-str) (Nil))) (t-result (t-unit) (t-nominal "IoError" (Nil) "variant")))))
+    (value-set env "spawn" (Scheme (Nil) (t-fn (Cons (t-list (t-str)) (Nil)) (t-result (t-nominal "SpawnStatus" (Nil) "variant") (t-nominal "IoError" (Nil) "variant")))))
+    (value-set env "getenv" (Scheme (Nil) (t-fn (Cons (t-str) (Nil)) (t-maybe (t-str)))))
+    (value-set env "exists" (Scheme (Nil) (t-fn (Cons (t-str) (Nil)) (t-bool))))
+    (value-set env "rename" (Scheme (Nil) (t-fn (Cons (t-str) (Cons (t-str) (Nil))) (t-result (t-unit) (t-nominal "IoError" (Nil) "variant")))))))
 
 (defn install-builtins (env: TypeEnv) -> Unit
   (do
@@ -283,6 +298,7 @@
     (install-result env)
     (install-list-type env)
     (install-io-error env)
+    (install-spawn-status env)
     (install-host-seam env)))
 
 (defn empty-env -> TypeEnv

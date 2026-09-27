@@ -417,7 +417,16 @@
     (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_ctor_closure
     (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_show
     (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_env_new
-    (write-extern-decl! m (func-type-idx-for-arity 3)))) ; mn_env_set
+    (write-extern-decl! m (func-type-idx-for-arity 3)) ; mn_env_set
+    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_equal
+    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_compare
+    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_write (i64, i64) -> i64
+    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_sb_length
+    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_dump
+    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_spawn
+    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_getenv
+    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_exists
+    (write-extern-decl! m (func-type-idx-for-arity 2)))) ; mn_rename
 
 ; ---------------------------------------------------------------------------
 ; `MODULE_CODE_GLOBALVAR` — one per string in `LlvmModule`'s `globals`,
@@ -477,7 +486,11 @@
 (defn write-global-const! (c: BitSink) (ma: Int) (i: Int) (s: Str) -> Unit
   (do
     (write-record! c (cst-code-settype) (Cons (ty-str-array-idx ma i) (Nil)))
-    (write-record! c (cst-code-string) (str-byte-ops s))))
+    ; A zero-length array is `zeroinitializer` (`CST_CODE_NULL`). An empty
+    ; `CST_CODE_STRING` record is rejected as "Invalid string record".
+    (if (= (str-byte-length s) 0)
+      (write-record! c (cst-code-null) (Nil))
+      (write-record! c (cst-code-string) (str-byte-ops s)))))
 
 (defn write-global-consts! (c: BitSink) (ma: Int) (globals: (List Str)) (i: Int) -> Unit
   (match globals
@@ -656,7 +669,16 @@
     (write-record! v (vst-code-entry) (Cons (extern-ctor-closure-abs num-strings) (str-byte-ops "mn_ctor_closure")))
     (write-record! v (vst-code-entry) (Cons (extern-show-abs num-strings) (str-byte-ops "mn_show")))
     (write-record! v (vst-code-entry) (Cons (extern-env-new-abs num-strings) (str-byte-ops "mn_env_new")))
-    (write-record! v (vst-code-entry) (Cons (extern-env-set-abs num-strings) (str-byte-ops "mn_env_set")))))
+    (write-record! v (vst-code-entry) (Cons (extern-env-set-abs num-strings) (str-byte-ops "mn_env_set")))
+    (write-record! v (vst-code-entry) (Cons (extern-equal-abs num-strings) (str-byte-ops "mn_equal")))
+    (write-record! v (vst-code-entry) (Cons (extern-compare-abs num-strings) (str-byte-ops "mn_compare")))
+    (write-record! v (vst-code-entry) (Cons (extern-write-abs num-strings) (str-byte-ops "mn_write")))
+    (write-record! v (vst-code-entry) (Cons (extern-sb-length-abs num-strings) (str-byte-ops "mn_sb_length")))
+    (write-record! v (vst-code-entry) (Cons (extern-dump-abs num-strings) (str-byte-ops "mn_dump")))
+    (write-record! v (vst-code-entry) (Cons (extern-spawn-abs num-strings) (str-byte-ops "mn_spawn")))
+    (write-record! v (vst-code-entry) (Cons (extern-getenv-abs num-strings) (str-byte-ops "mn_getenv")))
+    (write-record! v (vst-code-entry) (Cons (extern-exists-abs num-strings) (str-byte-ops "mn_exists")))
+    (write-record! v (vst-code-entry) (Cons (extern-rename-abs num-strings) (str-byte-ops "mn_rename")))))
 
 (defn lfunc-list-length (fs: (List LFunc)) -> Int
   (match fs (Nil) 0 (Cons _ rest) (+ 1 (lfunc-list-length rest))))

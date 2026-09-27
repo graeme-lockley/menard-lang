@@ -1089,8 +1089,10 @@
                 (if (is-cmp-op hn) (lower-cmp-value rest hn env b funcs noop pool)
                   (if (is-ctor-name hn pool) (lower-ctor hn rest env b funcs noop pool)
                     (if (is-runtime-op hn) (lower-runtime-op hn rest env b funcs noop pool)
+                    (if (is-effect-head hn)
+                      (result-then (lower-effect-op hn rest env b funcs noop pool) (fn () (Ok (const-unit! b))))
                       (if (is-unsupported-form hn) (Err (str-concat "cannot lower `" (str-concat hn "` with the real instruction lowerer yet")))
-                        (lower-call hn rest env b funcs noop pool)))))))))))))
+                        (lower-call hn rest env b funcs noop pool))))))))))))))
 
 ; -- if --
 
@@ -1329,7 +1331,9 @@
                       (if (= hn "NotADirectory") (Some 24)
                         (if (= hn "InvalidPath") (Some 25)
                           (if (= hn "TooLarge") (Some 26)
-                            (if (= hn "Other") (Some 27) (None))))))))))))))))
+                            (if (= hn "Other") (Some 27)
+                              (if (= hn "Exited") (Some 30)
+                                (if (= hn "Signalled") (Some 31) (None))))))))))))))))))
 
 (defn ctor-tag-of (hn: Str) (pool: StrPool) -> (Maybe Int)
   (match (builtin-ctor-tag-of hn)
@@ -1418,7 +1422,14 @@
                                                       (Cons "write-file"
                                                         (Cons "show"
                                                           (Cons "mn-env-new"
-                                                            (Cons "mn-env-set" (Nil))))))))))))))))))))))))))))))))
+                                                            (Cons "mn-env-set"
+                                                              (Cons "compare"
+                                                                (Cons "sb-length"
+                                                              (Cons "dump"
+                                                                (Cons "spawn"
+                                                                  (Cons "getenv"
+                                                                    (Cons "exists"
+                                                              (Cons "rename" (Nil)))))))))))))))))))))))))))))))))))))))
 
 (defn runtime-op-abs (hn: Str) (ns: Int) -> Int
   (if (= hn "str-concat") (extern-str-concat-abs ns)
@@ -1450,11 +1461,18 @@
                                                       (if (= hn "write-file") (extern-write-file-abs ns)
                                                         (if (= hn "show") (extern-show-abs ns)
                                                           (if (= hn "mn-env-new") (extern-env-new-abs ns)
-                                                            (extern-env-set-abs ns)))))))))))))))))))))))))))))))
+                                                            (if (= hn "mn-env-set") (extern-env-set-abs ns)
+                                                              (if (= hn "compare") (extern-compare-abs ns)
+                                                                (if (= hn "sb-length") (extern-sb-length-abs ns)
+                                                                  (if (= hn "dump") (extern-dump-abs ns)
+                                                                    (if (= hn "spawn") (extern-spawn-abs ns)
+                                                                      (if (= hn "getenv") (extern-getenv-abs ns)
+                                                                        (if (= hn "exists") (extern-exists-abs ns)
+                                                              (extern-rename-abs ns))))))))))))))))))))))))))))))))))))))
 
 (defn runtime-op-arity (hn: Str) -> Int
   (if (or (= hn "sb-new") (or (= hn "map-new") (or (= hn "mn-env-0") (= hn "arg-count")))) 0
-    (if (str-in-list hn (Cons "str-byte-length" (Cons "ref" (Cons "deref" (Cons "sb-take-str!" (Cons "map-size" (Cons "mn-env-1" (Cons "arg" (Cons "read-file" (Cons "mn-apply-0" (Cons "show" (Cons "mn-env-new" (Nil))))))))))))) 1
+    (if (str-in-list hn (Cons "str-byte-length" (Cons "ref" (Cons "deref" (Cons "sb-take-str!" (Cons "map-size" (Cons "mn-env-1" (Cons "mn-env-new" (Cons "arg" (Cons "read-file" (Cons "mn-apply-0" (Cons "show" (Cons "sb-length" (Cons "dump" (Cons "spawn" (Cons "getenv" (Cons "exists" (Nil)))))))))))))))))) 1
       (if (or (= hn "str-slice") (or (= hn "map-set") (or (= hn "mn-apply-2") (= hn "mn-env-set")))) 3
         2))))
 
@@ -1623,7 +1641,17 @@
 
 (defn lower-cond-op (hn: Str) (a-ast: Ast) (c-ast: Ast) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (result-bind (lower-expr a-ast env b funcs noop pool)
-    (fn (av) (result-bind (lower-expr c-ast env b funcs noop pool) (fn (cv) (Ok (emit-cmp2! b (cmp-pred-for hn) av cv)))))))
+    (fn (av) (result-bind (lower-expr c-ast env b funcs noop pool)
+      (fn (cv) (Ok (lower-cond-cmp! hn av cv b pool)))))))
+
+; `=` is value-directed (`mn_equal`). Ordering ops stay immediate icmp.
+(defn lower-cond-cmp! (hn: Str) (av: Int) (cv: Int) (b: Builder) (pool: StrPool) -> Int
+  (if (= hn "=")
+    (do
+      (let eqw (emit-call! b (extern-equal-abs (str-pool-count pool)) (Cons av (Cons cv (Nil)))))
+      (let f (const-false! b))
+      (emit-cmp2! b (icmp-ne) eqw f))
+    (emit-cmp2! b (cmp-pred-for hn) av cv)))
 
 (defn lower-cond-bool-value (ast: Ast) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (result-bind (lower-expr ast env b funcs noop pool)
@@ -1638,8 +1666,13 @@
     (Cons a-ast (Cons c-ast (Nil)))
       (result-bind (lower-expr a-ast env b funcs noop pool)
         (fn (av) (result-bind (lower-expr c-ast env b funcs noop pool)
-          (fn (cv) (Ok (bool-from-i1! b (emit-cmp2! b (cmp-pred-for op) av cv)))))))
+          (fn (cv) (Ok (lower-cmp-word! op av cv b pool))))))
     _ (Err (str-concat "comparison `" (str-concat op "` expects exactly 2 arguments")))))
+
+(defn lower-cmp-word! (op: Str) (av: Int) (cv: Int) (b: Builder) (pool: StrPool) -> Int
+  (if (= op "=")
+    (emit-call! b (extern-equal-abs (str-pool-count pool)) (Cons av (Cons cv (Nil))))
+    (bool-from-i1! b (emit-cmp2! b (cmp-pred-for op) av cv))))
 
 (defn cmp-pred-for (op: Str) -> Int
   (if (= op "<") (icmp-slt)
@@ -1793,16 +1826,25 @@
 (defn lower-println (args: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Unit Str)
   (result-then (lower-print-args args env b funcs noop pool) (fn () (Ok (emit-write-str-to! b pool (newline-str) (str-pool-write-stdout-abs pool))))))
 
-; `(write fd s)` — `fd` must be the `Int` literal `1` or `2` and `s` a
-; `Str` literal (see header comment's "Design" — a general `Str`-valued
-; `s` or a computed `fd` are future work, not lowered here).
+; `(write fd s)` — literal fd 1/2 with a literal or (for fd 1) any Str keeps
+; the direct stdout/stderr externs. A computed fd, or a computed Str on
+; fd 2, goes through `mn_write`.
+(defn lower-write-any (fd-ast: Ast) (s-ast: Ast) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Unit Str)
+  (result-bind (lower-expr fd-ast env b funcs noop pool)
+    (fn (fd)
+      (result-bind (lower-expr s-ast env b funcs noop pool)
+        (fn (s)
+          (Ok (do
+            (emit-call! b (extern-write-abs (str-pool-count pool)) (Cons fd (Cons s (Nil))))
+            ())))))))
+
 (defn lower-write-str (s-ast: Ast) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) (callee-abs: Int) (is-stdout: Bool) -> (Result Unit Str)
   (match s-ast
     (StrNode s _) (Ok (emit-write-str-to! b pool s callee-abs))
     _ (if is-stdout
         (result-bind (lower-expr s-ast env b funcs noop pool)
           (fn (v) (Ok (emit-call-void! b (extern-kind-print) (extern-print-str-abs (str-pool-count pool)) (Cons v (Nil))))))
-        (Err "write to fd 2 currently requires a Str literal"))))
+        (lower-write-any (IntNode 2 (Span 0 0)) s-ast env b funcs noop pool))))
 
 (defn lower-write (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Unit Str)
   (match rest
@@ -1812,7 +1854,7 @@
 (defn lower-write-fd (fd-ast: Ast) (s-ast: Ast) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Unit Str)
   (match fd-ast
     (IntNode n _) (lower-write-fd-n n s-ast env b funcs noop pool)
-    _ (Err "write's file descriptor must be the Int literal 1 or 2")))
+    _ (lower-write-any fd-ast s-ast env b funcs noop pool)))
 
 (defn lower-write-fd-n (n: Int) (s-ast: Ast) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Unit Str)
   (if (= n 1)
@@ -1848,7 +1890,7 @@
 
 (defn lower-sequence-after-effect (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (match rest
-    (Nil) (Err "a println/print/write call cannot be the last form of a body (it produces no Int)")
+    (Nil) (Ok (const-unit! b))
     _ (lower-sequence rest env b funcs noop pool)))
 
 (defn lower-sequence-step-real (f: Ast) (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)

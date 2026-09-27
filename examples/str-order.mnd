@@ -1,0 +1,12 @@
+; Value-directed `=` and `compare`. The two "ab" strings are separate
+; allocations. `compare` orders "a" before "b".
+; Run with: `./mn run examples/str-order.mnd`
+
+(defn main -> Int
+  (let a (str-concat "a" "b"))
+  (let b "ab")
+  (if (= a b)
+    (do (println "concatenated strings are equal") 0)
+    (do (println "concatenated strings differ") 0))
+  (println "compare \"a\" \"b\" = " (compare "a" "b"))
+  0)
