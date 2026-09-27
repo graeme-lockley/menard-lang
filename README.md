@@ -89,7 +89,16 @@ CI. **The Phase 3 gate is green.** `make check-fixed-point` checks
 Menard driver: in-process emit, `spawn` of the recorded `cc`, `rename`
 into place) produces a binary byte-identical to `./mn build` on the same
 `-o` path. `./mn` stays the TypeScript harness. `emit` spawns nothing.
-The collector is still Phase 4 — see §5 of the spec.
+
+**Phase 4 is complete.** `mn_alloc` bumps a 256 KiB nursery. A minor
+collection copies young survivors into old space from the shadow stack and
+the remembered set; it does not scan old space. A major mark-sweep runs
+only after old space crosses a growth threshold, and static objects stay
+leaves. On a native compile of `src/main.mnd`, `mn_gc_stats` reported a
+last minor pause of 143µs with old space at about 32 MiB (first minor 35µs
+at 75 KiB; minor max 441µs). Five majors ran, the longest about 8 ms.
+`MENARD_GC_STRESS` and `MENARD_HEAP_VERIFY` cover the oracle corpus and
+`examples/heap-churn.mnd`.
 
 ## Build
 

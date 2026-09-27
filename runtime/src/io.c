@@ -29,43 +29,43 @@
 #define TAG_IO_OTHER 27
 
 static MnShape shape_io_not_found = {
-    .tag = TAG_IO_NOT_FOUND, .nbytes = 8, .layout = MN_LAYOUT_ORDINARY};
+    .tag = TAG_IO_NOT_FOUND, .nbytes = 8, .layout = MN_LAYOUT_ORDINARY, .location = MN_LOC_STATIC};
 static MnShape shape_io_permission = {
-    .tag = TAG_IO_PERMISSION, .nbytes = 8, .layout = MN_LAYOUT_ORDINARY};
+    .tag = TAG_IO_PERMISSION, .nbytes = 8, .layout = MN_LAYOUT_ORDINARY, .location = MN_LOC_STATIC};
 static MnShape shape_io_exists = {
-    .tag = TAG_IO_EXISTS, .nbytes = 8, .layout = MN_LAYOUT_ORDINARY};
+    .tag = TAG_IO_EXISTS, .nbytes = 8, .layout = MN_LAYOUT_ORDINARY, .location = MN_LOC_STATIC};
 static MnShape shape_io_is_a_directory = {
-    .tag = TAG_IO_IS_A_DIRECTORY, .nbytes = 8, .layout = MN_LAYOUT_ORDINARY};
+    .tag = TAG_IO_IS_A_DIRECTORY, .nbytes = 8, .layout = MN_LAYOUT_ORDINARY, .location = MN_LOC_STATIC};
 static MnShape shape_io_not_a_directory = {
-    .tag = TAG_IO_NOT_A_DIRECTORY, .nbytes = 8, .layout = MN_LAYOUT_ORDINARY};
+    .tag = TAG_IO_NOT_A_DIRECTORY, .nbytes = 8, .layout = MN_LAYOUT_ORDINARY, .location = MN_LOC_STATIC};
 static MnShape shape_io_invalid_path = {
-    .tag = TAG_IO_INVALID_PATH, .nbytes = 8, .layout = MN_LAYOUT_ORDINARY};
+    .tag = TAG_IO_INVALID_PATH, .nbytes = 8, .layout = MN_LAYOUT_ORDINARY, .location = MN_LOC_STATIC};
 static MnShape shape_io_too_large = {
-    .tag = TAG_IO_TOO_LARGE, .nbytes = 8, .layout = MN_LAYOUT_ORDINARY};
+    .tag = TAG_IO_TOO_LARGE, .nbytes = 8, .layout = MN_LAYOUT_ORDINARY, .location = MN_LOC_STATIC};
 static MnShape shape_io_other = {
     .tag = TAG_IO_OTHER, .nbytes = 16, .layout = MN_LAYOUT_ORDINARY};
 
 static struct {
   MnShape *shape;
-} static_not_found = {.shape = &shape_io_not_found};
+} __attribute__((aligned(8))) static_not_found = {.shape = &shape_io_not_found};
 static struct {
   MnShape *shape;
-} static_permission = {.shape = &shape_io_permission};
+} __attribute__((aligned(8))) static_permission = {.shape = &shape_io_permission};
 static struct {
   MnShape *shape;
-} static_exists = {.shape = &shape_io_exists};
+} __attribute__((aligned(8))) static_exists = {.shape = &shape_io_exists};
 static struct {
   MnShape *shape;
-} static_is_a_directory = {.shape = &shape_io_is_a_directory};
+} __attribute__((aligned(8))) static_is_a_directory = {.shape = &shape_io_is_a_directory};
 static struct {
   MnShape *shape;
-} static_not_a_directory = {.shape = &shape_io_not_a_directory};
+} __attribute__((aligned(8))) static_not_a_directory = {.shape = &shape_io_not_a_directory};
 static struct {
   MnShape *shape;
-} static_invalid_path = {.shape = &shape_io_invalid_path};
+} __attribute__((aligned(8))) static_invalid_path = {.shape = &shape_io_invalid_path};
 static struct {
   MnShape *shape;
-} static_too_large = {.shape = &shape_io_too_large};
+} __attribute__((aligned(8))) static_too_large = {.shape = &shape_io_too_large};
 
 static int g_argc = 0;
 static char **g_argv = NULL;
@@ -213,6 +213,10 @@ MnWord mn_write_file(MnWord path_str, MnWord content_str) {
 
 _Noreturn void mn_exit(MnWord code_tagged) {
   int code = (int)(mn_word_to_int(code_tagged) & (int64_t)0xff);
+  /* `_exit` skips atexit, so a compiler-sized run still reports pauses. */
+  if (getenv("MENARD_GC_STATS") != NULL) {
+    mn_gc_stats();
+  }
   _exit(code);
 }
 

@@ -19,7 +19,8 @@
 
 static MnShape shape_str = {.tag = TAG_STR, .nbytes = 16, .layout = MN_LAYOUT_BYTES};
 static MnShape shape_ref = {.tag = TAG_REF, .nbytes = 16, .layout = MN_LAYOUT_ORDINARY};
-static MnShape shape_sb = {.tag = TAG_SB, .nbytes = 32, .layout = MN_LAYOUT_ORDINARY};
+/* Bytes: the data pointer, length, and capacity are not Menard pointers. */
+static MnShape shape_sb = {.tag = TAG_SB, .nbytes = 32, .layout = MN_LAYOUT_BYTES};
 
 /* ptr_bits is a raw pointer bit-pattern (from ptrtoint of a string global). */
 MnWord mn_str_new(int64_t ptr_bits, int64_t len) {
@@ -48,19 +49,28 @@ static uint8_t *str_bytes(MnWord s) {
 }
 
 MnWord mn_str_concat(MnWord a, MnWord b) {
-  int64_t la = str_len(a);
-  int64_t lb = str_len(b);
+  MnWord as, bs;
+  mn_root_push(&as);
+  as = a;
+  mn_root_push(&bs);
+  bs = b;
+  int64_t la = str_len(as);
+  int64_t lb = str_len(bs);
   int64_t n = la + lb;
   int64_t total = HDR + 8 + n;
   MnWord *obj = (MnWord *)mn_alloc(total, &shape_str);
-  obj[1] = (MnWord)n;
+  la = str_len(as);
+  lb = str_len(bs);
+  obj[1] = (MnWord)(la + lb);
   uint8_t *dst = (uint8_t *)(obj + 2);
   if (la > 0) {
-    memcpy(dst, str_bytes(a), (size_t)la);
+    memcpy(dst, str_bytes(as), (size_t)la);
   }
   if (lb > 0) {
-    memcpy(dst + la, str_bytes(b), (size_t)lb);
+    memcpy(dst + la, str_bytes(bs), (size_t)lb);
   }
+  mn_root_pop();
+  mn_root_pop();
   return (MnWord)obj;
 }
 
@@ -76,9 +86,12 @@ MnWord mn_str_byte(MnWord s, MnWord i_tagged) {
 }
 
 MnWord mn_str_slice(MnWord s, MnWord start_t, MnWord len_t) {
+  MnWord ss;
+  mn_root_push(&ss);
+  ss = s;
   int64_t start = mn_word_to_int(start_t);
   int64_t len = mn_word_to_int(len_t);
-  int64_t n = str_len(s);
+  int64_t n = str_len(ss);
   /* `(str-slice s start len)` — length, matching the interpreter. */
   if (start < 0) {
     start = 0;
@@ -94,10 +107,18 @@ MnWord mn_str_slice(MnWord s, MnWord start_t, MnWord len_t) {
   }
   int64_t total = HDR + 8 + len;
   MnWord *obj = (MnWord *)mn_alloc(total, &shape_str);
+  n = str_len(ss);
+  if (start > n) {
+    start = n;
+  }
+  if (start + len > n) {
+    len = n - start;
+  }
   obj[1] = (MnWord)len;
   if (len > 0) {
-    memcpy((uint8_t *)(obj + 2), str_bytes(s) + start, (size_t)len);
+    memcpy((uint8_t *)(obj + 2), str_bytes(ss) + start, (size_t)len);
   }
+  mn_root_pop();
   return (MnWord)obj;
 }
 
@@ -124,8 +145,12 @@ MnWord mn_write(MnWord fd_tagged, MnWord s) {
 }
 
 MnWord mn_ref_new(MnWord v) {
+  MnWord vs;
+  mn_root_push(&vs);
+  vs = v;
   MnWord *obj = (MnWord *)mn_alloc(HDR + 8, &shape_ref);
-  obj[1] = v;
+  mn_gc_store(obj, &obj[1], vs);
+  mn_root_pop();
   return (MnWord)obj;
 }
 
@@ -140,7 +165,8 @@ MnWord mn_ref_set(MnWord r, MnWord v) {
   if (mn_is_immediate(r)) {
     mn_panic("mn_ref_set: expected Ref");
   }
-  ((MnWord *)(uintptr_t)r)[1] = v;
+  MnWord *obj = (MnWord *)(uintptr_t)r;
+  mn_gc_store(obj, &obj[1], v);
   return MN_UNIT;
 }
 
@@ -212,15 +238,21 @@ MnWord mn_sb_take_str(MnWord sb) {
   if (mn_is_immediate(sb)) {
     mn_panic("mn_sb_take_str: expected StringBuffer");
   }
-  MnWord *obj = (MnWord *)(uintptr_t)sb;
+  MnWord held;
+  mn_root_push(&held);
+  held = sb;
+  MnWord *obj = (MnWord *)(uintptr_t)held;
   int64_t len = (int64_t)obj[2];
   int64_t total = HDR + 8 + len;
   MnWord *str = (MnWord *)mn_alloc(total, &shape_str);
+  obj = (MnWord *)(uintptr_t)held;
+  len = (int64_t)obj[2];
   str[1] = (MnWord)len;
   if (len > 0) {
     memcpy((uint8_t *)(str + 2), (uint8_t *)(uintptr_t)obj[1], (size_t)len);
   }
   obj[2] = 0;
+  mn_root_pop();
   return (MnWord)str;
 }
 

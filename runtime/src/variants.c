@@ -20,49 +20,54 @@
 
 #define HDR ((int64_t)sizeof(void *)) /* 8 */
 
-static MnShape shape_nil = {.tag = TAG_NIL, .nbytes = 8, .layout = MN_LAYOUT_ORDINARY};
+static MnShape shape_nil = {
+    .tag = TAG_NIL, .nbytes = 8, .layout = MN_LAYOUT_ORDINARY, .location = MN_LOC_STATIC};
 static MnShape shape_cons = {.tag = TAG_CONS, .nbytes = 24, .layout = MN_LAYOUT_ORDINARY};
-static MnShape shape_none = {.tag = TAG_NONE, .nbytes = 8, .layout = MN_LAYOUT_ORDINARY};
+static MnShape shape_none = {
+    .tag = TAG_NONE, .nbytes = 8, .layout = MN_LAYOUT_ORDINARY, .location = MN_LOC_STATIC};
 static MnShape shape_some = {.tag = TAG_SOME, .nbytes = 16, .layout = MN_LAYOUT_ORDINARY};
 static MnShape shape_ok = {.tag = TAG_OK, .nbytes = 16, .layout = MN_LAYOUT_ORDINARY};
 static MnShape shape_err = {.tag = TAG_ERR, .nbytes = 16, .layout = MN_LAYOUT_ORDINARY};
 
-/* Static nullary pool objects — header only. */
+/* Static nullary pool objects — header only. Leaves: not scanned. */
 static struct {
   MnShape *shape;
-} mn_static_nil = {.shape = &shape_nil};
+} __attribute__((aligned(8))) mn_static_nil = {.shape = &shape_nil};
 
 static struct {
   MnShape *shape;
-} mn_static_none = {.shape = &shape_none};
+} __attribute__((aligned(8))) mn_static_none = {.shape = &shape_none};
 
 MnWord mn_nil(void) { return (MnWord)&mn_static_nil; }
 MnWord mn_none(void) { return (MnWord)&mn_static_none; }
 
+static MnWord alloc_slots(MnShape *shape, int64_t nbytes, MnWord a, MnWord b, int n) {
+  MnWord as, bs;
+  mn_root_push(&as);
+  as = a;
+  mn_root_push(&bs);
+  bs = b;
+  MnWord *obj = (MnWord *)mn_alloc(nbytes, shape);
+  if (n >= 1) {
+    mn_gc_store(obj, &obj[1], as);
+  }
+  if (n >= 2) {
+    mn_gc_store(obj, &obj[2], bs);
+  }
+  mn_root_pop();
+  mn_root_pop();
+  return (MnWord)obj;
+}
+
 MnWord mn_cons(MnWord head, MnWord tail) {
-  MnWord *obj = (MnWord *)mn_alloc(HDR + 16, &shape_cons);
-  obj[1] = head;
-  obj[2] = tail;
-  return (MnWord)obj;
+  return alloc_slots(&shape_cons, HDR + 16, head, tail, 2);
 }
 
-MnWord mn_some(MnWord x) {
-  MnWord *obj = (MnWord *)mn_alloc(HDR + 8, &shape_some);
-  obj[1] = x;
-  return (MnWord)obj;
-}
+MnWord mn_some(MnWord x) { return alloc_slots(&shape_some, HDR + 8, x, MN_EMPTY, 1); }
 
-MnWord mn_ok(MnWord x) {
-  MnWord *obj = (MnWord *)mn_alloc(HDR + 8, &shape_ok);
-  obj[1] = x;
-  return (MnWord)obj;
-}
+MnWord mn_ok(MnWord x) { return alloc_slots(&shape_ok, HDR + 8, x, MN_EMPTY, 1); }
 
-MnWord mn_err(MnWord e) {
-  MnWord *obj = (MnWord *)mn_alloc(HDR + 8, &shape_err);
-  obj[1] = e;
-  return (MnWord)obj;
-}
+MnWord mn_err(MnWord e) { return alloc_slots(&shape_err, HDR + 8, e, MN_EMPTY, 1); }
 
 /* Untagged constructor tag (machine i64) for icmp/switch in match. */
 int64_t mn_tag(MnWord obj) {
@@ -88,7 +93,8 @@ MnWord mn_slot(MnWord obj, int64_t i) {
 /*
  * Generic user-nominal constructor (slice H). `tag` / `nslots` are plain
  * machine i64s (same convention as `mn_slot`'s index). Shape descriptors
- * are malloc'd and leaked — Phase 3 has no collector.
+ * are malloc'd once per call and live for the process: they are not
+ * Menard heap objects, so the collector does not move them.
  */
 MnWord mn_new(int64_t tag, int64_t nslots) {
   if (nslots < 0) {
@@ -102,6 +108,7 @@ MnWord mn_new(int64_t tag, int64_t nslots) {
   sh->tag = (int32_t)tag;
   sh->nbytes = (int32_t)nbytes;
   sh->layout = MN_LAYOUT_ORDINARY;
+  sh->location = MN_LOC_HEAP;
   MnWord *obj = (MnWord *)mn_alloc(nbytes, sh);
   return (MnWord)obj;
 }
@@ -114,6 +121,6 @@ MnWord mn_set_slot(MnWord obj, int64_t i, MnWord v) {
     mn_panic("mn_set_slot: negative index");
   }
   MnWord *p = (MnWord *)(uintptr_t)obj;
-  p[1 + i] = v;
+  mn_gc_store(p, &p[1 + i], v);
   return obj;
 }

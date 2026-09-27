@@ -464,6 +464,7 @@
             (Cons (str-concat "-I" (str-concat runtime "/include"))
               (Cons bc
                 (Cons (rt-src runtime "alloc.c")
+                  (Cons (rt-src runtime "gc.c")
                   (Cons (rt-src runtime "panic.c")
                     (Cons (rt-src runtime "print.c")
                       (Cons (rt-src runtime "shadow.c")
@@ -473,7 +474,7 @@
                               (Cons (rt-src runtime "closure.c")
                                 (Cons (rt-src runtime "io.c")
                                   (Cons (rt-src runtime "equal.c")
-                                    (Cons "-o" (Cons link-out (Nil)))))))))))))))))))))
+                                    (Cons "-o" (Cons link-out (Nil))))))))))))))))))))))
 
 (defn fail-spawn (what: Str) -> Unit
   (do

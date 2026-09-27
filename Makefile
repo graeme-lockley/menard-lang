@@ -9,13 +9,13 @@ endif
 CFLAGS ?= -std=c11 -Wall -Wextra -O1
 RUNTIME_DIR := runtime
 RUNTIME_BUILD := $(RUNTIME_DIR)/build
-RUNTIME_SRCS := $(RUNTIME_DIR)/src/alloc.c $(RUNTIME_DIR)/src/panic.c $(RUNTIME_DIR)/src/smoke_main.c
+RUNTIME_SRCS := $(RUNTIME_DIR)/src/alloc.c $(RUNTIME_DIR)/src/gc.c $(RUNTIME_DIR)/src/panic.c $(RUNTIME_DIR)/src/shadow.c $(RUNTIME_DIR)/src/smoke_main.c
 
-# The runtime a *compiled Menard program* links against — alloc + panic +
-# the fd-1 print helpers + the (stub) shadow-stack rooting ABI. Deliberately
-# excludes smoke_main.c: that file defines its own `main`, which would
-# collide with the `main` an emitted `.bc` module already defines.
-RUNTIME_LIB_SRCS := $(RUNTIME_DIR)/src/alloc.c $(RUNTIME_DIR)/src/panic.c $(RUNTIME_DIR)/src/print.c $(RUNTIME_DIR)/src/shadow.c $(RUNTIME_DIR)/src/variants.c $(RUNTIME_DIR)/src/str.c $(RUNTIME_DIR)/src/map.c $(RUNTIME_DIR)/src/closure.c $(RUNTIME_DIR)/src/io.c $(RUNTIME_DIR)/src/equal.c
+# The runtime a *compiled Menard program* links against — nursery collector,
+# shadow stack, and the fd-1 print helpers. Deliberately excludes
+# smoke_main.c: that file defines its own `main`, which would collide with
+# the `main` an emitted `.bc` module already defines.
+RUNTIME_LIB_SRCS := $(RUNTIME_DIR)/src/alloc.c $(RUNTIME_DIR)/src/gc.c $(RUNTIME_DIR)/src/panic.c $(RUNTIME_DIR)/src/print.c $(RUNTIME_DIR)/src/shadow.c $(RUNTIME_DIR)/src/variants.c $(RUNTIME_DIR)/src/str.c $(RUNTIME_DIR)/src/map.c $(RUNTIME_DIR)/src/closure.c $(RUNTIME_DIR)/src/io.c $(RUNTIME_DIR)/src/equal.c
 
 BUILD_DIR := build
 
@@ -29,9 +29,7 @@ typecheck:
 
 ci: typecheck test
 
-# Phase 2 runtime: build the leaking bump allocator plus a standalone smoke
-# `main` (runtime does not yet get `main` from a compiled Menard program —
-# see runtime/README.md), link with $(CC), and run it.
+# Standalone smoke `main` linked with the runtime (see runtime/README.md).
 runtime-smoke:
 	@mkdir -p $(RUNTIME_BUILD)
 	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(RUNTIME_SRCS) -o $(RUNTIME_BUILD)/smoke

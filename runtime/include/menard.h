@@ -5,9 +5,10 @@
  * immediate (odd) or a pointer to a heap or static object (even, 8-byte
  * aligned). `MnWord` is that word.
  *
- * Phase 2/3 uses a leaking bump allocator — see spec §5 ("Phase 2
- * deliberately leaks") and `runtime/README.md`. No collector runs yet;
- * `mn_alloc` never frees and never moves anything.
+ * Phase 4 collector: a copying nursery plus a mark-sweep old space.
+ * `mn_alloc` may move heap objects. Static objects (shape location
+ * `MN_LOC_STATIC`) never move. Roots live on the shadow stack
+ * (`mn_root_push` / `mn_root_pop`); see spec §4.3 and §4.4.
  */
 #ifndef MENARD_RUNTIME_H
 #define MENARD_RUNTIME_H
@@ -39,14 +40,21 @@ typedef uint64_t MnWord;
 #define MN_LAYOUT_CLOSURE 1
 #define MN_LAYOUT_BYTES 2
 
+/* Location is a second axis from layout (spec §2.2.1). Omitted
+ * designated-initializer fields stay 0, i.e. heap. */
+#define MN_LOC_HEAP 0
+#define MN_LOC_STATIC 1
+
 /*
  * Static shape descriptor — one per constructor (spec §2.2.1). The
- * object's first word is a pointer to one of these.
+ * object's first word is a pointer to one of these. Static objects are
+ * leaves: not marked, not swept, not moved.
  */
 typedef struct MnShape {
-  int32_t tag;    /* constructor tag id */
-  int32_t nbytes; /* total object size including the header word */
-  int32_t layout; /* MN_LAYOUT_ORDINARY / CLOSURE / BYTES */
+  int32_t tag;      /* constructor tag id */
+  int32_t nbytes;   /* total object size including the header word */
+  int32_t layout;   /* MN_LAYOUT_ORDINARY / CLOSURE / BYTES */
+  int32_t location; /* MN_LOC_HEAP / MN_LOC_STATIC */
 } MnShape;
 
 /*
@@ -90,10 +98,48 @@ static inline int mn_is_immediate(MnWord w) {
  * returned pointer is the object itself (even, 8-byte aligned) — slot 0
  * holds the shape pointer; payload slots begin at offset 8.
  *
- * Panics (does not return NULL) if the arena is exhausted or `size` is
- * negative or smaller than one header word.
+ * Panics (does not return NULL) if `size` is negative or smaller than
+ * one header word, or if the heap cannot grow. May collect, and may
+ * move every heap object reachable from the shadow stack.
  */
 void *mn_alloc(int64_t size, void *shape);
+
+/*
+ * mn_realloc — replace a `bytes` payload. The payload may move; the
+ * holder stores the returned pointer and never an interior one. `old`
+ * is the payload pointer previously returned (or NULL).
+ */
+void *mn_realloc(void *old_payload, int64_t size);
+
+/* Stop-the-world collection entry points (spec §4.4). */
+void mn_gc_collect(void);
+void mn_gc_stats(void);
+
+/*
+ * Write `value` into `slot` of heap object `holder`. If `holder` is in
+ * old space and `value` points into the nursery, record `holder` in the
+ * remembered set so a minor collection can find the pointer without
+ * scanning old space.
+ */
+void mn_gc_store(void *holder, MnWord *slot, MnWord value);
+
+/*
+ * Shadow stack (spec §4.4). `mn_root_push` writes the empty word into
+ * `slot`, then pushes the slot's address. The mutator stores the real
+ * word afterwards. `mn_root_pop` pops one slot.
+ *
+ * `mn_root_keep` / `mn_root_get` are the lowering ABI: keep a word in a
+ * fresh slot and return a tagged index; get reloads the (possibly
+ * moved) word. `mn_root_save` / `mn_root_restore` bracket loops and
+ * calls so `recur` can pop before it jumps.
+ */
+void mn_root_push(void *slot);
+void mn_root_pop(void);
+MnWord mn_root_push_word(MnWord slot_bits);
+MnWord mn_root_keep(MnWord value);
+MnWord mn_root_get(MnWord index_tagged);
+MnWord mn_root_save(void);
+MnWord mn_root_restore(MnWord depth_tagged);
 
 /* Load the shape pointer stored at offset 0 of an object. */
 static inline MnShape *mn_obj_shape(void *ptr) {
@@ -127,10 +173,7 @@ void mn_write_stderr(const uint8_t *p, size_t n);
  */
 void mn_print_i64(int64_t v);
 
-/*
- * mn_shadow_push / mn_shadow_pop — no-op stand-ins for the shadow-stack
- * rooting ABI (spec §4.4's `mn_root_push`/`mn_root_pop`).
- */
+/* Same stack as `mn_root_push` / `mn_root_pop`. */
 void mn_shadow_push(void *slot);
 void mn_shadow_pop(void);
 

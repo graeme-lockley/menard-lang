@@ -1,0 +1,47 @@
+; Phase 4 — heap churn for the copying nursery.
+; Long list, large Map, StringBuffer growth, nested closures.
+; Prints: list 528 map 62 sb 40 clo 16
+; Run with: `./mn run examples/heap-churn.mnd`
+
+(defn list-sum (xs: (List Int)) -> Int
+  (match xs
+    (Nil) 0
+    (Cons h t) (+ h (list-sum t))))
+
+(defn build-list (n: Int) -> (List Int)
+  (loop ((i n) (acc (Nil)))
+    (if (= i 0)
+      acc
+      (recur (- i 1) (Cons i acc)))))
+
+(defn fill-map (n: Int) -> Int
+  (let m
+    (loop ((i 0) (acc (map-new)))
+      (if (= i n)
+        acc
+        (recur (+ i 1) (map-set acc i (* i 2))))))
+  (match (map-get m (- n 1))
+    (Some v) v
+    (None) 0))
+
+(defn grow (n: Int) -> Int
+  (let sb (sb-new))
+  (loop ((i 0))
+    (if (= i n)
+      (str-byte-length (sb-take-str! sb))
+      (do
+        (sb-append-byte! sb 97)
+        (recur (+ i 1))))))
+
+(defn adder (n: Int) -> (Fn Int -> Int)
+  (fn (m) (+ n m)))
+
+(defn twice (f: (Fn Int -> Int)) -> (Fn Int -> Int)
+  (fn (x) (f (f x))))
+
+(defn main -> Int
+  (let xs (build-list 32))
+  (let add (adder 3))
+  (let bump (twice add))
+  (println "list " (list-sum xs) " map " (fill-map 32) " sb " (grow 40) " clo " (bump 10))
+  0)

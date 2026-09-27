@@ -30,10 +30,10 @@ typedef MnWord (*mn_bare2)(MnWord a0, MnWord a1);
 
 /* Sentinel env: closure code is a bare top-level function (no env arg). */
 static MnShape shape_bare = {
-    .tag = 102, .nbytes = 8, .layout = MN_LAYOUT_ORDINARY};
+    .tag = 102, .nbytes = 8, .layout = MN_LAYOUT_ORDINARY, .location = MN_LOC_STATIC};
 static struct {
   MnShape *shape;
-} mn_bare_marker = {.shape = &shape_bare};
+} __attribute__((aligned(8))) mn_bare_marker = {.shape = &shape_bare};
 
 static int mn_env_is_bare(MnWord env) {
   return env == (MnWord)&mn_bare_marker;
@@ -49,8 +49,12 @@ MnWord mn_env_0(void) {
 }
 
 MnWord mn_env_1(MnWord a) {
+  MnWord as;
+  mn_root_push(&as);
+  as = a;
   MnWord *obj = (MnWord *)mn_alloc(HDR + 8, &shape_env1);
-  obj[1] = a;
+  mn_gc_store(obj, &obj[1], as);
+  mn_root_pop();
   return (MnWord)obj;
 }
 
@@ -68,6 +72,7 @@ MnWord mn_env_new(MnWord n_tagged) {
   sh->tag = TAG_ENV;
   sh->nbytes = (int32_t)nbytes;
   sh->layout = MN_LAYOUT_ORDINARY;
+  sh->location = MN_LOC_HEAP;
   return (MnWord)mn_alloc(nbytes, sh);
 }
 
@@ -80,7 +85,7 @@ MnWord mn_env_set(MnWord env, MnWord i_tagged, MnWord v) {
     mn_panic("mn_env_set: negative index");
   }
   MnWord *obj = (MnWord *)(uintptr_t)env;
-  obj[1 + i] = v;
+  mn_gc_store(obj, &obj[1 + i], v);
   return env;
 }
 
@@ -95,9 +100,13 @@ MnWord mn_env_get(MnWord env, MnWord i_tagged) {
 
 /* code_bits is the bit pattern of a function pointer (ptrtoint). */
 MnWord mn_closure_new(MnWord code_bits, MnWord env) {
+  MnWord es;
+  mn_root_push(&es);
+  es = env;
   MnWord *obj = (MnWord *)mn_alloc(HDR + 16, &shape_closure);
-  obj[1] = code_bits;
-  obj[2] = env;
+  obj[1] = code_bits; /* code pointer: closure layout does not trace slot 0 */
+  mn_gc_store(obj, &obj[2], es);
+  mn_root_pop();
   return (MnWord)obj;
 }
 
@@ -138,8 +147,9 @@ MnWord mn_apply_2(MnWord clo, MnWord a0, MnWord a1) {
 }
 
 /* Constructor-as-value: env holds (tag, arity) as raw i64 words in slots. */
+/* Tag and arity are raw machine words, not Menard pointers. */
 static MnShape shape_ctor_env = {
-    .tag = 103, .nbytes = 24, .layout = MN_LAYOUT_ORDINARY};
+    .tag = 103, .nbytes = 24, .layout = MN_LAYOUT_BYTES};
 
 static MnWord ctor_apply_0(MnWord env) {
   MnWord *e = (MnWord *)(uintptr_t)env;
@@ -147,16 +157,35 @@ static MnWord ctor_apply_0(MnWord env) {
 }
 
 static MnWord ctor_apply_1(MnWord env, MnWord a0) {
-  MnWord *e = (MnWord *)(uintptr_t)env;
+  MnWord es, as;
+  mn_root_push(&es);
+  es = env;
+  mn_root_push(&as);
+  as = a0;
+  MnWord *e = (MnWord *)(uintptr_t)es;
   MnWord obj = mn_new((int64_t)e[1], (int64_t)e[2]);
-  return mn_set_slot(obj, 0, a0);
+  obj = mn_set_slot(obj, 0, as);
+  mn_root_pop();
+  mn_root_pop();
+  return obj;
 }
 
 static MnWord ctor_apply_2(MnWord env, MnWord a0, MnWord a1) {
-  MnWord *e = (MnWord *)(uintptr_t)env;
+  MnWord es, a0s, a1s;
+  mn_root_push(&es);
+  es = env;
+  mn_root_push(&a0s);
+  a0s = a0;
+  mn_root_push(&a1s);
+  a1s = a1;
+  MnWord *e = (MnWord *)(uintptr_t)es;
   MnWord obj = mn_new((int64_t)e[1], (int64_t)e[2]);
-  obj = mn_set_slot(obj, 0, a0);
-  return mn_set_slot(obj, 1, a1);
+  obj = mn_set_slot(obj, 0, a0s);
+  obj = mn_set_slot(obj, 1, a1s);
+  mn_root_pop();
+  mn_root_pop();
+  mn_root_pop();
+  return obj;
 }
 
 MnWord mn_ctor_closure(MnWord tag_raw, MnWord arity_raw) {
@@ -164,6 +193,9 @@ MnWord mn_ctor_closure(MnWord tag_raw, MnWord arity_raw) {
   MnWord *env = (MnWord *)mn_alloc(HDR + 16, &shape_ctor_env);
   env[1] = tag_raw;
   env[2] = arity_raw;
+  MnWord held;
+  mn_root_push(&held);
+  held = (MnWord)env;
   MnWord code;
   if (ar == 0) {
     code = (MnWord)(uintptr_t)ctor_apply_0;
@@ -174,5 +206,7 @@ MnWord mn_ctor_closure(MnWord tag_raw, MnWord arity_raw) {
   } else {
     mn_panic("mn_ctor_closure: arity > 2 not supported yet");
   }
-  return mn_closure_new(code, (MnWord)env);
+  MnWord clo = mn_closure_new(code, held);
+  mn_root_pop();
+  return clo;
 }

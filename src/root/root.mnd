@@ -2,28 +2,17 @@
 ;
 ; ## What this pass does (and does not, yet)
 ;
-; The real pass (spec §4.4's four rooting rules, ADR 10's alloca +
-; mem2reg discipline instead of LLVM statepoints) inserts a shadow-stack
-; push/pop around every call that can allocate while a live pointer is
-; held only in a register, so a later collector can find every root.
-; `emit/lower.mnd`'s real instruction selector only handles `Int`
-; (tagged, never heap-allocated) values today, and `runtime/src/alloc.c`
-; is a leaking bump allocator that never collects either (see that
-; module's and `runtime/src/shadow.c`'s header comments) — so there is,
-; today, nothing to actually root.
+; Spec §4.4's four rooting rules are implemented in `emit/lower.mnd`:
+; a function that may reach `mn_alloc` keeps every Menard word in a
+; shadow slot (`mn_root_keep` / `mn_root_get`), roots allocas with
+; `mn_root_push`, and restores the stack depth at `recur` and at
+; return. Allocation-free functions emit no roots.
 ;
-; What this slice adds instead is the pipeline *shape* the real pass
-; will grow into: every `defn` body is rewritten to call two new
-; top-level `defn`s, `shadow-push`/`shadow-pop`, once each — Menard-level
-; stand-ins for the runtime's real `mn_shadow_push`/`mn_shadow_pop` C
-; symbols (`runtime/src/shadow.c`), which a later slice's instruction
-; emission will lower these calls to directly. For now, both stand-ins
-; are Unit no-ops (`(defn shadow-push -> Unit ())`), and — same
-; rationale as `close/close.mnd`'s lambda lifting — `emit/lower.mnd`
-; recognises exactly this structural shape (`Unit` return, zero params,
-; an empty-parens `()` body) and skips a call to one entirely rather
-; than lowering it as a real call, so every rewritten body still
-; computes exactly the value it computed before wrapping.
+; This pass still wraps every `defn` with `shadow-push` / `shadow-pop`
+; Unit no-ops. The lowerer skips those calls (`is-unit-noop-ldefn`)
+; and does not treat them as may-collect, so the wrap does not change
+; the rooted set. The runtime symbols are `mn_root_push` / `mn_root_pop`
+; (`runtime/src/shadow.c`).
 ;
 ; ## The wrapping shape, and why it is not the naively simpler one
 ;

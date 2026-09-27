@@ -73,7 +73,8 @@ static int64_t node_size(MnWord n) {
   if (n == MN_EMPTY) {
     return 0;
   }
-  return (int64_t)((MnWord *)(uintptr_t)n)[6];
+  /* Height and size are tagged immediates so the collector skips them. */
+  return mn_word_to_int(((MnWord *)(uintptr_t)n)[6]);
 }
 
 typedef struct {

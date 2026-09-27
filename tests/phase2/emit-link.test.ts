@@ -47,6 +47,7 @@ const clang = Bun.which("clang");
 // against the same runtime `oracle.test.ts` does.
 const RUNTIME_LIB_SRCS = [
   "runtime/src/alloc.c",
+  "runtime/src/gc.c",
   "runtime/src/panic.c",
   "runtime/src/print.c",
   "runtime/src/shadow.c",

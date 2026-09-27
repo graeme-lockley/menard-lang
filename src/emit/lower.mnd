@@ -534,26 +534,30 @@
 ; - `loops`: the stack of enclosing `LoopFrame`s (innermost first), so
 ;   `recur` can find which loop it targets (`current-loop-frame`) and
 ;   `lower-loop`/`lower-recur` can push/pop as loops nest.
-(defrec LoopFrame (header: BB) (exit-bb: BB) (result-slot: Int) (slots: (List Int)) (names: (List Str)))
-(defn loop-frame-header (lf: LoopFrame) -> BB (match lf (LoopFrame h _ _ _ _) h))
-(defn loop-frame-exit-bb (lf: LoopFrame) -> BB (match lf (LoopFrame _ e _ _ _) e))
-(defn loop-frame-result-slot (lf: LoopFrame) -> Int (match lf (LoopFrame _ _ r _ _) r))
-(defn loop-frame-slots (lf: LoopFrame) -> (List Int) (match lf (LoopFrame _ _ _ s _) s))
-(defn loop-frame-names (lf: LoopFrame) -> (List Str) (match lf (LoopFrame _ _ _ _ n) n))
+(defrec LoopFrame (header: BB) (exit-bb: BB) (result-slot: Int) (slots: (List Int)) (names: (List Str)) (root-mark: Int))
+(defn loop-frame-header (lf: LoopFrame) -> BB (match lf (LoopFrame h _ _ _ _ _) h))
+(defn loop-frame-exit-bb (lf: LoopFrame) -> BB (match lf (LoopFrame _ e _ _ _ _) e))
+(defn loop-frame-result-slot (lf: LoopFrame) -> Int (match lf (LoopFrame _ _ r _ _ _) r))
+(defn loop-frame-slots (lf: LoopFrame) -> (List Int) (match lf (LoopFrame _ _ _ s _ _) s))
+(defn loop-frame-names (lf: LoopFrame) -> (List Str) (match lf (LoopFrame _ _ _ _ n _) n))
+(defn loop-frame-root-mark (lf: LoopFrame) -> Int (match lf (LoopFrame _ _ _ _ _ m) m))
 
-(defrec Builder (closed: (Ref (List (Ref (List PendingItem))))) (cur: (Ref BB)) (next-val: (Ref Int)) (closed-count: (Ref Int)) (terminated: (Ref Bool)) (loops: (Ref (List LoopFrame))))
+(defrec Builder (closed: (Ref (List (Ref (List PendingItem))))) (cur: (Ref BB)) (next-val: (Ref Int)) (closed-count: (Ref Int)) (terminated: (Ref Bool)) (loops: (Ref (List LoopFrame))) (rooting: (Ref Bool)) (root-base: (Ref Int)) (root-ns: (Ref Int)))
 
-(defn b-closed (b: Builder) -> (Ref (List (Ref (List PendingItem)))) (match b (Builder c _ _ _ _ _) c))
-(defn b-cur (b: Builder) -> (Ref BB) (match b (Builder _ c _ _ _ _) c))
-(defn b-next-val (b: Builder) -> (Ref Int) (match b (Builder _ _ n _ _ _) n))
-(defn b-closed-count (b: Builder) -> (Ref Int) (match b (Builder _ _ _ n _ _) n))
-(defn b-terminated (b: Builder) -> (Ref Bool) (match b (Builder _ _ _ _ t _) t))
-(defn b-loops (b: Builder) -> (Ref (List LoopFrame)) (match b (Builder _ _ _ _ _ l) l))
+(defn b-closed (b: Builder) -> (Ref (List (Ref (List PendingItem)))) (match b (Builder c _ _ _ _ _ _ _ _) c))
+(defn b-cur (b: Builder) -> (Ref BB) (match b (Builder _ c _ _ _ _ _ _ _) c))
+(defn b-next-val (b: Builder) -> (Ref Int) (match b (Builder _ _ n _ _ _ _ _ _) n))
+(defn b-closed-count (b: Builder) -> (Ref Int) (match b (Builder _ _ _ n _ _ _ _ _) n))
+(defn b-terminated (b: Builder) -> (Ref Bool) (match b (Builder _ _ _ _ t _ _ _ _) t))
+(defn b-loops (b: Builder) -> (Ref (List LoopFrame)) (match b (Builder _ _ _ _ _ l _ _ _) l))
+(defn b-rooting (b: Builder) -> (Ref Bool) (match b (Builder _ _ _ _ _ _ r _ _) r))
+(defn b-root-base (b: Builder) -> (Ref Int) (match b (Builder _ _ _ _ _ _ _ r _) r))
+(defn b-root-ns (b: Builder) -> (Ref Int) (match b (Builder _ _ _ _ _ _ _ _ n) n))
 
 (defn new-bb -> BB (BB (ref (- 0 1)) (ref (Nil))))
 
 (defn builder-new (start-val: Int) -> Builder
-  (Builder (ref (Nil)) (ref (new-bb)) (ref start-val) (ref 0) (ref false) (ref (Nil))))
+  (Builder (ref (Nil)) (ref (new-bb)) (ref start-val) (ref 0) (ref false) (ref (Nil)) (ref false) (ref 0) (ref 0)))
 
 (defn block-terminated? (b: Builder) -> Bool (deref (b-terminated b)))
 (defn mark-terminated! (b: Builder) -> Unit (set! (b-terminated b) true))
@@ -744,6 +748,52 @@
     (emit! b (ICall callee-rel arg-rels))
     (bump-val! b)))
 
+(defn not (b: Bool) -> Bool (if b false true))
+
+; May-collect functions keep every Menard word in a shadow slot and reload
+; it at each use, so a copying collection can update the slot. The index
+; `mn_root_keep` returns is a tagged immediate, not a pointer.
+(defn is-rooting (b: Builder) -> Bool (deref (b-rooting b)))
+
+(defn keep! (b: Builder) (v: Int) -> Int
+  (if (or (not (is-rooting b)) (block-terminated? b)) v
+    (emit-call! b (extern-root-keep-abs (deref (b-root-ns b))) (Cons v (Nil)))))
+
+(defn get! (b: Builder) (v: Int) -> Int
+  (if (or (not (is-rooting b)) (block-terminated? b)) v
+    (emit-call! b (extern-root-get-abs (deref (b-root-ns b))) (Cons v (Nil)))))
+
+(defn get-words! (b: Builder) (xs: (List Int)) -> (List Int)
+  (match xs
+    (Nil) (Nil)
+    (Cons x rest) (Cons (get! b x) (get-words! b rest))))
+
+(defn emit-call-words! (b: Builder) (callee-abs: Int) (arg-abs: (List Int)) -> Int
+  (emit-call! b callee-abs (get-words! b arg-abs)))
+
+(defn emit-root-save! (b: Builder) -> Int
+  (emit-call! b (extern-root-save-abs (deref (b-root-ns b))) (Nil)))
+
+(defn emit-root-restore! (b: Builder) (depth-abs: Int) -> Unit
+  (if (is-rooting b)
+    (do
+      (emit-call! b (extern-root-restore-abs (deref (b-root-ns b))) (Cons depth-abs (Nil)))
+      ())
+    ()))
+
+; Alloca whose address is on the shadow stack. The push is a real
+; `ptr` call so LLVM cannot drop the following store or fold the slot
+; into an incoming stack argument (which the push would then zero).
+; Allocation-free functions get a plain alloca.
+(defn root-alloca! (b: Builder) -> Int
+  (let slot (emit-alloca! b))
+  (if (is-rooting b)
+    (do
+      (emit-call-void! b (extern-kind-write) (extern-root-push-abs (deref (b-root-ns b)))
+        (Cons slot (Cons (const-i64! b 0) (Nil))))
+      slot)
+    slot))
+
 (defn emit-ret! (b: Builder) (val-abs: Int) -> Unit
   (do
     (emit! b (IRet (rel-ref b val-abs)))
@@ -759,6 +809,10 @@
 ; unconditionally, exactly as if this branch had produced a value.
 (defn maybe-store-and-br! (b: Builder) (result-slot: Int) (val-abs: Int) (target: BB) -> Unit
   (if (block-terminated? b) ()
+    ; The slot holds a root index (an immediate). The join reloads it
+    ; with `get!`. Storing the index, not the word, means this alloca
+    ; does not have to be a shadow root — including when the `if` sits
+    ; in a loop header.
     (do (emit-store! b result-slot val-abs) (emit-br! b target))))
 
 ; `+`/`-`: free plus a one-instruction fixup (header comment's "The
@@ -974,7 +1028,7 @@
 ; own doc comment (`runtime/include/menard.h`).
 (defn emit-print-i64! (b: Builder) (pool: StrPool) (v: Int) -> Unit
   (do
-    (let untagged (arith-untag! b v))
+    (let untagged (arith-untag! b (get! b v)))
     (emit-call-void! b (extern-kind-print) (str-pool-print-i64-abs pool) (Cons untagged (Nil)))))
 
 ; ---------------------------------------------------------------------------
@@ -1001,6 +1055,9 @@
   (str-in-list s (unsupported-form-names)))
 
 (defn lower-expr (ast: Ast) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
+  (result-bind (lower-expr-raw ast env b funcs noop pool) (fn (v) (Ok (keep! b v)))))
+
+(defn lower-expr-raw (ast: Ast) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (match ast
     (IntNode n _) (Ok (const-tagged! b n))
     (BoolNode v _) (Ok (const-bool! b v))
@@ -1068,14 +1125,14 @@
 
 (defn lower-apply-clo (clo: Int) (args: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (match args
-    (Nil) (Ok (emit-call! b (extern-apply-0-abs (str-pool-count pool)) (Cons clo (Nil))))
+    (Nil) (Ok (emit-call-words! b (extern-apply-0-abs (str-pool-count pool)) (Cons clo (Nil))))
     (Cons a0 (Nil))
       (result-bind (lower-expr a0 env b funcs noop pool)
-        (fn (arg) (Ok (emit-call! b (extern-apply-1-abs (str-pool-count pool)) (Cons clo (Cons arg (Nil)))))))
+        (fn (arg) (Ok (emit-call-words! b (extern-apply-1-abs (str-pool-count pool)) (Cons clo (Cons arg (Nil)))))))
     (Cons a0 (Cons a1 (Nil)))
       (result-bind (lower-expr a0 env b funcs noop pool)
         (fn (x) (result-bind (lower-expr a1 env b funcs noop pool)
-          (fn (y) (Ok (emit-call! b (extern-apply-2-abs (str-pool-count pool)) (Cons clo (Cons x (Cons y (Nil))))))))))
+          (fn (y) (Ok (emit-call-words! b (extern-apply-2-abs (str-pool-count pool)) (Cons clo (Cons x (Cons y (Nil))))))))))
     _ (Err "closure application supports at most 2 arguments currently")))
 
 (defn lower-named (hn: Str) (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
@@ -1132,7 +1189,7 @@
   (do
     (maybe-store-and-br! b result-slot else-val join-bb)
     (switch-to! b join-bb)
-    (Ok (emit-load! b result-slot))))
+    (Ok (get! b (emit-load! b result-slot)))))
 
 ; -- loop / recur (slice 3A) --
 ;
@@ -1189,8 +1246,8 @@
               (result-bind (lower-expr init-ast env b funcs noop pool)
                 (fn (v)
                   (do
-                    (let slot (emit-alloca! b))
-                    (emit-store! b slot v)
+                    (let slot (root-alloca! b))
+                    (emit-store! b slot (get! b v))
                     (lower-loop-bind-all rest body result-slot env b funcs noop pool
                       (Cons name names-acc) (Cons slot slots-acc) (map-set env-acc name slot))))))
         _ (Err "each loop binding must be (name init)"))))
@@ -1199,16 +1256,19 @@
   (do
     (let header (fresh-bb! b))
     (let exit-bb (fresh-bb! b))
+    ; Save once, in the block that dominates the header, so `recur` can
+    ; pop body roots without popping the loop slots rooted above.
+    (let mark (if (is-rooting b) (emit-root-save! b) 0))
     (emit-br! b header)
     (switch-to! b header)
-    (push-loop-frame! b (LoopFrame header exit-bb result-slot slots names))
+    (push-loop-frame! b (LoopFrame header exit-bb result-slot slots names mark))
     (result-bind (lower-expr body env b funcs noop pool)
       (fn (body-val)
         (do
           (maybe-store-and-br! b result-slot body-val exit-bb)
           (pop-loop-frame! b)
           (switch-to! b exit-bb)
-          (Ok (emit-load! b result-slot)))))))
+          (Ok (get! b (emit-load! b result-slot))))))))
 
 (defn lower-recur (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (match (current-loop-frame b)
@@ -1230,14 +1290,20 @@
   (match vals
     (Nil)
       (match slots
-        (Nil) (do (emit-br! b header) (Ok (const-tagged! b 0)))
+        (Nil)
+          (do
+            (match (current-loop-frame b)
+              (Some lf) (emit-root-restore! b (loop-frame-root-mark lf))
+              (None) ())
+            (emit-br! b header)
+            (Ok (const-tagged! b 0)))
         _ (Err "recur argument count does not match loop bindings"))
     (Cons v rest-vals)
       (match slots
         (Nil) (Err "recur argument count does not match loop bindings")
         (Cons slot rest-slots)
           (do
-            (emit-store! b slot v)
+            (emit-store! b slot (get! b v))
             (lower-recur-store-all rest-vals rest-slots header b)))))
 
 ; -- builtin + user constructors + match (slice 3C / H) --
@@ -1364,7 +1430,7 @@
     (Cons v rest)
       (do
         (let idx (const-i64! b i))
-        (let obj2 (emit-call! b (extern-set-slot-abs (str-pool-count pool)) (Cons obj (Cons idx (Cons v (Nil))))))
+        (let obj2 (emit-call! b (extern-set-slot-abs (str-pool-count pool)) (Cons obj (Cons idx (Cons (get! b v) (Nil))))))
         (lower-user-ctor-fill obj2 rest (+ i 1) b pool))))
 
 (defn lower-user-ctor (hn: Str) (args: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
@@ -1385,7 +1451,7 @@
   (if (is-builtin-ctor hn)
     (if (= (ast-list-length args) (ctor-arity-of hn pool))
       (result-bind (lower-args args env b funcs noop pool)
-        (fn (avs) (Ok (emit-call! b (ctor-extern-abs hn (str-pool-count pool)) avs))))
+        (fn (avs) (Ok (emit-call-words! b (ctor-extern-abs hn (str-pool-count pool)) avs))))
       (Err (str-concat "arity mismatch constructing " hn)))
     (lower-user-ctor hn args env b funcs noop pool)))
 
@@ -1481,7 +1547,7 @@
     (lower-closure-new args env b funcs noop pool)
     (if (= (ast-list-length args) (runtime-op-arity hn))
       (result-bind (lower-args args env b funcs noop pool)
-        (fn (avs) (Ok (emit-call! b (runtime-op-abs hn (str-pool-count pool)) avs))))
+        (fn (avs) (Ok (emit-call-words! b (runtime-op-abs hn (str-pool-count pool)) avs))))
       (Err (str-concat "arity mismatch calling " hn)))))
 
 ; `(mn-closure-new __lamN env)` — first arg is a FuncRef symbol; emit
@@ -1498,7 +1564,7 @@
               (do
                 (let code-bits (emit-cast! b (cast-ptrtoint) (func-ref-abs fr) (ty-i64)))
                 (result-bind (lower-expr env-ast env b funcs noop pool)
-                  (fn (env-val) (Ok (emit-call! b (extern-closure-new-abs (str-pool-count pool)) (Cons code-bits (Cons env-val (Nil))))))))))
+                  (fn (env-val) (Ok (emit-call! b (extern-closure-new-abs (str-pool-count pool)) (Cons code-bits (Cons (get! b env-val) (Nil))))))))))
     _ (Err "mn-closure-new requires a function name and an env")))
 
 (defn is-wildcard-pat (pat: Ast) -> Bool
@@ -1521,7 +1587,7 @@
 
 (defn bind-name! (name: Str) (val: Int) (env: (Map Str Int)) (b: Builder) -> (Map Str Int)
   (do
-    (let slot (emit-alloca! b))
+    (let slot (root-alloca! b))
     (emit-store! b slot val)
     (map-set env name slot)))
 
@@ -1597,10 +1663,10 @@
   (match clauses
     (Nil)
       (do
-        (emit-store! b result-slot (const-tagged! b 0))
+        (emit-store! b result-slot (keep! b (const-tagged! b 0)))
         (emit-br! b join-bb)
         (switch-to! b join-bb)
-        (Ok (emit-load! b result-slot)))
+        (Ok (get! b (emit-load! b result-slot))))
     (Cons pat (Cons body rest-clauses))
       (if (is-wildcard-pat pat)
         (lower-match-wildcard-body body result-slot join-bb env b funcs noop pool)
@@ -1613,12 +1679,13 @@
       (do
         (maybe-store-and-br! b result-slot v join-bb)
         (switch-to! b join-bb)
-        (Ok (emit-load! b result-slot))))))
+        (Ok (get! b (emit-load! b result-slot)))))))
 
 (defn lower-match-pat-clause (sv: Int) (pat: Ast) (body: Ast) (rest-clauses: (List Ast)) (result-slot: Int) (join-bb: BB) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (do
     (let else-bb (fresh-bb! b))
-    (result-bind (bind-pat! pat sv else-bb env b pool)
+    (let val (get! b sv))
+    (result-bind (bind-pat! pat val else-bb env b pool)
       (fn (env2)
         (result-bind (lower-expr body env2 b funcs noop pool)
           (fn (v)
@@ -1648,17 +1715,17 @@
 (defn lower-cond-cmp! (hn: Str) (av: Int) (cv: Int) (b: Builder) (pool: StrPool) -> Int
   (if (= hn "=")
     (do
-      (let eqw (emit-call! b (extern-equal-abs (str-pool-count pool)) (Cons av (Cons cv (Nil)))))
+      (let eqw (emit-call! b (extern-equal-abs (str-pool-count pool)) (Cons (get! b av) (Cons (get! b cv) (Nil)))))
       (let f (const-false! b))
       (emit-cmp2! b (icmp-ne) eqw f))
-    (emit-cmp2! b (cmp-pred-for hn) av cv)))
+    (emit-cmp2! b (cmp-pred-for hn) (get! b av) (get! b cv))))
 
 (defn lower-cond-bool-value (ast: Ast) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (result-bind (lower-expr ast env b funcs noop pool)
     (fn (bv)
       (do
         (let f (const-false! b))
-        (Ok (emit-cmp2! b (icmp-ne) bv f))))))
+        (Ok (emit-cmp2! b (icmp-ne) (get! b bv) f))))))
 
 ; Comparison as a Bool *value* (not only as `if`'s test).
 (defn lower-cmp-value (args: (List Ast)) (op: Str) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
@@ -1671,8 +1738,8 @@
 
 (defn lower-cmp-word! (op: Str) (av: Int) (cv: Int) (b: Builder) (pool: StrPool) -> Int
   (if (= op "=")
-    (emit-call! b (extern-equal-abs (str-pool-count pool)) (Cons av (Cons cv (Nil))))
-    (bool-from-i1! b (emit-cmp2! b (cmp-pred-for op) av cv))))
+    (emit-call! b (extern-equal-abs (str-pool-count pool)) (Cons (get! b av) (Cons (get! b cv) (Nil))))
+    (bool-from-i1! b (emit-cmp2! b (cmp-pred-for op) (get! b av) (get! b cv)))))
 
 (defn cmp-pred-for (op: Str) -> Int
   (if (= op "<") (icmp-slt)
@@ -1691,11 +1758,13 @@
     _ (Err (str-concat "operator " (str-concat op " expects exactly 2 arguments")))))
 
 (defn apply-arith! (b: Builder) (op: Str) (av: Int) (cv: Int) -> Int
-  (if (= op "+") (arith-add! b av cv)
-    (if (= op "-") (arith-sub! b av cv)
-      (if (= op "*") (arith-mul! b av cv)
-        (if (= op "/") (arith-div! b av cv)
-          (arith-rem! b av cv))))))
+  (let aw (get! b av))
+  (let cw (get! b cv))
+  (if (= op "+") (arith-add! b aw cw)
+    (if (= op "-") (arith-sub! b aw cw)
+      (if (= op "*") (arith-mul! b aw cw)
+        (if (= op "/") (arith-div! b aw cw)
+          (arith-rem! b aw cw))))))
 
 ; -- let (both the inline-body form `(let n e body…)` and the bare,
 ; sequence-threading form `(let n e)` — see `lower-sequence` for the
@@ -1713,9 +1782,10 @@
 
 (defn lower-let-inline-bind (name: Str) (v: Int) (body: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (do
-    (let slot (emit-alloca! b))
-    (emit-store! b slot v)
-    (lower-let-inline-continue body (map-set env name slot) b funcs noop pool v)))
+    (let w (get! b v))
+    (let slot (root-alloca! b))
+    (emit-store! b slot w)
+    (lower-let-inline-continue body (map-set env name slot) b funcs noop pool w)))
 
 (defn lower-let-inline-continue (body: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) (v: Int) -> (Result Int Str)
   (match body
@@ -1799,7 +1869,7 @@
   (match rest
     (Cons code-ast (Nil))
       (result-bind (lower-expr code-ast env b funcs noop pool)
-        (fn (v) (Ok (emit-call-void! b (extern-kind-print) (extern-exit-abs (str-pool-count pool)) (Cons v (Nil))))))
+        (fn (v) (Ok (emit-call-void! b (extern-kind-print) (extern-exit-abs (str-pool-count pool)) (Cons (get! b v) (Nil))))))
     _ (Err "exit requires exactly one Int argument")))
 
 ; `println`/`print`'s variadic args: each is either a `Str` literal
@@ -1835,7 +1905,7 @@
       (result-bind (lower-expr s-ast env b funcs noop pool)
         (fn (s)
           (Ok (do
-            (emit-call! b (extern-write-abs (str-pool-count pool)) (Cons fd (Cons s (Nil))))
+            (emit-call! b (extern-write-abs (str-pool-count pool)) (Cons (get! b fd) (Cons (get! b s) (Nil))))
             ())))))))
 
 (defn lower-write-str (s-ast: Ast) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) (callee-abs: Int) (is-stdout: Bool) -> (Result Unit Str)
@@ -1843,7 +1913,7 @@
     (StrNode s _) (Ok (emit-write-str-to! b pool s callee-abs))
     _ (if is-stdout
         (result-bind (lower-expr s-ast env b funcs noop pool)
-          (fn (v) (Ok (emit-call-void! b (extern-kind-print) (extern-print-str-abs (str-pool-count pool)) (Cons v (Nil))))))
+          (fn (v) (Ok (emit-call-void! b (extern-kind-print) (extern-print-str-abs (str-pool-count pool)) (Cons (get! b v) (Nil))))))
         (lower-write-any (IntNode 2 (Span 0 0)) s-ast env b funcs noop pool))))
 
 (defn lower-write (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Unit Str)
@@ -1904,9 +1974,10 @@
 
 (defn lower-sequence-let-bind (name: Str) (v: Int) (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (do
-    (let slot (emit-alloca! b))
-    (emit-store! b slot v)
-    (lower-sequence-rest rest (map-set env name slot) b funcs noop pool v)))
+    (let w (get! b v))
+    (let slot (root-alloca! b))
+    (emit-store! b slot w)
+    (lower-sequence-rest rest (map-set env name slot) b funcs noop pool w)))
 
 (defn lower-sequence-rest (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) (fallback: Int) -> (Result Int Str)
   (match rest
@@ -1914,7 +1985,7 @@
     _ (lower-sequence rest env b funcs noop pool)))
 
 (defn lower-sequence-plain (f: Ast) (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
-  (result-bind (lower-expr f env b funcs noop pool) (fn (v) (lower-sequence-rest rest env b funcs noop pool v))))
+  (result-bind (lower-expr f env b funcs noop pool) (fn (v) (lower-sequence-rest rest env b funcs noop pool (get! b v)))))
 
 ; -- calls to other top-level `Int`-only `defn`s --
 
@@ -1944,24 +2015,25 @@
         (let clo (emit-load! b slot))
         (Ok (emit-call! b (extern-apply-0-abs (str-pool-count pool)) (Cons clo (Nil)))))
     (Cons a0 (Nil))
-      (do
-        (let clo (emit-load! b slot))
-        (result-bind (lower-expr a0 env b funcs noop pool)
-          (fn (arg) (Ok (emit-call! b (extern-apply-1-abs (str-pool-count pool)) (Cons clo (Cons arg (Nil))))))))
+      (result-bind (lower-expr a0 env b funcs noop pool)
+        (fn (arg)
+          (do
+            (let clo (emit-load! b slot))
+            (Ok (emit-call! b (extern-apply-1-abs (str-pool-count pool)) (Cons clo (Cons (get! b arg) (Nil))))))))
     (Cons a0 (Cons a1 (Nil)))
-      (do
-        (let clo (emit-load! b slot))
-        (result-bind (lower-expr a0 env b funcs noop pool)
-          (fn (arg0)
-            (result-bind (lower-expr a1 env b funcs noop pool)
-              (fn (arg1)
+      (result-bind (lower-expr a0 env b funcs noop pool)
+        (fn (arg0)
+          (result-bind (lower-expr a1 env b funcs noop pool)
+            (fn (arg1)
+              (do
+                (let clo (emit-load! b slot))
                 (Ok (emit-call! b (extern-apply-2-abs (str-pool-count pool))
-                  (Cons clo (Cons arg0 (Cons arg1 (Nil)))))))))))
+                  (Cons clo (Cons (get! b arg0) (Cons (get! b arg1) (Nil)))))))))))
     _ (Err (str-concat "closure application supports 0–2 arguments (calling local `" (str-concat name "`)")))))
 
 (defn lower-call-with-ref (fr: FuncRef) (name: Str) (arg-asts: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (if (= (ast-list-length arg-asts) (func-ref-arity fr))
-    (result-bind (lower-args arg-asts env b funcs noop pool) (fn (args) (Ok (emit-call! b (func-ref-abs fr) args))))
+    (result-bind (lower-args arg-asts env b funcs noop pool) (fn (args) (Ok (emit-call-words! b (func-ref-abs fr) args))))
     (Err (str-concat "arity mismatch calling " name))))
 
 ; ---------------------------------------------------------------------------
@@ -1977,12 +2049,14 @@
 (defn bind-params-cons! (b: Builder) (n: Str) (rest: (List Str)) (start: Int) (i: Int) -> (Map Str Int)
   (do
     (let param-abs (+ start i))
-    (let slot (emit-alloca! b))
+    (let slot (root-alloca! b))
     (emit-store! b slot param-abs)
     (map-set (bind-params! b rest start (+ i 1)) n slot)))
 
 (defn finish-return! (b: Builder) (is-main: Bool) (result-abs: Int) -> Unit
-  (if is-main (finish-main-return! b result-abs) (emit-ret! b result-abs)))
+  (do
+    (emit-root-restore! b (deref (b-root-base b)))
+    (if is-main (finish-main-return! b result-abs) (emit-ret! b result-abs))))
 
 ; spec: `main` computes a tagged `i64` `Int` like any other function,
 ; then `lshr 1` (untag) + `trunc i32` + `ret i32` — see header comment.
@@ -1993,13 +2067,17 @@
     (let i32v (emit-cast! b (cast-trunc) untagged (ty-i32)))
     (emit-ret! b i32v)))
 
-(defn lower-one-func (ld: LDefn) (num-globals: Int) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result LFunc Str)
+(defn lower-one-func (ld: LDefn) (num-globals: Int) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) (mc: (Map Str Bool)) -> (Result LFunc Str)
   (do
     (let is-main (= (ldefn-name ld) "main"))
     ; Native `@main` is `(i32 argc, ptr argv) -> i32` — two LLVM params that
     ; are not Menard words; Menard `main` itself still takes zero args.
     (let llvm-nparams (if is-main 2 (param-arity-of (ldefn-params ld))))
     (let b (builder-new (+ num-globals llvm-nparams)))
+    (let flag (match (map-get mc (ldefn-name ld)) (Some f) f (None) true))
+    (set! (b-rooting b) flag)
+    (set! (b-root-ns b) (str-pool-count pool))
+    (if flag (set! (b-root-base b) (emit-root-save! b)) ())
     (let env0 (bind-params! b (lparam-names (ldefn-params ld)) num-globals 0))
     (emit-main-init-if-needed! b is-main num-globals pool)
     (match (lower-sequence (ldefn-body ld) env0 b funcs noop pool)
@@ -2020,14 +2098,14 @@
     (finish-builder! b)
     (Ok (LFunc (ldefn-name ld) (param-arity-of (ldefn-params ld)) is-main (total-blocks b) (builder-items-ordered b)))))
 
-(defn lower-all-funcs (lds: (List LDefn)) (num-globals: Int) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result (List LFunc) Str)
+(defn lower-all-funcs (lds: (List LDefn)) (num-globals: Int) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) (mc: (Map Str Bool)) -> (Result (List LFunc) Str)
   (match lds
     (Nil) (Ok (Nil))
-    (Cons ld rest) (result-bind (lower-one-func ld num-globals funcs noop pool)
-      (fn (lf) (lower-all-funcs-cons lf rest num-globals funcs noop pool)))))
+    (Cons ld rest) (result-bind (lower-one-func ld num-globals funcs noop pool mc)
+      (fn (lf) (lower-all-funcs-cons lf rest num-globals funcs noop pool mc)))))
 
-(defn lower-all-funcs-cons (lf: LFunc) (rest: (List LDefn)) (num-globals: Int) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result (List LFunc) Str)
-  (result-bind (lower-all-funcs rest num-globals funcs noop pool) (fn (lfs) (Ok (Cons lf lfs)))))
+(defn lower-all-funcs-cons (lf: LFunc) (rest: (List LDefn)) (num-globals: Int) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) (mc: (Map Str Bool)) -> (Result (List LFunc) Str)
+  (result-bind (lower-all-funcs rest num-globals funcs noop pool mc) (fn (lfs) (Ok (Cons lf lfs)))))
 
 ; ---------------------------------------------------------------------------
 ; Top-level, non-`defn` forms — `hello.mnd`'s standalone `(println
@@ -2112,6 +2190,170 @@
 ; count again) — `num-globals` below is `2*num-strings + extern-count +
 ; num-funcs`, exactly what `write-module-body!`'s own `init-base` (`bc-
 ; writer.mnd`) assumes too.
+; A function may-collect when it, or something it calls, can reach
+; `mn_alloc`. Allocation-free functions are not rooted (spec §4.4).
+; Unknown calls are treated as may-collect: over-rooting is safe.
+(defn mc-pure (hn: Str) -> Bool
+  (or (or (or (or (= hn "if") (= hn "let")) (or (= hn "do") (= hn "loop")))
+        (or (or (= hn "recur") (= hn "match"))
+            (or (or (= hn "println") (= hn "print")) (or (= hn "shadow-push") (= hn "shadow-pop")))))
+      (or (or (or (or (= hn "write") (= hn "exit")) (or (= hn "deref") (= hn "set!")))
+            (or (or (= hn "str-byte") (= hn "str-byte-length")) (or (= hn "map-has") (= hn "map-size"))))
+          (or (or (or (or (= hn "mn-env-get") (= hn "arg-count")) (or (= hn "exists") (= hn "sb-length")))
+                (or (or (= hn "dump") (= hn "+")) (or (= hn "-") (= hn "*"))))
+              (or (or (or (= hn "/") (= hn "%")) (or (= hn "<") (= hn ">")))
+                  (or (or (= hn "<=") (= hn ">=")) (or (= hn "=") (= hn "compare"))))))))
+
+(defn mc-alloc-name (hn: Str) -> Bool
+  (or (or (or (or (= hn "str-concat") (= hn "str-slice")) (or (= hn "ref") (= hn "sb-new")))
+        (or (or (= hn "sb-append!") (= hn "sb-append-byte!")) (or (= hn "sb-take-str!") (= hn "map-new"))))
+      (or (or (or (or (= hn "map-set") (= hn "map-get")) (or (= hn "mn-env-0") (= hn "mn-env-1")))
+            (or (or (= hn "mn-env-new") (= hn "mn-closure-new")) (or (= hn "mn-apply-0") (= hn "mn-apply-1"))))
+          (or (or (or (= hn "mn-apply-2") (= hn "arg")) (or (= hn "read-file") (= hn "write-file")))
+              (or (or (= hn "show") (= hn "spawn")) (or (= hn "getenv") (= hn "rename")))))))
+
+(defn mc-ctor-alloc (hn: Str) -> Bool
+  (and (is-upper-name hn) (and (not (= hn "Nil")) (not (= hn "None")))))
+
+; One walk records direct allocs and the user-function callees. Later
+; passes only follow that graph, so the AST is not re-walked per pass.
+(defrec McWalk (direct: Bool) (callees: (List Str)))
+
+(defn mc-walk-empty -> McWalk (McWalk false (Nil)))
+
+(defn mc-append (xs: (List Str)) (ys: (List Str)) -> (List Str)
+  (match xs (Nil) ys (Cons x rest) (Cons x (mc-append rest ys))))
+
+(defn mc-walk-or (a: McWalk) (b: McWalk) -> McWalk
+  (match a
+    (McWalk da ca)
+      (match b
+        (McWalk db cb) (McWalk (or da db) (mc-append ca cb)))))
+
+(defn mc-note-head (hn: Str) (names: (Map Str Bool)) -> McWalk
+  (if (mc-pure hn) (mc-walk-empty)
+    (if (or (mc-alloc-name hn) (mc-ctor-alloc hn)) (McWalk true (Nil))
+      (match (map-get names hn)
+        (Some _) (McWalk false (Cons hn (Nil)))
+        (None) (McWalk true (Nil))))))
+
+(defn mc-walk-forms (xs: (List Ast)) (names: (Map Str Bool)) -> McWalk
+  (match xs
+    (Nil) (mc-walk-empty)
+    (Cons a rest) (mc-walk-or (mc-walk-ast a names) (mc-walk-forms rest names))))
+
+; A string literal lowers to `mn_str_new`. That allocation is not a call
+; in the AST, so it has to count on its own — otherwise a function whose
+; only allocation is `"..." ` keeps live pointers in unrooted allocas.
+(defn mc-walk-ast (ast: Ast) (names: (Map Str Bool)) -> McWalk
+  (match ast
+    (ParenNode elems _) (mc-walk-paren elems names)
+    (BracketNode elems _) (mc-walk-forms elems names)
+    (StrNode _ _) (McWalk true (Nil))
+    _ (mc-walk-empty)))
+
+; Loop bindings and match patterns look like calls. Walking them would
+; mark every arithmetic loop and every match as may-collect.
+(defn mc-walk-loop-inits (pairs: (List Ast)) (names: (Map Str Bool)) -> McWalk
+  (match pairs
+    (Nil) (mc-walk-empty)
+    (Cons p rest)
+      (mc-walk-or
+        (match (binding-pair-of p)
+          (Some (Cons _ (Cons init (Nil)))) (mc-walk-ast init names)
+          _ (mc-walk-ast p names))
+        (mc-walk-loop-inits rest names))))
+
+(defn mc-walk-loop (rest: (List Ast)) (names: (Map Str Bool)) -> McWalk
+  (match rest
+    (Cons bindings (Cons body (Nil)))
+      (match (binding-list-elems bindings)
+        (Some pairs) (mc-walk-or (mc-walk-loop-inits pairs names) (mc-walk-ast body names))
+        (None) (mc-walk-or (mc-walk-ast bindings names) (mc-walk-ast body names)))
+    _ (mc-walk-forms rest names)))
+
+(defn mc-walk-match-clauses (xs: (List Ast)) (names: (Map Str Bool)) -> McWalk
+  (match xs
+    (Nil) (mc-walk-empty)
+    (Cons _pat (Cons body rest)) (mc-walk-or (mc-walk-ast body names) (mc-walk-match-clauses rest names))
+    (Cons other (Nil)) (mc-walk-ast other names)))
+
+(defn mc-walk-match (rest: (List Ast)) (names: (Map Str Bool)) -> McWalk
+  (match rest
+    (Cons scrut clauses) (mc-walk-or (mc-walk-ast scrut names) (mc-walk-match-clauses clauses names))
+    (Nil) (mc-walk-empty)))
+
+(defn mc-walk-paren (elems: (List Ast)) (names: (Map Str Bool)) -> McWalk
+  (match elems
+    (Nil) (mc-walk-empty)
+    (Cons head rest)
+      (match (sym-str head)
+        (None) (mc-walk-or (mc-walk-forms rest names) (McWalk true (Nil)))
+        (Some hn)
+          (if (= hn "loop") (mc-walk-loop rest names)
+            (if (= hn "match") (mc-walk-match rest names)
+              (mc-walk-or (mc-walk-forms rest names) (mc-note-head hn names)))))))
+
+(defn mc-seed (lds: (List LDefn)) -> (Map Str Bool)
+  (match lds
+    (Nil) (map-new)
+    (Cons ld rest) (map-set (mc-seed rest) (ldefn-name ld) false)))
+
+(defn mc-build (lds: (List LDefn)) (names: (Map Str Bool)) -> (Map Str McWalk)
+  (match lds
+    (Nil) (map-new)
+    (Cons ld rest)
+      (map-set (mc-build rest names) (ldefn-name ld) (mc-walk-forms (ldefn-body ld) names))))
+
+(defn mc-any-callee (xs: (List Str)) (flags: (Map Str Bool)) -> Bool
+  (match xs
+    (Nil) false
+    (Cons n rest)
+      (match (map-get flags n)
+        (Some f) (if f true (mc-any-callee rest flags))
+        (None) (mc-any-callee rest flags))))
+
+(defn mc-body-true (w: McWalk) (flags: (Map Str Bool)) -> Bool
+  (match w
+    (McWalk direct callees) (if direct true (mc-any-callee callees flags))))
+
+(defn mc-apply (lds: (List LDefn)) (info: (Map Str McWalk)) (flags: (Map Str Bool)) -> (Map Str Bool)
+  (match lds
+    (Nil) flags
+    (Cons ld rest) (mc-apply-one ld rest info flags)))
+
+(defn mc-apply-one (ld: LDefn) (rest: (List LDefn)) (info: (Map Str McWalk)) (flags: (Map Str Bool)) -> (Map Str Bool)
+  (let name (ldefn-name ld))
+  (let now (match (map-get flags name) (Some f) f (None) false))
+  (let next-flag
+    (if now true
+      (match (map-get info name)
+        (Some w) (mc-body-true w flags)
+        (None) true)))
+  (mc-apply rest info (map-set flags name next-flag)))
+
+(defn mc-flags-equal (lds: (List LDefn)) (a: (Map Str Bool)) (b: (Map Str Bool)) -> Bool
+  (match lds
+    (Nil) true
+    (Cons ld rest)
+      (match (map-get a (ldefn-name ld))
+        (None) false
+        (Some fa)
+          (match (map-get b (ldefn-name ld))
+            (None) false
+            (Some fb) (if (= fa fb) (mc-flags-equal rest a b) false)))))
+
+(defn mc-propagate (lds: (List LDefn)) (info: (Map Str McWalk)) (flags: (Map Str Bool)) (n: Int) -> (Map Str Bool)
+  (if (<= n 0) flags (mc-propagate-step lds info flags n)))
+
+(defn mc-propagate-step (lds: (List LDefn)) (info: (Map Str McWalk)) (flags: (Map Str Bool)) (n: Int) -> (Map Str Bool)
+  (let next (mc-apply lds info flags))
+  (if (mc-flags-equal lds flags next) next (mc-propagate lds info next (- n 1))))
+
+(defn mc-analyze (lds: (List LDefn)) -> (Map Str Bool)
+  (let names (mc-seed lds))
+  (mc-propagate lds (mc-build lds names) names (ast-list-length-lds lds)))
+
 (defn lower-program-build (word-lds: (List LDefn)) (all-lds: (List LDefn)) (forms: (List Ast)) -> (Result Str Str)
   (do
     (let extra (collect-non-defn-tops forms))
@@ -2122,6 +2364,7 @@
     (let funcs (build-func-refs word-lds2 (+ num-strings (extern-count))))
     (let noop (collect-noop-names all-lds))
     (let num-globals (+ (* 2 num-strings) (+ (extern-count) num-funcs)))
-    (match (lower-all-funcs word-lds2 num-globals funcs noop pool)
+    (let mc (mc-analyze word-lds2))
+    (match (lower-all-funcs word-lds2 num-globals funcs noop pool mc)
       (Ok lfuncs) (Ok (write-module-bc (LlvmModule lfuncs (str-pool-strs pool))))
       (Err msg) (Err (str-concat "cannot lower `main`: " msg)))))

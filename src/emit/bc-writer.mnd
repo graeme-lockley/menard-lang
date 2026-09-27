@@ -426,7 +426,12 @@
     (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_spawn
     (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_getenv
     (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_exists
-    (write-extern-decl! m (func-type-idx-for-arity 2)))) ; mn_rename
+    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_rename
+    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_root_keep
+    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_root_get
+    (write-extern-decl! m (func-type-idx-for-arity 0)) ; mn_root_save
+    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_root_restore
+    (write-extern-decl! m (ty-write-sig-idx ma)))) ; mn_root_push(ptr, i64)
 
 ; ---------------------------------------------------------------------------
 ; `MODULE_CODE_GLOBALVAR` — one per string in `LlvmModule`'s `globals`,
@@ -678,7 +683,12 @@
     (write-record! v (vst-code-entry) (Cons (extern-spawn-abs num-strings) (str-byte-ops "mn_spawn")))
     (write-record! v (vst-code-entry) (Cons (extern-getenv-abs num-strings) (str-byte-ops "mn_getenv")))
     (write-record! v (vst-code-entry) (Cons (extern-exists-abs num-strings) (str-byte-ops "mn_exists")))
-    (write-record! v (vst-code-entry) (Cons (extern-rename-abs num-strings) (str-byte-ops "mn_rename")))))
+    (write-record! v (vst-code-entry) (Cons (extern-rename-abs num-strings) (str-byte-ops "mn_rename")))
+    (write-record! v (vst-code-entry) (Cons (extern-root-keep-abs num-strings) (str-byte-ops "mn_root_keep")))
+    (write-record! v (vst-code-entry) (Cons (extern-root-get-abs num-strings) (str-byte-ops "mn_root_get")))
+    (write-record! v (vst-code-entry) (Cons (extern-root-save-abs num-strings) (str-byte-ops "mn_root_save")))
+    (write-record! v (vst-code-entry) (Cons (extern-root-restore-abs num-strings) (str-byte-ops "mn_root_restore")))
+    (write-record! v (vst-code-entry) (Cons (extern-root-push-abs num-strings) (str-byte-ops "mn_root_push")))))
 
 (defn lfunc-list-length (fs: (List LFunc)) -> Int
   (match fs (Nil) 0 (Cons _ rest) (+ 1 (lfunc-list-length rest))))

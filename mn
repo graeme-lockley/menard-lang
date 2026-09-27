@@ -23,6 +23,7 @@ const RECORDED_CC = "/usr/bin/clang";
 const RECORDED_RUNTIME = "runtime";
 const RUNTIME_NAMES = [
   "alloc.c",
+  "gc.c",
   "panic.c",
   "print.c",
   "shadow.c",

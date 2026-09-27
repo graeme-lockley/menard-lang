@@ -35,14 +35,14 @@ static int64_t node_height(MnWord n) {
   if (n == MN_EMPTY) {
     return 0;
   }
-  return node_view(n)->height;
+  return mn_word_to_int((MnWord)node_view(n)->height);
 }
 
 static int64_t node_size(MnWord n) {
   if (n == MN_EMPTY) {
     return 0;
   }
-  return node_view(n)->size;
+  return mn_word_to_int((MnWord)node_view(n)->size);
 }
 
 static int str_cmp_bytes(MnWord a, MnWord b) {
@@ -85,66 +85,120 @@ static int key_cmp(MnWord a, MnWord b) {
 }
 
 static MnWord mk_node(MnWord key, MnWord val, MnWord left, MnWord right) {
+  MnWord ks, vs, ls, rs;
+  mn_root_push(&ks);
+  ks = key;
+  mn_root_push(&vs);
+  vs = val;
+  mn_root_push(&ls);
+  ls = left;
+  mn_root_push(&rs);
+  rs = right;
   MnWord *obj = (MnWord *)mn_alloc(HDR + 48, &shape_node56);
   NodeView *nv = (NodeView *)(obj + 1);
-  nv->key = key;
-  nv->val = val;
-  nv->left = left;
-  nv->right = right;
-  int64_t hl = node_height(left);
-  int64_t hr = node_height(right);
-  nv->height = 1 + (hl > hr ? hl : hr);
-  nv->size = 1 + node_size(left) + node_size(right);
+  nv->key = ks;
+  nv->val = vs;
+  nv->left = ls;
+  nv->right = rs;
+  int64_t hl = node_height(ls);
+  int64_t hr = node_height(rs);
+  nv->height = (int64_t)mn_int_to_word(1 + (hl > hr ? hl : hr));
+  nv->size = (int64_t)mn_int_to_word(1 + node_size(ls) + node_size(rs));
+  mn_root_pop();
+  mn_root_pop();
+  mn_root_pop();
+  mn_root_pop();
   return (MnWord)obj;
 }
 
 static MnWord rotate_left(MnWord n) {
-  NodeView *nv = node_view(n);
-  MnWord r = nv->right;
-  NodeView *rv = node_view(r);
-  return mk_node(rv->key, rv->val, mk_node(nv->key, nv->val, nv->left, rv->left), rv->right);
+  MnWord ns, rs;
+  mn_root_push(&ns);
+  ns = n;
+  mn_root_push(&rs);
+  rs = node_view(ns)->right;
+  MnWord inner = mk_node(node_view(ns)->key, node_view(ns)->val, node_view(ns)->left, node_view(rs)->left);
+  MnWord result = mk_node(node_view(rs)->key, node_view(rs)->val, inner, node_view(rs)->right);
+  mn_root_pop();
+  mn_root_pop();
+  return result;
 }
 
 static MnWord rotate_right(MnWord n) {
-  NodeView *nv = node_view(n);
-  MnWord l = nv->left;
-  NodeView *lv = node_view(l);
-  return mk_node(lv->key, lv->val, lv->left, mk_node(nv->key, nv->val, lv->right, nv->right));
+  MnWord ns, ls;
+  mn_root_push(&ns);
+  ns = n;
+  mn_root_push(&ls);
+  ls = node_view(ns)->left;
+  MnWord inner = mk_node(node_view(ns)->key, node_view(ns)->val, node_view(ls)->right, node_view(ns)->right);
+  MnWord result = mk_node(node_view(ls)->key, node_view(ls)->val, node_view(ls)->left, inner);
+  mn_root_pop();
+  mn_root_pop();
+  return result;
 }
 
 static MnWord balance(MnWord n) {
-  NodeView *nv = node_view(n);
-  int64_t bf = node_height(nv->left) - node_height(nv->right);
+  MnWord ns;
+  mn_root_push(&ns);
+  ns = n;
+  int64_t bf = node_height(node_view(ns)->left) - node_height(node_view(ns)->right);
+  MnWord result;
   if (bf > 1) {
-    NodeView *lv = node_view(nv->left);
-    if (node_height(lv->right) > node_height(lv->left)) {
-      return rotate_right(mk_node(nv->key, nv->val, rotate_left(nv->left), nv->right));
+    MnWord left = node_view(ns)->left;
+    if (node_height(node_view(left)->right) > node_height(node_view(left)->left)) {
+      MnWord rotated = rotate_left(left);
+      MnWord key = node_view(ns)->key;
+      MnWord val = node_view(ns)->val;
+      MnWord right = node_view(ns)->right;
+      result = rotate_right(mk_node(key, val, rotated, right));
+    } else {
+      result = rotate_right(ns);
     }
-    return rotate_right(n);
-  }
-  if (bf < -1) {
-    NodeView *rv = node_view(nv->right);
-    if (node_height(rv->left) > node_height(rv->right)) {
-      return rotate_left(mk_node(nv->key, nv->val, nv->left, rotate_right(nv->right)));
+  } else if (bf < -1) {
+    MnWord right = node_view(ns)->right;
+    if (node_height(node_view(right)->left) > node_height(node_view(right)->right)) {
+      MnWord rotated = rotate_right(right);
+      MnWord key = node_view(ns)->key;
+      MnWord val = node_view(ns)->val;
+      MnWord left = node_view(ns)->left;
+      result = rotate_left(mk_node(key, val, left, rotated));
+    } else {
+      result = rotate_left(ns);
     }
-    return rotate_left(n);
+  } else {
+    result = ns;
   }
-  return n;
+  mn_root_pop();
+  return result;
 }
 
 static MnWord insert(MnWord node, MnWord k, MnWord v) {
-  if (node == MN_EMPTY) {
-    return mk_node(k, v, MN_EMPTY, MN_EMPTY);
+  MnWord ns, ks, vs;
+  mn_root_push(&ns);
+  ns = node;
+  mn_root_push(&ks);
+  ks = k;
+  mn_root_push(&vs);
+  vs = v;
+  MnWord result;
+  if (ns == MN_EMPTY) {
+    result = mk_node(ks, vs, MN_EMPTY, MN_EMPTY);
+  } else {
+    int c = key_cmp(ks, node_view(ns)->key);
+    if (c == 0) {
+      result = mk_node(ks, vs, node_view(ns)->left, node_view(ns)->right);
+    } else if (c < 0) {
+      MnWord left = insert(node_view(ns)->left, ks, vs);
+      result = balance(mk_node(node_view(ns)->key, node_view(ns)->val, left, node_view(ns)->right));
+    } else {
+      MnWord right = insert(node_view(ns)->right, ks, vs);
+      result = balance(mk_node(node_view(ns)->key, node_view(ns)->val, node_view(ns)->left, right));
+    }
   }
-  NodeView *nv = node_view(node);
-  int c = key_cmp(k, nv->key);
-  if (c == 0) {
-    return mk_node(k, v, nv->left, nv->right);
-  }
-  if (c < 0) {
-    return balance(mk_node(nv->key, nv->val, insert(nv->left, k, v), nv->right));
-  }
-  return balance(mk_node(nv->key, nv->val, nv->left, insert(nv->right, k, v)));
+  mn_root_pop();
+  mn_root_pop();
+  mn_root_pop();
+  return result;
 }
 
 static MnWord lookup(MnWord node, MnWord k) {
@@ -170,9 +224,22 @@ MnWord mn_map_set(MnWord m, MnWord k, MnWord v) {
   if (mn_is_immediate(m)) {
     mn_panic("mn_map_set: expected Map");
   }
-  MnWord root = ((MnWord *)(uintptr_t)m)[1];
+  MnWord ms, ks, vs, held;
+  mn_root_push(&ms);
+  ms = m;
+  mn_root_push(&ks);
+  ks = k;
+  mn_root_push(&vs);
+  vs = v;
+  MnWord root = ((MnWord *)(uintptr_t)ms)[1];
+  mn_root_push(&held);
+  held = insert(root, ks, vs);
   MnWord *obj = (MnWord *)mn_alloc(HDR + 8, &shape_map);
-  obj[1] = insert(root, k, v);
+  mn_gc_store(obj, &obj[1], held);
+  mn_root_pop();
+  mn_root_pop();
+  mn_root_pop();
+  mn_root_pop();
   return (MnWord)obj;
 }
 

@@ -22,6 +22,7 @@ short description of its result and exits 0. Run with
 | `echo-file.mnd` | G | `read-file` / `write` / `exit` (fixture under `fixtures/`) |
 | `mod-main.mnd` + `mod-util.mnd` | G | multi-module emit (`import` flattened into one `.bc`) |
 | `host-seam.mnd` | driver | `exists`, `getenv`, `spawn`, `rename` (native; run from the repo root) |
+| `heap-churn.mnd` | collector | long `List`, large `Map`, `StringBuffer` growth, nested closures |
 
 ## Fixed point
 

@@ -95,6 +95,7 @@ const llvmDis = whichTool("llvm-dis");
 // its own `main` and would collide with the emitted module's.
 const RUNTIME_LIB_SRCS = [
   "runtime/src/alloc.c",
+  "runtime/src/gc.c",
   "runtime/src/panic.c",
   "runtime/src/print.c",
   "runtime/src/shadow.c",
