@@ -70,38 +70,25 @@ diagnostics, and a build-host benchmark in CI. Issues
 [#1](https://github.com/graeme-lockley/menard-lang/issues/1)–[#10](https://github.com/graeme-lockley/menard-lang/issues/10)
 are closed.
 
-**Phase 2 is complete for the accepted Int/if/let/calls subset, plus
-`println`/`print`/`write`**: Int `main`s (and every top-level `Int`-only
-`defn` they call, including lifted closures), arithmetic and comparisons,
-`if`/`let`/`do` — real SSA instructions computing the result, not a
-compile-time-folded exit code — and standalone top-level `println`/`print`
-of `Str` literals and `Int`s, plus `write` to fd 1/2, lowered to real LLVM
-string globals and calls into the runtime's fd-1/fd-2 print helpers
-(`mn_write_stdout`/`mn_print_i64`/`mn_write_stderr`), with non-`defn`
-top-level forms prepended into `main`'s body as effect steps — see
-`tests/phase2/oracle/*.mnd` and the interp↔native CI oracle,
-`tests/phase2/oracle.test.ts` (which asserts the emitted module's
-disassembly actually contains the instruction each fixture claims, and that
-interp/native stdout agree byte-for-byte for the `println` fixture). The
-compiler is written in Menard and run as stage0 on the interpreter
-(`bun run host/src/cli/menard.ts run src/main.mnd -- emit <file> [out.bc]`);
-`make ret-native` / `make hello-native` link and run its output with clang.
-Emit uses **deterministic LLVM bitcode** (`.bc`), never textual `.ll`
-(ADR 40): a real bit-level encoder (`src/emit/bc-writer.mnd`) is fed by a
-real instruction selector (`src/emit/lower.mnd`) over the tagged-`Int` ABI
-(spec §2.2/§3.4) — see that module's header comment for exactly what it
-lowers and what it still cleanly declines (`loop`/`recur`, `match`, and any
-non-`Int` value). Remaining toward **Phase 3** (self-hosting) — not blocking
-Phase 2 §5 for this corpus, since every accepted fixture only needs the
-Int/if/let/calls subset: `loop`/`recur` and `match`/heap-object instruction
-emission for programs this lowerer cannot yet handle, full `derive`
-**codegen** (today `derive/derive.mnd` only plans which types need it), the
-static pool's bytes actually landing in the module image (today
-`pool/pool.mnd` collects and discards), and compiling `src/` itself
-(`bc0 == bc1`). Phase 4 adds the collector — see §5 of the spec. Remaining
-host work — notably
-[`spawn` / `spawn-capture`](https://github.com/graeme-lockley/menard-lang/issues/11)
-— is tracked in the [issue list](https://github.com/graeme-lockley/menard-lang/issues).
+**Phase 2 is complete** for the Int/if/let/calls/`println` subset (real SSA,
+interp↔native oracle). **Phase 3 is in progress:** slices A–G land in the
+emitter and runtime —
+
+- **A** `loop`/`recur`
+- **B** heap shape headers in `mn_alloc`; Bool/Unit immediates
+- **C** `List`/`Maybe`/`Result` constructors + `match`
+- **D** `Str` / `StringBuffer` / `Ref`
+- **E** heap closures (`mn_closure_new` / `mn_apply_1`)
+- **F** persistent `Map` (Int/Str keys)
+- **G** Tier-0 I/O (`read-file` / `write-file` / `arg` / `exit`) + import-graph
+  flatten for emit (see `examples/echo-file.mnd`, `examples/mod-main.mnd`)
+
+See [`examples/`](examples/) for a tour and `tests/phase2/oracle.test.ts` for
+CI. **Slice H** (`bc0 == bc1`): private-name uniquify + `check src/main.mnd`
+pass; match/let/loop binders are in scope for nested closures (N-slot env);
+examples print their results; emit of `src/main.mnd` now stops on an unlowered `compare` call —
+`make check-fixed-point` is scaffolded but not green yet. Spawn (#11) is closed. Phase 4 adds the
+collector — see §5 of the spec.
 
 ## Build
 

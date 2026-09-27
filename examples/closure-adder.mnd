@@ -1,0 +1,44 @@
+; Slice 3E — heap closures (spec §2.6). Returned `fn` captures `n`,
+; then `map` applies it to every element of a list.
+; Prints the list before and after.
+; Run with: `./mn run examples/closure-adder.mnd`
+
+(defn adder (n: Int) -> (Fn Int -> Int)
+  (fn (m) (+ n m)))
+
+(defn map (f: (Fn Int -> Int)) (xs: (List Int)) -> (List Int)
+  (match xs
+    (Nil) (Nil)
+    (Cons h t) (Cons (f h) (map f t))))
+
+(defn print-elems (xs: (List Int)) -> Int
+  (match xs
+    (Nil) 0
+    (Cons h t)
+      (do
+        (print h)
+        (match t
+          (Nil) 0
+          _
+            (do
+              (print " ")
+              (print-elems t))))))
+
+(defn print-list (xs: (List Int)) -> Int
+  (do
+    (print "(")
+    (print-elems xs)
+    (print ")")
+    0))
+
+(defn main -> Int
+  (let before (Cons 1 (Cons 2 (Cons 3 (Nil)))))
+  (let add40 (adder 40))
+  (let after (map add40 before))
+  (print "before: ")
+  (print-list before)
+  (println)
+  (print "after:  ")
+  (print-list after)
+  (println)
+  0)

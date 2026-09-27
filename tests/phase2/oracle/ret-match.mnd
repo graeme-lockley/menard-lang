@@ -1,12 +1,5 @@
-; Slice 2G oracle fixture: `match` on `Nil`/`Cons` for a `(List Int)`
-; built from nested constructor literals — under slice 2G's since-
-; replaced constant-folding evaluator this folded to `ret i32 60`
-; (`10 + 20 + 30 = 60`) at compile time. Slice 2H's real instruction
-; selector (`src/emit/lower.mnd`) does not lower `match` (or a `List`
-; value) yet (a clean, documented `Err` — see that module's header
-; comment's "Scope"): still interpretable (still 60 — see
-; `tests/phase2/oracle.test.ts`'s own "unsupported" test), but no
-; longer part of the emit-and-run native oracle.
+; Slice 2G/3C oracle fixture: `match` on `Nil`/`Cons` for a `(List Int)`.
+; Expect exit 60 (`10 + 20 + 30`).
 
 (defn list-sum (xs: (List Int)) -> Int
   (match xs

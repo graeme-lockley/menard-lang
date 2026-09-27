@@ -1,0 +1,15 @@
+; Slice 3C — Result + match.
+; Prints the unwrapped Ok and the fallback for Err.
+; Run with: `./mn run examples/result-match.mnd`
+
+(defn unwrap-or-zero (r: (Result Int Str)) -> Int
+  (match r
+    (Ok n) n
+    (Err _) 0))
+
+(defn main -> Int
+  (print "Ok 7 unwraps to ")
+  (println (unwrap-or-zero (Ok 7)))
+  (print "Err \"missing\" unwraps to ")
+  (println (unwrap-or-zero (Err "missing")))
+  0)

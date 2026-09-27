@@ -1,0 +1,9 @@
+; Slice 3G — multi-module emit entry: imports `mod-util.mnd`.
+; Prints: double(21) = 42
+; Run with: `./mn run examples/mod-main.mnd`
+
+(import "./mod-util.mnd")
+
+(defn main -> Int
+  (println "double(21) = " (double 21))
+  0)

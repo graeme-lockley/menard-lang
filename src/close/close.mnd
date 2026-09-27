@@ -1,30 +1,13 @@
-; Closure conversion — Phase 2 slice 2E.
+; Closure conversion — Phase 3 slice E (heap closures, spec §2.6).
 ;
 ; ## What this pass does
 ;
-; `src/emit/lower.mnd`'s real instruction selector only ever lowers
-; literals, `+ - * / %`, comparisons, `if`/`let`/`do`, and calls to
-; *other top-level `defn`s* — it has no notion of a first-class function
-; value, so a `main` that binds a `fn`/`lambda` to a name and then calls
-; that name (`(let add (fn (x) (+ x 1))) (add 40)`) cannot be lowered at
-; all: `lower-sym` finds `add` bound to nothing the alloca-slot `env` it
-; threads understands, and `lower-expr` has no case for a bare `fn`
-; form. This pass makes that shape lowerable via **lambda lifting**: every closure
-; bound by a *bare* `(let name (fn (params…) body))` — the sequence-level
-; `let` form `src/emit/lower.mnd`'s own `as-simple-let` recognizes, i.e.
-; one `let` among several sibling forms in a `defn` body or a `do` block,
-; not the inline `(let n e body…)` form — is lifted into a fresh
-; top-level `defn __lamN`, and every call site `(name args…)` for the
-; rest of that sequence is rewritten to call `__lamN` directly. A closure
-; that captures free variables gets those variables prepended as extra
-; leading parameters, and call sites pass the same names as extra leading
-; arguments — ordinary lambda lifting (see e.g. Peyton Jones §12.2), not
-; the heap-allocated closure-record scheme spec §2.6/§4.4 eventually
-; wants (that scheme needs real, non-folded instruction emission to
-; construct and index a record; this slice still only has the fold-based
-; lowerer, so it borrows lambda lifting instead, sufficient to make the
-; *shape* — "a nested `fn`, called" — round-trip through `emit` end to
-; end for the first time).
+; Every `fn`/`lambda` is lifted to a top-level `defn __lamN` that takes a
+; hidden environment word as its first parameter. Free variables are
+; packed into a heap env at creation (`mn-env-0` / `mn-env-new`) and read
+; back in the lifted body via `(mn-env-get env i)`. Creation produces a
+; heap closure with `(mn-closure-new __lamN env)`; call sites of
+; let-bound closures become `(mn-apply-1 clo arg)`.
 ;
 ; Transform, worked through:
 ;
@@ -34,81 +17,41 @@
 ;
 ;   -- closure-convert -->
 ;
-;   (defn main -> Int (__lam0 40))
-;   (defn __lam0 (x: Int) -> Int (+ x 1))
-;
-; With a captured free variable (`y`, bound earlier in the same body):
-;
 ;   (defn main -> Int
-;     (let y 1)
-;     (let add (fn (x) (+ x y)))
-;     (add 40))
+;     (let add (mn-closure-new __lam0 (mn-env-0)))
+;     (mn-apply-1 add 40))
+;   (defn __lam0 (env: Int) (x: Int) -> Int (+ x 1))
+;
+; With a captured free variable:
+;
+;   (defn adder (n: Int) -> (Fn Int -> Int)
+;     (fn (m) (+ n m)))
 ;
 ;   -- closure-convert -->
 ;
-;   (defn main -> Int (let y 1) (__lam0 y 40))
-;   (defn __lam0 (y: Int) (x: Int) -> Int (+ x y))
+;   (defn adder (n: Int) -> (Fn Int -> Int)
+;     (do
+;       (let __menv (mn-env-new 1))
+;       (let __menv (mn-env-set __menv 0 n))
+;       (mn-closure-new __lam0 __menv)))
+;   (defn __lam0 (env: Int) (m: Int) -> Int
+;     (do (let n (mn-env-get env 0)) (+ n m)))
 ;
-; ## Limitations (all deliberate, all documented here rather than
-; discovered later — see spec's own slice-boundary convention)
+; ## Limitations (deliberate for this slice)
 ;
-; - **Int-only.** A `fn`'s own parameters have no type annotation in the
-;   concrete syntax (`(fn (x) …)`, unlike `defn`'s `(x: Int)` —
-;   `type/check.mnd`'s `lambda-param-list-cons` infers them), and this
-;   pass has no type information to consult (it runs after
-;   `type/check.mnd` has already accepted the program and discarded what
-;   it inferred — same reason `emit/lower.mnd`'s header gives for
-;   re-walking raw `Ast`). Every lifted parameter and every captured free
-;   variable is therefore declared `Int` unconditionally. A closure over
-;   anything else typechecks fine but is not lifted correctly (the lifted
-;   `defn`'s declared types just won't match its real values) — out of
-;   scope until this pass has real type information to work from.
-; - **Call sites only.** A captured/lifted name is only rewritten where
-;   it is the *head* of an application, `(name args…)`. Passing a closure
-;   as a first-class value (returned, stored in a `let`, passed as an
-;   argument) is not rewritten — the raw `fn` form (or a now-dangling
-;   reference to the erased `let`) survives into `emit`, which fails
-;   cleanly (`src/emit/lower.mnd` has no fold case for `fn`/an unbound
-;   name) rather than miscompiling.
-; - **Only bare, sequence-level `let`s are lifted.** The pattern this
-;   pass looks for is a `(let name (fn …))` that is itself one element of
-;   a `defn` body or a `do` block's form list (`as-simple-let`'s shape,
-;   not the inline `(let n e body…)` form). A closure bound via the
-;   inline form, or nested inside an `if`/`match`/`loop` branch, is not
-;   detected — it is left untouched (and, again, fails cleanly at `emit`
-;   rather than being silently mishandled).
-; - **Nesting.** A closure's own body may itself contain further nested
-;   closures, but only through an explicit `do` block (`(fn (x) (do (let
-;   inner (fn …)) (inner …)))`); `close-expr` recurses into `do` (mirror
-;   of `emit/lower.mnd`'s `lower-sequence`) but does not otherwise descend
-;   into `if`/`match`/`loop` bodies looking for more lifts. Ordinary
-;   structural recursion over a finite `Ast` tree always terminates on
-;   its own, so unlike an evaluator's call-depth fuel (which would bound
-;   *evaluating* a recursive call chain, a genuinely unbounded process)
-;   this pass needs no separate fuel/depth counter.
-; - **Shadowing is not detected.** Free-variable analysis
-;   (`collect-symbols`) is a naive "every `SymNode` anywhere in the
-;   body" walk with no notion of local rebinding, so a nested `let`/`fn`
-;   that reuses an outer captured name would be mis-analyzed. None of
-;   this slice's fixtures exercise that; a real capture-avoiding pass is
-;   future work (same "documented now, fixed later" spirit as the rest of
-;   this list).
-;
-; Everything a top-level form is *not* one of the shapes above — another
-; `defn` with no closures in its body, a `defrec`/`variant`/`alias`, a
-; bare top-level expression — passes through byte-for-byte unchanged,
-; exactly like the identity stub this pass replaces.
+; - **Int-only captures / params.** Same as the prior lambda-lift slice:
+;   every lifted parameter and capture is declared `Int`.
+; - **Apply arity 0–2.** Rewritten call sites use `mn-apply-0/1/2`.
+;   Closures with three or more arguments are out of scope.
+; - **Shadowing / nested lets inside fn bodies** use the same naive
+;   free-var scan as before.
 
 (import "../reader/ast.mnd")
 
-; Re-export shim: a `pub` signature may not mention a private nominal
-; type (ADR 27), even one imported `pub` from elsewhere — see
-; src/reader/read.mnd's header comment for why.
 (pub alias Ast Ast)
 
 ; ---------------------------------------------------------------------------
-; Small Ast helpers, restated locally per src/'s "no prelude import" rule
-; (see e.g. `emit/lower.mnd`'s equivalent header note).
+; Small Ast helpers (no prelude import — see emit/lower.mnd).
 
 (defn sym-str (ast: Ast) -> (Maybe Str)
   (match ast (SymNode n _) (Some n) _ (None)))
@@ -141,9 +84,7 @@
     (Cons h rest) (if (= h x) true (str-list-contains rest x))))
 
 ; ---------------------------------------------------------------------------
-; Free-symbol collection (see header comment's "Limitations" for why this
-; is a deliberately naive over-approximation, not a real capture-avoiding
-; analysis).
+; Free-symbol collection (naive over-approximation).
 
 (defn collect-symbols (ast: Ast) -> (List Str)
   (match ast
@@ -158,10 +99,7 @@
     (Cons e rest) (append-str-list (collect-symbols e) (collect-symbols-list rest))))
 
 ; ---------------------------------------------------------------------------
-; `defn` parameters are `(name: Type)`; `fn` parameters are a bare `name`
-; (see `type/check.mnd`'s `lambda-param-list-cons` vs. its
-; `infer-defn`/param handling — mirrored here rather than imported, same
-; "restated locally" rule).
+; Parameter name helpers.
 
 (defn defn-param-name (ast: Ast) -> (Maybe Str)
   (match ast
@@ -194,8 +132,6 @@
 (defn fn-param-elems (params-ast: Ast) -> (List Ast)
   (match params-ast (ParenNode elems _) elems _ (Nil)))
 
-; A synthesized `defn`/`__lamN` parameter `(name: Int)` — see header
-; comment's "Int-only" limitation.
 (defn int-param-for (name: Str) -> Ast
   (ParenNode (Cons (SymNode (str-concat name ":") (dummy-span)) (Cons (SymNode "Int" (dummy-span)) (Nil))) (dummy-span)))
 
@@ -204,18 +140,8 @@
     (Nil) (Nil)
     (Cons n rest) (Cons (int-param-for n) (int-params-for rest))))
 
-(defn syms-for (names: (List Str)) (sp: Span) -> (List Ast)
-  (match names
-    (Nil) (Nil)
-    (Cons n rest) (Cons (SymNode n sp) (syms-for rest sp))))
-
 ; ---------------------------------------------------------------------------
-; `(defn name params… -> Ret body…)` header/body split — every top-level
-; element up to (not including) the `->`, the `->` itself, the return
-; type, and the body forms after it. Mirrors `emit/lower.mnd`'s
-; `find-arrow`, extended to keep the `->` node itself (needed here to
-; rebuild the form; `lower.mnd` never does, since it only ever reads a
-; `defn`, never rewrites one).
+; `(defn name params… -> Ret body…)` header/body split.
 
 (defrec ArrowSplit (header: (List Ast)) (arrow: Ast) (ret: Ast) (body: (List Ast)))
 
@@ -242,25 +168,16 @@
     (None) (None)
     (Some s) (Some (ArrowSplit (Cons e (arrow-split-header s)) (arrow-split-arrow s) (arrow-split-ret s) (arrow-split-body s)))))
 
-; `header` is `[defn, name-or-(name [tparams]), param…]` — drop the first
-; two (they are never parameters) to get the real parameter list.
 (defn defn-scope-of (header: (List Ast)) -> (List Str)
   (match header
     (Cons _ (Cons _ params)) (defn-param-names params)
     _ (Nil)))
 
 ; ---------------------------------------------------------------------------
-; Substitution: `name -> (lifted top-level name, ordered free-var names)`
-; for every closure lifted so far in the enclosing sequence.
+; Substitution: let-bound closure name -> lifted info (for mn-apply-1 rewrite).
 
 (defrec LiftedInfo (lifted-name: Str) (free-vars: (List Str)))
 
-; Rewrite every application `(name args…)` in `ast` whose `name` is a key
-; of `subst` into `(lifted-name free-var… args…)`; everything else is
-; walked structurally and otherwise left alone. Total and side-effect
-; free: safe to call on *any* `Ast`, including forms this pass never
-; specifically recognizes (`if`, `match`, `loop`, …) — see header
-; comment's closing paragraph.
 (defn apply-subst-ast (ast: Ast) (subst: (Map Str LiftedInfo)) -> Ast
   (match ast
     (ParenNode elems sp) (apply-subst-paren elems sp subst)
@@ -285,19 +202,33 @@
 (defn apply-subst-paren-named (name: Str) (head: Ast) (args: (List Ast)) (sp: Span) (subst: (Map Str LiftedInfo)) -> Ast
   (match (map-get subst name)
     (None) (ParenNode (Cons head (apply-subst-list args subst)) sp)
-    (Some info) (rewrite-call info args sp subst)))
+    (Some _) (rewrite-call name args sp subst)))
 
-(defn rewrite-call (info: LiftedInfo) (args: (List Ast)) (sp: Span) (subst: (Map Str LiftedInfo)) -> Ast
-  (match info
-    (LiftedInfo lifted-name free-vars)
-      (ParenNode (Cons (SymNode lifted-name sp) (append-list (syms-for free-vars sp) (apply-subst-list args subst))) sp)))
+; `(name arg…)` for a known let-bound closure → `mn-apply-0/1/2`.
+(defn rewrite-call (name: Str) (args: (List Ast)) (sp: Span) (subst: (Map Str LiftedInfo)) -> Ast
+  (match args
+    (Nil)
+      (ParenNode
+        (Cons (SymNode "mn-apply-0" sp)
+          (Cons (SymNode name sp) (Nil)))
+        sp)
+    (Cons a0 (Nil))
+      (ParenNode
+        (Cons (SymNode "mn-apply-1" sp)
+          (Cons (SymNode name sp)
+            (Cons (apply-subst-ast a0 subst) (Nil))))
+        sp)
+    (Cons a0 (Cons a1 (Nil)))
+      (ParenNode
+        (Cons (SymNode "mn-apply-2" sp)
+          (Cons (SymNode name sp)
+            (Cons (apply-subst-ast a0 subst)
+              (Cons (apply-subst-ast a1 subst) (Nil)))))
+        sp)
+    _ (ParenNode (Cons (SymNode name sp) (apply-subst-list args subst)) sp)))
 
 ; ---------------------------------------------------------------------------
-; `(let name (fn (params…) body-expr))` — the one shape this pass lifts.
-; Deliberately as narrow as `emit/lower.mnd`'s own `as-simple-let`: three
-; elements exactly (`let`, a bare name, a value), whose value is in turn
-; exactly three elements (`fn`/`lambda`, a bare param list, one body
-; expression) — see header comment's "Only bare, sequence-level `let`s".
+; `(let name (fn (params…) body-expr))`
 
 (defrec LetFn (name: Str) (params-ast: Ast) (body-expr: Ast))
 
@@ -322,10 +253,6 @@
 (defn as-fn-value-check (name: Str) (fn-head: Ast) (params-ast: Ast) (body-expr: Ast) -> (Maybe LetFn)
   (if (or (is-sym fn-head "fn") (is-sym fn-head "lambda")) (Some (LetFn name params-ast body-expr)) (None)))
 
-; The ordinary bare `(let name expr)` (not binding a `fn`) — sibling
-; forms extend their scope with `name`, exactly as `emit/lower.mnd`'s
-; `as-simple-let`/`lower-sequence` treat it.
-
 (defrec SimpleLet (name: Str) (expr: Ast))
 
 (defn as-simple-let (f: Ast) -> (Maybe SimpleLet)
@@ -344,8 +271,82 @@
     (ParenNode (Cons head (Cons name-ast _)) sp) (ParenNode (Cons head (Cons name-ast (Cons new-expr (Nil)))) sp)
     _ orig))
 
+(defn make-simple-let (name: Str) (expr: Ast) -> Ast
+  (ParenNode
+    (Cons (SymNode "let" (dummy-span))
+      (Cons (SymNode name (dummy-span))
+        (Cons expr (Nil))))
+    (dummy-span)))
+
 ; ---------------------------------------------------------------------------
-; Lifting a captured `fn` into a fresh top-level `defn __lamN`.
+; Env / closure AST builders.
+
+(defn str-list-len (xs: (List Str)) -> Int
+  (match xs
+    (Nil) 0
+    (Cons _ rest) (+ 1 (str-list-len rest))))
+
+(defn make-env-new (n: Int) -> Ast
+  (ParenNode
+    (Cons (SymNode "mn-env-new" (dummy-span))
+      (Cons (IntNode n (dummy-span)) (Nil)))
+    (dummy-span)))
+
+(defn make-env-set (i: Int) (name: Str) -> Ast
+  (ParenNode
+    (Cons (SymNode "mn-env-set" (dummy-span))
+      (Cons (SymNode "__menv" (dummy-span))
+        (Cons (IntNode i (dummy-span))
+          (Cons (SymNode name (dummy-span)) (Nil)))))
+    (dummy-span)))
+
+(defn env-set-lets (free-vars: (List Str)) (i: Int) -> (List Ast)
+  (match free-vars
+    (Nil) (Nil)
+    (Cons name rest)
+      (Cons (make-simple-let "__menv" (make-env-set i name)) (env-set-lets rest (+ i 1)))))
+
+; Zero captures stay the static empty env. One or more captures allocate an
+; N-slot record and store each free var. The `do` is an expression, so it can
+; sit in the env argument of `mn-closure-new`.
+(defn make-env-expr (free-vars: (List Str)) -> Ast
+  (match free-vars
+    (Nil) (ParenNode (Cons (SymNode "mn-env-0" (dummy-span)) (Nil)) (dummy-span))
+    _ (ParenNode
+        (Cons (SymNode "do" (dummy-span))
+          (Cons (make-simple-let "__menv" (make-env-new (str-list-len free-vars)))
+            (append-list (env-set-lets free-vars 0)
+              (Cons (SymNode "__menv" (dummy-span)) (Nil)))))
+        (dummy-span))))
+
+(defn make-closure-create (lam-name: Str) (free-vars: (List Str)) -> Ast
+  (ParenNode
+    (Cons (SymNode "mn-closure-new" (dummy-span))
+      (Cons (SymNode lam-name (dummy-span))
+        (Cons (make-env-expr free-vars) (Nil))))
+    (dummy-span)))
+
+(defn make-env-get (env-name: Str) (i: Int) -> Ast
+  (ParenNode
+    (Cons (SymNode "mn-env-get" (dummy-span))
+      (Cons (SymNode env-name (dummy-span))
+        (Cons (IntNode i (dummy-span)) (Nil))))
+    (dummy-span)))
+
+; `(do (let c0 (mn-env-get env 0)) … body)` — or just `body` when no frees.
+(defn wrap-env-binds (free-vars: (List Str)) (body: Ast) -> Ast
+  (match free-vars
+    (Nil) body
+    _ (ParenNode (Cons (SymNode "do" (dummy-span)) (append-list (env-bind-lets free-vars 0) (Cons body (Nil)))) (dummy-span))))
+
+(defn env-bind-lets (free-vars: (List Str)) (i: Int) -> (List Ast)
+  (match free-vars
+    (Nil) (Nil)
+    (Cons name rest)
+      (Cons (make-simple-let name (make-env-get "env" i)) (env-bind-lets rest (+ i 1)))))
+
+; ---------------------------------------------------------------------------
+; Lifting.
 
 (defn free-vars-in-scope-order (scope: (List Str)) (used: (List Str)) (exclude: (List Str)) -> (List Str)
   (match scope
@@ -363,14 +364,15 @@
     (set! counter (+ n 1))
     (str-concat "__lam" (show n))))
 
-(defrec LiftOut (extra: (List Ast)) (subst: (Map Str LiftedInfo)))
-(defn lift-out-extra (r: LiftOut) -> (List Ast) (match r (LiftOut e _) e))
-(defn lift-out-subst (r: LiftOut) -> (Map Str LiftedInfo) (match r (LiftOut _ s) s))
+(defrec LiftOut (extra: (List Ast)) (subst: (Map Str LiftedInfo)) (lam-name: Str) (free-vars: (List Str)))
+(defn lift-out-extra (r: LiftOut) -> (List Ast) (match r (LiftOut e _ _ _) e))
+(defn lift-out-subst (r: LiftOut) -> (Map Str LiftedInfo) (match r (LiftOut _ s _ _) s))
+(defn lift-out-lam-name (r: LiftOut) -> Str (match r (LiftOut _ _ n _) n))
+(defn lift-out-free-vars (r: LiftOut) -> (List Str) (match r (LiftOut _ _ _ f) f))
 
-; `name`'s binding (`(let name (fn params-ast body-expr))`) is dropped
-; entirely; `lift-out-subst` records how to rewrite `name`'s call sites
-; (in the caller's remaining sequence) into a call to the new `defn`.
-(defn lift-lambda (name: Str) (params-ast: Ast) (body-expr: Ast) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> LiftOut
+; Build the lifted `defn __lamN (env: Int) (params…) -> Int body`.
+; If `bind-name` is Some, record it in subst for mn-apply-1 rewriting.
+(defn lift-lambda (bind-name: (Maybe Str)) (params-ast: Ast) (body-expr: Ast) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> LiftOut
   (do
     (let fn-params (fn-param-elems params-ast))
     (let param-names (fn-param-names fn-params))
@@ -379,7 +381,8 @@
     (let inner-scope (append-str-list free-vars param-names))
     (let converted (close-expr body-expr inner-scope subst counter))
     (let lam-name (fresh-lam-name counter))
-    (let new-params (append-list (int-params-for free-vars) (int-params-for param-names)))
+    (let new-params (Cons (int-param-for "env") (int-params-for param-names)))
+    (let wrapped-body (wrap-env-binds free-vars (expr-result-ast converted)))
     (let defn-form
       (ParenNode
         (Cons (SymNode "defn" (dummy-span))
@@ -387,16 +390,18 @@
             (append-list new-params
               (Cons (SymNode "->" (dummy-span))
                 (Cons (SymNode "Int" (dummy-span))
-                  (Cons (expr-result-ast converted) (Nil)))))))
+                  (Cons wrapped-body (Nil)))))))
         (dummy-span)))
-    (LiftOut (Cons defn-form (expr-result-extra converted)) (map-set subst name (LiftedInfo lam-name free-vars)))))
+    (let new-subst (lift-bind-subst subst bind-name lam-name free-vars))
+    (LiftOut (Cons defn-form (expr-result-extra converted)) new-subst lam-name free-vars)))
+
+(defn lift-bind-subst (subst: (Map Str LiftedInfo)) (bind-name: (Maybe Str)) (lam-name: Str) (free-vars: (List Str)) -> (Map Str LiftedInfo)
+  (match bind-name
+    (None) subst
+    (Some name) (map-set subst name (LiftedInfo lam-name free-vars))))
 
 ; ---------------------------------------------------------------------------
-; `close-expr`: convert a single expression (a `fn`'s one-form body, or
-; any other sub-expression) — recurses into `do` (a genuine sub-sequence,
-; per `emit/lower.mnd`'s `lower-sequence`/`lower-named` treatment of
-; `do`), otherwise applies `subst` structurally and stops (see header
-; comment's "Nesting" limitation).
+; close-expr / close-body
 
 (defrec ExprResult (ast: Ast) (extra: (List Ast)))
 (defn expr-result-ast (r: ExprResult) -> Ast (match r (ExprResult a _) a))
@@ -410,17 +415,208 @@
 (defn close-expr-head (head: Ast) (rest: (List Ast)) (sp: Span) (orig: Ast) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprResult
   (if (is-sym head "do")
     (close-expr-do rest sp scope subst counter)
-    (ExprResult (apply-subst-ast orig subst) (Nil))))
+    (if (or (is-sym head "fn") (is-sym head "lambda"))
+      (close-expr-lambda rest scope subst counter)
+      (if (is-sym head "match")
+        (close-expr-match rest sp scope subst counter)
+        (if (is-sym head "let")
+          (close-expr-let rest sp orig scope subst counter)
+          (if (is-sym head "loop")
+            (close-expr-loop rest sp scope subst counter)
+            (close-expr-app head rest sp scope subst counter)))))))
+
+(defn close-expr-lambda (rest: (List Ast)) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprResult
+  (match rest
+    (Cons params-ast (Cons body-expr _))
+      (do
+        (let lifted (lift-lambda (None) params-ast body-expr scope subst counter))
+        (ExprResult
+          (make-closure-create (lift-out-lam-name lifted) (lift-out-free-vars lifted))
+          (lift-out-extra lifted)))
+    _ (ExprResult (ParenNode (Cons (SymNode "fn" (dummy-span)) rest) (dummy-span)) (Nil))))
 
 (defn close-expr-do (rest: (List Ast)) (sp: Span) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprResult
   (do
     (let result (close-body rest scope subst counter))
     (ExprResult (ParenNode (Cons (SymNode "do" sp) (body-result-forms result)) sp) (body-result-extra result))))
 
-; ---------------------------------------------------------------------------
-; `close-body`: convert a `defn`/`do` body — a `(List Ast)` sequence where
-; a bare `(let n e)` extends the scope (and, if `e` is a `fn`, is lifted
-; instead of kept) for every sibling form that follows.
+(defrec ExprListResult (asts: (List Ast)) (extra: (List Ast)))
+(defn expr-list-asts (r: ExprListResult) -> (List Ast) (match r (ExprListResult a _) a))
+(defn expr-list-extra (r: ExprListResult) -> (List Ast) (match r (ExprListResult _ e) e))
+
+; Pattern binders that a lambda inside the clause must capture.
+; `_` and uppercase constructors bind nothing; a lowercase symbol binds;
+; `(Ctor p …)` recurses into payloads. Patterns are not closed as expressions.
+(defn is-upper-name (s: Str) -> Bool
+  (let b (str-byte s 0))
+  (and (>= b 65) (<= b 90)))
+
+(defn pat-binders (pat: Ast) -> (List Str)
+  (match pat
+    (SymNode n _)
+      (if (or (= n "_") (is-upper-name n)) (Nil) (Cons n (Nil)))
+    (ParenNode (Cons _ payloads) _) (pat-binders-list payloads)
+    (BracketNode (Cons _ payloads) _) (pat-binders-list payloads)
+    _ (Nil)))
+
+(defn pat-binders-list (ps: (List Ast)) -> (List Str)
+  (match ps
+    (Nil) (Nil)
+    (Cons p rest) (append-str-list (pat-binders p) (pat-binders-list rest))))
+
+(defrec ClosedClauses (asts: (List Ast)) (extra: (List Ast)))
+(defn closed-clause-asts (c: ClosedClauses) -> (List Ast) (match c (ClosedClauses a _) a))
+(defn closed-clause-extra (c: ClosedClauses) -> (List Ast) (match c (ClosedClauses _ e) e))
+
+(defn close-match-clauses (clauses: (List Ast)) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ClosedClauses
+  (match clauses
+    (Nil) (ClosedClauses (Nil) (Nil))
+    (Cons pat (Cons body rest))
+      (do
+        (let binders (pat-binders pat))
+        (let br (close-expr body (append-str-list binders scope) subst counter))
+        (let rr (close-match-clauses rest scope subst counter))
+        (ClosedClauses
+          (Cons pat (Cons (expr-result-ast br) (closed-clause-asts rr)))
+          (append-list (expr-result-extra br) (closed-clause-extra rr))))
+    (Cons lone (Nil))
+      (do
+        (let er (close-expr lone scope subst counter))
+        (ClosedClauses (Cons (expr-result-ast er) (Nil)) (expr-result-extra er)))))
+
+(defn close-expr-match (rest: (List Ast)) (sp: Span) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprResult
+  (match rest
+    (Cons scrut clauses)
+      (do
+        (let sr (close-expr scrut scope subst counter))
+        (let cr (close-match-clauses clauses scope subst counter))
+        (ExprResult
+          (ParenNode
+            (Cons (SymNode "match" sp)
+              (Cons (expr-result-ast sr) (closed-clause-asts cr)))
+            sp)
+          (append-list (expr-result-extra sr) (closed-clause-extra cr))))
+    (Nil) (ExprResult (ParenNode (Cons (SymNode "match" sp) (Nil)) sp) (Nil))))
+
+; `(let name expr body…)` — `name` is in scope for the body, including
+; lambdas nested there. The binding expression itself stays in the outer scope.
+(defn close-expr-let (rest: (List Ast)) (sp: Span) (orig: Ast) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprResult
+  (match rest
+    (Cons name-ast (Cons expr-ast body))
+      (match (sym-str name-ast)
+        (Some n) (close-expr-let-named n name-ast expr-ast body sp scope subst counter)
+        (None) (close-expr-app (SymNode "let" sp) rest sp scope subst counter))
+    _ (close-expr-app (SymNode "let" sp) rest sp scope subst counter)))
+
+(defn close-expr-let-named (n: Str) (name-ast: Ast) (expr-ast: Ast) (body: (List Ast)) (sp: Span) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprResult
+  (do
+    (let er (close-expr expr-ast scope subst counter))
+    (let br (close-expr-list body (Cons n scope) subst counter))
+    (ExprResult
+      (ParenNode
+        (Cons (SymNode "let" sp)
+          (Cons name-ast
+            (Cons (expr-result-ast er) (expr-list-asts br))))
+        sp)
+      (append-list (expr-result-extra er) (expr-list-extra br)))))
+
+(defn binding-list-elems-close (ast: Ast) -> (Maybe (List Ast))
+  (match ast
+    (ParenNode elems _) (Some elems)
+    (BracketNode elems _) (Some elems)
+    _ (None)))
+
+(defn loop-binding-names (pairs: (List Ast)) -> (List Str)
+  (match pairs
+    (Nil) (Nil)
+    (Cons pair rest)
+      (match pair
+        (ParenNode (Cons name-ast _) _)
+          (match (sym-str name-ast)
+            (Some n) (Cons n (loop-binding-names rest))
+            (None) (loop-binding-names rest))
+        (BracketNode (Cons name-ast _) _)
+          (match (sym-str name-ast)
+            (Some n) (Cons n (loop-binding-names rest))
+            (None) (loop-binding-names rest))
+        _ (loop-binding-names rest))))
+
+(defn close-loop-pairs (pairs: (List Ast)) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprListResult
+  (match pairs
+    (Nil) (ExprListResult (Nil) (Nil))
+    (Cons pair rest) (close-loop-pair pair rest scope subst counter)))
+
+(defn close-loop-pair (pair: Ast) (rest: (List Ast)) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprListResult
+  (match pair
+    (ParenNode (Cons name-ast (Cons init (Nil))) psp)
+      (close-loop-pair-rebuild name-ast init psp true rest scope subst counter)
+    (BracketNode (Cons name-ast (Cons init (Nil))) psp)
+      (close-loop-pair-rebuild name-ast init psp false rest scope subst counter)
+    _ (do
+        (let rr (close-loop-pairs rest scope subst counter))
+        (ExprListResult (Cons pair (expr-list-asts rr)) (expr-list-extra rr)))))
+
+(defn close-loop-pair-rebuild (name-ast: Ast) (init: Ast) (psp: Span) (as-paren: Bool) (rest: (List Ast)) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprListResult
+  (do
+    (let ir (close-expr init scope subst counter))
+    (let rebuilt
+      (if as-paren
+        (ParenNode (Cons name-ast (Cons (expr-result-ast ir) (Nil))) psp)
+        (BracketNode (Cons name-ast (Cons (expr-result-ast ir) (Nil))) psp)))
+    (let rr (close-loop-pairs rest scope subst counter))
+    (ExprListResult
+      (Cons rebuilt (expr-list-asts rr))
+      (append-list (expr-result-extra ir) (expr-list-extra rr)))))
+
+(defn rebuild-binding-list (orig: Ast) (pairs: (List Ast)) -> Ast
+  (match orig
+    (BracketNode _ sp) (BracketNode pairs sp)
+    (ParenNode _ sp) (ParenNode pairs sp)
+    _ orig))
+
+; Inits are closed in the outer scope (parallel assignment). The body sees
+; every loop name, so a lambda inside the body can capture them.
+(defn close-expr-loop (rest: (List Ast)) (sp: Span) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprResult
+  (match rest
+    (Cons bindings-ast (Cons body (Nil)))
+      (match (binding-list-elems-close bindings-ast)
+        (Some pairs) (close-expr-loop-pairs bindings-ast pairs body sp scope subst counter)
+        (None) (close-expr-app (SymNode "loop" sp) rest sp scope subst counter))
+    _ (close-expr-app (SymNode "loop" sp) rest sp scope subst counter)))
+
+(defn close-expr-loop-pairs (bindings-ast: Ast) (pairs: (List Ast)) (body: Ast) (sp: Span) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprResult
+  (do
+    (let names (loop-binding-names pairs))
+    (let inits (close-loop-pairs pairs scope subst counter))
+    (let br (close-expr body (append-str-list names scope) subst counter))
+    (ExprResult
+      (ParenNode
+        (Cons (SymNode "loop" sp)
+          (Cons (rebuild-binding-list bindings-ast (expr-list-asts inits))
+            (Cons (expr-result-ast br) (Nil))))
+        sp)
+      (append-list (expr-list-extra inits) (expr-result-extra br)))))
+
+; Recurse into application head/args, then apply subst (for mn-apply-1).
+(defn close-expr-app (head: Ast) (rest: (List Ast)) (sp: Span) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprResult
+  (do
+    (let head-r (close-expr head scope subst counter))
+    (let args-r (close-expr-list rest scope subst counter))
+    (let rebuilt (ParenNode (Cons (expr-result-ast head-r) (expr-list-asts args-r)) sp))
+    (ExprResult
+      (apply-subst-ast rebuilt subst)
+      (append-list (expr-result-extra head-r) (expr-list-extra args-r)))))
+
+(defn close-expr-list (elems: (List Ast)) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprListResult
+  (match elems
+    (Nil) (ExprListResult (Nil) (Nil))
+    (Cons e rest)
+      (do
+        (let er (close-expr e scope subst counter))
+        (let rr (close-expr-list rest scope subst counter))
+        (ExprListResult
+          (Cons (expr-result-ast er) (expr-list-asts rr))
+          (append-list (expr-result-extra er) (expr-list-extra rr))))))
 
 (defrec BodyResult (forms: (List Ast)) (extra: (List Ast)))
 (defn body-result-forms (r: BodyResult) -> (List Ast) (match r (BodyResult f _) f))
@@ -440,11 +636,16 @@
   (match lf
     (LetFn name params-ast body-expr) (close-body-liftfn-do name params-ast body-expr rest scope subst counter)))
 
+; Keep `(let name (mn-closure-new …))` and rewrite later call sites.
 (defn close-body-liftfn-do (name: Str) (params-ast: Ast) (body-expr: Ast) (rest: (List Ast)) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> BodyResult
   (do
-    (let lifted (lift-lambda name params-ast body-expr scope subst counter))
-    (let rest-result (close-body rest scope (lift-out-subst lifted) counter))
-    (BodyResult (body-result-forms rest-result) (append-list (lift-out-extra lifted) (body-result-extra rest-result)))))
+    (let lifted (lift-lambda (Some name) params-ast body-expr scope subst counter))
+    (let create (make-closure-create (lift-out-lam-name lifted) (lift-out-free-vars lifted)))
+    (let new-scope (Cons name scope))
+    (let rest-result (close-body rest new-scope (lift-out-subst lifted) counter))
+    (BodyResult
+      (Cons (make-simple-let name create) (body-result-forms rest-result))
+      (append-list (lift-out-extra lifted) (body-result-extra rest-result)))))
 
 (defn close-body-plain (f: Ast) (rest: (List Ast)) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> BodyResult
   (match (as-simple-let f)
@@ -473,9 +674,7 @@
       (append-list (expr-result-extra converted) (body-result-extra rest-result)))))
 
 ; ---------------------------------------------------------------------------
-; Top-level driver: every `defn` (through an optional `pub` wrapper) has
-; its body run through `close-body`; every other top-level form (another
-; declaration, or a bare top-level expression) passes through unchanged.
+; Top-level driver.
 
 (defrec CloseResult (form: Ast) (extra: (List Ast)))
 

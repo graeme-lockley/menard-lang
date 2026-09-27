@@ -1,0 +1,10 @@
+; Slice 3D oracle: Ref counter; exit 55.
+
+(defn main -> Int
+  (let c (ref 0))
+  (loop ((i 0))
+    (if (> i 10)
+      (deref c)
+      (do
+        (set! c (+ (deref c) i))
+        (recur (+ i 1))))))

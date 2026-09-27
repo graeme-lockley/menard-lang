@@ -47,6 +47,11 @@ const RUNTIME_LIB_SRCS = [
   "runtime/src/panic.c",
   "runtime/src/print.c",
   "runtime/src/shadow.c",
+  "runtime/src/variants.c",
+  "runtime/src/str.c",
+  "runtime/src/map.c",
+  "runtime/src/closure.c",
+  "runtime/src/io.c",
 ].map(abs);
 const RUNTIME_INCLUDE = abs("runtime/include");
 

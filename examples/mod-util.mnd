@@ -1,0 +1,5 @@
+; Slice 3G — multi-module emit helper.
+; Imported by `mod-main.mnd`.
+
+(pub defn double (n: Int) -> Int
+  (* n 2))

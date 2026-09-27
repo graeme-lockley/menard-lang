@@ -1,0 +1,9 @@
+; Slice 3F oracle: Map set/get/size → 12.
+
+(defn main -> Int
+  (let m0 (map-new))
+  (let m1 (map-set m0 1 10))
+  (let m2 (map-set m1 2 20))
+  (match (map-get m2 1)
+    (Some v) (+ v (map-size m2))
+    (None) 0))

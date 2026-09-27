@@ -1,13 +1,13 @@
 /*
- * Menard runtime — C11, phase 2.
+ * Menard runtime — C11, phase 2/3.
  *
  * Every Menard value occupies one 64-bit word (spec §2.2): a tagged
  * immediate (odd) or a pointer to a heap or static object (even, 8-byte
  * aligned). `MnWord` is that word.
  *
- * Phase 2 is a leaking bump allocator — see spec §5 ("Phase 2 deliberately
- * leaks") and `runtime/README.md`. No collector runs yet; `mn_alloc` never
- * frees and never moves anything.
+ * Phase 2/3 uses a leaking bump allocator — see spec §5 ("Phase 2
+ * deliberately leaks") and `runtime/README.md`. No collector runs yet;
+ * `mn_alloc` never frees and never moves anything.
  */
 #ifndef MENARD_RUNTIME_H
 #define MENARD_RUNTIME_H
@@ -26,9 +26,28 @@ typedef uint64_t MnWord;
  * The empty word — 0. Not a reference to anything; the only even word that
  * is not the address of an object or a function (spec §2.2, "the empty
  * word"). `mn_alloc` zeroes every body it hands out, so an unwritten slot
- * always reads as this.
+ * always reads as this — after the shape header is written.
  */
 #define MN_EMPTY ((MnWord)0)
+
+/*
+ * Layout kinds (spec §2.2.1): how the collector would read the object.
+ * Phase 3 stores these in shape descriptors; the collector itself is
+ * Phase 4.
+ */
+#define MN_LAYOUT_ORDINARY 0
+#define MN_LAYOUT_CLOSURE 1
+#define MN_LAYOUT_BYTES 2
+
+/*
+ * Static shape descriptor — one per constructor (spec §2.2.1). The
+ * object's first word is a pointer to one of these.
+ */
+typedef struct MnShape {
+  int32_t tag;    /* constructor tag id */
+  int32_t nbytes; /* total object size including the header word */
+  int32_t layout; /* MN_LAYOUT_ORDINARY / CLOSURE / BYTES */
+} MnShape;
 
 /*
  * `Int` is 63-bit signed, tagged in the low bit: t(v) = (v << 1) | 1, held
@@ -47,24 +66,39 @@ static inline int64_t mn_word_to_int(MnWord w) {
   return ((int64_t)w) >> 1;
 }
 
+/*
+ * Bool / Unit immediates (spec §2.2: tagged immediates; bit patterns left
+ * unspecified). Int already occupies every odd residue via t(v)=(v<<1)|1,
+ * so Bool/Unit share the OCaml-style type-erased encodings:
+ *   false = t(0) = 1, true = t(1) = 3, Unit = t(0) = 1.
+ * The type system keeps them apart; the host never models tags.
+ */
+#define MN_FALSE ((MnWord)1)
+#define MN_TRUE ((MnWord)3)
+#define MN_UNIT ((MnWord)1)
+
 /* Odd => immediate (spec invariant 1); even => pointer (invariant 2). */
 static inline int mn_is_immediate(MnWord w) {
   return (int)(w & (MnWord)1);
 }
 
 /*
- * mn_alloc — allocate `size` bytes, 8-byte aligned, zeroed.
+ * mn_alloc — allocate `size` bytes, 8-byte aligned, zeroed, then store
+ * `shape` at offset 0.
  *
- * Phase 2's implementation (`runtime/src/alloc.c`) bump-allocates from a
- * single reserved arena and never frees. `shape` is accepted for ABI
- * compatibility with the eventual collector (spec §4.4:
- * `mn_alloc(size, shape)`, where `shape` is a pointer to the object's
- * static shape descriptor) but phase 2 does not dereference it.
+ * `size` includes the header word (8 bytes) plus the payload. The
+ * returned pointer is the object itself (even, 8-byte aligned) — slot 0
+ * holds the shape pointer; payload slots begin at offset 8.
  *
  * Panics (does not return NULL) if the arena is exhausted or `size` is
- * negative.
+ * negative or smaller than one header word.
  */
 void *mn_alloc(int64_t size, void *shape);
+
+/* Load the shape pointer stored at offset 0 of an object. */
+static inline MnShape *mn_obj_shape(void *ptr) {
+  return *(MnShape **)ptr;
+}
 
 /*
  * mn_panic — the runtime's terminal failure path. Writes `message` to fd 2
@@ -77,43 +111,95 @@ _Noreturn void mn_panic(const char *message);
  * mn_write_stdout — write `n` raw bytes to fd 1 (`runtime/src/print.c`).
  * fd 1 carries only the compiled program's own output (spec §2.16) —
  * never a panic message, which always goes through `mn_panic` to fd 2
- * instead. Not yet called by any emitted code (slice 2C adds the
- * runtime side of `print`/`println` lowering ahead of the lowerer that
- * will call it); declaring it here now is enough for `clang` to link a
- * program against the runtime without a missing-symbol error later.
+ * instead.
  */
 void mn_write_stdout(const uint8_t *p, size_t n);
 
 /*
  * mn_write_stderr — write `n` raw bytes to fd 2 (`runtime/src/print.c`),
- * mirroring `mn_write_stdout`'s fd-1 loop exactly. Used by `(write 2 s)`
- * once `src/emit/lower.mnd` lowers it — fd 2 is otherwise `mn_panic`'s
- * own, disjoint output path (see `mn_write_stdout`'s comment above); a
- * compiled program's own explicit `(write 2 ...)` calls are the one
- * legitimate other fd-2 writer, and go through this function, never
- * `mn_panic`.
+ * mirroring `mn_write_stdout`'s fd-1 loop exactly.
  */
 void mn_write_stderr(const uint8_t *p, size_t n);
 
 /*
  * mn_print_i64 — write `v`'s decimal representation (no trailing
- * newline) to fd 1 via `mn_write_stdout`. A small helper for whatever
- * later slice lowers `show`/`print` on `Int` to a direct runtime call
- * instead of a full `show`-then-`write` sequence; unused for now, same
- * rationale as `mn_write_stdout` above.
+ * newline) to fd 1 via `mn_write_stdout`.
  */
 void mn_print_i64(int64_t v);
 
 /*
  * mn_shadow_push / mn_shadow_pop — no-op stand-ins for the shadow-stack
- * rooting ABI (spec §4.4's `mn_root_push`/`mn_root_pop`), reserved for
- * slice 2E's collector (`runtime/src/shadow.c`). Phase 2's allocator
- * (`runtime/src/alloc.c`) never collects, so nothing needs rooting yet;
- * these exist only so emitted code can start carrying push/pop pairs
- * around allocation sites before the collector that reads them exists.
+ * rooting ABI (spec §4.4's `mn_root_push`/`mn_root_pop`).
  */
 void mn_shadow_push(void *slot);
 void mn_shadow_pop(void);
+
+/*
+ * Builtin List / Maybe / Result constructors and match helpers
+ * (`runtime/src/variants.c`, Phase 3 slice C). All values are MnWord.
+ */
+MnWord mn_nil(void);
+MnWord mn_cons(MnWord head, MnWord tail);
+MnWord mn_none(void);
+MnWord mn_some(MnWord x);
+MnWord mn_ok(MnWord x);
+MnWord mn_err(MnWord e);
+int64_t mn_tag(MnWord obj);
+MnWord mn_slot(MnWord obj, int64_t i);
+/* User nominals (slice H): allocate + fill ordinary heap objects. */
+MnWord mn_new(int64_t tag, int64_t nslots);
+MnWord mn_set_slot(MnWord obj, int64_t i, MnWord v);
+
+/* Str / StringBuffer / Ref (`runtime/src/str.c`, Phase 3 slice D). */
+MnWord mn_str_new(int64_t ptr_bits, int64_t len);
+MnWord mn_str_concat(MnWord a, MnWord b);
+MnWord mn_str_byte_length(MnWord s);
+MnWord mn_str_byte(MnWord s, MnWord i_tagged);
+MnWord mn_str_slice(MnWord s, MnWord start_t, MnWord end_t);
+void mn_print_str(MnWord s);
+MnWord mn_ref_new(MnWord v);
+MnWord mn_ref_deref(MnWord r);
+MnWord mn_ref_set(MnWord r, MnWord v);
+MnWord mn_sb_new(void);
+MnWord mn_sb_append(MnWord sb, MnWord s);
+MnWord mn_sb_append_byte(MnWord sb, MnWord b_tagged);
+MnWord mn_sb_take_str(MnWord sb);
+
+/* Loose `show` for diagnostics (Phase 3 slice H) — Int decimal or #<obj>. */
+MnWord mn_show(MnWord v);
+
+/* Persistent Map (`runtime/src/map.c`, Phase 3 slice F). */
+MnWord mn_map_new(void);
+MnWord mn_map_set(MnWord m, MnWord k, MnWord v);
+MnWord mn_map_get(MnWord m, MnWord k); /* → (Maybe v) as Some/None */
+MnWord mn_map_has(MnWord m, MnWord k); /* → Bool */
+MnWord mn_map_size(MnWord m);          /* → Int */
+
+/* Heap closures (`runtime/src/closure.c`, Phase 3 slice E). */
+MnWord mn_env_0(void);
+MnWord mn_env_1(MnWord a);
+MnWord mn_env_new(MnWord n_tagged);
+MnWord mn_env_set(MnWord env, MnWord i_tagged, MnWord v);
+MnWord mn_env_get(MnWord env, MnWord i_tagged);
+MnWord mn_closure_new(MnWord code_bits, MnWord env);
+MnWord mn_closure_bare(MnWord code_bits); /* top-level fn as value; apply without env */
+MnWord mn_ctor_closure(MnWord tag_raw, MnWord arity_raw); /* constructor as Fn value */
+MnWord mn_apply_0(MnWord clo);
+MnWord mn_apply_1(MnWord clo, MnWord a0);
+MnWord mn_apply_2(MnWord clo, MnWord a0, MnWord a1);
+
+/*
+ * Tier-0 I/O (`runtime/src/io.c`, Phase 3 slice G). Emitted `@main` is
+ * `i32(i32 argc, ptr argv)` and must call `mn_init` before any of the
+ * arg / file helpers. `mn_read_file` / `mn_write_file` return
+ * `(Result … IoError)` via `mn_ok` / `mn_err`.
+ */
+void mn_init(int argc, char **argv);
+MnWord mn_arg_count(void);
+MnWord mn_arg(MnWord i_tagged); /* → Str; panics if out of range */
+MnWord mn_read_file(MnWord path_str); /* → (Result Str IoError) */
+MnWord mn_write_file(MnWord path_str, MnWord content_str); /* → (Result Unit IoError) */
+_Noreturn void mn_exit(MnWord code_tagged);
 
 #ifdef __cplusplus
 }

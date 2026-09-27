@@ -1,0 +1,396 @@
+; Import-graph flatten for emit/check (Phase 3 slice G/H).
+;
+; Loads the entry module and its transitive `(import "…")` closure through
+; `read-file`, desugars each module, strips import forms, unwraps `pub`, and
+; concatenates bodies in dependency-first order into one flat `(List Ast)`
+; suitable for the single-module typecheck/lower path.
+;
+; Private top-level bindings (`defn` / `defrec` / `variant` / `alias`, plus
+; constructors of private variants) are renamed per module to `__mN_name` so
+; helpers that collide across `src/` (e.g. `is-sym`) do not smash each other
+; after flatten. Pub names stay as exported; a second non-alias pub binding of
+; the same name is an error. Pub `alias` re-exports (common for `Ast`/`Span`)
+; are allowed to repeat.
+
+(import "../reader/ast.mnd")
+(import "../reader/read.mnd")
+(import "../reader/casing.mnd")
+(import "../desugar/desugar.mnd")
+(import "../util/result.mnd")
+
+; Re-export shim — see `emit/bitcode.mnd` / `reader/casing.mnd`.
+(pub alias Ast Ast)
+
+(defn dummy-span -> Span (Span 0 0))
+
+(defn sym-str (a: Ast) -> (Maybe Str)
+  (match a (SymNode n _) (Some n) _ (None)))
+
+(defn is-sym (a: Ast) (name: Str) -> Bool
+  (match (sym-str a) (Some n) (= n name) (None) false))
+
+(defn append-asts (xs: (List Ast)) (ys: (List Ast)) -> (List Ast)
+  (match xs (Nil) ys (Cons x rest) (Cons x (append-asts rest ys))))
+
+(defn str-byte-at (s: Str) (i: Int) -> Int
+  (str-byte s i))
+
+; Last `/` index, or -1 if none.
+(defn last-slash-from (s: Str) (i: Int) (acc: Int) -> Int
+  (if (< i 0)
+    acc
+    (if (= (str-byte-at s i) 47)
+      i
+      (last-slash-from s (- i 1) acc))))
+
+(defn path-dirname (path: Str) -> Str
+  (do
+    (let n (str-byte-length path))
+    (let slash (last-slash-from path (- n 1) -1))
+    (if (< slash 0)
+      "."
+      (if (= slash 0) "/" (str-slice path 0 slash)))))
+
+(defn path-is-abs (spec: Str) -> Bool
+  (and (> (str-byte-length spec) 0) (= (str-byte-at spec 0) 47)))
+
+(defn path-join (dir: Str) (spec: Str) -> Str
+  (if (path-is-abs spec)
+    spec
+    (if (or (= dir ".") (= dir ""))
+      spec
+      (str-concat dir (str-concat "/" spec)))))
+
+; Normalize `.` / `..` segments (no symlink resolution).
+(defn normalize-push (acc: (List Str)) (seg: Str) -> (List Str)
+  (if (= seg ".")
+    acc
+    (if (= seg "..")
+      (match acc (Nil) (Nil) (Cons _ rest) rest)
+      (Cons seg acc))))
+
+(defn split-segments-from (s: Str) (i: Int) (n: Int) (start: Int) (acc: (List Str)) -> (List Str)
+  (if (>= i n)
+    (if (= start n) acc (Cons (str-slice s start (- n start)) acc))
+    (if (= (str-byte-at s i) 47)
+      (split-segments-from s (+ i 1) n (+ i 1)
+        (if (= start i) acc (normalize-push acc (str-slice s start (- i start)))))
+      (split-segments-from s (+ i 1) n start acc))))
+
+(defn reverse-strs (xs: (List Str)) (acc: (List Str)) -> (List Str)
+  (match xs (Nil) acc (Cons x rest) (reverse-strs rest (Cons x acc))))
+
+(defn join-segments (xs: (List Str)) (abs: Bool) -> Str
+  (match xs
+    (Nil) (if abs "/" ".")
+    (Cons h rest) (join-segments-cons h rest abs)))
+
+(defn join-segments-cons (h: Str) (rest: (List Str)) (abs: Bool) -> Str
+  (match rest
+    (Nil) (if abs (str-concat "/" h) h)
+    (Cons n more)
+      (str-concat (if abs (str-concat "/" h) h)
+        (str-concat "/" (join-segments-cons n more false)))))
+
+(defn path-normalize (path: Str) -> Str
+  (do
+    (let abs (path-is-abs path))
+    (let n (str-byte-length path))
+    (let segs-rev (split-segments-from path 0 n 0 (Nil)))
+    (let segs (reverse-strs segs-rev (Nil)))
+    (join-segments segs abs)))
+
+(defn resolve-import-path (from-path: Str) (spec: Str) -> Str
+  (path-normalize (path-join (path-dirname from-path) spec)))
+
+(defn parse-import-spec (form: Ast) -> (Maybe Str)
+  (match form
+    (ParenNode (Cons head (Cons spec (Nil))) _)
+      (if (is-sym head "import")
+        (match spec (StrNode s _) (Some s) _ (None))
+        (None))
+    _ (None)))
+
+(defn unwrap-pub-form (form: Ast) -> Ast
+  (match form
+    (ParenNode (Cons head rest) sp)
+      (if (is-sym head "pub")
+        (ParenNode rest sp)
+        form)
+    _ form))
+
+(defn reverse-asts (xs: (List Ast)) (acc: (List Ast)) -> (List Ast)
+  (match xs (Nil) acc (Cons x rest) (reverse-asts rest (Cons x acc))))
+
+(defn strip-imports-and-pub (forms: (List Ast)) (acc: (List Ast)) -> (List Ast)
+  (match forms
+    (Nil) (reverse-asts acc (Nil))
+    (Cons f rest)
+      (match (parse-import-spec f)
+        (Some _) (strip-imports-and-pub rest acc)
+        (None) (strip-imports-and-pub rest (Cons (unwrap-pub-form f) acc)))))
+
+(defn collect-import-specs (forms: (List Ast)) (acc: (List Str)) -> (List Str)
+  (match forms
+    (Nil) (reverse-strs acc (Nil))
+    (Cons f rest)
+      (match (parse-import-spec f)
+        (Some spec) (collect-import-specs rest (Cons spec acc))
+        (None) (collect-import-specs rest acc))))
+
+; ---------------------------------------------------------------------------
+; Private-symbol uniquification (slice H)
+
+(defn decl-name-of (name-part: Ast) -> (Maybe Str)
+  (match name-part
+    (SymNode n _) (Some n)
+    (ParenNode (Cons n-ast _) _) (sym-str n-ast)
+    _ (None)))
+
+(defn push-unique (xs: (List Str)) (x: Str) -> (List Str)
+  (match xs
+    (Nil) (Cons x (Nil))
+    (Cons h rest) (if (= h x) xs (Cons h (push-unique rest x)))))
+
+(defn gather-ctor-names (ctors: (List Ast)) (acc: (List Str)) -> (List Str)
+  (match ctors
+    (Nil) acc
+    (Cons c rest)
+      (match c
+        (ParenNode (Cons cname-ast _) _)
+          (match (sym-str cname-ast)
+            (Some n) (gather-ctor-names rest (push-unique acc n))
+            (None) (gather-ctor-names rest acc))
+        _ (gather-ctor-names rest acc))))
+
+(defn gather-variant-names (name-part: Ast) (ctors: (List Ast)) (acc: (List Str)) -> (List Str)
+  (do
+    (let acc1
+      (match (decl-name-of name-part) (Some n) (push-unique acc n) (None) acc))
+    (gather-ctor-names ctors acc1)))
+
+(defn gather-decl-name-list (head: Str) (rest: (List Ast)) (acc: (List Str)) -> (List Str)
+  (if (= head "defn")
+    (match rest
+      (Cons name-part _) (match (decl-name-of name-part) (Some n) (push-unique acc n) (None) acc)
+      (Nil) acc)
+    (if (= head "alias")
+      (match rest
+        (Cons name-part _) (match (sym-str name-part) (Some n) (push-unique acc n) (None) acc)
+        (Nil) acc)
+      (if (= head "defrec")
+        (match rest
+          (Cons name-part _) (match (decl-name-of name-part) (Some n) (push-unique acc n) (None) acc)
+          (Nil) acc)
+        (if (= head "variant")
+          (match rest
+            (Cons name-part ctors) (gather-variant-names name-part ctors acc)
+            (Nil) acc)
+          acc)))))
+
+(defn gather-form-names (form: Ast) (acc: (List Str)) -> (List Str)
+  (match form
+    (ParenNode (Cons head rest) sp)
+      (if (is-sym head "pub")
+        (gather-form-names (ParenNode rest sp) acc)
+        (if (is-sym head "import")
+          acc
+          (match (sym-str head)
+            (None) acc
+            (Some hn) (gather-decl-name-list hn rest acc))))
+    _ acc))
+
+(defn gather-forms-names (forms: (List Ast)) (acc: (List Str)) -> (List Str)
+  (match forms
+    (Nil) acc
+    (Cons f rest) (gather-forms-names rest (gather-form-names f acc))))
+
+; Only names introduced by `(pub …)` forms.
+(defn gather-pub-form-names (form: Ast) (acc: (List Str)) -> (List Str)
+  (match form
+    (ParenNode (Cons head rest) sp)
+      (if (is-sym head "pub")
+        (gather-form-names (ParenNode rest sp) acc)
+        acc)
+    _ acc))
+
+(defn gather-pub-forms-names (forms: (List Ast)) (acc: (List Str)) -> (List Str)
+  (match forms
+    (Nil) acc
+    (Cons f rest) (gather-pub-forms-names rest (gather-pub-form-names f acc))))
+
+(defn list-to-bool-map (xs: (List Str)) (acc: (Map Str Bool)) -> (Map Str Bool)
+  (match xs
+    (Nil) acc
+    (Cons n rest) (list-to-bool-map rest (map-set acc n true))))
+
+(defn name-is-pub (pub-names: (Map Str Bool)) (name: Str) -> Bool
+  (match (map-get pub-names name) (Some _) true (None) false))
+
+(defn module-prefix (mid: Int) -> Str
+  (str-concat "__m" (str-concat (show mid) "_")))
+
+(defn add-rename (renames: (Map Str Str)) (prefix: Str) (name: Str) -> (Map Str Str)
+  (map-set renames name (str-concat prefix name)))
+
+(defn build-renames-from-list (names: (List Str)) (pub-names: (Map Str Bool)) (prefix: Str) (acc: (Map Str Str)) -> (Map Str Str)
+  (match names
+    (Nil) acc
+    (Cons n rest)
+      ; Never rename `main` — the lowerer looks for the program entry by that name.
+      (if (or (= n "main") (name-is-pub pub-names n))
+        (build-renames-from-list rest pub-names prefix acc)
+        (build-renames-from-list rest pub-names prefix (add-rename acc prefix n)))))
+
+(defn build-renames (forms: (List Ast)) (mid: Int) -> (Map Str Str)
+  (do
+    (let pub-list (gather-pub-forms-names forms (Nil)))
+    (let all-list (gather-forms-names forms (Nil)))
+    (let pub-names (list-to-bool-map pub-list (map-new)))
+    (build-renames-from-list all-list pub-names (module-prefix mid) (map-new))))
+
+(defn rename-lookup (renames: (Map Str Str)) (name: Str) -> Str
+  (match (map-get renames name) (Some n) n (None) name))
+
+; Leave `(quote …)` bodies untouched (symbols are data, not refs).
+(defn rename-paren (xs: (List Ast)) (sp: Span) (renames: (Map Str Str)) -> Ast
+  (match xs
+    (Cons head rest)
+      (if (is-sym head "quote")
+        (ParenNode xs sp)
+        (ParenNode (rename-ast-list xs renames) sp))
+    (Nil) (ParenNode xs sp)))
+
+(defn rename-ast (a: Ast) (renames: (Map Str Str)) -> Ast
+  (match a
+    (SymNode n sp) (SymNode (rename-lookup renames n) sp)
+    (ParenNode xs sp) (rename-paren xs sp renames)
+    (BracketNode xs sp) (BracketNode (rename-ast-list xs renames) sp)
+    _ a))
+
+(defn rename-ast-list (xs: (List Ast)) (renames: (Map Str Str)) -> (List Ast)
+  (match xs
+    (Nil) (Nil)
+    (Cons x rest) (Cons (rename-ast x renames) (rename-ast-list rest renames))))
+
+(defn rename-forms (forms: (List Ast)) (renames: (Map Str Str)) -> (List Ast)
+  (rename-ast-list forms renames))
+
+; Decl head of a top-level form after pub unwrap (`alias` / `defn` / …).
+(defn form-decl-kind (form: Ast) -> Str
+  (match (unwrap-pub-form form)
+    (ParenNode (Cons head _) _)
+      (match (sym-str head) (Some hn) hn (None) "")
+    _ ""))
+
+(defn register-one-export! (exports: (Ref (Map Str Str))) (path: Str) (name: Str) (kind: Str) -> (Result Unit Str)
+  (match (map-get (deref exports) name)
+    (None)
+      (do
+        (set! exports (map-set (deref exports) name path))
+        (Ok ()))
+    (Some prev)
+      (if (= kind "alias")
+        (Ok ())
+        (if (= prev path)
+          (Ok ())
+          (Err
+            (str-concat "duplicate pub export `"
+              (str-concat name
+                (str-concat "` from "
+                  (str-concat path (str-concat " (already exported by " (str-concat prev ")")))))))))))
+
+(defn register-export-names! (exports: (Ref (Map Str Str))) (path: Str) (names: (List Str)) (kind: Str) -> (Result Unit Str)
+  (match names
+    (Nil) (Ok ())
+    (Cons n rest)
+      (result-bind (register-one-export! exports path n kind)
+        (fn (_) (register-export-names! exports path rest kind)))))
+
+(defn register-form-exports! (exports: (Ref (Map Str Str))) (path: Str) (form: Ast) -> (Result Unit Str)
+  (match form
+    (ParenNode (Cons head rest) sp)
+      (if (is-sym head "pub")
+        (do
+          (let inner (ParenNode rest sp))
+          (let kind (form-decl-kind inner))
+          (let names (gather-form-names inner (Nil)))
+          (register-export-names! exports path names kind))
+        (Ok ()))
+    _ (Ok ())))
+
+(defn register-forms-exports! (exports: (Ref (Map Str Str))) (path: Str) (forms: (List Ast)) -> (Result Unit Str)
+  (match forms
+    (Nil) (Ok ())
+    (Cons f rest)
+      (result-bind (register-form-exports! exports path f)
+        (fn (_) (register-forms-exports! exports path rest)))))
+
+; Strip imports/pub, uniquify privates, register pub exports.
+(defn uniquify-module-body (path: Str) (mid: Int) (forms: (List Ast)) (exports: (Ref (Map Str Str))) -> (Result (List Ast) Str)
+  (result-bind (register-forms-exports! exports path forms)
+    (fn (_)
+      (do
+        (let renames (build-renames forms mid))
+        (let stripped (strip-imports-and-pub forms (Nil)))
+        (Ok (rename-forms stripped renames))))))
+
+; ---------------------------------------------------------------------------
+; Module graph load
+
+(defn load-module-into (path: Str) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) -> (Result Unit Str)
+  (match (map-get (deref visited) path)
+    (Some _) (Ok ())
+    (None)
+      (do
+        (set! visited (map-set (deref visited) path true))
+        (match (read-file path)
+          (Err _) (Err (str-concat "module not found: " path))
+          (Ok src) (load-module-source path src visited acc mid exports)))))
+
+(defn load-module-source (path: Str) (src: Str) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) -> (Result Unit Str)
+  (match (read-all src)
+    (Err e) (Err (str-concat "parse error in " path))
+    (Ok forms) (load-module-casing path forms visited acc mid exports)))
+
+(defn load-module-casing (path: Str) (forms: (List Ast)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) -> (Result Unit Str)
+  (match (check-casing-all forms)
+    (Err _) (Err (str-concat "casing error in " path))
+    (Ok _) (load-module-desugar path forms visited acc mid exports)))
+
+(defn load-module-desugar (path: Str) (forms: (List Ast)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) -> (Result Unit Str)
+  (match (desugar-all forms)
+    (Err _) (Err (str-concat "desugar error in " path))
+    (Ok desugared) (load-module-deps path desugared visited acc mid exports)))
+
+(defn load-module-deps (path: Str) (forms: (List Ast)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) -> (Result Unit Str)
+  (do
+    (let specs (collect-import-specs forms (Nil)))
+    (result-bind (load-deps-list path specs visited acc mid exports)
+      (fn (_)
+        (do
+          (let id (deref mid))
+          (set! mid (+ id 1))
+          (result-bind (uniquify-module-body path id forms exports)
+            (fn (body)
+              (do
+                (set! acc (append-asts (deref acc) body))
+                (Ok ())))))))))
+
+(defn load-deps-list (from: Str) (specs: (List Str)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) -> (Result Unit Str)
+  (match specs
+    (Nil) (Ok ())
+    (Cons spec rest)
+      (result-bind (load-module-into (resolve-import-path from spec) visited acc mid exports)
+        (fn (_) (load-deps-list from rest visited acc mid exports)))))
+
+; Public entry: flatten `entry-path` (already read as `src`) into one form list.
+(pub defn flatten-module-graph (entry-path: Str) (src: Str) -> (Result (List Ast) Str)
+  (do
+    (let visited (ref (map-new)))
+    (let acc (ref (Nil)))
+    (let mid (ref 0))
+    (let exports (ref (map-new)))
+    (set! visited (map-set (deref visited) entry-path true))
+    (result-bind (load-module-source entry-path src visited acc mid exports)
+      (fn (_) (Ok (deref acc))))))

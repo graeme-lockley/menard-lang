@@ -15,11 +15,11 @@ RUNTIME_SRCS := $(RUNTIME_DIR)/src/alloc.c $(RUNTIME_DIR)/src/panic.c $(RUNTIME_
 # the fd-1 print helpers + the (stub) shadow-stack rooting ABI. Deliberately
 # excludes smoke_main.c: that file defines its own `main`, which would
 # collide with the `main` an emitted `.bc` module already defines.
-RUNTIME_LIB_SRCS := $(RUNTIME_DIR)/src/alloc.c $(RUNTIME_DIR)/src/panic.c $(RUNTIME_DIR)/src/print.c $(RUNTIME_DIR)/src/shadow.c
+RUNTIME_LIB_SRCS := $(RUNTIME_DIR)/src/alloc.c $(RUNTIME_DIR)/src/panic.c $(RUNTIME_DIR)/src/print.c $(RUNTIME_DIR)/src/shadow.c $(RUNTIME_DIR)/src/variants.c $(RUNTIME_DIR)/src/str.c $(RUNTIME_DIR)/src/map.c $(RUNTIME_DIR)/src/closure.c $(RUNTIME_DIR)/src/io.c
 
 BUILD_DIR := build
 
-.PHONY: test typecheck ci runtime-smoke runtime-clean hello-native ret-native
+.PHONY: test typecheck ci runtime-smoke runtime-clean hello-native ret-native check-fixed-point
 
 test:
 	cd host && bun test ../tests
@@ -69,3 +69,21 @@ ret-native:
 	bun run host/src/cli/menard.ts run src/main.mnd -- emit tests/phase2/oracle/ret41.mnd $(BUILD_DIR)/ret41.bc
 	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/ret41.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/ret41
 	$(BUILD_DIR)/ret41; echo $$?
+
+# Phase 3 slice H — fixed-point gate: stage0 emit of src/main.mnd
+# → bc0; link stage1; stage1 emit → bc1; cmp bc0 bc1.
+# Private-name uniquify on flatten is in; full `src/` emit still blocked on
+# first-class top-level fn/ctor values (see examples/README.md). This recipe
+# fails at stage0 emit until that lands; when emit+link+cmp succeeds, it is
+# the agreement gate.
+check-fixed-point:
+	@mkdir -p $(BUILD_DIR)/fp
+	@echo "==> stage0 emit src/main.mnd → bc0"
+	@bun run host/src/cli/menard.ts run src/main.mnd -- emit src/main.mnd $(BUILD_DIR)/fp/bc0.bc \
+		|| (echo "check-fixed-point: stage0 emit of src/main.mnd failed (slice H: need top-level-as-closure / trampolines; see examples/README.md)" >&2; exit 1)
+	@echo "==> link stage1"
+	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/fp/bc0.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/fp/stage1
+	@echo "==> stage1 emit src/main.mnd → bc1"
+	$(BUILD_DIR)/fp/stage1 emit src/main.mnd $(BUILD_DIR)/fp/bc1.bc
+	@echo "==> cmp bc0 bc1"
+	cmp $(BUILD_DIR)/fp/bc0.bc $(BUILD_DIR)/fp/bc1.bc && echo "bc0 == bc1 OK"

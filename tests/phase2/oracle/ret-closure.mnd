@@ -1,12 +1,6 @@
-; Slice 2E/2H oracle fixture: a nested `fn`, bound by a bare `let` and
-; then called — `src/close/close.mnd`'s lambda lifting rewrites this
-; into a fresh top-level `defn __lam0` plus a direct call, which
-; `src/emit/lower.mnd`'s real instruction selector then lowers exactly
-; like any other top-level `Int`-only `defn` and call (through
-; `src/root/root.mnd`'s shadow-push/pop wrapping too, skipped as the
-; no-op it is — see that module's header comment): a real `call i64
-; @__lam0(...)`, not a folded `ret i32 41`. See
-; `tests/phase2/oracle.test.ts`.
+; Slice 3E oracle: a nested `fn`, bound by a bare `let` and then called —
+; `src/close/close.mnd` lifts it to `__lam0` + heap env/closure, and
+; `src/emit/lower.mnd` emits `mn_closure_new` / `mn_apply_1`. Exit 41.
 
 (defn main -> Int
   (let add (fn (x) (+ x 1)))

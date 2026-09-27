@@ -1,0 +1,15 @@
+; Slice 3D — Ref mutation in a loop.
+; Prints: ref sum of 0 through 10 is 55
+; Run with: `./mn run examples/ref-counter.mnd`
+
+(defn main -> Int
+  (let c (ref 0))
+  (let total
+    (loop ((i 0))
+      (if (> i 10)
+        (deref c)
+        (do
+          (set! c (+ (deref c) i))
+          (recur (+ i 1))))))
+  (println "ref sum of 0 through 10 is " total)
+  0)

@@ -1,0 +1,22 @@
+; Slice 3B oracle: Bool/Unit values, Bool-returning helper, Unit mid-sequence.
+; Expect exit 1.
+
+(defn is-pos (n: Int) -> Bool
+  (> n 0))
+
+(defn as-int (b: Bool) -> Int
+  (if b 1 0))
+
+(defn touch -> Unit
+  (let _ 0)
+  ())
+
+(defn main -> Int
+  (let t true)
+  (let f false)
+  (touch)
+  (if t
+    (if f
+      0
+      (as-int (is-pos 5)))
+    0))

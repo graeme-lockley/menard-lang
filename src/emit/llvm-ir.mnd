@@ -122,9 +122,9 @@
   (IRet Int))
 
 ; One function: `i64`/`i64 x nparams` -> `i64` ABI, except `is-main`
-; (`() -> i32`, spec: untag + trunc before this `IRet`). `nblocks` is the
-; `DECLAREBLOCKS` count; `items` is the full, already-ordered instruction
-; (+ inline constant) stream.
+; (`(i32, ptr) -> i32`, spec: `mn_init` at entry, untag + trunc before
+; this `IRet`). `nblocks` is the `DECLAREBLOCKS` count; `items` is the
+; full, already-ordered instruction (+ inline constant) stream.
 (pub defrec LFunc (name: Str) (nparams: Int) (is-main: Bool) (nblocks: Int) (items: (List Item)))
 
 (pub defn lfunc-name (f: LFunc) -> Str (match f (LFunc n _ _ _ _) n))
@@ -147,26 +147,88 @@
 (pub defn llvm-module-globals (m: LlvmModule) -> (List Str) (match m (LlvmModule _ gs) gs))
 
 ; ---------------------------------------------------------------------------
-; The three fixed runtime externs `println`/`print`/`write` lowering
-; calls (`runtime/include/menard.h`) — always declared, in this fixed
-; order, regardless of whether a given program actually calls any of
-; them (an unused `declare` is harmless — see `lower.mnd`'s header
-; comment). `extern-count` is how many module-scope value ids they
-; occupy; `lower.mnd`'s `StrPool` and `write-module-bc` both derive every
+; The fixed runtime externs — always declared, in this fixed order,
+; regardless of whether a given program actually calls any of them (an
+; unused `declare` is harmless — see `lower.mnd`'s header comment).
+; `extern-count` is how many module-scope value ids they occupy;
+; `lower.mnd`'s `StrPool` and `write-module-bc` both derive every
 ; extern's own abs id from `num-strings` (the string globals that
-; precede them) using the three functions below, so the two modules
-; can never disagree about which id is which extern.
-(pub defn extern-count -> Int 3)
+; precede them) using the helpers below, so the two modules can never
+; disagree about which id is which extern.
+;
+; Order: mn_write_stdout, mn_print_i64, mn_write_stderr, mn_alloc,
+; heap helpers (3C), mn_print_str, Str/Ref/SB (3D), Map (3F), closures (3E),
+; tier-0 I/O (3G: mn_init … mn_exit).
+(pub defn extern-count -> Int 50)
 
 (pub defn extern-write-stdout-abs (num-strings: Int) -> Int num-strings)
 (pub defn extern-print-i64-abs (num-strings: Int) -> Int (+ num-strings 1))
 (pub defn extern-write-stderr-abs (num-strings: Int) -> Int (+ num-strings 2))
+(pub defn extern-alloc-abs (num-strings: Int) -> Int (+ num-strings 3))
+(pub defn extern-nil-abs (num-strings: Int) -> Int (+ num-strings 4))
+(pub defn extern-cons-abs (num-strings: Int) -> Int (+ num-strings 5))
+(pub defn extern-none-abs (num-strings: Int) -> Int (+ num-strings 6))
+(pub defn extern-some-abs (num-strings: Int) -> Int (+ num-strings 7))
+(pub defn extern-ok-abs (num-strings: Int) -> Int (+ num-strings 8))
+(pub defn extern-err-abs (num-strings: Int) -> Int (+ num-strings 9))
+(pub defn extern-tag-abs (num-strings: Int) -> Int (+ num-strings 10))
+(pub defn extern-slot-abs (num-strings: Int) -> Int (+ num-strings 11))
+(pub defn extern-print-str-abs (num-strings: Int) -> Int (+ num-strings 12))
+(pub defn extern-str-new-abs (num-strings: Int) -> Int (+ num-strings 13))
+(pub defn extern-str-concat-abs (num-strings: Int) -> Int (+ num-strings 14))
+(pub defn extern-str-byte-length-abs (num-strings: Int) -> Int (+ num-strings 15))
+(pub defn extern-str-byte-abs (num-strings: Int) -> Int (+ num-strings 16))
+(pub defn extern-str-slice-abs (num-strings: Int) -> Int (+ num-strings 17))
+(pub defn extern-ref-new-abs (num-strings: Int) -> Int (+ num-strings 18))
+(pub defn extern-ref-deref-abs (num-strings: Int) -> Int (+ num-strings 19))
+(pub defn extern-ref-set-abs (num-strings: Int) -> Int (+ num-strings 20))
+(pub defn extern-sb-new-abs (num-strings: Int) -> Int (+ num-strings 21))
+(pub defn extern-sb-append-abs (num-strings: Int) -> Int (+ num-strings 22))
+(pub defn extern-sb-append-byte-abs (num-strings: Int) -> Int (+ num-strings 23))
+(pub defn extern-sb-take-str-abs (num-strings: Int) -> Int (+ num-strings 24))
+(pub defn extern-map-new-abs (num-strings: Int) -> Int (+ num-strings 25))
+(pub defn extern-map-set-abs (num-strings: Int) -> Int (+ num-strings 26))
+(pub defn extern-map-get-abs (num-strings: Int) -> Int (+ num-strings 27))
+(pub defn extern-map-has-abs (num-strings: Int) -> Int (+ num-strings 28))
+(pub defn extern-map-size-abs (num-strings: Int) -> Int (+ num-strings 29))
+(pub defn extern-env-0-abs (num-strings: Int) -> Int (+ num-strings 30))
+(pub defn extern-env-1-abs (num-strings: Int) -> Int (+ num-strings 31))
+(pub defn extern-env-get-abs (num-strings: Int) -> Int (+ num-strings 32))
+(pub defn extern-closure-new-abs (num-strings: Int) -> Int (+ num-strings 33))
+(pub defn extern-apply-1-abs (num-strings: Int) -> Int (+ num-strings 34))
+(pub defn extern-init-abs (num-strings: Int) -> Int (+ num-strings 35))
+(pub defn extern-arg-count-abs (num-strings: Int) -> Int (+ num-strings 36))
+(pub defn extern-arg-abs (num-strings: Int) -> Int (+ num-strings 37))
+(pub defn extern-read-file-abs (num-strings: Int) -> Int (+ num-strings 38))
+(pub defn extern-write-file-abs (num-strings: Int) -> Int (+ num-strings 39))
+(pub defn extern-exit-abs (num-strings: Int) -> Int (+ num-strings 40))
+(pub defn extern-new-abs (num-strings: Int) -> Int (+ num-strings 41))
+(pub defn extern-set-slot-abs (num-strings: Int) -> Int (+ num-strings 42))
+(pub defn extern-apply-0-abs (num-strings: Int) -> Int (+ num-strings 43))
+(pub defn extern-apply-2-abs (num-strings: Int) -> Int (+ num-strings 44))
+(pub defn extern-closure-bare-abs (num-strings: Int) -> Int (+ num-strings 45))
+(pub defn extern-ctor-closure-abs (num-strings: Int) -> Int (+ num-strings 46))
+(pub defn extern-show-abs (num-strings: Int) -> Int (+ num-strings 47))
+(pub defn extern-env-new-abs (num-strings: Int) -> Int (+ num-strings 48))
+(pub defn extern-env-set-abs (num-strings: Int) -> Int (+ num-strings 49))
+
+; Builtin constructor tags — must match runtime/src/variants.c.
+(pub defn tag-nil -> Int 0)
+(pub defn tag-cons -> Int 1)
+(pub defn tag-none -> Int 2)
+(pub defn tag-some -> Int 3)
+(pub defn tag-ok -> Int 4)
+(pub defn tag-err -> Int 5)
 
 ; `ICallVoid`'s `kind` tag — which of the two fixed extern function
 ; *types* a void call's `fnty` field references (see `ICallVoid`'s own
 ; doc comment above for why arity alone can't disambiguate them).
 (pub defn extern-kind-write -> Int 0) ; void(ptr, i64) — write_stdout/write_stderr
-(pub defn extern-kind-print -> Int 1) ; void(i64) — print_i64
+(pub defn extern-kind-print -> Int 1) ; void(i64) — print_i64 / print_str / mn_exit
+(pub defn extern-kind-init -> Int 2) ; void(i32, ptr) — mn_init
+
+(pub defn cast-zext -> Int 1) ; LLVM CastOps::ZExt — i1 -> i64 for Bool immediates
+(pub defn cast-ptrtoint -> Int 9) ; LLVM CastOps::PtrToInt — string global -> i64
 
 ; ---------------------------------------------------------------------------
 ; Opcode/predicate constants (llvm/Bitcode/LLVMBitCodes.h's

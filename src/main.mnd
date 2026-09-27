@@ -30,6 +30,7 @@
 (import "./derive/derive.mnd")
 (import "./derive/plan.mnd")
 (import "./emit/bitcode.mnd")
+(import "./modules/graph.mnd")
 
 (defn nl -> Str
   (do
@@ -220,32 +221,25 @@
     (exit 2)))
 
 ; ---------------------------------------------------------------------------
-; Shared front end: read-all → (dump reader) → casing → desugar → (dump
-; desugar) → typecheck → (dump type) → closure-convert → (dump close) →
-; rooting-analyze → (dump root) → plan-derives → (dump derive) → on-ok.
+; Shared front end: flatten import graph → (dump reader/desugar) → typecheck
+; → … → on-ok. Flatten already runs read/casing/desugar per module.
 
 (defn maybe-dump (forms: (List Ast)) (dump-after: Bool) -> Unit
   (if dump-after (dump forms) ()))
 
-(defn front-end (path: Str) (src: Str) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
-  (match (read-all src)
-    (Ok forms) (front-end-checked path forms dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive on-ok)
-    (Err e) (do (report-parse-error path e) (exit 1))))
-
-(defn front-end-checked (path: Str) (forms: (List Ast)) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
+(defn fail-load (msg: Str) -> Unit
   (do
-    (maybe-dump forms dump-after-reader)
-    (match (check-casing-all forms)
-      (Ok _) (front-end-desugared path forms dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive on-ok)
-      (Err e) (do (report-casing-error path e) (exit 1)))))
+    (write-line 2 (str-concat "error: " msg))
+    (exit 1)))
 
-(defn front-end-desugared (path: Str) (forms: (List Ast)) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
-  (match (desugar-all forms)
-    (Ok desugared)
+(defn front-end (path: Str) (src: Str) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
+  (match (flatten-module-graph path src)
+    (Ok forms)
       (do
-        (maybe-dump desugared dump-after-desugar)
-        (front-end-typechecked path desugared dump-after-type dump-after-close dump-after-root dump-after-derive on-ok))
-    (Err es) (do (report-desugar-errors path es) (exit 1))))
+        (maybe-dump forms dump-after-reader)
+        (maybe-dump forms dump-after-desugar)
+        (front-end-typechecked path forms dump-after-type dump-after-close dump-after-root dump-after-derive on-ok))
+    (Err msg) (fail-load msg)))
 
 (defn front-end-typechecked (path: Str) (forms: (List Ast)) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
   (match (typecheck-forms forms)

@@ -1,0 +1,30 @@
+; Match binders are in scope for nested `fn`, and the env holds every capture.
+; Prints: head 10, rest is non-empty, total 11
+; Run with: `./mn run examples/match-capture.mnd`
+
+(defn first-plus-rest-flag (xs: (List Int)) -> Int
+  (match xs
+    (Nil)
+      (do
+        (println "empty list, total 0")
+        0)
+    (Cons h rest)
+      ((fn ()
+         (do
+           (let flag
+             (match rest
+               (Nil) 0
+               _ 1))
+           (let total (+ h flag))
+           (print "head ")
+           (print h)
+           (if (= flag 0)
+             (do (print ", rest is empty") 0)
+             (do (print ", rest is non-empty") 0))
+           (print ", total ")
+           (println total)
+           total)))))
+
+(defn main -> Int
+  (first-plus-rest-flag (Cons 10 (Cons 1 (Nil))))
+  0)

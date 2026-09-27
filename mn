@@ -25,6 +25,11 @@ const RUNTIME_SRCS = [
   join(RUNTIME_DIR, "src/panic.c"),
   join(RUNTIME_DIR, "src/print.c"),
   join(RUNTIME_DIR, "src/shadow.c"),
+  join(RUNTIME_DIR, "src/variants.c"),
+  join(RUNTIME_DIR, "src/str.c"),
+  join(RUNTIME_DIR, "src/map.c"),
+  join(RUNTIME_DIR, "src/closure.c"),
+  join(RUNTIME_DIR, "src/io.c"),
 ];
 const BUILD_DIR = join(ROOT, "build");
 const CFLAGS = ["-std=c11", "-Wall", "-Wextra", "-O1"];

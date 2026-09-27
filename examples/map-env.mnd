@@ -1,0 +1,20 @@
+; Slice 3F — persistent Map.
+; Prints both entries and the size.
+; Run with: `./mn run examples/map-env.mnd`
+
+(defn print-got (v: (Maybe Int)) -> Int
+  (match v
+    (Some n) (do (print n) 0)
+    (None) (do (print "none") 0)))
+
+(defn main -> Int
+  (let m0 (map-new))
+  (let m1 (map-set m0 1 10))
+  (let m2 (map-set m1 2 20))
+  (print "1 -> ")
+  (print-got (map-get m2 1))
+  (print ", 2 -> ")
+  (print-got (map-get m2 2))
+  (print ", size ")
+  (println (map-size m2))
+  0)

@@ -1,0 +1,15 @@
+; Slice 3E — Result + heap-closure continuation (inline `fn`).
+; Prints the Ok path and the Err fallback.
+; Run with: `./mn run examples/closure-result-bind.mnd`
+
+(defn result-bind-int (r: (Result Int Str)) (k: (Fn Int -> Int)) -> Int
+  (match r
+    (Ok v) (k v)
+    (Err _) 0))
+
+(defn main -> Int
+  (print "Ok 40 passed to (fn (x) (+ x 1)) = ")
+  (println (result-bind-int (Ok 40) (fn (x) (+ x 1))))
+  (print "Err \"nope\" passed to the same fn = ")
+  (println (result-bind-int (Err "nope") (fn (x) (+ x 1))))
+  0)

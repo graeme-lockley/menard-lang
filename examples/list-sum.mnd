@@ -1,0 +1,28 @@
+; Slice 3C — List + match.
+; Prints: 10 + 20 + 30 = 60
+; Run with: `./mn run examples/list-sum.mnd`
+
+(defn list-sum (xs: (List Int)) -> Int
+  (match xs
+    (Nil) 0
+    (Cons h t) (+ h (list-sum t))))
+
+(defn print-summands (xs: (List Int)) -> Int
+  (match xs
+    (Nil) 0
+    (Cons h t)
+      (do
+        (print h)
+        (match t
+          (Nil) 0
+          _
+            (do
+              (print " + ")
+              (print-summands t))))))
+
+(defn main -> Int
+  (let xs (Cons 10 (Cons 20 (Cons 30 (Nil)))))
+  (print-summands xs)
+  (print " = ")
+  (println (list-sum xs))
+  0)

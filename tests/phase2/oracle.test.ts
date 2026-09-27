@@ -53,13 +53,8 @@
  * real binary. Skipped (not failed) when either is not on `PATH` — see
  * `emit-link.test.ts` for the same convention.
  *
- * `ret-loop.mnd`/`ret-match.mnd` (slice 2G's `loop`/`recur`-over-Int and
- * `match`-on-`(List Int)` fixtures) are **not** part of this slice's
- * fixture list: `src/emit/lower.mnd`'s real instruction selector
- * deliberately does not lower `loop`/`recur` or `match` yet (a clean,
- * documented `Err` — see that module's header comment's "Scope"), so
- * both files remain on disk as a record of slice 2G's constant-folded
- * behavior but are no longer exercised by an emit-and-run oracle here.
+ * `ret-loop.mnd` and `ret-match.mnd` are active oracle fixtures (slices
+ * 3A / 3C). `ret-bool-unit.mnd` covers Bool/Unit immediates (slice 3B).
  */
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
@@ -91,6 +86,11 @@ const RUNTIME_LIB_SRCS = [
   "runtime/src/panic.c",
   "runtime/src/print.c",
   "runtime/src/shadow.c",
+  "runtime/src/variants.c",
+  "runtime/src/str.c",
+  "runtime/src/map.c",
+  "runtime/src/closure.c",
+  "runtime/src/io.c",
 ].map(abs);
 const RUNTIME_INCLUDE = abs("runtime/include");
 
@@ -182,10 +182,10 @@ const fixtures: Array<{
     expectDis: /\bcall i64\b/,
   },
   {
-    name: "a nested `fn`, lambda-lifted by closure-convert, lowers to a real `call` to the lifted defn",
+    name: "a nested `fn` becomes a heap closure (`mn_closure_new` / `mn_apply_1`)",
     entry: "tests/phase2/oracle/ret-closure.mnd",
     expectExit: 41,
-    expectDis: /\bcall i64 @__lam0\b/,
+    expectDis: /\bcall i64 @mn_(closure_new|apply_1)\b/,
   },
   {
     name: "a standalone top-level `(println ...)` lowers to a real `mn_write_stdout` call, prepended into `main`",
@@ -193,6 +193,43 @@ const fixtures: Array<{
     expectExit: 7,
     expectDis: /\bcall void @mn_write_stdout\b/,
     expectStdout: "Hello, oracle!\n",
+  },
+  {
+    name: "`loop`/`recur` lowers to a real back-edge (`br` to an earlier block), computing sum-to 10 = 55",
+    entry: "tests/phase2/oracle/ret-loop.mnd",
+    expectExit: 55,
+    expectDis: /\bbr label %/,
+  },
+  {
+    name: "Bool/Unit immediates: Bool locals, Bool-returning helpers, Unit mid-sequence (exit 1)",
+    entry: "tests/phase2/oracle/ret-bool-unit.mnd",
+    expectExit: 1,
+    expectDis: /\bicmp /,
+  },
+  {
+    name: "`match` on Cons/Nil list-sum lowers via mn_tag/mn_slot (exit 60)",
+    entry: "tests/phase2/oracle/ret-match.mnd",
+    expectExit: 60,
+    expectDis: /\bcall i64 @mn_(tag|cons|nil)\b/,
+  },
+  {
+    name: "Str concat + write (stdout hello\\n, exit 5)",
+    entry: "tests/phase2/oracle/ret-strings.mnd",
+    expectExit: 5,
+    expectDis: /\bcall i64 @mn_str_concat\b/,
+    expectStdout: "hello\n",
+  },
+  {
+    name: "Ref + loop mutation (sum 0..10 = 55)",
+    entry: "tests/phase2/oracle/ret-ref.mnd",
+    expectExit: 55,
+    expectDis: /\bcall i64 @mn_ref_(new|deref|set)\b/,
+  },
+  {
+    name: "Map set/get/size (exit 12)",
+    entry: "tests/phase2/oracle/ret-map.mnd",
+    expectExit: 12,
+    expectDis: /\bcall i64 @mn_map_(new|set|get|size)\b/,
   },
 ];
 
@@ -270,37 +307,6 @@ describe.skipIf(clang === null || llvmDis === null)("interp <-> native oracle (P
       const emitted = emit("tests/corpus/spec-examples.mnd", bcPath);
       expect(emitted.exitCode).toBe(1);
       expect(emitted.stderr).toContain("main");
-    } finally {
-      await rm(bcPath).catch(() => {});
-    }
-  });
-
-  // `src/emit/lower.mnd`'s real instruction selector does not lower
-  // `loop`/`recur` or `match` (see its header comment's "Scope") — these
-  // two fixtures, still interpretable, must fail `emit` cleanly (exit 1,
-  // a `error: ...` diagnostic) rather than crash the CLI or silently
-  // emit a wrong module.
-  test("emit fails cleanly on a `loop`/`recur` body (unsupported by the real instruction lowerer)", async () => {
-    const dir = await mkdtempP(join(tmpdir(), "menard-oracle-"));
-    const bcPath = join(dir, "out.bc");
-    try {
-      expect(interpret("tests/phase2/oracle/ret-loop.mnd").exitCode).toBe(55);
-      const emitted = emit("tests/phase2/oracle/ret-loop.mnd", bcPath);
-      expect(emitted.exitCode).toBe(1);
-      expect(emitted.stderr).toContain("loop");
-    } finally {
-      await rm(bcPath).catch(() => {});
-    }
-  });
-
-  test("emit fails cleanly on a `match` body (unsupported by the real instruction lowerer)", async () => {
-    const dir = await mkdtempP(join(tmpdir(), "menard-oracle-"));
-    const bcPath = join(dir, "out.bc");
-    try {
-      expect(interpret("tests/phase2/oracle/ret-match.mnd").exitCode).toBe(60);
-      const emitted = emit("tests/phase2/oracle/ret-match.mnd", bcPath);
-      expect(emitted.exitCode).toBe(1);
-      expect(emitted.stderr).not.toBe("");
     } finally {
       await rm(bcPath).catch(() => {});
     }

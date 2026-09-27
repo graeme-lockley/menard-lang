@@ -1,0 +1,12 @@
+; Slice 3D — Str concat + byte-length.
+; Prints: "hel" + "lo" = hello (5 bytes)
+; Run with: `./mn run examples/strings.mnd`
+
+(defn main -> Int
+  (let s (str-concat "hel" "lo"))
+  (print "\"hel\" + \"lo\" = ")
+  (write 1 s)
+  (print " (")
+  (print (str-byte-length s))
+  (println " bytes)")
+  0)

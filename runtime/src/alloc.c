@@ -1,11 +1,13 @@
 /*
- * mn_alloc — phase 2's leaking bump allocator.
+ * mn_alloc — phase 2/3's leaking bump allocator.
  *
  * Reserve one large arena with mmap and hand out bytes from the front of it,
  * forever. Nothing is ever freed and nothing ever moves: "get self-hosting
- * with a broken memory model, *then* make it correct" (spec §5). The
- * `shape` parameter exists only so the C ABI already matches phase 4's
- * collecting allocator; it is not read here.
+ * with a broken memory model, *then* make it correct" (spec §5).
+ *
+ * Every object begins with a shape pointer at offset 0 (spec §2.2.1). The
+ * `size` argument includes that header word; the returned pointer is the
+ * object itself (even, 8-byte aligned).
  */
 #include "menard.h"
 
@@ -34,10 +36,8 @@ static void mn_arena_init(void) {
 }
 
 void *mn_alloc(int64_t size, void *shape) {
-  (void)shape; /* unread until phase 4's collector needs the layout kind */
-
-  if (size < 0) {
-    mn_panic("mn_alloc: negative size");
+  if (size < (int64_t)sizeof(void *)) {
+    mn_panic("mn_alloc: size must include at least the header word");
   }
 
   if (mn_arena_base == NULL) {
@@ -62,6 +62,9 @@ void *mn_alloc(int64_t size, void *shape) {
    * "Zeroing is now justified, not asserted").
    */
   memset(result, 0, aligned);
+
+  /* Shape pointer at offset 0 — the object's header (spec §2.2.1). */
+  *(void **)result = shape;
 
   return result;
 }
