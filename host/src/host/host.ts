@@ -29,6 +29,10 @@ export type Host = {
     bytes: Uint8Array,
   ): { ok: true } | { ok: false; error: IoError };
   listDir(path: string): { ok: true; names: string[] } | { ok: false; error: IoError };
+  /** `(Maybe Str)` — `null` is None. */
+  getenv(name: string): string | null;
+  exists(path: string): boolean;
+  rename(from: string, to: string): { ok: true } | { ok: false; error: IoError };
   /** Program arguments after CLI `--` (not including the script path). */
   argv: string[];
   /** Truncate to 8 bits and request process exit. Never returns. */
@@ -254,7 +258,7 @@ function hasChildren(fs: VirtualFs, p: string): boolean {
   return false;
 }
 
-function fsOps(fs: VirtualFs): Pick<Host, "readFile" | "writeFile" | "listDir"> {
+function fsOps(fs: VirtualFs): Pick<Host, "readFile" | "writeFile" | "listDir" | "exists" | "rename"> {
   return {
     readFile(path) {
       const p = normalize(path);
@@ -300,6 +304,23 @@ function fsOps(fs: VirtualFs): Pick<Host, "readFile" | "writeFile" | "listDir"> 
       }
       return { ok: true, names: [...names].sort() };
     },
+    exists(path) {
+      const p = normalize(path);
+      return fs.files.has(p) || fs.dirs.has(p);
+    },
+    rename(from, to) {
+      const a = normalize(from);
+      const b = normalize(to);
+      const bytes = fs.files.get(a);
+      if (bytes === undefined) return { ok: false, error: { tag: "NotFound" } };
+      if (fs.dirs.has(b) && !fs.files.has(b)) {
+        return { ok: false, error: { tag: "IsADirectory" } };
+      }
+      fs.files.delete(a);
+      ensureParentDirs(fs.dirs, b);
+      fs.files.set(b, bytes);
+      return { ok: true };
+    },
   };
 }
 
@@ -328,6 +349,7 @@ export function createHost(
     stderr?: Uint8Array[];
     spawnEnabled?: boolean;
     argv?: string[];
+    env?: Record<string, string>;
   } = {},
 ): Host & { stdout: Uint8Array[]; stderr: Uint8Array[]; fs: VirtualFs } {
   const fs = opts.fs ?? createVirtualFs();
@@ -356,6 +378,11 @@ export function createHost(
     },
     ...fsOps(fs),
     ...spawnOps(spawnEnabled),
+    getenv(name) {
+      const env = opts.env ?? {};
+      const v = env[name];
+      return v === undefined ? null : v;
+    },
   };
 }
 
@@ -410,6 +437,10 @@ export function createLiveHost(
     },
     ...fsOps(fs),
     ...spawnOps(spawnEnabled),
+    getenv(name) {
+      const v = process.env[name];
+      return v === undefined ? null : v;
+    },
   };
 }
 
@@ -474,6 +505,26 @@ export function createRealHost(
       try {
         const names = nodeFs.readdirSync(path).slice().sort();
         return { ok: true, names };
+      } catch (e) {
+        return { ok: false, error: mapNodeErrno((e as NodeJS.ErrnoException).code) };
+      }
+    },
+    getenv(name) {
+      const v = process.env[name];
+      return v === undefined ? null : v;
+    },
+    exists(path) {
+      try {
+        nodeFs.statSync(path);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    rename(from, to) {
+      try {
+        nodeFs.renameSync(from, to);
+        return { ok: true };
       } catch (e) {
         return { ok: false, error: mapNodeErrno((e as NodeJS.ErrnoException).code) };
       }

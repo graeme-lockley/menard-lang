@@ -37,3 +37,23 @@ jobs:
       - name: Test
         working-directory: ${{ github.workspace }}
         run: make test
+
+  bootstrap:
+    name: fixed point (clang)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Install dependencies
+        working-directory: host
+        run: bun install --frozen-lockfile
+
+      - name: Install clang
+        run: sudo apt-get update && sudo apt-get install -y clang
+
+      - name: Bootstrap fixed point
+        run: make bootstrap

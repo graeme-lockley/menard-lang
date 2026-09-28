@@ -95,11 +95,14 @@ describe("modules", () => {
   });
 
   test("prelude loads via import", () => {
-    const prelude = new TextDecoder().decode(
-      readFileSync(join(import.meta.dir, "../../../prelude/core.mnd")),
-    );
+    const root = join(import.meta.dir, "../../..");
+    const read = (rel: string) => new TextDecoder().decode(readFileSync(join(root, rel)));
     const host = hostWith({
-      "/prelude/core.mnd": prelude,
+      "/prelude/core.mnd": read("prelude/core.mnd"),
+      "/stdlib/sys.mnd": read("stdlib/sys.mnd"),
+      "/stdlib/io.mnd": read("stdlib/io.mnd"),
+      "/stdlib/fs.mnd": read("stdlib/fs.mnd"),
+      "/stdlib/proc.mnd": read("stdlib/proc.mnd"),
       "/main.mnd": `(import "./prelude/core.mnd")\n(not true)\n`,
     });
     const src = host.readFile("/main.mnd");

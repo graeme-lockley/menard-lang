@@ -184,6 +184,7 @@
 ;   `Builder` can already express, just not yet wired for this one case.
 
 (import "../reader/ast.mnd")
+(import "../pool/pool.mnd")
 (import "../util/result.mnd")
 (import "./llvm-ir.mnd")
 (import "./bc-writer.mnd")
@@ -896,7 +897,8 @@
 ;
 ; `order-rev` accumulates in reverse (`Cons`-prepend, same rationale as
 ; `Builder`'s own `items`); `str-pool-strs` reverses it once, for
-; `LlvmModule`'s `globals` (id `0..S-1`, in first-discovered order).
+; `LlvmModule`'s `globals` (id `0..S-1`, in `pool.mnd`'s sorted order,
+; with `println`'s newline appended when it is not already a literal).
 (defrec CtorSpec (tag: Int) (arity: Int))
 (defn ctor-spec-tag (c: CtorSpec) -> Int (match c (CtorSpec t _) t))
 (defn ctor-spec-arity (c: CtorSpec) -> Int (match c (CtorSpec _ a) a))
@@ -950,54 +952,16 @@
     (let s (str-pool-count p))
     (StrPool (str-pool-order-rev p) (str-pool-by-content p) (str-pool-next p) s (+ s 1) (+ s 2) ctors)))
 
-; -- collection: a pure syntactic walk, no `env`/`funcs`/`noop`, and no
-; way to fail (see `StrPool`'s own doc comment). --
-
-(defn collect-strs-list (xs: (List Ast)) (p: StrPool) -> StrPool
+; String globals come from `pool.mnd`'s sorted literals. `newline-str` is
+; appended so a bare `(println)` still has a global; `str-pool-add` leaves
+; an existing literal where the sort put it.
+(defn str-pool-from-list (xs: (List Str)) (p: StrPool) -> StrPool
   (match xs
     [] p
-    (Cons x rest) (collect-strs-list rest (collect-strs-ast x p))))
+    (Cons s rest) (str-pool-from-list rest (str-pool-add p s))))
 
-(defn collect-strs-ast (ast: Ast) (p: StrPool) -> StrPool
-  (match ast
-    (StrNode s _) (str-pool-add p s)
-    (ParenNode elems _) (collect-strs-list elems (collect-strs-special elems p))
-    (BracketNode elems _) (collect-strs-list elems p)
-    _ p))
-
-(defn collect-strs-special (elems: (List Ast)) (p: StrPool) -> StrPool
-  (match elems
-    (Cons head rest) (collect-strs-special-named head rest p)
-    [] p))
-
-(defn collect-strs-special-named (head: Ast) (rest: (List Ast)) (p: StrPool) -> StrPool
-  (match (sym-str head)
-    (None) p
-    (Some hn) (collect-strs-special-op hn rest p)))
-
-(defn collect-strs-special-op (hn: Str) (rest: (List Ast)) (p: StrPool) -> StrPool
-  (if (= hn "println") (str-pool-add (collect-strs-str-args rest p) (newline-str))
-    (if (= hn "print") (collect-strs-str-args rest p)
-      (if (= hn "write") (collect-strs-write-arg rest p)
-        p)))) 
-
-(defn collect-strs-str-args (args: (List Ast)) (p: StrPool) -> StrPool
-  (match args
-    [] p
-    (Cons a rest) (collect-strs-str-args rest (collect-strs-str-arg a p))))
-
-(defn collect-strs-str-arg (a: Ast) (p: StrPool) -> StrPool
-  (match a (StrNode s _) (str-pool-add p s) _ p))
-
-(defn collect-strs-write-arg (args: (List Ast)) (p: StrPool) -> StrPool
-  (match args
-    [_fd s-ast] (collect-strs-str-arg s-ast p)
-    _ p))
-
-; The one entry point: every top-level form (defn or not), recursing
-; into everything — see `StrPool`'s own doc comment's "Collection".
 (defn collect-str-pool (forms: (List Ast)) -> StrPool
-  (collect-strs-list forms (str-pool-new)))
+  (str-pool-add (str-pool-from-list (pool-string-literals forms) (str-pool-new)) (newline-str)))
 
 ; -- real lowering's own void-call emission: `println`/`print`/`write`
 ; call one of the three fixed runtime externs directly (never a real
@@ -1065,7 +1029,14 @@
     (ParenNode elems _) (lower-paren elems env b funcs noop pool)
     (BracketNode _ _) (Err "cannot lower a list literal with the real instruction lowerer yet")
     (StrNode s _) (Ok (emit-str-lit! b pool s))
-    (FloatNode _ _) (Err "cannot lower a Float value with the real instruction lowerer yet")))
+    (FloatNode s _) (Ok (emit-float-lit! b pool s))))
+
+(defn emit-float-lit! (b: Builder) (pool: StrPool) (s: Str) -> Int
+  (do
+    (let gid (str-pool-get pool s))
+    (let ptr-i64 (emit-cast! b (cast-ptrtoint) gid (ty-i64)))
+    (let len (const-i64! b (str-byte-length s)))
+    (emit-call! b (extern-float-from-str-abs (str-pool-count pool)) [ptr-i64 len])))
 
 (defn emit-str-lit! (b: Builder) (pool: StrPool) (s: Str) -> Int
   (do
@@ -1145,11 +1116,14 @@
               (if (is-arith-binop hn) (lower-arith rest hn env b funcs noop pool)
                 (if (is-cmp-op hn) (lower-cmp-value rest hn env b funcs noop pool)
                   (if (is-ctor-name hn pool) (lower-ctor hn rest env b funcs noop pool)
-                    (if (is-runtime-op hn) (lower-runtime-op hn rest env b funcs noop pool)
-                    (if (is-effect-head hn)
-                      (result-then (lower-effect-op hn rest env b funcs noop pool) (fn () (Ok (const-unit! b))))
-                      (if (is-unsupported-form hn) (Err (str-concat "cannot lower `" (str-concat hn "` with the real instruction lowerer yet")))
-                        (lower-call hn rest env b funcs noop pool))))))))))))))
+                    (match (map-get funcs hn)
+                      (Some _) (lower-call hn rest env b funcs noop pool)
+                      (None)
+                        (if (is-runtime-op hn) (lower-runtime-op hn rest env b funcs noop pool)
+                          (if (is-effect-head hn)
+                            (result-then (lower-effect-op hn rest env b funcs noop pool) (fn () (Ok (const-unit! b))))
+                            (if (is-unsupported-form hn) (Err (str-concat "cannot lower `" (str-concat hn "` with the real instruction lowerer yet")))
+                              (lower-call hn rest env b funcs noop pool)))))))))))))))
 
 ; -- if --
 
@@ -1329,8 +1303,16 @@
     (ParenNode (Cons cname-ast payload-asts) _)
       (match (sym-str cname-ast)
         (None) acc
-        (Some cname) (register-ctor-spec acc cname (ast-list-length payload-asts) tag-ref))
+        (Some cname) (register-variant-ctor-name cname payload-asts acc tag-ref))
     _ acc))
+
+; IoError and SpawnStatus already have runtime tags (20–27, 30–31).
+; Collecting them again would mint a user tag at 1000 and disagree with
+; the objects the C functions return.
+(defn register-variant-ctor-name (cname: Str) (payload-asts: (List Ast)) (acc: (Map Str CtorSpec)) (tag-ref: (Ref Int)) -> (Map Str CtorSpec)
+  (match (builtin-ctor-tag-of cname)
+    (Some _) acc
+    (None) (register-ctor-spec acc cname (ast-list-length payload-asts) tag-ref)))
 
 (defn register-variant-ctors (ctors: (List Ast)) (acc: (Map Str CtorSpec)) (tag-ref: (Ref Int)) -> (Map Str CtorSpec)
   (match ctors
@@ -1379,8 +1361,13 @@
 (defn is-user-ctor (hn: Str) (pool: StrPool) -> Bool
   (match (map-get (str-pool-ctors pool) hn) (Some _) true (None) false))
 
+(defn has-builtin-tag (hn: Str) -> Bool
+  (match (builtin-ctor-tag-of hn)
+    (Some _) true
+    (None) false))
+
 (defn is-ctor-name (hn: Str) (pool: StrPool) -> Bool
-  (or (is-builtin-ctor hn) (is-user-ctor hn pool)))
+  (or (has-builtin-tag hn) (is-user-ctor hn pool)))
 
 (defn builtin-ctor-tag-of (hn: Str) -> (Maybe Int)
   (if (= hn "Nil") (Some (tag-nil))
@@ -1409,13 +1396,26 @@
         (Some spec) (Some (ctor-spec-tag spec))
         (None) (None))))
 
+(defn seam-fixed-arity (hn: Str) -> (Maybe Int)
+  (if (or (= hn "Other") (or (= hn "Exited") (= hn "Signalled"))) (Some 1)
+    (if (or (= hn "NotFound")
+          (or (= hn "Permission")
+            (or (= hn "Exists")
+              (or (= hn "IsADirectory")
+                (or (= hn "NotADirectory")
+                  (or (= hn "InvalidPath") (= hn "TooLarge"))))))) (Some 0)
+      (None))))
+
 (defn ctor-arity-of (hn: Str) (pool: StrPool) -> Int
-  (if (or (= hn "Nil") (= hn "None")) 0
-    (if (= hn "Cons") 2
-      (if (or (= hn "Some") (or (= hn "Ok") (= hn "Err"))) 1
-        (match (map-get (str-pool-ctors pool) hn)
-          (Some spec) (ctor-spec-arity spec)
-          (None) (- 0 1))))))
+  (match (seam-fixed-arity hn)
+    (Some n) n
+    (None)
+      (if (or (= hn "Nil") (= hn "None")) 0
+        (if (= hn "Cons") 2
+          (if (or (= hn "Some") (or (= hn "Ok") (= hn "Err"))) 1
+            (match (map-get (str-pool-ctors pool) hn)
+              (Some spec) (ctor-spec-arity spec)
+              (None) (- 0 1)))))))
 
 (defn ctor-extern-abs (hn: Str) (ns: Int) -> Int
   (if (= hn "Nil") (extern-nil-abs ns)
@@ -1447,13 +1447,29 @@
               (Ok (lower-user-ctor-fill obj avs 0 b pool)))))
         (Err (str-concat "arity mismatch constructing " hn)))))
 
+(defn lower-fixed-tag-ctor (hn: Str) (args: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
+  (match (builtin-ctor-tag-of hn)
+    (None) (Err (str-concat "unknown constructor " hn))
+    (Some tag)
+      (if (= (ast-list-length args) (ctor-arity-of hn pool))
+        (result-bind (lower-args args env b funcs noop pool)
+          (fn (avs)
+            (do
+              (let tag-c (const-i64! b tag))
+              (let nslots (const-i64! b (ctor-arity-of hn pool)))
+              (let obj (emit-call! b (extern-new-abs (str-pool-count pool)) [tag-c nslots]))
+              (Ok (lower-user-ctor-fill obj avs 0 b pool)))))
+        (Err (str-concat "arity mismatch constructing " hn)))))
+
 (defn lower-ctor (hn: Str) (args: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (if (is-builtin-ctor hn)
     (if (= (ast-list-length args) (ctor-arity-of hn pool))
       (result-bind (lower-args args env b funcs noop pool)
         (fn (avs) (Ok (emit-call-words! b (ctor-extern-abs hn (str-pool-count pool)) avs))))
       (Err (str-concat "arity mismatch constructing " hn)))
-    (lower-user-ctor hn args env b funcs noop pool)))
+    (if (has-builtin-tag hn)
+      (lower-fixed-tag-ctor hn args env b funcs noop pool)
+      (lower-user-ctor hn args env b funcs noop pool))))
 
 (defn is-runtime-op (hn: Str) -> Bool
   (str-in-list hn (runtime-op-names)))
@@ -1496,9 +1512,44 @@
   "spawn"
   "getenv"
   "exists"
-  "rename"])
+  "rename"
+  "mn_arg_count"
+  "mn_arg"
+  "mn_read_file"
+  "mn_write_file"
+  "mn_spawn"
+  "mn_getenv"
+  "mn_exists"
+  "mn_rename"
+  "f+"
+  "f-"
+  "f*"
+  "f/"])
+
+; `extern` declares the C symbol (`mn_exists`). Ambient compiler calls
+; still use the Menard name (`exists`). Both lower to the same abs id.
+(defn seam-menard-name (hn: Str) -> Str
+  (if (= hn "mn_arg_count") "arg-count"
+    (if (= hn "mn_arg") "arg"
+      (if (= hn "mn_read_file") "read-file"
+        (if (= hn "mn_write_file") "write-file"
+          (if (= hn "mn_spawn") "spawn"
+            (if (= hn "mn_getenv") "getenv"
+              (if (= hn "mn_exists") "exists"
+                (if (= hn "mn_rename") "rename" hn)))))))))
+
+(defn effect-alias (hn: Str) -> Str
+  (if (= hn "mn_write") "write"
+    (if (= hn "mn_exit") "exit" hn)))
 
 (defn runtime-op-abs (hn: Str) (ns: Int) -> Int
+  (runtime-op-abs-named (seam-menard-name hn) ns))
+
+(defn runtime-op-abs-named (hn: Str) (ns: Int) -> Int
+  (if (= hn "f+") (extern-fadd-abs ns)
+    (if (= hn "f-") (extern-fsub-abs ns)
+      (if (= hn "f*") (extern-fmul-abs ns)
+        (if (= hn "f/") (extern-fdiv-abs ns)
   (if (= hn "str-concat") (extern-str-concat-abs ns)
     (if (= hn "str-byte-length") (extern-str-byte-length-abs ns)
       (if (= hn "str-byte") (extern-str-byte-abs ns)
@@ -1535,9 +1586,12 @@
                                                                     (if (= hn "spawn") (extern-spawn-abs ns)
                                                                       (if (= hn "getenv") (extern-getenv-abs ns)
                                                                         (if (= hn "exists") (extern-exists-abs ns)
-                                                              (extern-rename-abs ns))))))))))))))))))))))))))))))))))))))
+                                                              (extern-rename-abs ns))))))))))))))))))))))))))))))))))))))))))
 
 (defn runtime-op-arity (hn: Str) -> Int
+  (runtime-op-arity-named (seam-menard-name hn)))
+
+(defn runtime-op-arity-named (hn: Str) -> Int
   (if (or (= hn "sb-new") (or (= hn "map-new") (or (= hn "mn-env-0") (= hn "arg-count")))) 0
     (if (str-in-list hn ["str-byte-length" "ref" "deref" "sb-take-str!" "map-size" "mn-env-1" "mn-env-new" "arg" "read-file" "mn-apply-0" "show" "sb-length" "dump" "spawn" "getenv" "exists"]) 1
       (if (or (= hn "str-slice") (or (= hn "map-set") (or (= hn "mn-apply-2") (= hn "mn-env-set")))) 3
@@ -1826,7 +1880,7 @@
 ; for the two-pass string-global scheme these lower against.
 
 (defn is-effect-head (s: Str) -> Bool
-  (or (= s "println") (or (= s "print") (or (= s "write") (= s "exit")))))
+  (or (= s "println") (or (= s "print") (or (= s "write") (or (= s "exit") (or (= s "mn_write") (= s "mn_exit")))))))
 
 (defn is-effect-call (f: Ast) -> Bool
   (match f
@@ -1860,6 +1914,9 @@
     (Some hn) (lower-effect-op hn rest env b funcs noop pool)))
 
 (defn lower-effect-op (hn: Str) (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Unit Str)
+  (lower-effect-known (effect-alias hn) rest env b funcs noop pool))
+
+(defn lower-effect-known (hn: Str) (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Unit Str)
   (if (= hn "println") (lower-println rest env b funcs noop pool)
     (if (= hn "print") (lower-print rest env b funcs noop pool)
       (if (= hn "exit") (lower-exit rest env b funcs noop pool)
@@ -2195,6 +2252,9 @@
 ; `mn_alloc`. Allocation-free functions are not rooted (spec §4.4).
 ; Unknown calls are treated as may-collect: over-rooting is safe.
 (defn mc-pure (hn: Str) -> Bool
+  (mc-pure-body (effect-alias (seam-menard-name hn))))
+
+(defn mc-pure-body (hn: Str) -> Bool
   (or (or (or (or (= hn "if") (= hn "let")) (or (= hn "do") (= hn "loop")))
         (or (or (= hn "recur") (= hn "match"))
             (or (or (= hn "println") (= hn "print")) (or (= hn "shadow-push") (= hn "shadow-pop")))))
@@ -2206,12 +2266,16 @@
                   (or (or (= hn "<=") (= hn ">=")) (or (= hn "=") (= hn "compare"))))))))
 
 (defn mc-alloc-name (hn: Str) -> Bool
+  (mc-alloc-body (seam-menard-name hn)))
+
+(defn mc-alloc-body (hn: Str) -> Bool
   (or (or (or (or (= hn "str-concat") (= hn "str-slice")) (or (= hn "ref") (= hn "sb-new")))
         (or (or (= hn "sb-append!") (= hn "sb-append-byte!")) (or (= hn "sb-take-str!") (= hn "map-new"))))
       (or (or (or (or (= hn "map-set") (= hn "map-get")) (or (= hn "mn-env-0") (= hn "mn-env-1")))
             (or (or (= hn "mn-env-new") (= hn "mn-closure-new")) (or (= hn "mn-apply-0") (= hn "mn-apply-1"))))
           (or (or (or (= hn "mn-apply-2") (= hn "arg")) (or (= hn "read-file") (= hn "write-file")))
-              (or (or (= hn "show") (= hn "spawn")) (or (= hn "getenv") (= hn "rename")))))))
+              (or (or (= hn "show") (= hn "spawn")) (or (= hn "getenv") (= hn "rename")))
+              (or (or (= hn "f+") (= hn "f-")) (or (= hn "f*") (= hn "f/")))))))
 
 (defn mc-ctor-alloc (hn: Str) -> Bool
   (and (is-upper-name hn) (and (not (= hn "Nil")) (not (= hn "None")))))

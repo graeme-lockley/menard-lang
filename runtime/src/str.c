@@ -8,7 +8,9 @@
  */
 #include "menard.h"
 
+#include <math.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -16,8 +18,11 @@
 #define TAG_STR 10
 #define TAG_REF 11
 #define TAG_SB 12
+#define TAG_FLOAT 13
 
 static MnShape shape_str = {.tag = TAG_STR, .nbytes = 16, .layout = MN_LAYOUT_BYTES};
+/* Bytes: the f64 payload is not a Menard pointer. */
+static MnShape shape_float = {.tag = TAG_FLOAT, .nbytes = 16, .layout = MN_LAYOUT_BYTES};
 static MnShape shape_ref = {.tag = TAG_REF, .nbytes = 16, .layout = MN_LAYOUT_ORDINARY};
 /* Bytes: the data pointer, length, and capacity are not Menard pointers. */
 static MnShape shape_sb = {.tag = TAG_SB, .nbytes = 32, .layout = MN_LAYOUT_BYTES};
@@ -256,7 +261,53 @@ MnWord mn_sb_take_str(MnWord sb) {
   return (MnWord)str;
 }
 
-#include <stdio.h>
+static MnWord box_float(double d) {
+  MnWord *obj = (MnWord *)mn_alloc(16, &shape_float);
+  memcpy(&obj[1], &d, sizeof(d));
+  return (MnWord)obj;
+}
+
+static double unbox_float(MnWord w) {
+  double d = 0;
+  if (!mn_is_immediate(w)) {
+    memcpy(&d, &((MnWord *)(uintptr_t)w)[1], sizeof(d));
+  }
+  return d;
+}
+
+MnWord mn_float_from_str(int64_t ptr_bits, int64_t len) {
+  if (len < 0) {
+    mn_panic("mn_float_from_str: negative length");
+  }
+  char *tmp = (char *)malloc((size_t)len + 1);
+  if (tmp == NULL) {
+    mn_panic("mn_float_from_str: out of memory");
+  }
+  if (len > 0) {
+    memcpy(tmp, (const void *)(uintptr_t)ptr_bits, (size_t)len);
+  }
+  tmp[len] = 0;
+  char *end = NULL;
+  double d = strtod(tmp, &end);
+  free(tmp);
+  return box_float(d);
+}
+
+MnWord mn_fadd(MnWord a, MnWord b) { return box_float(unbox_float(a) + unbox_float(b)); }
+MnWord mn_fsub(MnWord a, MnWord b) { return box_float(unbox_float(a) - unbox_float(b)); }
+MnWord mn_fmul(MnWord a, MnWord b) { return box_float(unbox_float(a) * unbox_float(b)); }
+MnWord mn_fdiv(MnWord a, MnWord b) { return box_float(unbox_float(a) / unbox_float(b)); }
+
+static int format_float(double d, char *buf, size_t n) {
+  if (d == 0.0) {
+    if (signbit(d)) return snprintf(buf, n, "-0.0");
+    return snprintf(buf, n, "0.0");
+  }
+  if (isfinite(d) && d == trunc(d) && d < 1e15 && d > -1e15) {
+    return snprintf(buf, n, "%.1f", d);
+  }
+  return snprintf(buf, n, "%.15g", d);
+}
 
 MnWord mn_show(MnWord v) {
   char buf[64];
@@ -265,7 +316,13 @@ MnWord mn_show(MnWord v) {
     /* Int / Bool / Unit share odd immediates; print as Int decimal. */
     n = snprintf(buf, sizeof(buf), "%lld", (long long)mn_word_to_int(v));
   } else {
-    n = snprintf(buf, sizeof(buf), "#<obj>");
+    MnWord *obj = (MnWord *)(uintptr_t)v;
+    MnShape *sh = (MnShape *)(uintptr_t)obj[0];
+    if (sh != NULL && sh->tag == TAG_FLOAT) {
+      n = format_float(unbox_float(v), buf, sizeof(buf));
+    } else {
+      n = snprintf(buf, sizeof(buf), "#<obj>");
+    }
   }
   if (n < 0) {
     mn_panic("mn_show: snprintf failed");

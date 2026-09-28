@@ -78,6 +78,8 @@ type RawModule = {
   forms: Ast[];
   exports: Set<string>;
   imports: { path: string; span: Span }[];
+  /** Import paths whose exports are also exports of this module. */
+  reexports: string[];
 };
 
 /**
@@ -97,23 +99,24 @@ export function loadModuleGraph(
     const parsed = readAll(source);
     if (!parsed.ok) {
       diagnostics.push(parseErrorToDiagnostic(parsed.error));
-      raw.set(path, { path, forms: [], exports: new Set(), imports: [] });
+      raw.set(path, { path, forms: [], exports: new Set(), imports: [], reexports: [] });
       return;
     }
     const casing = checkCasingAll(parsed.forms);
     if (!casing.ok) {
       diagnostics.push(casingErrorToDiagnostic(casing.error));
-      raw.set(path, { path, forms: [], exports: new Set(), imports: [] });
+      raw.set(path, { path, forms: [], exports: new Set(), imports: [], reexports: [] });
       return;
     }
     const desugared = desugarAll(parsed.forms);
     if (!desugared.ok) {
       diagnostics.push(...desugared.diagnostics);
-      raw.set(path, { path, forms: [], exports: new Set(), imports: [] });
+      raw.set(path, { path, forms: [], exports: new Set(), imports: [], reexports: [] });
       return;
     }
 
     const imports: { path: string; span: Span }[] = [];
+    const reexports: string[] = [];
     const exports = new Set<string>();
     const body: Ast[] = [];
 
@@ -134,6 +137,7 @@ export function loadModuleGraph(
         }
         const resolved = resolveImportPath(path, imp.spec);
         imports.push({ path: resolved, span: imp.span });
+        if (imp.reexport) reexports.push(resolved);
         continue;
       }
 
@@ -156,7 +160,7 @@ export function loadModuleGraph(
       body.push(pub.form);
     }
 
-    raw.set(path, { path, forms: body, exports, imports });
+    raw.set(path, { path, forms: body, exports, imports, reexports });
 
     for (const imp of imports) {
       if (raw.has(imp.path)) continue;
@@ -254,6 +258,23 @@ export function loadModuleGraph(
   // Ensure entry is in order (it should be)
   if (!seen.has(entry)) order.push(entry);
 
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const m of raw.values()) {
+      for (const depPath of m.reexports) {
+        const dep = raw.get(depPath);
+        if (!dep) continue;
+        for (const name of dep.exports) {
+          if (!m.exports.has(name)) {
+            m.exports.add(name);
+            grew = true;
+          }
+        }
+      }
+    }
+  }
+
   const modules = new Map<string, PreparedModule>();
   for (const p of order) {
     const m = raw.get(p)!;
@@ -269,13 +290,28 @@ export function loadModuleGraph(
   return { ok: true, graph: { order, modules } };
 }
 
-function parseImport(form: Ast): { spec: string; span: Span } | null {
-  if (form.tag !== "list" || form.elems.length < 2) return null;
-  const h = form.elems[0]!;
+function parseImport(form: Ast): { spec: string; span: Span; reexport: boolean } | null {
+  let node = form;
+  let reexport = false;
+  if (node.tag === "list" && node.elems.length >= 2) {
+    const h0 = node.elems[0]!;
+    if (h0.tag === "sym" && nameEquals(h0.name, "pub")) {
+      reexport = true;
+      node = {
+        tag: "list",
+        kind: node.kind,
+        elems: node.elems.slice(1),
+        span: node.span,
+      };
+    }
+  }
+  if (node.tag !== "list" || node.elems.length < 2) return null;
+  const h = node.elems[0]!;
   if (h.tag !== "sym" || !nameEquals(h.name, "import")) return null;
+  form = node;
   const spec = form.elems[1]!;
-  if (spec.tag !== "str") return { spec: "", span: form.span };
-  return { spec: new TextDecoder().decode(spec.bytes), span: form.span };
+  if (spec.tag !== "str") return { spec: "", span: form.span, reexport };
+  return { spec: new TextDecoder().decode(spec.bytes), span: form.span, reexport };
 }
 
 function unwrapPub(form: Ast): { form: Ast; exported: boolean } {

@@ -1,0 +1,18 @@
+; User record and variant. `show` must print the same text on the
+; interpreter and on a native binary.
+
+(defrec Point (x: Int) (y: Int))
+
+(variant Color
+  (Red)
+  (Rgb Int Int Int))
+
+(defn main -> Int
+  (do
+    (write 1 (show (Point 1 2)))
+    (println "")
+    (write 1 (show (Red)))
+    (println "")
+    (write 1 (show (Rgb 3 4 5)))
+    (println "")
+    0))

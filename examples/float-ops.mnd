@@ -1,0 +1,19 @@
+; Floats are bytes objects. -0.0 stays distinct from 0.0.
+
+(defn main -> Int
+  (do
+    (write 1 (show -0.0))
+    (println "")
+    (write 1 (show 0.0))
+    (println "")
+    (write 1 (show (f+ -0.0 0.0)))
+    (println "")
+    (write 1 (show (f+ 1.5 2.5)))
+    (println "")
+    (write 1 (show (f- 1.0 2.5)))
+    (println "")
+    (write 1 (show (f* 1.5 2.0)))
+    (println "")
+    (write 1 (show (f/ 7.5 2.5)))
+    (println "")
+    0))

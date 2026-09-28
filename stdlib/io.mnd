@@ -1,0 +1,25 @@
+; IoError is the closed taxonomy the runtime and the interpreter both
+; return (§2.15). Tags are the C statics: 20–26 nullary, 27 (Other Int).
+
+(pub variant IoError
+  (NotFound)
+  (Permission)
+  (Exists)
+  (IsADirectory)
+  (NotADirectory)
+  (InvalidPath)
+  (TooLarge)
+  (Other Int))
+
+(extern mn_write (fd: Int) (data: Str) -> (Result Unit IoError))
+(extern mn_read_file (path: Str) -> (Result Str IoError))
+(extern mn_write_file (path: Str) (data: Str) -> (Result Unit IoError))
+
+(pub defn write (fd: Int) (data: Str) -> (Result Unit IoError)
+  (mn_write fd data))
+
+(pub defn read-file (path: Str) -> (Result Str IoError)
+  (mn_read_file path))
+
+(pub defn write-file (path: Str) (data: Str) -> (Result Unit IoError)
+  (mn_write_file path data))

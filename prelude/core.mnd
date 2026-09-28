@@ -1,3 +1,8 @@
+(pub import "../stdlib/sys.mnd")
+(pub import "../stdlib/io.mnd")
+(pub import "../stdlib/fs.mnd")
+(pub import "../stdlib/proc.mnd")
+
 (pub defn (id [a]) (x: a) -> a
   x)
 

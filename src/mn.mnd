@@ -22,6 +22,9 @@
 ; `--dump-after=derive` additionally prints `derive/plan.mnd`'s
 ; `describe-derives` — which types the program's `show`/`=`/`compare`/
 ; `dump` use sites need derived (slice 2F) — right after the forms dump.
+; The plan is taken from the forms *before* `plan-derives` rewrites
+; `(show (Red))` into `(show_Color ...)`, so the line still names the
+; declared type.
 
 (import "./reader/ast.mnd")
 (import "./reader/read.mnd")
@@ -324,7 +327,7 @@
   (do
     (let derived (plan-derives forms))
     (maybe-dump derived dump-after-derive)
-    (maybe-dump-derive-plan derived dump-after-derive)
+    (maybe-dump-derive-plan forms dump-after-derive)
     (on-ok derived)))
 
 (defn with-source (path: Str) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit

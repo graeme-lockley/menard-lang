@@ -16,12 +16,13 @@
 ; compared" question a real derive engine's instantiation-site scan
 ; (§2.8.4) will also have to answer.
 ;
-; TODO(later slice): per-type/per-instantiation code generation — port
-; the synthesis in host/src/interp/derive.ts into Menard `defn`s emitted
-; per instantiation, keyed by `plan.mnd`'s traversal (or a typed
-; successor to it). See `derive/plan.mnd`'s own header comment for why
-; that generation step, specifically, is deferred rather than attempted
-; here.
+; `plan-derives` prepends a `defn` for `show`, `=`, `compare`, and `dump`
+; for each user record or variant that a classifiable use site mentions,
+; and rewrites that use site onto the generated name. Builtin `Int` /
+; `Bool` / `Str` stay on the runtime intrinsics. `Ref`, `StringBuffer`,
+; and `Fn` are not given bodies here — the typer already rejects `show`
+; of those. Field payloads are printed with the builtin `show`, which
+; matches the interpreter for `Int`.
 
 (import "../reader/ast.mnd")
 
@@ -30,5 +31,325 @@
 ; src/reader/read.mnd's header comment for why.
 (pub alias Ast Ast)
 
+(defn sp0 -> Span (Span 0 0))
+(defn sy (name: Str) -> Ast (SymNode name (sp0)))
+(defn int-lit (n: Int) -> Ast (IntNode n (sp0)))
+(defn bool-lit (flag: Bool) -> Ast (BoolNode flag (sp0)))
+(defn st (s: Str) -> Ast (StrNode s (sp0)))
+(defn paren (xs: (List Ast)) -> Ast (ParenNode xs (sp0)))
+
+(defn sym-str (ast: Ast) -> (Maybe Str)
+  (match ast (SymNode n _) (Some n) _ (None)))
+
+(defn is-sym (ast: Ast) (name: Str) -> Bool
+  (match (sym-str ast) (Some n) (= n name) (None) false))
+
+(defn list-length (xs: (List Str)) -> Int
+  (match xs [] 0 (Cons _ rest) (+ 1 (list-length rest))))
+
+(defn ast-length (xs: (List Ast)) -> Int
+  (match xs [] 0 (Cons _ rest) (+ 1 (ast-length rest))))
+
+(defn append-ast (xs: (List Ast)) (ys: (List Ast)) -> (List Ast)
+  (match xs [] ys (Cons x rest) (Cons x (append-ast rest ys))))
+
+(defn strip-colon (s: Str) -> Str
+  (let n (str-byte-length s))
+  (if (and (> n 0) (= (str-byte s (- n 1)) 58)) (str-slice s 0 (- n 1)) s))
+
+(defn unwrap-pub (ast: Ast) -> Ast
+  (match ast
+    (ParenNode (Cons head rest) sp) (if (is-sym head "pub") (unwrap-pub (ParenNode rest sp)) ast)
+    _ ast))
+
+(defrec DeriveCtor (name: Str) (arity: Int))
+(defn dc-name (c: DeriveCtor) -> Str (match c (DeriveCtor n _) n))
+(defn dc-arity (c: DeriveCtor) -> Int (match c (DeriveCtor _ a) a))
+
+(defn binders (prefix: Str) (n: Int) (i: Int) -> (List Str)
+  (if (>= i n) []
+    (Cons (str-concat prefix (show i)) (binders prefix n (+ i 1)))))
+
+(defn syms-of (xs: (List Str)) -> (List Ast)
+  (match xs [] [] (Cons h rest) (Cons (sy h) (syms-of rest))))
+
+(defn ctor-pat (c: DeriveCtor) (prefix: Str) -> Ast
+  (paren (Cons (sy (dc-name c)) (syms-of (binders prefix (dc-arity c) 0)))))
+
+(defn concat2 (a: Ast) (b: Ast) -> Ast
+  (paren [(sy "str-concat") a b]))
+
+(defn show-call (name: Str) -> Ast
+  (paren [(sy "show") (sy name)]))
+
+(defn join-shown (fields: (List Str)) -> Ast
+  (match fields
+    [] (st "")
+    [f] (show-call f)
+    (Cons f rest) (concat2 (show-call f) (concat2 (st " ") (join-shown rest)))))
+
+(defn show-of-ctor (c: DeriveCtor) (prefix: Str) -> Ast
+  (if (= (dc-arity c) 0)
+    (st (str-concat "(" (str-concat (dc-name c) ")")))
+    (concat2
+      (st (str-concat "(" (str-concat (dc-name c) " ")))
+      (concat2 (join-shown (binders prefix (dc-arity c) 0)) (st ")")))))
+
+(defn show-clauses (ctors: (List DeriveCtor)) -> (List Ast)
+  (match ctors
+    [] []
+    (Cons c rest)
+      (append-ast [(ctor-pat c "a") (show-of-ctor c "a")] (show-clauses rest))))
+
+(defn eq-fields (as: (List Str)) (bs: (List Str)) -> Ast
+  (match as
+    [] (bool-lit true)
+    (Cons a ar)
+      (match bs
+        [] (bool-lit false)
+        (Cons b br)
+          (paren [(sy "if") (paren [(sy "=") (sy a) (sy b)]) (eq-fields ar br) (bool-lit false)]))))
+
+(defn cmp-fields (as: (List Str)) (bs: (List Str)) -> Ast
+  (match as
+    [] (int-lit 0)
+    (Cons a ar)
+      (match bs
+        [] (int-lit 0)
+        (Cons b br)
+          (paren [(sy "let") (sy "c") (paren [(sy "compare") (sy a) (sy b)])
+            (paren [(sy "if") (paren [(sy "=") (sy "c") (int-lit 0)]) (cmp-fields ar br) (sy "c")])]))))
+
+(defn eq-one (c: DeriveCtor) -> Ast
+  (paren [(sy "match") (sy "b")
+    (ctor-pat c "b")
+    (eq-fields (binders "a" (dc-arity c) 0) (binders "b" (dc-arity c) 0))
+    (sy "_") (bool-lit false)]))
+
+(defn eq-clauses (ctors: (List DeriveCtor)) -> (List Ast)
+  (match ctors
+    [] []
+    (Cons c rest) (append-ast [(ctor-pat c "a") (eq-one c)] (eq-clauses rest))))
+
+(defn cmp-one (c: DeriveCtor) -> Ast
+  (paren [(sy "match") (sy "b")
+    (ctor-pat c "b")
+    (cmp-fields (binders "a" (dc-arity c) 0) (binders "b" (dc-arity c) 0))
+    (sy "_")
+    (int-lit 1)]))
+
+(defn cmp-clauses (ctors: (List DeriveCtor)) -> (List Ast)
+  (match ctors
+    [] []
+    (Cons c rest) (append-ast [(ctor-pat c "a") (cmp-one c)] (cmp-clauses rest))))
+
+(defn defn-1 (name: Str) (ty: Str) (ret: Str) (body: Ast) -> Ast
+  (paren [(sy "defn") (sy name) (paren [(sy "v:") (sy ty)]) (sy "->") (sy ret) body]))
+
+(defn defn-2 (name: Str) (ty: Str) (ret: Str) (body: Ast) -> Ast
+  (paren [(sy "defn") (sy name)
+    (paren [(sy "a:") (sy ty)])
+    (paren [(sy "b:") (sy ty)])
+    (sy "->") (sy ret) body]))
+
+(defn match-v (clauses: (List Ast)) -> Ast
+  (paren (Cons (sy "match") (Cons (sy "v") clauses))))
+
+(defn match-a (clauses: (List Ast)) -> Ast
+  (paren (Cons (sy "match") (Cons (sy "a") clauses))))
+
+(defn gen-type (ty: Str) (ctors: (List DeriveCtor)) -> (List Ast)
+  [(defn-1 (str-concat "show_" ty) ty "Str" (match-v (show-clauses ctors)))
+   (defn-2 (str-concat "eq_" ty) ty "Bool" (match-a (eq-clauses ctors)))
+   (defn-2 (str-concat "compare_" ty) ty "Int" (match-a (cmp-clauses ctors)))
+   (defn-1 (str-concat "dump_" ty) ty "Str" (match-v (show-clauses ctors)))])
+
+(defn gen-used (names: (List Str)) (types: (Map Str (List DeriveCtor))) -> (List Ast)
+  (match names
+    [] []
+    (Cons n rest)
+      (match (map-get types n)
+        (None) (gen-used rest types)
+        (Some ctors) (append-ast (gen-type n ctors) (gen-used rest types)))))
+
+(defn insert-name (x: Str) (xs: (List Str)) -> (List Str)
+  (match xs
+    [] [x]
+    (Cons h rest) (if (= h x) xs (if (<= (compare x h) 0) (Cons x xs) (Cons h (insert-name x rest))))))
+
+(defn ctor-type-of (name: Str) (ctors: (Map Str Str)) -> (Maybe Str)
+  (map-get ctors name))
+
+(defn classify-user (ast: Ast) (ctors: (Map Str Str)) -> (Maybe Str)
+  (match ast
+    (SymNode n _) (ctor-type-of n ctors)
+    (ParenNode (Cons head args) _)
+      (match (sym-str head)
+        (None) (None)
+        (Some hn) (ctor-type-of hn ctors))
+    _ (None)))
+
+(defn is-derive-op (name: Str) -> Bool
+  (or (= name "show") (or (= name "=") (or (= name "compare") (= name "dump")))))
+
+(defn op-prefix (name: Str) -> Str
+  (if (= name "show") "show_"
+    (if (= name "=") "eq_"
+      (if (= name "compare") "compare_" "dump_"))))
+
+(defn note-used (ast: Ast) (ctors: (Map Str Str)) (acc: (List Str)) -> (List Str)
+  (match ast
+    (ParenNode elems _) (note-used-paren elems ctors acc)
+    (BracketNode elems _) (note-used-list elems ctors acc)
+    _ acc))
+
+(defn note-used-list (xs: (List Ast)) (ctors: (Map Str Str)) (acc: (List Str)) -> (List Str)
+  (match xs
+    [] acc
+    (Cons x rest) (note-used-list rest ctors (note-used x ctors acc))))
+
+(defn note-used-paren (elems: (List Ast)) (ctors: (Map Str Str)) (acc: (List Str)) -> (List Str)
+  (match elems
+    (Cons head rest)
+      (note-used-list rest ctors (note-used-head head rest ctors acc))
+    [] acc))
+
+(defn note-used-head (head: Ast) (rest: (List Ast)) (ctors: (Map Str Str)) (acc: (List Str)) -> (List Str)
+  (match (sym-str head)
+    (None) acc
+    (Some hn)
+      (if (is-derive-op hn)
+        (match rest
+          (Cons a _)
+            (match (classify-user a ctors)
+              (None) acc
+              (Some ty) (insert-name ty acc))
+          [] acc)
+        acc)))
+
+(defn used-in (forms: (List Ast)) (ctors: (Map Str Str)) -> (List Str)
+  (used-in-list forms ctors []))
+
+(defn used-in-list (forms: (List Ast)) (ctors: (Map Str Str)) (acc: (List Str)) -> (List Str)
+  (match forms
+    [] acc
+    (Cons f rest) (used-in-list rest ctors (note-used f ctors acc))))
+
+(defn rewrite-name (op: Str) (ty: Str) -> Str
+  (str-concat (op-prefix op) ty))
+
+(defn rewrite (ast: Ast) (ctors: (Map Str Str)) -> Ast
+  (match ast
+    (ParenNode elems sp) (ParenNode (rewrite-paren elems ctors) sp)
+    (BracketNode elems sp) (BracketNode (rewrite-list elems ctors) sp)
+    _ ast))
+
+(defn rewrite-list (xs: (List Ast)) (ctors: (Map Str Str)) -> (List Ast)
+  (match xs [] [] (Cons x rest) (Cons (rewrite x ctors) (rewrite-list rest ctors))))
+
+(defn rewrite-paren (elems: (List Ast)) (ctors: (Map Str Str)) -> (List Ast)
+  (match elems
+    (Cons head rest) (rewrite-paren-head head rest ctors)
+    [] []))
+
+(defn rewrite-paren-head (head: Ast) (rest: (List Ast)) (ctors: (Map Str Str)) -> (List Ast)
+  (match (sym-str head)
+    (None) (Cons (rewrite head ctors) (rewrite-list rest ctors))
+    (Some hn)
+      (if (is-derive-op hn)
+        (rewrite-derive hn head rest ctors)
+        (Cons head (rewrite-list rest ctors)))))
+
+(defn rewrite-derive (hn: Str) (head: Ast) (rest: (List Ast)) (ctors: (Map Str Str)) -> (List Ast)
+  (match rest
+    (Cons a more)
+      (match (classify-user a ctors)
+        (None) (Cons head (rewrite-list rest ctors))
+        (Some ty) (Cons (sy (rewrite-name hn ty)) (rewrite-list rest ctors)))
+    [] (Cons head [])))
+
+(defn rewrite-forms (forms: (List Ast)) (ctors: (Map Str Str)) -> (List Ast)
+  (match forms [] [] (Cons f rest) (Cons (rewrite f ctors) (rewrite-forms rest ctors))))
+
+(defn add-ctor (ctors: (Map Str Str)) (cname: Str) (ty: Str) -> (Map Str Str)
+  (map-set ctors cname ty))
+
+(defn variant-ctors (cs: (List Ast)) (ty: Str) (ctors: (Map Str Str)) (acc: (List DeriveCtor)) -> (List DeriveCtor)
+  (match cs
+    [] acc
+    (Cons c rest)
+      (match c
+        (ParenNode (Cons name-ast payloads) _)
+          (match (sym-str name-ast)
+            (None) (variant-ctors rest ty ctors acc)
+            (Some cname)
+              (Cons (DeriveCtor cname (ast-length payloads)) (variant-ctors rest ty ctors acc)))
+        _ (variant-ctors rest ty ctors acc))))
+
+(defn remember-variant (cs: (List Ast)) (ty: Str) (ctors: (Map Str Str)) -> (Map Str Str)
+  (match cs
+    [] ctors
+    (Cons c rest)
+      (match c
+        (ParenNode (Cons name-ast _) _)
+          (match (sym-str name-ast)
+            (None) (remember-variant rest ty ctors)
+            (Some cname) (remember-variant rest ty (add-ctor ctors cname ty)))
+        _ (remember-variant rest ty ctors))))
+
+(defrec TypeAcc (types: (Map Str (List DeriveCtor))) (ctors: (Map Str Str)))
+
+(defn acc-add-defrec (acc: TypeAcc) (name: Str) (arity: Int) -> TypeAcc
+  (match acc
+    (TypeAcc types ctors)
+      (TypeAcc
+        (map-set types name [(DeriveCtor name arity)])
+        (add-ctor ctors name name))))
+
+(defn acc-add-variant (acc: TypeAcc) (name: Str) (cs: (List Ast)) -> TypeAcc
+  (match acc
+    (TypeAcc types ctors)
+      (TypeAcc
+        (map-set types name (variant-ctors cs name ctors []))
+        (remember-variant cs name ctors))))
+
+(defn take-name (ast: Ast) -> (Maybe Str)
+  (match ast
+    (SymNode n _) (Some (strip-colon n))
+    (ParenNode (Cons n _) _) (match (sym-str n) (Some s) (Some (strip-colon s)) (None) (None))
+    _ (None)))
+
+(defn consider-named (hn: Str) (rest: (List Ast)) (acc: TypeAcc) -> TypeAcc
+  (if (= hn "defrec")
+    (match rest
+      (Cons name-ast fields)
+        (match (take-name name-ast)
+          (None) acc
+          (Some name) (acc-add-defrec acc name (ast-length fields)))
+      [] acc)
+    (if (= hn "variant")
+      (match rest
+        (Cons name-ast cs)
+          (match (take-name name-ast)
+            (None) acc
+            (Some name) (acc-add-variant acc name cs))
+        [] acc)
+      acc)))
+
+(defn consider (ast: Ast) (acc: TypeAcc) -> TypeAcc
+  (match (unwrap-pub ast)
+    (ParenNode (Cons head rest) _)
+      (match (sym-str head)
+        (None) acc
+        (Some hn) (consider-named hn rest acc))
+    _ acc))
+
+(defn consider-all (forms: (List Ast)) (acc: TypeAcc) -> TypeAcc
+  (match forms
+    [] acc
+    (Cons f rest) (consider-all rest (consider f acc))))
+
 (pub defn plan-derives (forms: (List Ast)) -> (List Ast)
-  forms)
+  (match (consider-all forms (TypeAcc (map-new) (map-new)))
+    (TypeAcc types ctors)
+      (append-ast (gen-used (used-in forms ctors) types) (rewrite-forms forms ctors))))

@@ -12,25 +12,12 @@
 ; runtime built-ins, and the Maybe/Result/List/IoError nominal types); and
 ; simple polymorphic `defn`s via declared `[a]` type parameters.
 ;
-; TODO(this slice), left for later slices per the plan:
-;   - `extern` declarations are not typed (no collectExternScheme port):
-;     `extern` is confined to the stdlib seam modules by the module loader
-;     (host/src/interp/modules.ts's E_EXTERN_SEAM check) and is out of
-;     scope for the single-file programs this slice targets.
-;   - No `ImportBundle`/cross-module typing (host's `imports`/`exports`
-;     options to `typecheckForms`, and `checkPubPrivateTypes`, ADR 27):
-;     `src/mn.mnd` runs one file at a time with no module graph of its
-;     own yet, so there is nothing to bundle. Revisit alongside a Menard
-;     module loader.
-;   - `spawn`/`spawn-capture` and the SpawnStatus/SpawnError/SpawnOutput
-;     types are not registered: `src/mn.mnd` and its own dependencies
-;     never call them. Add if a later slice needs process spawning typed.
-;   - Predicate coverage: `is-showable`/`is-orderable` (types.mnd) are
-;     structurally complete for every type this typer can itself build,
-;     but there is no third "equatable" predicate — `=`'s scheme is typed
-;     generically (any `a`) exactly as the host's is, with no check that
-;     `a` is actually equatable, matching host/src/type/check.ts exactly
-;     (it has no such check either).
+; `spawn` / `spawn-capture` and SpawnStatus are registered
+; (`install-spawn-status`). Import graphs are flattened before this typer
+; runs (`src/modules/graph.mnd`). `extern` forms register the same scheme
+; a `defn` header would, with no body. Still open:
+;   - `=` is generic in `a`, matching the host typer. There is no separate
+;     equatable predicate.
 ;   - `and`/`or`/`cond`/`when`/`while` are not special-cased here because
 ;     `src/mn.mnd`'s pipeline runs desugar before typecheck (spec §2.5:
 ;     "expanded during desugaring, before typing"), so this typer never
@@ -159,6 +146,10 @@
     (value-set env "*" (Scheme [] (t-fn [(t-int) (t-int)] (t-int))))
     (value-set env "/" (Scheme [] (t-fn [(t-int) (t-int)] (t-int))))
     (value-set env "%" (Scheme [] (t-fn [(t-int) (t-int)] (t-int))))
+    (value-set env "f+" (Scheme [] (t-fn [(t-float) (t-float)] (t-float))))
+    (value-set env "f-" (Scheme [] (t-fn [(t-float) (t-float)] (t-float))))
+    (value-set env "f*" (Scheme [] (t-fn [(t-float) (t-float)] (t-float))))
+    (value-set env "f/" (Scheme [] (t-fn [(t-float) (t-float)] (t-float))))
     (value-set env "<" (Scheme [] (t-fn [(t-int) (t-int)] (t-bool))))
     (value-set env ">" (Scheme [] (t-fn [(t-int) (t-int)] (t-bool))))
     (value-set env "<=" (Scheme [] (t-fn [(t-int) (t-int)] (t-bool))))
@@ -769,12 +760,28 @@
 
 ; variant
 
+(defn ctor-owner (c: CtorInfo) -> Str
+  (match c (CtorInfo type-name _ _) type-name))
+
+; A constructor already owned by another variant stays there. SpawnError
+; lists the IoError singletons NotFound and Permission for exhaustiveness
+; without taking them away from IoError.
+(defn register-variant-ctor-set (env: TypeEnv) (type-name: Str) (params: (List Str)) (cname: Str) (payloads: (List Type)) -> Unit
+  (do
+    (ctor-set env cname (CtorInfo type-name payloads params))
+    (value-set env cname (Scheme params (t-fn payloads (t-nominal type-name (params-to-types params) "variant"))))))
+
+(defn register-variant-ctor-checked (env: TypeEnv) (type-name: Str) (params: (List Str)) (cname: Str) (payloads: (List Type)) -> Unit
+  (match (ctor-get env cname)
+    (Some info)
+      (if (= (ctor-owner info) type-name)
+        (register-variant-ctor-set env type-name params cname payloads)
+        ())
+    (None) (register-variant-ctor-set env type-name params cname payloads)))
+
 (defn register-variant-ctor (env: TypeEnv) (type-name: Str) (params: (List Str)) (vc: VariantCtor) -> Unit
   (match vc
-    (VariantCtor cname payloads)
-      (do
-        (ctor-set env cname (CtorInfo type-name payloads params))
-        (value-set env cname (Scheme params (t-fn payloads (t-nominal type-name (params-to-types params) "variant")))))))
+    (VariantCtor cname payloads) (register-variant-ctor-checked env type-name params cname payloads)))
 
 (defn parse-variant-ctor-named (env: TypeEnv) (cname-ast: Ast) (payload-asts: (List Ast)) (params: (List Str)) -> (Maybe VariantCtor)
   (match (sym-str cname-ast)
@@ -899,7 +906,8 @@
 (defn collect-defn-scheme-named (env: TypeEnv) (hn: Str) (rest: (List Ast)) (elems: (List Ast)) (sp: Span) -> Unit
   (if (= hn "pub") (collect-defn-scheme-elems env rest sp)
     (if (= hn "defn") (register-defn-scheme env elems sp)
-      ())))
+      (if (= hn "extern") (register-defn-scheme env elems sp)
+        ()))))
 
 (defn collect-defn-scheme-head (env: TypeEnv) (head: Ast) (rest: (List Ast)) (elems: (List Ast)) (sp: Span) -> Unit
   (match (sym-str head)

@@ -69,6 +69,47 @@ describe("tier-0 host seam", () => {
     if (r.ok) expect(r.exitCode).toBe(300 & 0xff);
   });
 
+  test("getenv, exists, and rename match the runtime Result shapes", () => {
+    const fs = createVirtualFs({ "/a.txt": "hi" });
+    const host = createHost({ fs, env: { CC: "clang" } });
+    const r = run(
+      `(do
+  (let g (getenv "CC"))
+  (let missing (getenv "NO_SUCH"))
+  (let was (exists "/a.txt"))
+  (let moved (rename "/a.txt" "/b.txt"))
+  (let now (exists "/a.txt"))
+  (let there (exists "/b.txt"))
+  (match g
+    (Some cc)
+      (match missing
+        (None)
+          (match moved
+            (Ok _)
+              (if (and was (and there (if now false true))) cc "bad-flags")
+            (Err _) "bad-rename")
+        _ "bad-missing")
+    _ "bad-getenv"))`,
+      { host },
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "str") {
+      expect(new TextDecoder().decode(r.value.bytes)).toBe("clang");
+    }
+  });
+
+  test("rename of a missing path is Err NotFound", () => {
+    const host = createHost();
+    const r = run(`(rename "/nope" "/elsewhere")`, { host });
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "variant") {
+      expect(r.value.ctor).toBe("Err");
+      const err = r.value.payloads[0];
+      expect(err?.tag).toBe("variant");
+      if (err?.tag === "variant") expect(err.ctor).toBe("NotFound");
+    }
+  });
+
   test("seam builtins typecheck", () => {
     const diags = diagnose(`(do
   (arg-count)
@@ -76,6 +117,9 @@ describe("tier-0 host seam", () => {
   (write 1 "x")
   (read-file "a")
   (write-file "b" "c")
+  (getenv "CC")
+  (exists "a")
+  (rename "a" "b")
   (exit 0))`);
     expect(diags).toEqual([]);
   });

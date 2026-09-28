@@ -904,6 +904,8 @@ function collectDef(env: TypeEnv, ast: Ast): void {
       if (!cname) continue;
       const payloads = ce.elems.slice(1).map((e) => parseTypeExpr(env, e, paramSet));
       ctors.push({ name: cname, payloads, span: ce.span });
+      const existing = env.ctors.get(cname);
+      if (existing && existing.typeName !== name) continue;
       env.ctors.set(cname, { typeName: name, payloads, params });
       env.values.set(cname, {
         params,

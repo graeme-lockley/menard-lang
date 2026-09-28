@@ -1,0 +1,10 @@
+; Path predicates. `exists` is allocation-free; `rename` returns IoError.
+
+(extern mn_exists (path: Str) -> Bool)
+(extern mn_rename (from: Str) (to: Str) -> (Result Unit IoError))
+
+(pub defn exists (path: Str) -> Bool
+  (mn_exists path))
+
+(pub defn rename (from: Str) (to: Str) -> (Result Unit IoError)
+  (mn_rename from to))

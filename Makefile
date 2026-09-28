@@ -21,7 +21,13 @@ BUILD_DIR := build
 
 .DEFAULT_GOAL := mn
 
-.PHONY: mn test typecheck ci runtime-smoke runtime-clean hello-native ret-native check-fixed-point
+.PHONY: mn bootstrap test typecheck ci runtime-smoke runtime-clean hello-native ret-native check-fixed-point
+
+# Full fixed-point gate: stage0 emit, stage1/stage2 link, bc0 == bc1,
+# stage1 == stage2, and the installed driver artifact. Plain `make` only
+# rebuilds ./mn. This recipe does not enable the stress or heap-verify
+# collectors.
+bootstrap: check-fixed-point
 
 # Bootstrap the native driver. Stage0 (the interpreter) compiles
 # src/mn.mnd; clang links it to ./mn. The binary is not committed.

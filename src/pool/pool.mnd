@@ -304,6 +304,48 @@
 ; module's header comment) — one per line, `"str \"…\""` or `"ctor
 ; Name"`, deduped and sorted by that line's own byte content (ADR 38).
 ; Empty (`""`) if `forms` mentions neither.
+; Distinct `Str` literals in `forms`, sorted by byte content. The lowerer
+; emits one global per entry in this order. The newline `println` appends
+; is not a source literal; the lowerer adds it after this list.
+(defn collect-raw-list (xs: (List Ast)) (acc: (Ref (List Str))) -> Unit
+  (match xs
+    [] ()
+    (Cons x rest) (do (collect-raw-expr x acc) (collect-raw-list rest acc))))
+
+(defn collect-raw-expr (ast: Ast) (acc: (Ref (List Str))) -> Unit
+  (match ast
+    (StrNode s _) (set! acc (Cons s (deref acc)))
+    (FloatNode s _) (set! acc (Cons s (deref acc)))
+    (ParenNode elems _) (collect-raw-paren elems acc)
+    (BracketNode elems _) (collect-raw-list elems acc)
+    _ ()))
+
+(defn collect-raw-paren (elems: (List Ast)) (acc: (Ref (List Str))) -> Unit
+  (match elems
+    [] ()
+    (Cons head rest)
+      (if (is-sym head "quote") ()
+        (collect-raw-list (Cons head rest) acc))))
+
+(defn collect-raw-top (ast: Ast) (acc: (Ref (List Str))) -> Unit
+  (match (unwrap-pub ast)
+    (ParenNode (Cons head _) _)
+      (match (sym-str head)
+        (Some hn) (if (is-decl-head hn) () (collect-raw-expr (unwrap-pub ast) acc))
+        (None) (collect-raw-expr (unwrap-pub ast) acc))
+    _ (collect-raw-expr ast acc)))
+
+(defn collect-raw-tops (forms: (List Ast)) (acc: (Ref (List Str))) -> Unit
+  (match forms
+    [] ()
+    (Cons f rest) (do (collect-raw-top f acc) (collect-raw-tops rest acc))))
+
+(pub defn pool-string-literals (forms: (List Ast)) -> (List Str)
+  (do
+    (let acc (ref []))
+    (collect-raw-tops forms acc)
+    (sort-strs (dedup-list (deref acc)))))
+
 (pub defn pool-summary (forms: (List Ast)) -> Str
   (do
     (let arities (all-ctor-arities forms))

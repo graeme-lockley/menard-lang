@@ -1,0 +1,19 @@
+; Process seam. The extern name is the C symbol (§2.7). The published
+; name is an ordinary function.
+
+(extern mn_exit (code: Int) -> Unit)
+(extern mn_arg_count -> Int)
+(extern mn_arg (i: Int) -> Str)
+(extern mn_getenv (name: Str) -> (Maybe Str))
+
+(pub defn exit (code: Int) -> Unit
+  (mn_exit code))
+
+(pub defn arg-count -> Int
+  (mn_arg_count))
+
+(pub defn arg (i: Int) -> Str
+  (mn_arg i))
+
+(pub defn getenv (name: Str) -> (Maybe Str)
+  (mn_getenv name))

@@ -3,20 +3,14 @@
 ; ADR 40: the compiler's product is LLVM bitcode (`.bc`); `menard emit`
 ; never shells out to `llvm-as`, and this module does not either.
 ; `emit-program-bc` is the `emit` CLI's one entry point into code
-; generation: it hands `forms` straight to `src/emit/lower.mnd`'s
-; `lower-program`, which finds the program's top-level `defn main -> Int
-; …`, lowers it (and every top-level `Int`-only `defn` it calls) to real
-; instructions over the tagged-`Int` ABI, and calls `src/emit/bc-
-; writer.mnd`'s `write-module-bc` with the resulting `LlvmModule` — see
-; `lower.mnd`'s header comment for exactly what it lowers and does not
-; support yet, and why. A program with no such `main`, or whose `main`
-; needs a form this lowerer does not yet handle (`loop`/`recur`,
-; `match`, a non-`Int` value, …), is an `Err`: `emit` fails (see
-; `src/mn.mnd`'s `write-module`) rather than writing a wrong or stale
-; module.
+; generation: it hands `forms` to `src/emit/lower.mnd`'s `lower-program`,
+; which lowers the phase-3 subset (loops, match, strings, closures, maps,
+; I/O) over the tagged-word ABI and calls `src/emit/bc-writer.mnd`'s
+; `write-module-bc`. A program with no `defn main`, or a form the lowerer
+; refuses, is an `Err`: `emit` fails rather than writing
+; a stale module.
 
 (import "../reader/ast.mnd")
-(import "../pool/pool.mnd")
 (import "./lower.mnd")
 
 ; Re-export shim — see `reader/casing.mnd`'s header comment for why this
@@ -24,24 +18,9 @@
 ; a private nominal type, even one imported `pub` from elsewhere.
 (pub alias Ast Ast)
 
-; Runs the static pool collector (`pool/pool.mnd`, slice 2F) over `forms`
-; before lowering, exactly as the real pipeline eventually must (spec
-; §2.11's static pool is built during the final emission pass). The
-; result is computed and discarded here: `lower.mnd`'s real instruction
-; selector only lowers `Int`, never a `Str`, a `Float`, or a constructor
-; object (see its own header comment), so nothing downstream consumes a
-; pool yet — see `pool/pool.mnd`'s own header comment's "Wiring" for why
-; this call exists anyway (to exercise the collector on every real
-; `emit`, not only in its own unit tests) and what still has to land
-; before it does anything.
-(defn run-pool-collection (forms: (List Ast)) -> Unit
-  (do (pool-summary forms) ()))
-
+; String globals are `pool.mnd`'s sorted literals, consumed inside
+; `lower-program`. Nullary constructors stay the C static objects.
 ; Emit a bitcode module for a program's forms, or an error message if the
-; program has no lowerable `defn main -> Int …` (see the module comment
-; above, and `lower.mnd`'s header comment for exactly what "lowerable"
-; covers today).
+; program has no lowerable `defn main` (see `lower.mnd`).
 (pub defn emit-program-bc (forms: (List Ast)) -> (Result Str Str)
-  (do
-    (run-pool-collection forms)
-    (lower-program forms)))
+  (lower-program forms))

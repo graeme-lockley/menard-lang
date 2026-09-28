@@ -124,6 +124,21 @@ function isTopDef(ast: Ast): boolean {
   );
 }
 
+/** C symbol on an `extern` line → the host builtin it wraps. */
+const EXTERN_BUILTIN: Record<string, string> = {
+  mn_exit: "exit",
+  mn_arg_count: "arg-count",
+  mn_arg: "arg",
+  mn_getenv: "getenv",
+  mn_write: "write",
+  mn_read_file: "read-file",
+  mn_write_file: "write-file",
+  mn_exists: "exists",
+  mn_rename: "rename",
+  mn_spawn: "spawn",
+  mn_spawn_capture: "spawn-capture",
+};
+
 function defineTop(ast: Ast, env: Env): void {
   if (ast.tag !== "list" || ast.elems.length === 0) return;
   const hn = ast.elems[0]!;
@@ -136,9 +151,11 @@ function defineTop(ast: Ast, env: Env): void {
     return;
   }
   if (nameEquals(hn.name, "extern")) {
-    // Interpreter: extern names the existing host builtin (same symbol).
+    // The declared name is the C symbol (`mn_exists`). The interpreter
+    // already has the operation under the Menard name (`exists`).
     const name = symName(ast.elems[1]!);
-    const existing = envGet(env, name);
+    const builtin = EXTERN_BUILTIN[name] ?? name;
+    const existing = envGet(env, builtin);
     if (!existing) {
       throw new PanicError(`extern unbound in interpreter: ${name}`, ast.span);
     }
@@ -154,6 +171,7 @@ function defineTop(ast: Ast, env: Env): void {
       const ce = ast.elems[i]!;
       if (ce.tag !== "list" || ce.elems.length < 1 || ce.elems[0]!.tag !== "sym") continue;
       const cname = symName(ce.elems[0]!);
+      if (envGet(env, cname)) continue;
       const arity = ce.elems.length - 1;
       envSet(env, cname, {
         tag: "fn",
@@ -173,6 +191,7 @@ function defineTop(ast: Ast, env: Env): void {
           ? symName(namePart.elems[0]!)
           : null;
     if (!name) return;
+    if (envGet(env, name)) return;
     const fieldCount = Math.max(0, ast.elems.length - 2);
     envSet(env, name, {
       tag: "fn",
@@ -843,6 +862,7 @@ function installBuiltins(env: Env): void {
     "sb-new", "sb-append!", "sb-append-byte!", "sb-length", "sb-clear!", "sb-to-str", "sb-take-str!",
     "None", "Some", "Ok", "Err", "Nil", "Cons",
     "exit", "arg-count", "arg", "write", "read-file", "write-file",
+    "getenv", "exists", "rename",
     "spawn", "spawn-capture",
     "NotFound", "Permission", "Exists", "IsADirectory", "NotADirectory",
     "InvalidPath", "TooLarge", "Other", "Unsupported",
@@ -1081,10 +1101,34 @@ function applyBuiltin(
       const r = host.readFile(path);
       return r.ok ? resultOk(vStr(r.bytes)) : resultErr(r.error);
     }
+    case "f+":
+    case "f-":
+    case "f*":
+    case "f/": {
+      const x = (args[0] as { value: number }).value;
+      const y = (args[1] as { value: number }).value;
+      const value = name === "f+" ? x + y : name === "f-" ? x - y : name === "f*" ? x * y : x / y;
+      return { tag: "float", value };
+    }
     case "write-file": {
       const path = new TextDecoder().decode((args[0] as { bytes: Uint8Array }).bytes);
       const data = (args[1] as { bytes: Uint8Array }).bytes;
       const w = host.writeFile(path, data);
+      return w.ok ? resultOk(vUnit()) : resultErr(w.error);
+    }
+    case "getenv": {
+      const name = new TextDecoder().decode((args[0] as { bytes: Uint8Array }).bytes);
+      const v = host.getenv(name);
+      return v === null ? vVariant("None") : vVariant("Some", [vStr(new TextEncoder().encode(v))]);
+    }
+    case "exists": {
+      const path = new TextDecoder().decode((args[0] as { bytes: Uint8Array }).bytes);
+      return vBool(host.exists(path));
+    }
+    case "rename": {
+      const from = new TextDecoder().decode((args[0] as { bytes: Uint8Array }).bytes);
+      const to = new TextDecoder().decode((args[1] as { bytes: Uint8Array }).bytes);
+      const w = host.rename(from, to);
       return w.ok ? resultOk(vUnit()) : resultErr(w.error);
     }
     case "spawn": {

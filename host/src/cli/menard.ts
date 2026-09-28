@@ -37,7 +37,7 @@ withInternalGuard(
     }
 
     const path = file;
-    const host = createLiveHost({ realFs: true, argv });
+    const host = createLiveHost({ realFs: true, argv, spawnEnabled: true });
 
     if (cmd === "check") {
       const diags = diagnose(source, { path, host });

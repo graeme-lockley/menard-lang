@@ -159,7 +159,7 @@
 ; Order: mn_write_stdout, mn_print_i64, mn_write_stderr, mn_alloc,
 ; heap helpers (3C), mn_print_str, Str/Ref/SB (3D), Map (3F), closures (3E),
 ; tier-0 I/O (3G: mn_init … mn_exit).
-(pub defn extern-count -> Int 64)
+(pub defn extern-count -> Int 69)
 
 (pub defn extern-write-stdout-abs (num-strings: Int) -> Int num-strings)
 (pub defn extern-print-i64-abs (num-strings: Int) -> Int (+ num-strings 1))
@@ -225,6 +225,11 @@
 (pub defn extern-root-save-abs (num-strings: Int) -> Int (+ num-strings 61))
 (pub defn extern-root-restore-abs (num-strings: Int) -> Int (+ num-strings 62))
 (pub defn extern-root-push-abs (num-strings: Int) -> Int (+ num-strings 63))
+(pub defn extern-float-from-str-abs (num-strings: Int) -> Int (+ num-strings 64))
+(pub defn extern-fadd-abs (num-strings: Int) -> Int (+ num-strings 65))
+(pub defn extern-fsub-abs (num-strings: Int) -> Int (+ num-strings 66))
+(pub defn extern-fmul-abs (num-strings: Int) -> Int (+ num-strings 67))
+(pub defn extern-fdiv-abs (num-strings: Int) -> Int (+ num-strings 68))
 
 ; Builtin constructor tags — must match runtime/src/variants.c.
 (pub defn tag-nil -> Int 0)

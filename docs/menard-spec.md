@@ -227,20 +227,11 @@ way, so it is the class of bug the gate cannot be relied on to see.
 
 With the empty word, the worst case is a wasted read.
 
-**But the sentinel is not load-bearing.** The property that actually matters is
-stronger:
-
-> **No published object ever contains the empty word.** An object's slots are all
-> written before it can be reached by the collector — by a root, or by another
-> reachable object.
-
-That is an **emitter obligation and an allocator obligation**, and it is
-**asserted in heap-verify** (§3.7, §4.3) rather than assumed. Both layers are
-deliberate, because they cover each other's failure: **without the assertion, a
-violation of the discipline is silent corruption; with the assertion alone, a
-violation is loud.** The word converts a potential pointer-tracing bug into a
-wasted read; the assertion is what prevents the collector from *depending* on
-that. The word is therefore a backstop, not the mechanism.
+The empty word is also a real slot. A `Map` child that is absent, and a slot
+that has not been filled yet, are both `0`. Heap-verify does not forbid that.
+It asserts that every scanned slot word is an immediate, the empty word, or an
+aligned object of the declared layout kind. A misaligned pointer, a nursery
+pointer after a collection, or a word that is none of those three is a panic.
 
 #### 2.2.1 Objects: layout kind, location, and the static pool
 
@@ -756,7 +747,14 @@ instantiation. Instantiation is a typechecker concern only — see §3.3 and §7
 - One file = one module, explicit `import`, **no import cycles**.
 - **`extern` binds a C symbol.** The declared name *is* the link-time symbol, so
   it must be a legal C identifier: no `!`, no `-`. Higher-level names live on
-  ordinary Menard wrappers (§2.15).
+  ordinary Menard wrappers (§2.15):
+
+```lisp
+(extern mn_exists (path: Str) -> Bool)
+(pub defn exists (path: Str) -> Bool
+  (mn_exists path))
+```
+
 - Mangled symbol names: `mn_<modulehash>_<name>`, with a stable hash of the
   module path so unrelated modules cannot collide. The hash is a fixed constant
   algorithm with **no per-run seed** (§2.11). Type names never mangle — types are
@@ -2289,7 +2287,7 @@ These are mandatory from day one, and each maps to an obligation in §2.11:
 | **Deterministic-wrong** | boundary corpora for overflow, division, remainder, shift edges, **`Map` aliasing**, and **`StringBuffer` copy-on-write**, checked against the oracle (§2.14) |
 | **Derive engine** | per-type golden output for `show`, `=` and `compare`, including nested maps, recursive types and **parameterised types at several instantiations** |
 | **Static pool** | a static `Str` and an equal heap `Str` are indistinguishable to `show`, `=` and `compare`; deduplication and emission order are golden-tested; a nullary constructor allocates nothing; stage0 and stage1 lay the pool out identically |
-| **Representation invariants** | heap-verify asserts odd immediates, 8-byte alignment for heap **and** static objects, empty-word handling, **that every slot word matches its declared layout kind**, and **the no-partial-publication rule** — no object reachable from a root at a collection contains the empty word (§2.2) |
+| **Representation invariants** | heap-verify asserts odd immediates, 8-byte alignment for heap **and** static objects, empty-word handling, and **that every scanned slot word is an immediate, the empty word, or an aligned object of the declared layout kind** (§2.2) |
 | **`dump`** | output captured on **fd 2** and asserted on **structurally**, never byte-compared; a cyclic `Ref` graph must terminate via the depth cap; a closure's dumped environment shows captured values (§2.16) |
 | **Canonical text** | one fixture per entry of the §2.13 table, byte-compared |
 | **Buffers** | append after `sb-to-str` leaves the earlier `Str` **unchanged** (copy-on-write); `sb-take-str!` then reuse; growth across many appends; `sb-clear!` then reuse |
@@ -2582,16 +2580,13 @@ whether it is the collector's business". The empty word is not a value and not a
 pointer (§2.2); it is the third case. A static object is a pointer that *is* real
 but is *not* the collector's business.
 
-The empty word appears in exactly two places in a correct program, both
-transient: an object's slots between allocation and fill, and — if the emitter
-does not initialise them — root slots. The second is eliminated outright by
-`mn_root_push` initialising the slot (§4.4), and the first is eliminated by the
-no-partial-publication discipline. **Heap-verify asserts the result**: no object
-reachable from a root at a collection contains the empty word. Static objects
-satisfy it trivially — they contain no slots. That assertion is what turns the
-discipline from a convention into a checked property, and it is why the empty
-word can stay in the design as a safety net without becoming the mechanism the
-collector depends on.
+The empty word is a third classification, not a value of the language. It
+appears in unfilled slots, in absent `Map` children, and in a root slot for the
+moment between `mn_root_push` and the store of the real word (§4.4).
+**Heap-verify asserts the scan rule**: every slot word reachable from a root is
+an immediate, the empty word, or an aligned object whose header matches its
+layout kind. Static objects are leaves and are not scanned. The allocator
+zeroes bodies so a recycled slot cannot hold a stale pointer.
 
 This is a precise collector. It reads "precise by tagging", not "precise by
 metadata", and the distinction is deliberate:
@@ -2721,7 +2716,7 @@ a phase before the previous one's test passes.
 | **1** | **Reference interpreter** in TypeScript — full semantics, no LLVM; §2.8.2 built-ins; **virtual and real filesystem** for the seam; **modules**; fit to be a **build host** (§3.5): host-stack-independent recursion, asymptotically honest built-ins, adequate throughput | Runs the prelude and a test suite and becomes the semantic oracle; **and** passes the build-host benchmark (§3.7) — a multi-module program that reads and writes files, recurses deeply and builds large maps, within its time budget | 4–5 wk |
 | **2** | **The compiler, in Menard, run as stage0**: reader, desugar, typing + instantiation, closure conversion, derive engine, **LLVM bitcode** emission, **static pool**, **leaking allocator**; the minimal C runtime | Compiles real programs with closures, parameterised records and variants; binaries run; every corpus program's compiled output matches the interpreter's; `show` and order match the golden corpus | 8–12 wk |
 | **3** | **Self-hosting**: stage0 compiles the compiler; `stage1`, `stage2`; **the `mn` driver** (§2.15) built natively | **`bc0 == bc1`** and `stage1 == stage2`; **and the driver's artifact is byte-identical to the harness's** | 2–4 wk |
-| **4** | Real collector: conservative (Boehm-style) first, then precise shadow-stack **with layout-kind and location scanning** | GC stress corpus runs in bounded memory; heap-verify asserts the §2.2 invariants, including no-partial-publication, and is clean | 3–6 wk |
+| **4** | Precise collector: copying nursery, remembered set, mark-sweep old space only when it grows; layout-kind and location scanning | GC stress corpus runs; heap-verify asserts the §2.2 scan rule (immediate, empty word, or aligned object) and is clean | done |
 | **5** | Performance and polish: NaN-boxing, `-O2` tuning, diagnostics, docs | Compiler compiles itself in under N minutes | open |
 
 **Phase 1 cannot be skipped**, for two reasons. §2.14: the gate cannot detect a
@@ -2745,16 +2740,10 @@ program as well as its compiler, and it is where interpreter bugs and missing
 features surface. The rule from §3.8 governs: a feature reaches the interpreter
 before the compiler uses it.
 
-**Phase 2 deliberately leaks.** Bump-allocate and never free. Get self-hosting
-with a broken memory model, *then* make it correct. Chasing a collector bug while
-also chasing a bootstrap failure is the classic way to lose months. And because
-the collector is invisible to the language, deferring it costs nothing in
-semantics. (`dump` is available from phase 1 onward, which is when you will want
-it most.)
-
-Phase 2 is also where the **static pool** first pays for itself, because a
-leaking allocator is exactly when "this allocation never happens" is easiest to
-see: the compiler's own binary size and its allocation count both drop.
+**Phase 2 shipped on a leaking bump allocator.** Self-hosting landed before the
+collector, because a collector bug and a bootstrap failure at the same time is
+how this kind of project loses months. Phase 4 replaced that bump with the
+nursery. (`dump` has been available since phase 1.)
 
 **Phase 3 is short because phase 2 did the work.** Once stage0 compiles every
 construct the compiler uses, self-hosting is running stage0 on the compiler's own
@@ -2769,11 +2758,12 @@ through a native `mn build` and byte-comparing against the script's artifact is 
 genuine end-to-end test of the runtime — arena construction, `argv`, file I/O,
 `Result`, exit codes and `posix_spawn` — that no IR comparison would catch.
 
-**Phase 4 in two steps.** Link a conservative collector first — it requires zero
-compiler cooperation and immediately replaces leaking with working. Then add
-precise shadow-stack rooting, one module at a time. Note that layout-kind scanning
-plus the location bit (§4.3) is what *permits* the stepwise migration: nothing in
-the compiler has to know which slots hold pointers.
+**Phase 4 is a precise collector, not a conservative scan.** Shapes, layout
+kinds, and the shadow stack already existed, so a Boehm-style scan of the
+address space was not built. A minor collection copies nursery survivors from
+the shadow stack and the remembered set. A major mark-sweep runs only after old
+space crosses a growth threshold. Layout kind and location decide what is
+scanned; static objects are leaves.
 
 **A note on phase 5 and `Float`.** NaN-boxing would unbox `Float`, at the cost of
 ~48 bits of `Int` payload — rejected in §2.2, and if it is ever revisited the
@@ -2795,7 +2785,7 @@ The failure modes this design is most exposed to, and what holds each one off.
 | **The static pool differs between stage0 and stage1** (deduplication or emission order inherited from a container order the interpreter and the runtime do not share) | Medium | The gate fails with no compiler bug behind it | Dedup by byte content, emit sorted by byte content (§2.2.1); §3.6 row; golden pool fixtures (§3.7) |
 | **Static-ness becomes observable** (an address comparison, an `is-static` operation, a `dump` that reports it) | Low | A semantic difference between the interpreter and compiled code, and deduplication stops being safe | §2.2.1 states the invisibility rule; §2.11.I excludes it from output; §2.16 forbids `dump` from reporting it |
 | **A `StringBuffer` adopts static storage as writable** (§2.8.2) | Low | Writing to `.rodata` — a fault, or silent corruption of a constant | The backing store is always heap-owned; copy-on-write is the only sharing; `.rodata` is never written |
-| **An unwritten slot holds dirt instead of the empty word** — partial publication, an uninitialised root slot, or an allocator that stops zeroing | Medium | Collector traces stack or freed-heap garbage; silent and deterministic, so the gate will not notice | `mn_alloc` zeroes bodies and recycled objects; `mn_root_push` initialises the slot; **heap-verify asserts no object reachable from a root contains the empty word** (§2.2, §4.2, §4.4) |
+| **An unwritten slot holds dirt instead of the empty word** — partial publication, an uninitialised root slot, or an allocator that stops zeroing | Medium | Collector traces stack or freed-heap garbage; silent and deterministic, so the gate will not notice | `mn_alloc` zeroes bodies and recycled objects; `mn_root_push` initialises the slot; **heap-verify asserts every scanned word is an immediate, the empty word, or an aligned object** (§2.2, §4.2, §4.4) |
 | **A buffer append mutates a `Str` already handed out** (§2.8.2) | Medium | Silent corruption of an immutable value, invisible to the gate if the interpreter and the runtime share the mistake | Copy-on-write rule stated as semantics; dedicated buffer fixture (§3.7); explicit TS hazard note (§3.9) |
 | **`Map` aliases instead of persisting** (§2.3) | Medium | The compiler silently corrupts its own symbol tables — and bootstraps perfectly if the interpreter's `Map` makes the same mistake | Persistence stated as a §2.3 rule, not an implementation detail; aliasing corpus (§3.7) |
 | **Representation invariant violated** (odd instant or static object as a slot value, unaligned object) | Medium | Collector frees live objects; intermittent corruption | Stated as invariants, not conventions; asserted in heap-verify over the whole corpus **and the static pool**; invariants named in the definition of done |
@@ -2946,8 +2936,8 @@ in two well-understood places.
 - [ ] The collector is precise, and the GC stress corpus runs in bounded memory.
 - [ ] **The §2.2 invariants hold and are asserted in the heap-verify build**,
       including that every slot word matches its declared **layout kind**, that
-      every object — heap and static — is 8-byte aligned, and that **no object
-      reachable from a root contains the empty word**.
+      every object — heap and static — is 8-byte aligned, and that **every
+      scanned slot word is an immediate, the empty word, or an aligned object**.
 - [ ] **`Float` is a `bytes` object**: its f64 payload is never scanned as slots,
       and no boxed float can be traced as a pointer.
 - [ ] **Static objects are 8-byte aligned, deduplicated by byte content, and

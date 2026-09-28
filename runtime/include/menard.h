@@ -213,6 +213,11 @@ MnWord mn_sb_take_str(MnWord sb);
 
 /* Loose `show` for diagnostics (Phase 3 slice H) — Int decimal or #<obj>. */
 MnWord mn_show(MnWord v);
+MnWord mn_float_from_str(int64_t ptr_bits, int64_t len);
+MnWord mn_fadd(MnWord a, MnWord b);
+MnWord mn_fsub(MnWord a, MnWord b);
+MnWord mn_fmul(MnWord a, MnWord b);
+MnWord mn_fdiv(MnWord a, MnWord b);
 /* `(dump v)` is a diagnostic builtin. The fixed-point emit never calls it;
  * a Unit no-op keeps the call lowerable without an AST printer. */
 MnWord mn_dump(MnWord v);

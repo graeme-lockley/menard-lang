@@ -1,0 +1,28 @@
+; SpawnStatus tags are the C values 30 and 31. NotFound and Permission
+; are the IoError singletons (§2.15); they are listed here so a
+; SpawnError match is exhaustive, and they stay registered as IoError.
+
+(pub variant SpawnStatus
+  (Exited Int)
+  (Signalled Int))
+
+(pub defrec SpawnOutput
+  (status: SpawnStatus)
+  (stdout: Str)
+  (stderr: Str))
+
+(pub variant SpawnError
+  (NotFound)
+  (NotExecutable)
+  (Permission)
+  (InvalidArgument)
+  (TooManyArguments)
+  (Unsupported))
+
+(extern mn_spawn (argv: (List Str)) -> (Result SpawnStatus SpawnError))
+
+(pub defn spawn (argv: (List Str)) -> (Result SpawnStatus SpawnError)
+  (mn_spawn argv))
+
+; `spawn-capture` is the host builtin. The native runtime exports
+; `mn_spawn` only, so there is no `mn_spawn_capture` wrapper yet.

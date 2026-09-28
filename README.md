@@ -70,21 +70,12 @@ diagnostics, and a build-host benchmark in CI. Issues
 [#1](https://github.com/graeme-lockley/menard-lang/issues/1)–[#10](https://github.com/graeme-lockley/menard-lang/issues/10)
 are closed.
 
-**Phase 2 is complete** for the Int/if/let/calls/`println` subset (real SSA,
-interp↔native oracle). **Phase 3 is in progress:** slices A–G land in the
-emitter and runtime —
-
-- **A** `loop`/`recur`
-- **B** heap shape headers in `mn_alloc`; Bool/Unit immediates
-- **C** `List`/`Maybe`/`Result` constructors + `match`
-- **D** `Str` / `StringBuffer` / `Ref`
-- **E** heap closures (`mn_closure_new` / `mn_apply_1`)
-- **F** persistent `Map` (Int/Str keys)
-- **G** Tier-0 I/O (`read-file` / `write-file` / `arg` / `exit`) + import-graph
-  flatten for emit (see `examples/echo-file.mnd`, `examples/mod-main.mnd`)
-
-See [`examples/`](examples/) for a tour and `tests/phase2/oracle.test.ts` for
-CI. **The Phase 3 gate is green.** `make check-fixed-point` checks
+**Phase 2 and Phase 3 are complete.** The emitter lowers `loop`/`recur`,
+Bool/Unit immediates, `List`/`Maybe`/`Result` and `match`, `Str` /
+`StringBuffer` / `Ref`, heap closures, persistent `Map`, and tier-0 I/O,
+including import-graph flatten. See [`examples/`](examples/) and
+`tests/phase2/oracle.test.ts`. **The Phase 3 gate is green.**
+`make check-fixed-point` checks
 `bc0 == bc1`, `stage1 == stage2`, and that `build/fp/stage1 build` (the
 Menard driver: in-process emit, `spawn` of the recorded `cc`, `rename`
 into place) produces a binary byte-identical to `./mn build` on the same
