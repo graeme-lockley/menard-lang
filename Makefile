@@ -42,7 +42,7 @@ mn:
 	mv $(BUILD_DIR)/mn.tmp mn
 
 test:
-	cd host && bun test ../tests
+	cd host && bun test --timeout 30000 ../tests
 
 typecheck:
 	cd host && bunx tsc --noEmit -p tsconfig.json

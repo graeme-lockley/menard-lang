@@ -1,0 +1,4 @@
+[test]
+# Interpreting src/mn.mnd and linking with clang exceeds Bun's 5s default
+# on a loaded CI runner. A passing test still finishes as soon as it finishes.
+timeout = 30000
