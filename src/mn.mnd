@@ -377,8 +377,61 @@
 ; `defn main -> Int …` its real instruction lowerer (src/emit/lower.mnd)
 ; can lower — see that module's header comment for what it does and does
 ; not lower yet.
+; `clang -print-target-triple` prints `darwin`, but the triple clang
+; actually links against is the one in its own IR (`macosx` on this
+; host). Ask clang to emit a one-line module and read that line.
+; Spawn being unavailable (the test host) leaves the triple empty, and
+; clang will warn when it supplies its own.
+(defn triple-marker -> Str "target triple = \"")
+
+(defn bytes-match-at (s: Str) (i: Int) (pat: Str) (j: Int) -> Bool
+  (if (>= j (str-byte-length pat)) true
+    (if (>= (+ i j) (str-byte-length s)) false
+      (if (= (str-byte s (+ i j)) (str-byte pat j))
+        (bytes-match-at s i pat (+ j 1))
+        false))))
+
+(defn find-bytes (s: Str) (pat: Str) (i: Int) -> Int
+  (if (> (+ i (str-byte-length pat)) (str-byte-length s)) (- 0 1)
+    (if (bytes-match-at s i pat 0) i
+      (find-bytes s pat (+ i 1)))))
+
+(defn copy-until (s: Str) (i: Int) (stop: Int) (acc: Str) -> Str
+  (if (>= i (str-byte-length s)) acc
+    (if (= (str-byte s i) stop) acc
+      (copy-until s (+ i 1) stop (str-concat acc (str-slice s i 1))))))
+
+(defn triple-from-text (text: Str) -> Str
+  (do
+    (let mark (triple-marker))
+    (let at (find-bytes text mark 0))
+    (if (< at 0) ""
+      (copy-until text (+ at (str-byte-length mark)) 34 ""))))
+
+(defn triple-from-ll (path: Str) -> Str
+  (match (read-file path)
+    (Err _) (do (write-line 2 (str-concat "error: cannot read " path)) (exit 1) "")
+    (Ok text)
+      (do
+        (let triple (triple-from-text text))
+        (if (= (str-byte-length triple) 0)
+          (do (write-line 2 "error: clang IR has no target triple") (exit 1) "")
+          triple))))
+
+(defn clang-target-triple (cc: Str) (out: Str) -> Str
+  (do
+    (let c-path (str-concat out ".probe.c"))
+    (let ll-path (str-concat out ".probe.ll"))
+    (match (write-file c-path "int x;")
+      (Err _) ""
+      (Ok _)
+        (match (spawn [cc "-S" "-emit-llvm" "-o" ll-path c-path])
+          (Err _) ""
+          (Ok st)
+            (if (= (status-exit-code st) 0) (triple-from-ll ll-path) "")))))
+
 (defn write-module (out: Str) (forms: (List Ast)) -> Unit
-  (match (emit-program-bc forms)
+  (match (emit-program-bc forms (clang-target-triple (chosen-cc "") out))
     (Ok bytes) (write-module-bytes out bytes)
     (Err msg) (fail-emit msg)))
 
@@ -474,6 +527,7 @@
   [
   cc
   "-std=c11"
+  "-D_DEFAULT_SOURCE"
   "-Wall"
   "-Wextra"
   "-O1"
@@ -490,6 +544,7 @@
   (rt-src runtime "closure.c")
   (rt-src runtime "io.c")
   (rt-src runtime "equal.c")
+  "-lm"
   "-o"
   link-out])
 
@@ -519,7 +574,7 @@
   (do
     (let bc (str-concat bin ".bc"))
     (let link-out (str-concat bin ".tmp"))
-    (match (emit-program-bc forms)
+    (match (emit-program-bc forms (clang-target-triple cc bin))
       (Err msg) (fail-emit msg)
       (Ok bytes)
         (match (write-file bc bytes)

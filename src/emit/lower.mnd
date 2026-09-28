@@ -2301,22 +2301,22 @@
 (defn subst-int-constants (forms: (List Ast)) -> (List Ast)
   (subst-forms forms (collect-int-constants forms)))
 
-(pub defn lower-program (forms: (List Ast)) -> (Result Str Str)
-  (lower-program-collected (subst-int-constants forms)))
+(pub defn lower-program (forms: (List Ast)) (triple: Str) -> (Result Str Str)
+  (lower-program-collected (subst-int-constants forms) triple))
 
-(defn lower-program-collected (forms: (List Ast)) -> (Result Str Str)
+(defn lower-program-collected (forms: (List Ast)) (triple: Str) -> (Result Str Str)
   (do
     (let lds (collect-ldefns-all forms))
     (let word-lds (filter-word-ldefns lds))
     (match (find-ldefn-named word-lds "main")
       (None) (Err "program has no top-level `defn main -> Int …` the real instruction lowerer can handle (`main` must return Int; helpers may use Int/Bool/Unit words)")
-      (Some main-ld) (lower-program-checked-main main-ld word-lds lds forms))))
+      (Some main-ld) (lower-program-checked-main main-ld word-lds lds forms triple))))
 
-(defn lower-program-checked-main (main-ld: LDefn) (word-lds: (List LDefn)) (all-lds: (List LDefn)) (forms: (List Ast)) -> (Result Str Str)
+(defn lower-program-checked-main (main-ld: LDefn) (word-lds: (List LDefn)) (all-lds: (List LDefn)) (forms: (List Ast)) (triple: Str) -> (Result Str Str)
   (if (> (param-arity-of (ldefn-params main-ld)) 0)
     (Err "`main` must take no arguments")
     (if (or (is-int-type (ldefn-ret main-ld)) (is-unit-type (ldefn-ret main-ld)))
-      (lower-program-build word-lds all-lds forms)
+      (lower-program-build word-lds all-lds forms triple)
       (Err "`main` must return Int or Unit"))))
 
 ; Global value numbering (see `llvm-ir.mnd`'s header comment and this
@@ -2501,7 +2501,7 @@
   (let names (mc-seed lds))
   (mc-propagate lds (mc-build lds names) names (ast-list-length-lds lds)))
 
-(defn lower-program-build (word-lds: (List LDefn)) (all-lds: (List LDefn)) (forms: (List Ast)) -> (Result Str Str)
+(defn lower-program-build (word-lds: (List LDefn)) (all-lds: (List LDefn)) (forms: (List Ast)) (triple: Str) -> (Result Str Str)
   (do
     (let extra (collect-non-defn-tops forms))
     (let word-lds2 (replace-main-body word-lds extra))
@@ -2513,5 +2513,5 @@
     (let num-globals (+ (* 2 num-strings) (+ (extern-count) num-funcs)))
     (let mc (mc-analyze word-lds2))
     (match (lower-all-funcs word-lds2 num-globals funcs noop pool mc)
-      (Ok lfuncs) (Ok (write-module-bc (LlvmModule lfuncs (str-pool-strs pool))))
+      (Ok lfuncs) (Ok (write-module-bc (LlvmModule lfuncs (str-pool-strs pool)) triple))
       (Err msg) (Err (str-concat "cannot lower `main`: " msg)))))

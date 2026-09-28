@@ -108,7 +108,7 @@ describe.skipIf(clang === null)("src/emit/bc-writer.mnd — a real bitcode encod
 
       const link = spawnSync(
         clang!,
-        [bcPath, ...RUNTIME_LIB_SRCS, "-I", RUNTIME_INCLUDE, "-o", binPath],
+        [bcPath, ...RUNTIME_LIB_SRCS, "-I", RUNTIME_INCLUDE, "-lm", "-o", binPath],
         { encoding: "utf-8" },
       );
       expect(link.status).toBe(0);

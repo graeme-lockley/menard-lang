@@ -239,6 +239,7 @@
 (defn type-block-id -> Int 17)
 
 (defn module-code-version -> Int 1)
+(defn module-code-triple -> Int 2)
 (defn module-code-globalvar -> Int 7)
 (defn module-code-function -> Int 8)
 
@@ -715,7 +716,14 @@
 ; exactly what `write-module-body!` below writes. `lower.mnd`'s `Builder`
 ; computes every relative operand against this same numbering; the two
 ; modules must never disagree about it.
-(defn write-module-body! (m: BitSink) (mod: LlvmModule) -> Unit
+; Clang warns `overriding the module target triple` when this record is
+; missing or differs from the compiler it is linking with. An empty
+; string leaves the record out (callers that cannot ask clang).
+(defn write-target-triple! (m: BitSink) (triple: Str) -> Unit
+  (if (= (str-byte-length triple) 0) ()
+    (write-record! m (module-code-triple) (str-byte-ops triple))))
+
+(defn write-module-body! (m: BitSink) (mod: LlvmModule) (triple: Str) -> Unit
   (do
     (let fs (llvm-module-funcs mod))
     (let globals (llvm-module-globals mod))
@@ -724,6 +732,7 @@
     (let ma (if (< ma0 3) 3 ma0))
     (let ns (int-list-length (str-lengths globals)))
     (write-record! m (module-code-version) [1]) ; version 1: relative value ids
+    (write-target-triple! m triple)
     (enter-subblock! m (type-block-id) (fn (t) (write-types! t ma globals)))
     (write-globalvars! m ma (str-lengths globals) 0 (+ ns (+ (extern-count) (lfunc-list-length fs))))
     (write-extern-decls! m ma)
@@ -737,12 +746,12 @@
 ; `src/emit/lower.mnd` is the one caller: it lowers a program's forms to
 ; an `LlvmModule` with real instructions and hands it here — this
 ; function itself knows nothing about `Ast` or lowering.
-(pub defn write-module-bc (mod: LlvmModule) -> Str
+(pub defn write-module-bc (mod: LlvmModule) (triple: Str) -> Str
   (do
     (let top (bitsink-new))
     (sb-append-byte! (sink-buf top) (bitstream-magic-byte-0))
     (sb-append-byte! (sink-buf top) (bitstream-magic-byte-1))
     (sb-append-byte! (sink-buf top) (bitstream-magic-byte-2))
     (sb-append-byte! (sink-buf top) (bitstream-magic-byte-3))
-    (enter-subblock! top (module-block-id) (fn (m) (write-module-body! m mod)))
+    (enter-subblock! top (module-block-id) (fn (m) (write-module-body! m mod triple)))
     (bitsink-finish! top)))

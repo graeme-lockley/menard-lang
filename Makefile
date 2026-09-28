@@ -6,7 +6,11 @@
 ifeq ($(origin CC),default)
 CC := clang
 endif
-CFLAGS ?= -std=c11 -Wall -Wextra -O1
+# -std=c11 hides POSIX (clock_gettime). _DEFAULT_SOURCE puts it back on
+# glibc; Darwin ignores the macro. -lm is required on Linux x86_64, where
+# `trunc` lives in libm rather than libc.
+CFLAGS ?= -std=c11 -Wall -Wextra -O1 -D_DEFAULT_SOURCE
+LDLIBS ?= -lm
 RUNTIME_DIR := runtime
 RUNTIME_BUILD := $(RUNTIME_DIR)/build
 RUNTIME_SRCS := $(RUNTIME_DIR)/src/alloc.c $(RUNTIME_DIR)/src/gc.c $(RUNTIME_DIR)/src/panic.c $(RUNTIME_DIR)/src/shadow.c $(RUNTIME_DIR)/src/smoke_main.c
@@ -34,7 +38,7 @@ bootstrap: check-fixed-point
 mn:
 	@mkdir -p $(BUILD_DIR)
 	bun run host/src/cli/menard.ts run src/mn.mnd -- emit src/mn.mnd $(BUILD_DIR)/mn.bc
-	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/mn.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/mn.tmp
+	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/mn.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/mn.tmp $(LDLIBS)
 	mv $(BUILD_DIR)/mn.tmp mn
 
 test:
@@ -48,7 +52,7 @@ ci: typecheck test
 # Standalone smoke `main` linked with the runtime (see runtime/README.md).
 runtime-smoke:
 	@mkdir -p $(RUNTIME_BUILD)
-	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(RUNTIME_SRCS) -o $(RUNTIME_BUILD)/smoke
+	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(RUNTIME_SRCS) -o $(RUNTIME_BUILD)/smoke $(LDLIBS)
 	$(RUNTIME_BUILD)/smoke
 
 runtime-clean:
@@ -70,7 +74,7 @@ runtime-clean:
 hello-native:
 	@mkdir -p $(BUILD_DIR)
 	bun run host/src/cli/menard.ts run src/mn.mnd -- emit hello.mnd $(BUILD_DIR)/hello.bc
-	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/hello.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/hello
+	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/hello.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/hello $(LDLIBS)
 	$(BUILD_DIR)/hello; echo $$?
 
 # Same as hello-native, but against tests/phase2/oracle/ret41.mnd, whose
@@ -81,7 +85,7 @@ hello-native:
 ret-native:
 	@mkdir -p $(BUILD_DIR)
 	bun run host/src/cli/menard.ts run src/mn.mnd -- emit tests/phase2/oracle/ret41.mnd $(BUILD_DIR)/ret41.bc
-	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/ret41.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/ret41
+	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/ret41.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/ret41 $(LDLIBS)
 	$(BUILD_DIR)/ret41; echo $$?
 
 # Phase 3 fixed-point gate (spec §5): stage0 emit of src/mn.mnd → bc0;
@@ -96,7 +100,7 @@ check-fixed-point:
 	bun run host/src/cli/menard.ts run src/mn.mnd -- emit src/mn.mnd $(BUILD_DIR)/fp/bc0.bc
 	@echo "==> link stage1"
 	cp $(BUILD_DIR)/fp/bc0.bc $(BUILD_DIR)/fp/mod.bc
-	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/fp/mod.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/fp/stage
+	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/fp/mod.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/fp/stage $(LDLIBS)
 	cp $(BUILD_DIR)/fp/stage $(BUILD_DIR)/fp/stage1
 	@echo "==> stage1 emit src/mn.mnd → bc1"
 	$(BUILD_DIR)/fp/stage1 emit src/mn.mnd $(BUILD_DIR)/fp/bc1.bc
@@ -104,7 +108,7 @@ check-fixed-point:
 	cmp $(BUILD_DIR)/fp/bc0.bc $(BUILD_DIR)/fp/bc1.bc && echo "bc0 == bc1 OK"
 	@echo "==> link stage2"
 	cp $(BUILD_DIR)/fp/bc1.bc $(BUILD_DIR)/fp/mod.bc
-	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/fp/mod.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/fp/stage
+	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/fp/mod.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/fp/stage $(LDLIBS)
 	cp $(BUILD_DIR)/fp/stage $(BUILD_DIR)/fp/stage2
 	@echo "==> cmp stage1 stage2"
 	cmp $(BUILD_DIR)/fp/stage1 $(BUILD_DIR)/fp/stage2 && echo "stage1 == stage2 OK"
