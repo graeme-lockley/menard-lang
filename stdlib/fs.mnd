@@ -1,4 +1,7 @@
-; Path predicates. `exists` is allocation-free; `rename` returns IoError.
+; Path predicates. `exists` is allocation-free; `rename` returns IoError,
+; which is defined in io.mnd.
+
+(import "./io.mnd")
 
 (extern mn_exists (path: Str) -> Bool)
 (extern mn_rename (from: Str) (to: Str) -> (Result Unit IoError))

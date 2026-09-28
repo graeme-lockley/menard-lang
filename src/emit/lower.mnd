@@ -2150,11 +2150,17 @@
       [num-globals (+ num-globals 1)])
     ()))
 
+; libc already defines `write`, `stdin`, `stdout`, and `stderr`. Menard
+; functions keep their source names for calls; the link symbol is prefixed
+; so a published `(defn write ...)` does not replace the syscall.
+(defn link-symbol (name: Str) -> Str
+  (if (= name "main") "main" (str-concat "menard." name)))
+
 (defn lower-one-func-finish (ld: LDefn) (is-main: Bool) (result-abs: Int) (b: Builder) -> (Result LFunc Str)
   (do
     (finish-return! b is-main result-abs)
     (finish-builder! b)
-    (Ok (LFunc (ldefn-name ld) (param-arity-of (ldefn-params ld)) is-main (total-blocks b) (builder-items-ordered b)))))
+    (Ok (LFunc (link-symbol (ldefn-name ld)) (param-arity-of (ldefn-params ld)) is-main (total-blocks b) (builder-items-ordered b)))))
 
 (defn lower-all-funcs (lds: (List LDefn)) (num-globals: Int) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) (mc: (Map Str Bool)) -> (Result (List LFunc) Str)
   (match lds
@@ -2177,7 +2183,11 @@
 ; expressions, keeps that behavior unchanged for any program that has
 ; one.
 (defn is-declaration-head (s: Str) -> Bool
-  (or (= s "defn") (or (= s "defrec") (or (= s "variant") (= s "alias")))))
+  (or (= s "defn")
+    (or (= s "defrec")
+      (or (= s "variant")
+        (or (= s "alias")
+          (or (= s "extern") (= s "import")))))))
 
 (defn is-declaration-form (ast: Ast) -> Bool
   (match (unwrap-pub ast)
@@ -2222,7 +2232,79 @@
 (defn ast-list-length-lds (lds: (List LDefn)) -> Int
   (match lds [] 0 (Cons _ rest) (+ 1 (ast-list-length-lds rest))))
 
+; A top-level `(let stdout 1)` is a value, not a function. Uses of the name
+; become the integer, so `(write stdout s)` lowers like `(write 1 s)`.
+(defn add-int-constant (ast: Ast) (acc: (Map Str Int)) -> (Map Str Int)
+  (match (unwrap-pub ast)
+    (ParenNode [head name-ast expr] _)
+      (if (is-sym head "let")
+        (add-int-constant-named name-ast expr acc)
+        acc)
+    _ acc))
+
+(defn add-int-constant-named (name-ast: Ast) (expr: Ast) (acc: (Map Str Int)) -> (Map Str Int)
+  (match (sym-str name-ast)
+    (None) acc
+    (Some n)
+      (match expr
+        (IntNode k _) (map-set acc n k)
+        _ acc)))
+
+(defn collect-int-constants-from (forms: (List Ast)) (acc: (Map Str Int)) -> (Map Str Int)
+  (match forms
+    [] acc
+    (Cons f rest) (collect-int-constants-from rest (add-int-constant f acc))))
+
+(defn collect-int-constants (forms: (List Ast)) -> (Map Str Int)
+  (collect-int-constants-from forms (map-new)))
+
+(defn subst-list (xs: (List Ast)) (consts: (Map Str Int)) (bound: Str) -> (List Ast)
+  (match xs
+    [] []
+    (Cons x rest) (Cons (subst-const x consts bound) (subst-list rest consts bound))))
+
+(defn subst-sym (name: Str) (sp: Span) (consts: (Map Str Int)) (bound: Str) -> Ast
+  (if (= name bound) (SymNode name sp)
+    (match (map-get consts name)
+      (Some k) (IntNode k sp)
+      (None) (SymNode name sp))))
+
+(defn let-bound-name (name-ast: Ast) -> Str
+  (match (sym-str name-ast) (Some n) n (None) ""))
+
+(defn subst-let (elems: (List Ast)) (sp: Span) (consts: (Map Str Int)) (bound: Str) -> Ast
+  (match elems
+    (Cons head (Cons name rest))
+      (ParenNode (Cons head (Cons name (subst-list rest consts (let-bound-name name)))) sp)
+    _ (ParenNode (subst-list elems consts bound) sp)))
+
+(defn subst-paren (elems: (List Ast)) (sp: Span) (consts: (Map Str Int)) (bound: Str) -> Ast
+  (match elems
+    (Cons head _)
+      (if (is-sym head "quote") (ParenNode elems sp)
+        (if (is-sym head "let") (subst-let elems sp consts bound)
+          (ParenNode (subst-list elems consts bound) sp)))
+    _ (ParenNode elems sp)))
+
+(defn subst-const (ast: Ast) (consts: (Map Str Int)) (bound: Str) -> Ast
+  (match ast
+    (SymNode name sp) (subst-sym name sp consts bound)
+    (ParenNode elems sp) (subst-paren elems sp consts bound)
+    (BracketNode elems sp) (BracketNode (subst-list elems consts bound) sp)
+    _ ast))
+
+(defn subst-forms (forms: (List Ast)) (consts: (Map Str Int)) -> (List Ast)
+  (match forms
+    [] []
+    (Cons f rest) (Cons (subst-const f consts "") (subst-forms rest consts))))
+
+(defn subst-int-constants (forms: (List Ast)) -> (List Ast)
+  (subst-forms forms (collect-int-constants forms)))
+
 (pub defn lower-program (forms: (List Ast)) -> (Result Str Str)
+  (lower-program-collected (subst-int-constants forms)))
+
+(defn lower-program-collected (forms: (List Ast)) -> (Result Str Str)
   (do
     (let lds (collect-ldefns-all forms))
     (let word-lds (filter-word-ldefns lds))

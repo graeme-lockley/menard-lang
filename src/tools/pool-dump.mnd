@@ -9,6 +9,7 @@
 (import "../reader/ast.mnd")
 (import "../reader/read.mnd")
 (import "../pool/pool.mnd")
+(import "../../stdlib/io.mnd")
 
 (defn nl -> Str
   (do
@@ -18,8 +19,8 @@
 
 (defn fail (msg: Str) -> Unit
   (do
-    (write 2 msg)
-    (write 2 (nl))
+    (write stderr msg)
+    (write stderr (nl))
     (exit 1)))
 
 (defn fail-parse (path: Str) (e: ParseError) -> Unit

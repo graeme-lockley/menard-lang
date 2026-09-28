@@ -1,3 +1,9 @@
+; Standard streams. These are the file descriptors `write` takes;
+; call sites use the names, `(write stdout s)`, not the numbers.
+(pub let stdin 0)
+(pub let stdout 1)
+(pub let stderr 2)
+
 ; IoError is the closed taxonomy the runtime and the interpreter both
 ; return (§2.15). Tags are the C statics: 20–26 nullary, 27 (Other Int).
 

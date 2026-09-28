@@ -342,6 +342,10 @@ export function declarationNames(form: Ast): string[] {
   const h = form.elems[0]!;
   if (h.tag !== "sym") return [];
   const hn = new TextDecoder().decode(h.name);
+  const letName = form.elems[1];
+  if (hn === "let" && form.elems.length >= 3 && letName?.tag === "sym") {
+    return [new TextDecoder().decode(letName.name)];
+  }
   if (hn === "defn" || hn === "defrec" || hn === "alias" || hn === "extern") {
     const namePart = form.elems[1]!;
     if (namePart.tag === "sym") return [new TextDecoder().decode(namePart.name)];

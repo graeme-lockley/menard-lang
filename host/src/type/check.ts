@@ -969,7 +969,11 @@ function typecheckTop(
   if (hn === "let" && ast.elems.length === 3) {
     const n = symStr(ast.elems[1]!);
     const t = infer(env, ast.elems[2]!, topLocal, topSubst);
-    if (n) topLocal.set(n, t);
+    if (n) {
+      topLocal.set(n, t);
+      // A module-level value, visible to later `defn` bodies and to importers.
+      env.values.set(n, { params: [], type: t });
+    }
     return;
   }
   infer(env, ast, topLocal, topSubst);

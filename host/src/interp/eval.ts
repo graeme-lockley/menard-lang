@@ -71,17 +71,13 @@ export function evalProgram(
     let e = env;
     for (const f of forms) {
       if (isTopDef(f)) continue;
-      if (
-        f.tag === "list" &&
-        f.elems[0]?.tag === "sym" &&
-        nameEquals(f.elems[0].name, "let") &&
-        f.elems.length === 3
-      ) {
-        const n = symName(f.elems[1]!);
-        const v = evalExpr(f.elems[2]!, e, host);
-        const child = emptyEnv(e);
-        envSet(child, n, v);
-        e = child;
+      const binding = topLet(f);
+      if (binding) {
+        const v = evalExpr(binding.expr, e, host);
+        // Bind on the module env functions closed over, not a child, so a
+        // later `defn` can mention the name the way it mentions any other value.
+        envSet(env, binding.name, v);
+        e = env;
         last = v;
         continue;
       }
@@ -101,6 +97,29 @@ export function evalProgram(
     }
     throw err;
   }
+}
+
+/** `(let name expr)` or `(pub let name expr)` at the top of a module. */
+function topLet(ast: Ast): { name: string; expr: Ast } | null {
+  let form = ast;
+  if (
+    form.tag === "list" &&
+    form.elems[0]?.tag === "sym" &&
+    nameEquals(form.elems[0].name, "pub") &&
+    form.elems.length >= 2
+  ) {
+    form = { tag: "list", kind: form.kind, elems: form.elems.slice(1), span: form.span };
+  }
+  if (
+    form.tag !== "list" ||
+    form.elems.length !== 3 ||
+    form.elems[0]?.tag !== "sym" ||
+    !nameEquals(form.elems[0].name, "let") ||
+    form.elems[1]?.tag !== "sym"
+  ) {
+    return null;
+  }
+  return { name: symName(form.elems[1]), expr: form.elems[2]! };
 }
 
 function isTopDef(ast: Ast): boolean {

@@ -37,6 +37,7 @@
 (import "./derive/plan.mnd")
 (import "./emit/bitcode.mnd")
 (import "./modules/graph.mnd")
+(import "../stdlib/io.mnd")
 
 (defn nl -> Str
   (do
@@ -178,39 +179,39 @@
   (match e
     (ParseError sp msg)
       (do
-        (write 2 path)
-        (write 2 ":")
-        (write 2 (show (span-start sp)))
-        (write 2 "-")
-        (write 2 (show (span-end sp)))
-        (write 2 ": error: ")
+        (write stderr path)
+        (write stderr ":")
+        (write stderr (show (span-start sp)))
+        (write stderr "-")
+        (write stderr (show (span-end sp)))
+        (write stderr ": error: ")
         (write-line 2 msg))))
 
 (defn report-casing-error (path: Str) (e: CasingError) -> Unit
   (match e
     (CasingError sp msg)
       (do
-        (write 2 path)
-        (write 2 ":")
-        (write 2 (show (span-start sp)))
-        (write 2 "-")
-        (write 2 (show (span-end sp)))
-        (write 2 ": error: ")
+        (write stderr path)
+        (write stderr ":")
+        (write stderr (show (span-start sp)))
+        (write stderr "-")
+        (write stderr (show (span-end sp)))
+        (write stderr ": error: ")
         (write-line 2 msg))))
 
 (defn report-desugar-error (path: Str) (e: DesugarError) -> Unit
   (match e
     (DesugarError sp code msg)
       (do
-        (write 2 path)
-        (write 2 ":")
-        (write 2 (show (span-start sp)))
-        (write 2 "-")
-        (write 2 (show (span-end sp)))
-        (write 2 ": error: ")
-        (write 2 msg)
-        (write 2 " [")
-        (write 2 code)
+        (write stderr path)
+        (write stderr ":")
+        (write stderr (show (span-start sp)))
+        (write stderr "-")
+        (write stderr (show (span-end sp)))
+        (write stderr ": error: ")
+        (write stderr msg)
+        (write stderr " [")
+        (write stderr code)
         (write-line 2 "]"))))
 
 (defn report-desugar-errors (path: Str) (es: (List DesugarError)) -> Unit
@@ -222,15 +223,15 @@
   (match e
     (TypeError sp code msg)
       (do
-        (write 2 path)
-        (write 2 ":")
-        (write 2 (show (span-start sp)))
-        (write 2 "-")
-        (write 2 (show (span-end sp)))
-        (write 2 ": error: ")
-        (write 2 msg)
-        (write 2 " [")
-        (write 2 code)
+        (write stderr path)
+        (write stderr ":")
+        (write stderr (show (span-start sp)))
+        (write stderr "-")
+        (write stderr (show (span-end sp)))
+        (write stderr ": error: ")
+        (write stderr msg)
+        (write stderr " [")
+        (write stderr code)
         (write-line 2 "]"))))
 
 (defn report-type-errors (path: Str) (es: (List TypeError)) -> Unit

@@ -2,12 +2,14 @@
 ; Prints a label, then the fixture text.
 ; Run with: `./mn run examples/echo-file.mnd` (cwd = repo root).
 
+(import "../stdlib/io.mnd")
+
 (defn main -> Int
   (match (read-file "examples/fixtures/echo-input.txt")
     (Ok s)
       (do
         (println "read examples/fixtures/echo-input.txt:")
-        (write 1 s)
+        (write stdout s)
         (println)
         0)
     (Err _)

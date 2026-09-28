@@ -2,6 +2,8 @@
 ; Prints one line per value: t, f, is-pos, and the Unit from touch.
 ; Run with: `./mn run examples/bool-unit.mnd`
 
+(import "../stdlib/io.mnd")
+
 (defn is-pos (n: Int) -> Bool
   (> n 0))
 
@@ -10,8 +12,8 @@
 
 (defn say-bool (label: Str) (b: Bool) -> Int
   (do
-    (write 1 label)
-    (write 1 (bool-word b))
+    (write stdout label)
+    (write stdout (bool-word b))
     (println)
     0))
 

@@ -1492,11 +1492,16 @@
 ; sequential top-level `let` (spec §2.4's `let*`-like sequencing, at the
 ; top level exactly as within a `defn` body).
 
+(defn bind-top-let (env: TypeEnv) (n: Str) (t: Type) (top-local: (Ref (Map Str Type))) -> Unit
+  (do
+    (set! top-local (map-set (deref top-local) n t))
+    (value-set env n (Scheme [] t))))
+
 (defn typecheck-top-let-named (env: TypeEnv) (name-ast: Ast) (expr-ast: Ast) (top-local: (Ref (Map Str Type))) -> Unit
   (do
     (let t (infer env expr-ast (deref top-local)))
     (match (sym-str name-ast)
-      (Some n) (set! top-local (map-set (deref top-local) n t))
+      (Some n) (bind-top-let env n t top-local)
       (None) ())))
 
 (defn typecheck-top-let (env: TypeEnv) (elems: (List Ast)) (sp: Span) (ast: Ast) (top-local: (Ref (Map Str Type))) -> Unit

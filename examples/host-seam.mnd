@@ -2,6 +2,8 @@
 ; Run from the repo root: ./mn run examples/host-seam.mnd
 ; `println` only prints string literals, so computed text goes through `write`.
 
+(import "../stdlib/io.mnd")
+
 (defn nl -> Str
   (do
     (let sb (sb-new))
@@ -10,8 +12,8 @@
 
 (defn line (s: Str) -> Unit
   (do
-    (write 1 s)
-    (write 1 (nl))
+    (write stdout s)
+    (write stdout (nl))
     ()))
 
 (defn main -> Int

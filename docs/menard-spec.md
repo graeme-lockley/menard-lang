@@ -1609,7 +1609,10 @@ real arguments, writes real IR and sets a real exit code.
 (arg-count) () -> Int
 (arg)       (i: Int) -> Str
 
-; menard/io.mnd — fd 1 and 2
+; menard/io.mnd — named streams, not the raw descriptor numbers
+(pub let stdin 0)
+(pub let stdout 1)
+(pub let stderr 2)
 (write)     (fd: Int) (s: Str) -> (Result Unit IoError)   ; raw bytes to any fd
 (print)     (a: …) -> Unit                                ; variadic stdout (§2.8.1)
 (println)   (a: …) -> Unit                                ; print, then 0x0a
@@ -1846,7 +1849,7 @@ it carries a code.
    other argument must be showable and is emitted as the bytes of `(show a)`.
    Neither form adds a newline except `println`, which appends one `0x0a`.
    `write` remains the host-seam primitive for raw bytes to an **arbitrary** fd
-   (so IR goes out with `(write 1 ir)`, not through `show`). `show` alone never
+   (so IR goes out with `(write stdout ir)`, not through `show`). `show` alone never
    touches a stream — it only builds the unique spelling (§2.13).
 2. **stdout and stderr are byte streams.** No newline translation, no encoding
    conversion, no locale — otherwise the gate breaks across platforms. Files are

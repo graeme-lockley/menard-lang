@@ -2,13 +2,15 @@
 ; Prints: built hi! (3 bytes)
 ; Run with: `./mn run examples/stringbuffer.mnd`
 
+(import "../stdlib/io.mnd")
+
 (defn main -> Int
   (let sb (sb-new))
   (sb-append! sb "hi")
   (sb-append-byte! sb 33)
   (let s (sb-take-str! sb))
   (print "built ")
-  (write 1 s)
+  (write stdout s)
   (print " (")
   (print (str-byte-length s))
   (println " bytes)")
