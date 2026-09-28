@@ -689,7 +689,7 @@
 ; `i1` from icmp → Bool immediate: zext to i64 (0/1) then retag → 1/3.
 (defn bool-from-i1! (b: Builder) (cond-abs: Int) -> Int
   (do
-    (let z (emit-cast! b (cast-zext) cond-abs (ty-i64)))
+    (let z (emit-cast! b cast-zext cond-abs ty-i64))
     (arith-retag! b z)))
 
 (defn emit-binop! (b: Builder) (op: Int) (lhs-abs: Int) (rhs-abs: Int) -> Int
@@ -790,7 +790,7 @@
   (let slot (emit-alloca! b))
   (if (is-rooting b)
     (do
-      (emit-call-void! b (extern-kind-write) (extern-root-push-abs (deref (b-root-ns b)))
+      (emit-call-void! b extern-kind-write (extern-root-push-abs (deref (b-root-ns b)))
         [slot (const-i64! b 0)])
       slot)
     slot))
@@ -820,33 +820,33 @@
 ; tagged-`Int` ABI, literally").
 (defn arith-add! (b: Builder) (av: Int) (cv: Int) -> Int
   (do
-    (let sum (emit-binop! b (binop-add) av cv))
+    (let sum (emit-binop! b binop-add av cv))
     (let one (const-i64! b 1))
-    (emit-binop! b (binop-sub) sum one)))
+    (emit-binop! b binop-sub sum one)))
 
 (defn arith-sub! (b: Builder) (av: Int) (cv: Int) -> Int
   (do
-    (let diff (emit-binop! b (binop-sub) av cv))
+    (let diff (emit-binop! b binop-sub av cv))
     (let one (const-i64! b 1))
-    (emit-binop! b (binop-add) diff one)))
+    (emit-binop! b binop-add diff one)))
 
 ; untag (`ashr 1`) / retag (`shl 1`, `or 1`) — shared by `*`/`/`/`%`.
 (defn arith-untag! (b: Builder) (v: Int) -> Int
   (do
     (let one (const-i64! b 1))
-    (emit-binop! b (binop-ashr) v one)))
+    (emit-binop! b binop-ashr v one)))
 
 (defn arith-retag! (b: Builder) (v: Int) -> Int
   (do
     (let one (const-i64! b 1))
-    (let shifted (emit-binop! b (binop-shl) v one))
-    (emit-binop! b (binop-or) shifted one)))
+    (let shifted (emit-binop! b binop-shl v one))
+    (emit-binop! b binop-or shifted one)))
 
 (defn arith-mul! (b: Builder) (av: Int) (cv: Int) -> Int
   (do
     (let ua (arith-untag! b av))
     (let uc (arith-untag! b cv))
-    (let prod (emit-binop! b (binop-mul) ua uc))
+    (let prod (emit-binop! b binop-mul ua uc))
     (arith-retag! b prod)))
 
 ; No zero-guard yet — see header comment's "Scope".
@@ -854,14 +854,14 @@
   (do
     (let ua (arith-untag! b av))
     (let uc (arith-untag! b cv))
-    (let q (emit-binop! b (binop-sdiv) ua uc))
+    (let q (emit-binop! b binop-sdiv ua uc))
     (arith-retag! b q)))
 
 (defn arith-rem! (b: Builder) (av: Int) (cv: Int) -> Int
   (do
     (let ua (arith-untag! b av))
     (let uc (arith-untag! b cv))
-    (let r (emit-binop! b (binop-srem) ua uc))
+    (let r (emit-binop! b binop-srem ua uc))
     (arith-retag! b r)))
 
 ; ---------------------------------------------------------------------------
@@ -984,7 +984,7 @@
   (do
     (let gid (str-pool-get pool s))
     (let len-abs (const-i64! b (str-byte-length s)))
-    (emit-call-void! b (extern-kind-write) callee-abs [gid len-abs])))
+    (emit-call-void! b extern-kind-write callee-abs [gid len-abs])))
 
 ; `mn_print_i64(i64)` — `v`'s already-tagged `Int` value, untagged
 ; (`arith-untag!`, the same `ashr 1` `*`/`/`/`%` already share) before
@@ -993,7 +993,7 @@
 (defn emit-print-i64! (b: Builder) (pool: StrPool) (v: Int) -> Unit
   (do
     (let untagged (arith-untag! b (get! b v)))
-    (emit-call-void! b (extern-kind-print) (str-pool-print-i64-abs pool) [untagged])))
+    (emit-call-void! b extern-kind-print (str-pool-print-i64-abs pool) [untagged])))
 
 ; ---------------------------------------------------------------------------
 ; The lowerer proper. `env` binds a body's local names (params, `let`s)
@@ -1034,14 +1034,14 @@
 (defn emit-float-lit! (b: Builder) (pool: StrPool) (s: Str) -> Int
   (do
     (let gid (str-pool-get pool s))
-    (let ptr-i64 (emit-cast! b (cast-ptrtoint) gid (ty-i64)))
+    (let ptr-i64 (emit-cast! b cast-ptrtoint gid ty-i64))
     (let len (const-i64! b (str-byte-length s)))
     (emit-call! b (extern-float-from-str-abs (str-pool-count pool)) [ptr-i64 len])))
 
 (defn emit-str-lit! (b: Builder) (pool: StrPool) (s: Str) -> Int
   (do
     (let gid (str-pool-get pool s))
-    (let ptr-i64 (emit-cast! b (cast-ptrtoint) gid (ty-i64)))
+    (let ptr-i64 (emit-cast! b cast-ptrtoint gid ty-i64))
     (let len (const-i64! b (str-byte-length s)))
     (emit-call! b (extern-str-new-abs (str-pool-count pool)) [ptr-i64 len])))
 
@@ -1057,7 +1057,7 @@
   (do
     ; `func-ref-abs` is already the module-scope absolute id
     ; (`num-strings + extern-count + idx`).
-    (let code (emit-cast! b (cast-ptrtoint) (func-ref-abs fr) (ty-i64)))
+    (let code (emit-cast! b cast-ptrtoint (func-ref-abs fr) ty-i64))
     (Ok (emit-call! b (extern-closure-bare-abs (str-pool-count pool)) [code]))))
 
 (defn lower-sym-ctor-or-err (name: Str) (b: Builder) (pool: StrPool) -> (Result Int Str)
@@ -1284,7 +1284,7 @@
 
 ; User-ctor tags start here so they never collide with runtime tags
 ; (List/Maybe/Result 0–5, Str/Ref/SB 10–12, Map/IoError 20–27, closure 100+).
-(defn user-ctor-tag-base -> Int 1000)
+(let user-ctor-tag-base 1000)
 
 (defn decl-name-of (name-part: Ast) -> (Maybe Str)
   (match name-part
@@ -1352,7 +1352,7 @@
 
 (defn collect-user-ctors (forms: (List Ast)) -> (Map Str CtorSpec)
   (do
-    (let tag-ref (ref (user-ctor-tag-base)))
+    (let tag-ref (ref user-ctor-tag-base))
     (collect-ctors-forms forms (map-new) tag-ref)))
 
 (defn is-builtin-ctor (hn: Str) -> Bool
@@ -1370,12 +1370,12 @@
   (or (has-builtin-tag hn) (is-user-ctor hn pool)))
 
 (defn builtin-ctor-tag-of (hn: Str) -> (Maybe Int)
-  (if (= hn "Nil") (Some (tag-nil))
-    (if (= hn "Cons") (Some (tag-cons))
-      (if (= hn "None") (Some (tag-none))
-        (if (= hn "Some") (Some (tag-some))
-          (if (= hn "Ok") (Some (tag-ok))
-            (if (= hn "Err") (Some (tag-err))
+  (if (= hn "Nil") (Some tag-nil)
+    (if (= hn "Cons") (Some tag-cons)
+      (if (= hn "None") (Some tag-none)
+        (if (= hn "Some") (Some tag-some)
+          (if (= hn "Ok") (Some tag-ok)
+            (if (= hn "Err") (Some tag-err)
               ; IoError ctors — constructed by the runtime, matched in user code.
               (if (= hn "NotFound") (Some 20)
                 (if (= hn "Permission") (Some 21)
@@ -1617,7 +1617,7 @@
             (None) (Err (str-concat "mn-closure-new: unknown function " lam-name))
             (Some fr)
               (do
-                (let code-bits (emit-cast! b (cast-ptrtoint) (func-ref-abs fr) (ty-i64)))
+                (let code-bits (emit-cast! b cast-ptrtoint (func-ref-abs fr) ty-i64))
                 (result-bind (lower-expr env-ast env b funcs noop pool)
                   (fn (env-val) (Ok (emit-call! b (extern-closure-new-abs (str-pool-count pool)) [code-bits (get! b env-val)])))))))
     _ (Err "mn-closure-new requires a function name and an env")))
@@ -1673,7 +1673,7 @@
       (do
         (let tag-abs (emit-call! b (extern-tag-abs (str-pool-count pool)) [val]))
         (let want (const-i64! b want-tag))
-        (let cond (emit-cmp2! b (icmp-eq) tag-abs want))
+        (let cond (emit-cmp2! b icmp-eq tag-abs want))
         (let ok-bb (fresh-bb! b))
         (emit-condbr! b ok-bb else-bb cond)
         (switch-to! b ok-bb)
@@ -1695,7 +1695,7 @@
 (defn bind-int-pat! (n: Int) (val: Int) (else-bb: BB) (env: (Map Str Int)) (b: Builder) -> (Result (Map Str Int) Str)
   (do
     (let lit (const-tagged! b n))
-    (let cond (emit-cmp2! b (icmp-eq) val lit))
+    (let cond (emit-cmp2! b icmp-eq val lit))
     (let ok-bb (fresh-bb! b))
     (emit-condbr! b ok-bb else-bb cond)
     (switch-to! b ok-bb)
@@ -1772,7 +1772,7 @@
     (do
       (let eqw (emit-call! b (extern-equal-abs (str-pool-count pool)) [(get! b av) (get! b cv)]))
       (let f (const-false! b))
-      (emit-cmp2! b (icmp-ne) eqw f))
+      (emit-cmp2! b icmp-ne eqw f))
     (emit-cmp2! b (cmp-pred-for hn) (get! b av) (get! b cv))))
 
 (defn lower-cond-bool-value (ast: Ast) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
@@ -1780,7 +1780,7 @@
     (fn (bv)
       (do
         (let f (const-false! b))
-        (Ok (emit-cmp2! b (icmp-ne) (get! b bv) f))))))
+        (Ok (emit-cmp2! b icmp-ne (get! b bv) f))))))
 
 ; Comparison as a Bool *value* (not only as `if`'s test).
 (defn lower-cmp-value (args: (List Ast)) (op: Str) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
@@ -1797,11 +1797,11 @@
     (bool-from-i1! b (emit-cmp2! b (cmp-pred-for op) (get! b av) (get! b cv)))))
 
 (defn cmp-pred-for (op: Str) -> Int
-  (if (= op "<") (icmp-slt)
-    (if (= op ">") (icmp-sgt)
-      (if (= op "<=") (icmp-sle)
-        (if (= op ">=") (icmp-sge)
-          (icmp-eq))))))
+  (if (= op "<") icmp-slt
+    (if (= op ">") icmp-sgt
+      (if (= op "<=") icmp-sle
+        (if (= op ">=") icmp-sge
+          icmp-eq)))))
 
 ; -- arithmetic --
 
@@ -1927,7 +1927,7 @@
   (match rest
     [code-ast]
       (result-bind (lower-expr code-ast env b funcs noop pool)
-        (fn (v) (Ok (emit-call-void! b (extern-kind-print) (extern-exit-abs (str-pool-count pool)) [(get! b v)]))))
+        (fn (v) (Ok (emit-call-void! b extern-kind-print (extern-exit-abs (str-pool-count pool)) [(get! b v)]))))
     _ (Err "exit requires exactly one Int argument")))
 
 ; `println`/`print`'s variadic args: each is either a `Str` literal
@@ -1971,7 +1971,7 @@
     (StrNode s _) (Ok (emit-write-str-to! b pool s callee-abs))
     _ (if is-stdout
         (result-bind (lower-expr s-ast env b funcs noop pool)
-          (fn (v) (Ok (emit-call-void! b (extern-kind-print) (extern-print-str-abs (str-pool-count pool)) [(get! b v)]))))
+          (fn (v) (Ok (emit-call-void! b extern-kind-print (extern-print-str-abs (str-pool-count pool)) [(get! b v)]))))
         (lower-write-any (IntNode 2 (Span 0 0)) s-ast env b funcs noop pool))))
 
 (defn lower-write (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Unit Str)
@@ -2121,8 +2121,8 @@
 (defn finish-main-return! (b: Builder) (result-abs: Int) -> Unit
   (do
     (let one (const-i64! b 1))
-    (let untagged (emit-binop! b (binop-lshr) result-abs one))
-    (let i32v (emit-cast! b (cast-trunc) untagged (ty-i32)))
+    (let untagged (emit-binop! b binop-lshr result-abs one))
+    (let i32v (emit-cast! b cast-trunc untagged ty-i32))
     (emit-ret! b i32v)))
 
 (defn lower-one-func (ld: LDefn) (num-globals: Int) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) (mc: (Map Str Bool)) -> (Result LFunc Str)
@@ -2146,7 +2146,7 @@
 ; see the process argv. Param abs ids are `num-globals` and `num-globals+1`.
 (defn emit-main-init-if-needed! (b: Builder) (is-main: Bool) (num-globals: Int) (pool: StrPool) -> Unit
   (if is-main
-    (emit-call-void! b (extern-kind-init) (extern-init-abs (str-pool-count pool))
+    (emit-call-void! b extern-kind-init (extern-init-abs (str-pool-count pool))
       [num-globals (+ num-globals 1)])
     ()))
 
@@ -2301,8 +2301,25 @@
 (defn subst-int-constants (forms: (List Ast)) -> (List Ast)
   (subst-forms forms (collect-int-constants forms)))
 
+; A top-level `(let end-block-code 0)` has already been substituted at every
+; use. Leaving the binding in `main` would only store a dead integer.
+(defn is-folded-int-let (ast: Ast) -> Bool
+  (match (unwrap-pub ast)
+    (ParenNode [head _ expr] _)
+      (if (is-sym head "let")
+        (match expr (IntNode _ _) true _ false)
+        false)
+    _ false))
+
+(defn drop-folded-int-lets (forms: (List Ast)) -> (List Ast)
+  (match forms
+    [] []
+    (Cons f rest)
+      (if (is-folded-int-let f) (drop-folded-int-lets rest)
+        (Cons f (drop-folded-int-lets rest)))))
+
 (pub defn lower-program (forms: (List Ast)) (triple: Str) -> (Result Str Str)
-  (lower-program-collected (subst-int-constants forms) triple))
+  (lower-program-collected (drop-folded-int-lets (subst-int-constants forms)) triple))
 
 (defn lower-program-collected (forms: (List Ast)) (triple: Str) -> (Result Str Str)
   (do
@@ -2508,9 +2525,9 @@
     (let pool (str-pool-finalize (collect-str-pool forms) (collect-user-ctors forms)))
     (let num-strings (str-pool-count pool))
     (let num-funcs (ast-list-length-lds word-lds2))
-    (let funcs (build-func-refs word-lds2 (+ num-strings (extern-count))))
+    (let funcs (build-func-refs word-lds2 (+ num-strings extern-count)))
     (let noop (collect-noop-names all-lds))
-    (let num-globals (+ (* 2 num-strings) (+ (extern-count) num-funcs)))
+    (let num-globals (+ (* 2 num-strings) (+ extern-count num-funcs)))
     (let mc (mc-analyze word-lds2))
     (match (lower-all-funcs word-lds2 num-globals funcs noop pool mc)
       (Ok lfuncs) (Ok (write-module-bc (LlvmModule lfuncs (str-pool-strs pool)) triple))
