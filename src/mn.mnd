@@ -379,9 +379,9 @@
 ; not lower yet.
 ; `clang -print-target-triple` prints `darwin`, but the triple clang
 ; actually links against is the one in its own IR (`macosx` on this
-; host). Ask clang to emit a one-line module and read that line.
-; Spawn being unavailable (the test host) leaves the triple empty, and
-; clang will warn when it supplies its own.
+; host). Capture that IR on stdout. Spawn being unavailable (the test
+; host) leaves the triple empty, and clang will warn when it supplies
+; its own.
 (defn triple-marker -> Str "target triple = \"")
 
 (defn bytes-match-at (s: Str) (i: Int) (pat: Str) (j: Int) -> Bool
@@ -408,30 +408,21 @@
     (if (< at 0) ""
       (copy-until text (+ at (str-byte-length mark)) 34 ""))))
 
-(defn triple-from-ll (path: Str) -> Str
-  (match (read-file path)
-    (Err _) (do (write-line 2 (str-concat "error: cannot read " path)) (exit 1) "")
-    (Ok text)
-      (do
-        (let triple (triple-from-text text))
-        (if (= (str-byte-length triple) 0)
-          (do (write-line 2 "error: clang IR has no target triple") (exit 1) "")
-          triple))))
-
-(defn clang-target-triple (cc: Str) (out: Str) -> Str
+(defn triple-or-fail (text: Str) -> Str
   (do
-    (let c-path (str-concat out ".probe.c"))
-    (let ll-path (str-concat out ".probe.ll"))
-    (match (write-file c-path "int x;")
-      (Err _) ""
-      (Ok _)
-        (match (spawn [cc "-S" "-emit-llvm" "-o" ll-path c-path])
-          (Err _) ""
-          (Ok st)
-            (if (= (status-exit-code st) 0) (triple-from-ll ll-path) "")))))
+    (let triple (triple-from-text text))
+    (if (= (str-byte-length triple) 0)
+      (do (write-line 2 "error: clang IR has no target triple") (exit 1) "")
+      triple)))
+
+(defn clang-target-triple (cc: Str) -> Str
+  (match (spawn-capture [cc "-S" "-emit-llvm" "-o" "-" "-x" "c" "-"] "int x;")
+    (Err _) ""
+    (Ok (SpawnOutput st text _))
+      (if (= (status-exit-code st) 0) (triple-or-fail text) "")))
 
 (defn write-module (out: Str) (forms: (List Ast)) -> Unit
-  (match (emit-program-bc forms (clang-target-triple (chosen-cc "") out))
+  (match (emit-program-bc forms (clang-target-triple (chosen-cc "")))
     (Ok bytes) (write-module-bytes out bytes)
     (Err msg) (fail-emit msg)))
 
@@ -530,7 +521,7 @@
   "-D_DEFAULT_SOURCE"
   "-Wall"
   "-Wextra"
-  "-O1"
+  "-O2"
   (str-concat "-I" (str-concat runtime "/include"))
   bc
   (rt-src runtime "alloc.c")
@@ -574,7 +565,7 @@
   (do
     (let bc (str-concat bin ".bc"))
     (let link-out (str-concat bin ".tmp"))
-    (match (emit-program-bc forms (clang-target-triple cc bin))
+    (match (emit-program-bc forms (clang-target-triple cc))
       (Err msg) (fail-emit msg)
       (Ok bytes)
         (match (write-file bc bytes)

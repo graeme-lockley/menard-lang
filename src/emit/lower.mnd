@@ -1329,7 +1329,10 @@
     (Cons name-part fields)
       (match (decl-name-of name-part)
         (None) acc
-        (Some name) (register-ctor-spec acc name (ast-list-length fields) tag-ref))
+        (Some name)
+          (match (builtin-ctor-tag-of name)
+            (Some _) acc
+            (None) (register-ctor-spec acc name (ast-list-length fields) tag-ref)))
     [] acc))
 
 (defn collect-ctors-named (hn: Str) (rest: (List Ast)) (acc: (Map Str CtorSpec)) (tag-ref: (Ref Int)) -> (Map Str CtorSpec)
@@ -1386,7 +1389,12 @@
                           (if (= hn "TooLarge") (Some 26)
                             (if (= hn "Other") (Some 27)
                               (if (= hn "Exited") (Some 30)
-                                (if (= hn "Signalled") (Some 31) (None))))))))))))))))))
+                                (if (= hn "Signalled") (Some 31)
+                                  (if (= hn "SpawnOutput") (Some 32)
+                                    (if (= hn "NotExecutable") (Some 33)
+                                      (if (= hn "InvalidArgument") (Some 34)
+                                        (if (= hn "TooManyArguments") (Some 35)
+                                          (if (= hn "Unsupported") (Some 36) (None)))))))))))))))))))))))
 
 (defn ctor-tag-of (hn: Str) (pool: StrPool) -> (Maybe Int)
   (match (builtin-ctor-tag-of hn)
@@ -1397,14 +1405,19 @@
         (None) (None))))
 
 (defn seam-fixed-arity (hn: Str) -> (Maybe Int)
-  (if (or (= hn "Other") (or (= hn "Exited") (= hn "Signalled"))) (Some 1)
-    (if (or (= hn "NotFound")
-          (or (= hn "Permission")
-            (or (= hn "Exists")
-              (or (= hn "IsADirectory")
-                (or (= hn "NotADirectory")
-                  (or (= hn "InvalidPath") (= hn "TooLarge"))))))) (Some 0)
-      (None))))
+  (if (= hn "SpawnOutput") (Some 3)
+    (if (or (= hn "Other") (or (= hn "Exited") (= hn "Signalled"))) (Some 1)
+      (if (or (= hn "NotFound")
+            (or (= hn "Permission")
+              (or (= hn "Exists")
+                (or (= hn "IsADirectory")
+                  (or (= hn "NotADirectory")
+                    (or (= hn "InvalidPath")
+                      (or (= hn "TooLarge")
+                        (or (= hn "NotExecutable")
+                          (or (= hn "InvalidArgument")
+                            (or (= hn "TooManyArguments") (= hn "Unsupported"))))))))))) (Some 0)
+        (None)))))
 
 (defn ctor-arity-of (hn: Str) (pool: StrPool) -> Int
   (match (seam-fixed-arity hn)
@@ -1510,6 +1523,7 @@
   "sb-length"
   "dump"
   "spawn"
+  "spawn-capture"
   "getenv"
   "exists"
   "rename"
@@ -1518,6 +1532,7 @@
   "mn_read_file"
   "mn_write_file"
   "mn_spawn"
+  "mn_spawn_capture"
   "mn_getenv"
   "mn_exists"
   "mn_rename"
@@ -1534,9 +1549,10 @@
       (if (= hn "mn_read_file") "read-file"
         (if (= hn "mn_write_file") "write-file"
           (if (= hn "mn_spawn") "spawn"
+            (if (= hn "mn_spawn_capture") "spawn-capture"
             (if (= hn "mn_getenv") "getenv"
               (if (= hn "mn_exists") "exists"
-                (if (= hn "mn_rename") "rename" hn)))))))))
+                (if (= hn "mn_rename") "rename" hn))))))))))
 
 (defn effect-alias (hn: Str) -> Str
   (if (= hn "mn_write") "write"
@@ -1584,9 +1600,10 @@
                                                                 (if (= hn "sb-length") (extern-sb-length-abs ns)
                                                                   (if (= hn "dump") (extern-dump-abs ns)
                                                                     (if (= hn "spawn") (extern-spawn-abs ns)
+                                                                      (if (= hn "spawn-capture") (extern-spawn-capture-abs ns)
                                                                       (if (= hn "getenv") (extern-getenv-abs ns)
                                                                         (if (= hn "exists") (extern-exists-abs ns)
-                                                              (extern-rename-abs ns))))))))))))))))))))))))))))))))))))))))))
+                                                              (extern-rename-abs ns)))))))))))))))))))))))))))))))))))))))))))
 
 (defn runtime-op-arity (hn: Str) -> Int
   (runtime-op-arity-named (seam-menard-name hn)))
@@ -2258,13 +2275,18 @@
 (defn collect-int-constants (forms: (List Ast)) -> (Map Str Int)
   (collect-int-constants-from forms (map-new)))
 
-(defn subst-list (xs: (List Ast)) (consts: (Map Str Int)) (bound: Str) -> (List Ast)
+(defn name-is-bound (name: Str) (bound: (List Str)) -> Bool
+  (match bound
+    [] false
+    (Cons b rest) (if (= name b) true (name-is-bound name rest))))
+
+(defn subst-list (xs: (List Ast)) (consts: (Map Str Int)) (bound: (List Str)) -> (List Ast)
   (match xs
     [] []
     (Cons x rest) (Cons (subst-const x consts bound) (subst-list rest consts bound))))
 
-(defn subst-sym (name: Str) (sp: Span) (consts: (Map Str Int)) (bound: Str) -> Ast
-  (if (= name bound) (SymNode name sp)
+(defn subst-sym (name: Str) (sp: Span) (consts: (Map Str Int)) (bound: (List Str)) -> Ast
+  (if (name-is-bound name bound) (SymNode name sp)
     (match (map-get consts name)
       (Some k) (IntNode k sp)
       (None) (SymNode name sp))))
@@ -2272,21 +2294,57 @@
 (defn let-bound-name (name-ast: Ast) -> Str
   (match (sym-str name-ast) (Some n) n (None) ""))
 
-(defn subst-let (elems: (List Ast)) (sp: Span) (consts: (Map Str Int)) (bound: Str) -> Ast
+; A parameter is `(name: Type)` or a bare symbol. The colon is part of the
+; symbol text. The name shadows an integer constant of the same spelling,
+; so `(stdin: Str)` is not `(let stdin 0)`.
+(defn strip-trailing-colon (raw: Str) -> Str
+  (let n (str-byte-length raw))
+  (if (and (> n 0) (= (str-byte raw (- n 1)) 58)) (str-slice raw 0 (- n 1)) raw))
+
+(defn param-bound-name (a: Ast) -> Str
+  (match a
+    (ParenNode (Cons n _) _) (strip-trailing-colon (let-bound-name n))
+    (SymNode n _) (strip-trailing-colon n)
+    _ ""))
+
+(defn subst-let (elems: (List Ast)) (sp: Span) (consts: (Map Str Int)) (bound: (List Str)) -> Ast
   (match elems
     (Cons head (Cons name rest))
-      (ParenNode (Cons head (Cons name (subst-list rest consts (let-bound-name name)))) sp)
+      (ParenNode (Cons head (Cons name (subst-list rest consts (Cons (let-bound-name name) bound)))) sp)
     _ (ParenNode (subst-list elems consts bound) sp)))
 
-(defn subst-paren (elems: (List Ast)) (sp: Span) (consts: (Map Str Int)) (bound: Str) -> Ast
+; Binders before `->` stay as written. The return type stays as written.
+; Only the body is substituted, with the parameter names bound.
+(defn subst-defn-body (xs: (List Ast)) (consts: (Map Str Int)) (bound: (List Str)) -> (List Ast)
+  (match xs
+    [] []
+    (Cons ret body) (Cons ret (subst-list body consts bound))))
+
+(defn subst-defn-params (xs: (List Ast)) (consts: (Map Str Int)) (bound: (List Str)) -> (List Ast)
+  (match xs
+    [] []
+    (Cons x rest)
+      (if (is-sym x "->")
+        (Cons x (subst-defn-body rest consts bound))
+        (Cons x (subst-defn-params rest consts (Cons (param-bound-name x) bound))))))
+
+(defn subst-defn (elems: (List Ast)) (sp: Span) (consts: (Map Str Int)) (bound: (List Str)) -> Ast
+  (match elems
+    (Cons head (Cons name rest))
+      (ParenNode (Cons head (Cons name (subst-defn-params rest consts bound))) sp)
+    _ (ParenNode (subst-list elems consts bound) sp)))
+
+(defn subst-paren (elems: (List Ast)) (sp: Span) (consts: (Map Str Int)) (bound: (List Str)) -> Ast
   (match elems
     (Cons head _)
       (if (is-sym head "quote") (ParenNode elems sp)
         (if (is-sym head "let") (subst-let elems sp consts bound)
-          (ParenNode (subst-list elems consts bound) sp)))
+          (if (or (is-sym head "defn") (is-sym head "fn"))
+            (subst-defn elems sp consts bound)
+            (ParenNode (subst-list elems consts bound) sp))))
     _ (ParenNode elems sp)))
 
-(defn subst-const (ast: Ast) (consts: (Map Str Int)) (bound: Str) -> Ast
+(defn subst-const (ast: Ast) (consts: (Map Str Int)) (bound: (List Str)) -> Ast
   (match ast
     (SymNode name sp) (subst-sym name sp consts bound)
     (ParenNode elems sp) (subst-paren elems sp consts bound)
@@ -2296,7 +2354,7 @@
 (defn subst-forms (forms: (List Ast)) (consts: (Map Str Int)) -> (List Ast)
   (match forms
     [] []
-    (Cons f rest) (Cons (subst-const f consts "") (subst-forms rest consts))))
+    (Cons f rest) (Cons (subst-const f consts []) (subst-forms rest consts))))
 
 (defn subst-int-constants (forms: (List Ast)) -> (List Ast)
   (subst-forms forms (collect-int-constants forms)))
@@ -2373,7 +2431,7 @@
       (or (or (or (or (= hn "map-set") (= hn "map-get")) (or (= hn "mn-env-0") (= hn "mn-env-1")))
             (or (or (= hn "mn-env-new") (= hn "mn-closure-new")) (or (= hn "mn-apply-0") (= hn "mn-apply-1"))))
           (or (or (or (= hn "mn-apply-2") (= hn "arg")) (or (= hn "read-file") (= hn "write-file")))
-              (or (or (= hn "show") (= hn "spawn")) (or (= hn "getenv") (= hn "rename")))
+              (or (or (= hn "show") (or (= hn "spawn") (= hn "spawn-capture"))) (or (= hn "getenv") (= hn "rename")))
               (or (or (= hn "f+") (= hn "f-")) (or (= hn "f*") (= hn "f/")))))))
 
 (defn mc-ctor-alloc (hn: Str) -> Bool

@@ -287,6 +287,11 @@
       (match (sym-str head) (Some hn) hn (None) "")
     _ ""))
 
+; NotFound and Permission are the IoError singletons. SpawnError lists them
+; so a match is exhaustive; they are not a second export.
+(defn shared-io-ctor (name: Str) -> Bool
+  (or (= name "NotFound") (= name "Permission")))
+
 (defn register-one-export! (exports: (Ref (Map Str Str))) (path: Str) (name: Str) (kind: Str) -> (Result Unit Str)
   (match (map-get (deref exports) name)
     (None)
@@ -294,7 +299,7 @@
         (set! exports (map-set (deref exports) name path))
         (Ok ()))
     (Some prev)
-      (if (= kind "alias")
+      (if (or (= kind "alias") (shared-io-ctor name))
         (Ok ())
         (if (= prev path)
           (Ok ())

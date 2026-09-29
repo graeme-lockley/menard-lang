@@ -265,6 +265,37 @@
     (value-set env "Exited" (Scheme [] (t-fn [(t-int)] (t-nominal "SpawnStatus" [] "variant"))))
     (value-set env "Signalled" (Scheme [] (t-fn [(t-int)] (t-nominal "SpawnStatus" [] "variant"))))))
 
+; SpawnOutput tag 32 and the SpawnError-only tags live in the runtime.
+; NotFound and Permission stay IoError constructors.
+(defn install-spawn-capture (env: TypeEnv) -> Unit
+  (do
+    (let status (t-nominal "SpawnStatus" [] "variant"))
+    (let err-ty (t-nominal "SpawnError" [] "variant"))
+    (let out-ty (t-nominal "SpawnOutput" [] "record"))
+    (type-set env "SpawnError"
+      (VariantDef "SpawnError" []
+        [(VariantCtor "NotFound" [])
+         (VariantCtor "NotExecutable" [])
+         (VariantCtor "Permission" [])
+         (VariantCtor "InvalidArgument" [])
+         (VariantCtor "TooManyArguments" [])
+         (VariantCtor "Unsupported" [])]))
+    (ctor-set env "NotExecutable" (CtorInfo "SpawnError" [] []))
+    (ctor-set env "InvalidArgument" (CtorInfo "SpawnError" [] []))
+    (ctor-set env "TooManyArguments" (CtorInfo "SpawnError" [] []))
+    (ctor-set env "Unsupported" (CtorInfo "SpawnError" [] []))
+    (value-set env "NotExecutable" (Scheme [] (t-fn [] err-ty)))
+    (value-set env "InvalidArgument" (Scheme [] (t-fn [] err-ty)))
+    (value-set env "TooManyArguments" (Scheme [] (t-fn [] err-ty)))
+    (value-set env "Unsupported" (Scheme [] (t-fn [] err-ty)))
+    (type-set env "SpawnOutput"
+      (RecordDef "SpawnOutput" []
+        [(RecordField "status" status) (RecordField "stdout" (t-str)) (RecordField "stderr" (t-str))]))
+    (ctor-set env "SpawnOutput" (CtorInfo "SpawnOutput" [status (t-str) (t-str)] []))
+    (value-set env "SpawnOutput" (Scheme [] (t-fn [status (t-str) (t-str)] out-ty)))
+    (value-set env "spawn-capture"
+      (Scheme [] (t-fn [(t-list (t-str)) (t-str)] (t-result out-ty err-ty))))))
+
 (defn install-host-seam (env: TypeEnv) -> Unit
   (do
     (value-set env "exit" (Scheme [] (t-fn [(t-int)] (t-unit))))
@@ -291,6 +322,7 @@
     (install-list-type env)
     (install-io-error env)
     (install-spawn-status env)
+    (install-spawn-capture env)
     (install-host-seam env)))
 
 (defn empty-env -> TypeEnv

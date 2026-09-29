@@ -205,7 +205,7 @@ other yet.
 | `host/src/cli/` | `check` / `run` CLI |
 | `prelude/` | Minimal Menard prelude |
 | `src/` | Compiler (Menard) — Phase 2. See [`src/README.md`](src/README.md) for the module layout and the stage0 command |
-| `runtime/` | C11 runtime (leaking allocator in Phase 2) |
+| `runtime/` | C11 runtime: nursery collector, shadow stack, and the `mn_*` seam |
 | `tests/` | Unit, corpus, semantic, negative, io |
 | `tests/bench/` | Build-host benchmark (CI time budgets) |
 | `tests/phase2/` | Runs `src/` under the Phase 1 host as stage0 — reader round-trip, `check`/`emit` CLI behaviour, emit→clang→run |

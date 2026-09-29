@@ -2720,7 +2720,7 @@ a phase before the previous one's test passes.
 | **2** | **The compiler, in Menard, run as stage0**: reader, desugar, typing + instantiation, closure conversion, derive engine, **LLVM bitcode** emission, **static pool**, **leaking allocator**; the minimal C runtime | Compiles real programs with closures, parameterised records and variants; binaries run; every corpus program's compiled output matches the interpreter's; `show` and order match the golden corpus | 8–12 wk |
 | **3** | **Self-hosting**: stage0 compiles the compiler; `stage1`, `stage2`; **the `mn` driver** (§2.15) built natively | **`bc0 == bc1`** and `stage1 == stage2`; **and the driver's artifact is byte-identical to the harness's** | 2–4 wk |
 | **4** | Precise collector: copying nursery, remembered set, mark-sweep old space only when it grows; layout-kind and location scanning | GC stress corpus runs; heap-verify asserts the §2.2 scan rule (immediate, empty word, or aligned object) and is clean | done |
-| **5** | Performance and polish: NaN-boxing, `-O2` tuning, diagnostics, docs | Compiler compiles itself in under N minutes | open |
+| **5** | Performance and polish: derived `show` prints the source name, native `spawn-capture`, `-O2` on both link paths | Stage0 emits `src/mn.mnd` in under 2 minutes | open |
 
 **Phase 1 cannot be skipped**, for two reasons. §2.14: the gate cannot detect a
 bug in the compiler's own logic, so the interpreter is the project's principal
@@ -2768,10 +2768,14 @@ the shadow stack and the remembered set. A major mark-sweep runs only after old
 space crosses a growth threshold. Layout kind and location decide what is
 scanned; static objects are leaves.
 
-**A note on phase 5 and `Float`.** NaN-boxing would unbox `Float`, at the cost of
-~48 bits of `Int` payload — rejected in §2.2, and if it is ever revisited the
-static pool's float literals become moot. That is one more reason it is a phase-5
-speculation rather than a design commitment.
+**Phase 5 is performance and polish.** Derived `show` and `dump` print the
+constructor name from the source, with the module prefix removed. `spawn-capture`
+is a native `mn_spawn_capture` as well as the host builtin, and the driver's
+clang triple probe reads that capture instead of leaving probe files beside the
+binary. Both link paths use `-O2`. The acceptance budget is two minutes for
+stage0 to emit `src/mn.mnd`; the clang link is outside that budget. NaN-boxing
+stays out: it would unbox `Float` at the cost of ~48 bits of `Int` payload,
+rejected in §2.2, and the static pool's float literals would become moot.
 
 ---
 

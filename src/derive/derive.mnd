@@ -76,6 +76,24 @@
 (defn ctor-pat (c: DeriveCtor) (prefix: Str) -> Ast
   (paren (Cons (sy (dc-name c)) (syms-of (binders prefix (dc-arity c) 0)))))
 
+; Flatten renames a private constructor to `__mN_Name` before derive runs.
+; The match pattern keeps that name so it still matches the value. Only the
+; characters inside `show` and `dump` use the name the source wrote.
+(defn source-ctor-name-digits (n: Str) (i: Int) (len: Int) -> Str
+  (if (>= i len) n
+    (do
+      (let b (str-byte n i))
+      (if (and (>= b 48) (<= b 57))
+        (source-ctor-name-digits n (+ i 1) len)
+        (if (= b 95) (str-slice n (+ i 1) (- len (+ i 1))) n)))))
+
+(defn source-ctor-name (n: Str) -> Str
+  (do
+    (let len (str-byte-length n))
+    (if (and (>= len 4) (and (= (str-byte n 0) 95) (and (= (str-byte n 1) 95) (= (str-byte n 2) 109))))
+      (source-ctor-name-digits n 3 len)
+      n)))
+
 (defn concat2 (a: Ast) (b: Ast) -> Ast
   (paren [(sy "str-concat") a b]))
 
@@ -89,11 +107,13 @@
     (Cons f rest) (concat2 (show-call f) (concat2 (st " ") (join-shown rest)))))
 
 (defn show-of-ctor (c: DeriveCtor) (prefix: Str) -> Ast
-  (if (= (dc-arity c) 0)
-    (st (str-concat "(" (str-concat (dc-name c) ")")))
-    (concat2
-      (st (str-concat "(" (str-concat (dc-name c) " ")))
-      (concat2 (join-shown (binders prefix (dc-arity c) 0)) (st ")")))))
+  (do
+    (let spelled (source-ctor-name (dc-name c)))
+    (if (= (dc-arity c) 0)
+      (st (str-concat "(" (str-concat spelled ")")))
+      (concat2
+        (st (str-concat "(" (str-concat spelled " ")))
+        (concat2 (join-shown (binders prefix (dc-arity c) 0)) (st ")"))))))
 
 (defn show-clauses (ctors: (List DeriveCtor)) -> (List Ast)
   (match ctors

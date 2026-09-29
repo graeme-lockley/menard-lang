@@ -24,5 +24,7 @@
 (pub defn spawn (argv: (List Str)) -> (Result SpawnStatus SpawnError)
   (mn_spawn argv))
 
-; `spawn-capture` is the host builtin. The native runtime exports
-; `mn_spawn` only, so there is no `mn_spawn_capture` wrapper yet.
+(extern mn_spawn_capture (argv: (List Str)) (stdin: Str) -> (Result SpawnOutput SpawnError))
+
+(pub defn spawn-capture (argv: (List Str)) (stdin: Str) -> (Result SpawnOutput SpawnError)
+  (mn_spawn_capture argv stdin))

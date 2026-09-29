@@ -9,7 +9,7 @@ endif
 # -std=c11 hides POSIX (clock_gettime). _DEFAULT_SOURCE puts it back on
 # glibc; Darwin ignores the macro. -lm is required on Linux x86_64, where
 # `trunc` lives in libm rather than libc.
-CFLAGS ?= -std=c11 -Wall -Wextra -O1 -D_DEFAULT_SOURCE
+CFLAGS ?= -std=c11 -Wall -Wextra -O2 -D_DEFAULT_SOURCE
 LDLIBS ?= -lm
 RUNTIME_DIR := runtime
 RUNTIME_BUILD := $(RUNTIME_DIR)/build
@@ -97,7 +97,14 @@ ret-native:
 check-fixed-point:
 	@mkdir -p $(BUILD_DIR)/fp
 	@echo "==> stage0 emit src/mn.mnd → bc0"
-	bun run host/src/cli/menard.ts run src/mn.mnd -- emit src/mn.mnd $(BUILD_DIR)/fp/bc0.bc
+	@start=$$(date +%s); \
+	bun run host/src/cli/menard.ts run src/mn.mnd -- emit src/mn.mnd $(BUILD_DIR)/fp/bc0.bc; \
+	status=$$?; \
+	end=$$(date +%s); \
+	elapsed=$$((end - start)); \
+	echo "stage0 emit took $${elapsed}s"; \
+	if [ $$status -ne 0 ]; then exit $$status; fi; \
+	if [ $$elapsed -gt 120 ]; then echo "stage0 emit of src/mn.mnd exceeded 2 minutes"; exit 1; fi
 	@echo "==> link stage1"
 	cp $(BUILD_DIR)/fp/bc0.bc $(BUILD_DIR)/fp/mod.bc
 	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/fp/mod.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/fp/stage $(LDLIBS)

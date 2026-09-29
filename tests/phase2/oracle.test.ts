@@ -136,7 +136,10 @@ function emit(entryRelPath: string, outPath: string): { exitCode: number; stderr
  * stdout/stderr. See this file's header comment for the `Int` ->
  * exit-code protocol.
  */
-function interpret(entryRelPath: string): { exitCode: number; stdout: string; stderr: string } {
+function interpret(
+  entryRelPath: string,
+  opts?: { spawn?: boolean },
+): { exitCode: number; stdout: string; stderr: string } {
   const entryPath = abs(entryRelPath);
   const source = readFileSync(entryPath);
   const stdoutChunks: Uint8Array[] = [];
@@ -144,6 +147,7 @@ function interpret(entryRelPath: string): { exitCode: number; stdout: string; st
   const host = createLiveHost({
     realFs: true,
     argv: [],
+    spawnEnabled: opts?.spawn === true,
     stdout: { write: (b: Uint8Array) => stdoutChunks.push(b) },
     stderr: { write: (b: Uint8Array) => stderrChunks.push(b) },
   });
@@ -176,6 +180,7 @@ const fixtures: Array<{
   expectExit: number;
   expectDis: RegExp;
   expectStdout?: string;
+  spawn?: boolean;
 }> = [
   {
     name: "a literal `main` lowers to a real untag/trunc/ret sequence (no `add`/`call` needed)",
@@ -245,13 +250,28 @@ const fixtures: Array<{
     expectExit: 12,
     expectDis: /\bcall i64 @mn_map_(new|set|get|size)\b/,
   },
+  {
+    name: "derived show of a private record and variant prints the source name",
+    entry: "examples/derive-show.mnd",
+    expectExit: 0,
+    expectDis: /\bcall i64 @mn_str_concat\b/,
+    expectStdout: "(Point 1 2)\n(Red)\n(Rgb 3 4 5)\n",
+  },
+  {
+    name: "spawn-capture feeds stdin and returns the child's stdout",
+    entry: "tests/phase2/oracle/spawn-capture.mnd",
+    expectExit: 0,
+    expectDis: /\bcall i64 @mn_spawn_capture\b/,
+    expectStdout: "hi\nab",
+    spawn: true,
+  },
 ];
 
 describe.skipIf(clang === null || llvmDis === null)("interp <-> native oracle (Phase 2 slice 2D/2H)", () => {
-  for (const { name, entry, expectExit, expectDis, expectStdout } of fixtures) {
+  for (const { name, entry, expectExit, expectDis, expectStdout, spawn } of fixtures) {
     test(name, async () => {
       // Interpreter side of the protocol.
-      const interp = interpret(entry);
+      const interp = interpret(entry, { spawn });
       if (expectStdout === undefined) {
         expect(interp.stdout).toBe("");
       } else {

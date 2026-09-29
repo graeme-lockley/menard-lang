@@ -437,7 +437,8 @@
     (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_fadd
     (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_fsub
     (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_fmul
-    (write-extern-decl! m (func-type-idx-for-arity 2)))) ; mn_fdiv
+    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_fdiv
+    (write-extern-decl! m (func-type-idx-for-arity 2)))) ; mn_spawn_capture
 
 ; ---------------------------------------------------------------------------
 ; `MODULE_CODE_GLOBALVAR` — one per string in `LlvmModule`'s `globals`,
@@ -696,7 +697,8 @@
     (write-record! v vst-code-entry (Cons (extern-fadd-abs num-strings) (str-byte-ops "mn_fadd")))
     (write-record! v vst-code-entry (Cons (extern-fsub-abs num-strings) (str-byte-ops "mn_fsub")))
     (write-record! v vst-code-entry (Cons (extern-fmul-abs num-strings) (str-byte-ops "mn_fmul")))
-    (write-record! v vst-code-entry (Cons (extern-fdiv-abs num-strings) (str-byte-ops "mn_fdiv")))))
+    (write-record! v vst-code-entry (Cons (extern-fdiv-abs num-strings) (str-byte-ops "mn_fdiv")))
+    (write-record! v vst-code-entry (Cons (extern-spawn-capture-abs num-strings) (str-byte-ops "mn_spawn_capture")))))
 
 (defn lfunc-list-length (fs: (List LFunc)) -> Int
   (match fs [] 0 (Cons _ rest) (+ 1 (lfunc-list-length rest))))

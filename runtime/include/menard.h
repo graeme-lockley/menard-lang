@@ -262,6 +262,10 @@ _Noreturn void mn_exit(MnWord code_tagged);
 /* `(spawn argv)` — posix_spawn, inherited stdio and cwd, no PATH search.
  * → (Result SpawnStatus IoError). Exited tag 30, Signalled tag 31. */
 MnWord mn_spawn(MnWord argv_list);
+/* `(spawn-capture argv stdin)` — same argv rules, pipes for stdin/stdout/stderr.
+ * → (Result SpawnOutput SpawnError). SpawnOutput tag 32. A bare command
+ * name is `./name`. */
+MnWord mn_spawn_capture(MnWord argv_list, MnWord stdin_str);
 MnWord mn_getenv(MnWord name);                 /* → (Maybe Str) */
 MnWord mn_exists(MnWord path_str);             /* → Bool */
 MnWord mn_rename(MnWord from_str, MnWord to_str); /* → (Result Unit IoError) */
