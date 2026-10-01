@@ -224,7 +224,7 @@ function desugarCondClauses(
         severity: "error",
         category: "semantic",
         code: "E_DESUGAR_COND_CLAUSE",
-        message: "cond clause must be a list (test exprs…)",
+        message: "cond clause must be a list (test exprs...)",
         span: first!.span,
       }),
     );

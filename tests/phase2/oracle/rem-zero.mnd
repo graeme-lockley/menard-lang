@@ -1,0 +1,3 @@
+; `%` by zero panics with the same text as `/` (spec §3.4).
+(defn main -> Int
+  (% 1 0))

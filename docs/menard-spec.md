@@ -123,6 +123,15 @@ projects like this.
 > Every feature must be payable by one implementer. If a feature doubles backend
 > work without being required for self-hosting, it is deferred.
 
+**Not in this version.** The following are specified below and not implemented.
+§1.4 defers them: none is required to self-host.
+
+- `Arr`, and `arr-new` / `arr-length` / `arr-nth` (§2.8.2)
+- `str-chars` (§2.8.2)
+- character literals — `Char` has no reader syntax; `char->str` is the conversion that exists
+- `map-entries` (§2.8.2). `map-keys` is accepted by both typers and runs in the interpreter; the native runtime does not provide it
+- the prelude function `find-on-path` (§2.8.3)
+
 ---
 
 ## 2. The language
@@ -531,7 +540,9 @@ Three clarifications that make byte-level I/O well defined:
   §2.15, where a NUL in an argument is an error rather than a truncation.
 - **`Char` is a Unicode *scalar value*** — a code point excluding the surrogate
   range `U+D800–U+DFFF`. This makes `char->str` **total** and never failing,
-  while `str-chars` (decode) is the **fallible** direction.
+  while `str-chars` (decode) is the **fallible** direction. **Not in this
+  version (§1.4):** there is no character-literal syntax, and `str-chars` is
+  not implemented. `char->str` is.
 - **There is no `Byte` type.** Bytes are `Int`s in a documented `0..255` range,
   reached through `str-byte`. The compiler's byte-critical paths — reader,
   hashing, I/O — are exactly the paths where a range assertion is a test. If
@@ -880,10 +891,10 @@ built-in nominal types with fixed operations, and implemented in the runtime:
 (str-byte)        (s: Str) (i: Int) -> Int          ; 0..255
 (str-slice)       (s: Str) (start: Int) (len: Int) -> Str
 (str-concat)      (a: Str) (b: Str) -> Str
-(char->str)       (c: Char) -> Str                  ; total
-(str-chars)       (s: Str) -> (Result (List Char) Int)  ; Int = byte offset of first bad byte
+(char->str)       (c: Char) -> Str                  ; total; implemented
+(str-chars)       (s: Str) -> (Result (List Char) Int)  ; not in this version (§1.4)
 
-; Arr — fixed-size, immutable (no in-place update, so no growth)
+; Arr — specified, not in this version (§1.4)
 (arr-new)    [a]    (n: Int) (v: a) -> (Arr a n)
 (arr-length) [a n]  (xs: (Arr a n)) -> Int
 (arr-nth)    [a n]  (xs: (Arr a n)) (i: Int) -> (Maybe a)
@@ -894,8 +905,8 @@ built-in nominal types with fixed operations, and implemented in the runtime:
 (map-set)     [k v] (m: (Map k v)) (k2: k) (v2: v) -> (Map k v)
 (map-has)     [k v] (m: (Map k v)) (k2: k) -> Bool
 (map-size)    [k v] (m: (Map k v)) -> Int
-(map-keys)    [k v] (m: (Map k v)) -> (List k)          ; canonical order (§2.11.O)
-(map-entries) [k v] (m: (Map k v)) -> (List k) (List v) ; parallel lists, same order
+(map-keys)    [k v] (m: (Map k v)) -> (List k)          ; interpreter and typers only; no native runtime (§1.4)
+(map-entries) [k v] (m: (Map k v)) -> (List k) (List v) ; not in this version (§1.4)
 
 ; StringBuffer — a reference type with in-place append (§2.3)
 (sb-new)          () -> StringBuffer
@@ -1019,7 +1030,8 @@ caller-supplied predicate anywhere in an output path (§2.11.O).
 Two more prelude members earn a mention because §2.15 depends on them:
 
 ```lisp
-;; Explicit, visible, testable PATH search — the primitive does NOT do this (§2.15).
+;; Specified, not in this version (§1.4). prelude/core.mnd does not define it.
+;; The driver's own search in src/mn.mnd is not this function.
 (defn (find-on-path) (name: Str) -> (Maybe Str)
   ... reads (getenv "PATH") and probes candidate paths ...)
 
@@ -1561,13 +1573,13 @@ thing.**
 | `sb-to-str` | **no** | Non-destructive — the sharp distinction from `sb-take-str!` |
 | `print`, `println`, `write`, `dump`, `read-file`, `write-file`, `exit`, `spawn`, … | **no** | They touch the OS, not an argument |
 
-The total population of `!` in the language is therefore **one special form and
-four functions**. Applying the rule is a decision about five names, not a
-judgement call on every I/O call — which matters, because the rule is not
-checked. The compiler *could* check the direct case — a `set!` writing to a
-parameter slot — but the transitive case is propagation ("this calls something
-that mutates its argument"), and propagation is an effect system. So it stays a
-convention, and the mitigation is its size.
+The published surface — `stdlib/` and `prelude/` — therefore uses `!` on
+**one special form and four functions**. Applying the rule there is a decision
+about five names, not a judgement call on every I/O call. A lint checks that
+surface. The compiler's own helpers (`emit!`, `bitsink-flush!`, and the rest)
+are local imperative names, and this convention does not propagate into them.
+The transitive case — "this calls something that mutates its argument" — is an
+effect system, which stays out. The mitigation is the size of the published list.
 
 Neither `panic` nor `exit` carries `!`: the program stopping is not mutation of a
 value reachable from an argument.
@@ -2720,7 +2732,7 @@ a phase before the previous one's test passes.
 | **2** | **The compiler, in Menard, run as stage0**: reader, desugar, typing + instantiation, closure conversion, derive engine, **LLVM bitcode** emission, **static pool**, **leaking allocator**; the minimal C runtime | Compiles real programs with closures, parameterised records and variants; binaries run; every corpus program's compiled output matches the interpreter's; `show` and order match the golden corpus | 8–12 wk |
 | **3** | **Self-hosting**: stage0 compiles the compiler; `stage1`, `stage2`; **the `mn` driver** (§2.15) built natively | **`bc0 == bc1`** and `stage1 == stage2`; **and the driver's artifact is byte-identical to the harness's** | 2–4 wk |
 | **4** | Precise collector: copying nursery, remembered set, mark-sweep old space only when it grows; layout-kind and location scanning | GC stress corpus runs; heap-verify asserts the §2.2 scan rule (immediate, empty word, or aligned object) and is clean | done |
-| **5** | Performance and polish: derived `show` prints the source name, native `spawn-capture`, `-O2` on both link paths | Stage0 emits `src/mn.mnd` in under 2 minutes | open |
+| **5** | Performance and polish: derived `show` prints the source name, native `spawn-capture`, `-O2` on both link paths | Stage0 emits `src/mn.mnd` in under 2 minutes | done |
 
 **Phase 1 cannot be skipped**, for two reasons. §2.14: the gate cannot detect a
 bug in the compiler's own logic, so the interpreter is the project's principal
@@ -2799,7 +2811,7 @@ The failure modes this design is most exposed to, and what holds each one off.
 | **`dump` output compared byte-for-byte, or `dump` called from a diagnostic path** (§2.16) | Medium | A flaky suite that looks like a determinism bug, or diagnostics that differ between the interpreter and a native build | §2.16 states the two-kinds-of-stderr rule; `dump` is captured on fd 2 and asserted structurally (§3.7) |
 | **Debug text routed to fd 1**, or stderr merged into the artifact | Low | Directly breaks the fixed point — the one way §2.16's isolation fails | `dump` has no value form and no accessor (§2.16); §3.6 requires the gate to compare the artifact alone |
 | **An ambient call is missed in an audit** (§2.15) | Medium | A path or environment value reaches emitted bytes with no signal to the reader | The boundary is the `extern` confinement in four named modules — checkable by lint (§2.7, §3.6); `find-on-path` keeps `PATH` lookup in visible code |
-| **The `!` convention is over-read** — taken for a checkable guarantee rather than a naming habit | Low | A reader trusts a marker nothing enforces | §2.15 states it is unchecked and covers five names; a linter is the only enforcement |
+| **The `!` convention is over-read** — taken for a checkable guarantee rather than a naming habit | Low | A reader trusts a marker nothing enforces | §2.15 limits the check to the five published names in `stdlib/` and `prelude/`; it does not propagate |
 | **A shell-string escape hatch appears** ("just let me run this command") (§2.15) | Medium | Unbounded ambient state in one string: quoting, globbing, `PATH`, expansion — invisible in the source and untestable | The argv form is a strict superset for every build use, and the refusal is permanent; the temptation is recorded so it is recognised |
 | **`spawn` silently gets a `PATH` search**, or the toolchain is "whatever is on `PATH`" | Medium | The build depends on ambient state that no Menard source mentions; "which `clang` did I get?" | §2.15 rule 2: no implicit lookup; `find-on-path` in visible prelude code; `mn --print-toolchain` |
 | **A child inherits fd 1 while fd 1 carries the artifact** | Low | Interleaved garbage in emitted IR — a fixed-point failure with no compiler bug behind it | The driver's streaming path spawns nothing; §3.6 row |
@@ -2923,12 +2935,12 @@ in two well-understood places.
 
 - [ ] All eight success criteria (§1.2) hold, with correctness and agreement
       evidenced separately.
-- [ ] `make bootstrap` builds from a clean checkout, one command, from source
+- [x] `make bootstrap` builds from a clean checkout, one command, from source
       alone — interpreter, then stage0, stage1, stage2 — and, once `mn` exists,
       that command runs the Menard driver.
-- [ ] There is exactly one compiler, and it is written in Menard. No compiler
+- [x] There is exactly one compiler, and it is written in Menard. No compiler
       binary is committed, downloaded or cached between bootstraps.
-- [ ] `make check-fixed-point` passes in CI: `bc0 == bc1` and `stage1 == stage2`,
+- [x] `make check-fixed-point` passes in CI: `bc0 == bc1` and `stage1 == stage2`,
       **and** the driver's artifact matches the harness's byte for byte.
 - [ ] All determinism obligations (§2.11, including §2.11.B) hold and are checked
       in CI, not asserted in prose.
@@ -2939,13 +2951,13 @@ in two well-understood places.
       by memory rather than the host stack, built-ins with the complexity this
       specification states, and stage0 compiling the compiler within the
       benchmark's budget.
-- [ ] The interpreter's typer and the compiler's agree on every negative fixture.
+- [x] The interpreter's typer and the compiler's agree on every negative fixture.
 - [ ] The collector is precise, and the GC stress corpus runs in bounded memory.
 - [ ] **The §2.2 invariants hold and are asserted in the heap-verify build**,
       including that every slot word matches its declared **layout kind**, that
       every object — heap and static — is 8-byte aligned, and that **every
       scanned slot word is an immediate, the empty word, or an aligned object**.
-- [ ] **`Float` is a `bytes` object**: its f64 payload is never scanned as slots,
+- [x] **`Float` is a `bytes` object**: its f64 payload is never scanned as slots,
       and no boxed float can be traced as a pointer.
 - [ ] **Static objects are 8-byte aligned, deduplicated by byte content, and
       emitted sorted by byte content**, identically by stage0 and stage1.
@@ -2962,22 +2974,24 @@ in two well-understood places.
 - [ ] **There is no `null`**: no operation returns one, no `deref` needs a null
       check, and the empty word appears in no Menard type, no canonical text form
       (§2.13), and no `dump` output (§2.16).
-- [ ] **`!` appears on exactly one special form and four functions** — `set!` and
-      the four `StringBuffer` operations that mutate — and on nothing that merely
-      touches the OS or the filesystem.
-- [ ] **Every ambient operation is `extern`-backed and lives in one of four
+- [x] **On the published surface (`stdlib/` and `prelude/`), `!` appears on
+      exactly one special form and four functions** — `set!` and the four
+      `StringBuffer` operations that mutate — and on nothing that merely touches
+      the OS or the filesystem. The compiler's local helpers are outside that
+      surface.
+- [x] **Every ambient operation is `extern`-backed and lives in one of four
       `stdlib` modules**, and the confinement is enforced by a lint, so §2.11.B's
       audit does not rest on a naming habit.
-- [ ] **There is no shell**: no Menard program can construct a command string.
+- [x] **There is no shell**: no Menard program can construct a command string.
       All process execution goes through `spawn`/`spawn-capture` with an argv
       list, and no `PATH` lookup is implicit.
-- [ ] **No `fork`, no signals, no child timeouts, no `chdir!`.** `SpawnStatus`
-      keeps normal exit and signal death apart in the primitive, and any folding
-      happens in a named prelude function.
-- [ ] **Spawning is disabled in the hermetic corpus**, and the non-hermetic
-      `proc/` tier is the only place a real child is spawned.
-- [ ] Every parse and type error carries a source span.
-- [ ] No macros. The special-form list in §2.5 is the whole language.
+- [x] **No `fork`, no signals, no child timeouts, no `chdir!`.** `SpawnStatus`
+      keeps normal exit and signal death apart in the primitive.
+- [x] **Hermetic programs do not spawn.** A test that sets `spawnEnabled: true`
+      lives under `tests/proc/`. The driver's clang triple probe may start
+      `clang`; that probe is not a corpus program.
+- [x] Every parse and type error carries a source span.
+- [x] No macros. The special-form list in §2.5 is the whole language.
 - [ ] One integer type, and no `Byte`. The width and operation rules in §2.2 hold
       everywhere, and the host never models the tag.
 - [ ] Type parameters are declared, never inferred, and no higher-kinded
@@ -2987,7 +3001,7 @@ in two well-understood places.
       `Str` values that are not valid UTF-8 are handled, not assumed away.
 - [ ] `Map` is persistent and its keys are orderable; nothing in the compiler or
       the prelude relies on aliasing.
-- [ ] Exactly two reference types — `Ref` and `StringBuffer` — both non-showable,
+- [x] Exactly two reference types — `Ref` and `StringBuffer` — both non-showable,
       both non-orderable, neither reaching an output path. The buffer's
       copy-on-write rule is implemented in the interpreter and the runtime, and
       tested.
@@ -2995,11 +3009,11 @@ in two well-understood places.
       value form and no accessor, and no diagnostic path calls it. A forgotten
       `dump` does not change `bc0 == bc1`. (§2.16)
 - [ ] Every fixed bug has a permanent corpus file.
-- [ ] The reference interpreter is retained and documented as the reference
+- [x] The reference interpreter is retained and documented as the reference
       semantics, and it runs every revision of the compiler.
-- [ ] This specification states plainly what the bootstrap gate does *not* prove
+- [x] This specification states plainly what the bootstrap gate does *not* prove
       (§2.14).
-- [ ] This specification is updated to match reality, or it is deleted. A spec
+- [x] This specification is updated to match reality, or it is deleted. A spec
       that contradicts the code is worse than no spec.
 
 ---

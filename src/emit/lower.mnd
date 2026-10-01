@@ -37,9 +37,9 @@
 ; "naive tagged multiply" mistake spec §2.2 calls out (for `+`/`-` the
 ; fixup is required for correctness, not an optimisation). `*`/`/`/`%`
 ; untag both operands (`ashr 1`, sign-extending), perform the native
-; 64-bit op, then retag (`shl 1`, `or 1`) — this module does not add
-; spec §3.4's explicit `sdiv`/`srem`-by-zero guard yet (see "Scope"
-; below); comparisons (`< > <= >= =`) run directly on the tagged words
+; 64-bit op, then retag (`shl 1`, `or 1`). `/` and `%` check the
+; divisor first and call `mn_panic` when it is zero (spec §3.4).
+; Comparisons (`< > <= >= =`) run directly on the tagged words
 ; (tagging is order- and equality-preserving, an injective affine map, so
 ; no untagging is needed) and produce `i1`, consumed only by `if`'s own
 ; conditional branch — this module has no other way to produce or
@@ -174,14 +174,11 @@
 ;   either a direct comparison or any Bool-valued expression (`icmp ne`
 ;   against `false`). `Int`/`Bool`/`Unit` params and returns share the
 ;   same `i64` word ABI (alloca/store/load).
-; - **`sdiv`/`srem`-by-zero guard (spec §3.4).** `*`/`/`/`%` untag, do the
-;   native op, and retag, but do not yet guard `/`/`%`'s divisor against
-;   zero with an explicit panic the way the spec's backend section
-;   requires (LLVM's `sdiv`/`srem` by zero is undefined, not merely
-;   wrong) — no current oracle fixture divides, so this is a documented
-;   gap rather than a silently-wrong path exercised by any test; adding
-;   it needs a `br`+call-`mn_panic`+`unreachable` sequence this module's
-;   `Builder` can already express, just not yet wired for this one case.
+; - **`sdiv`/`srem`-by-zero guard (spec §3.4).** `/` and `%` untag, then
+;   branch on a zero divisor to a block that calls `mn_panic` with
+;   `"division by zero"` and ends in `unreachable`. The success block
+;   does the native op and retags. LLVM's `sdiv`/`srem` by zero is
+;   undefined, so the check has to be explicit.
 
 (import "../reader/ast.mnd")
 (import "../pool/pool.mnd")
@@ -800,6 +797,11 @@
     (emit! b (IRet (rel-ref b val-abs)))
     (mark-terminated! b)))
 
+(defn emit-unreachable! (b: Builder) -> Unit
+  (do
+    (emit! b (IUnreachable))
+    (mark-terminated! b)))
+
 ; `if`'s (and `loop`'s) own "does this branch's value even reach the
 ; join/exit block" check — see `LoopFrame`'s doc comment. If the block
 ; open right now already ended in a terminator (a `recur` branching
@@ -849,20 +851,30 @@
     (let prod (emit-binop! b binop-mul ua uc))
     (arith-retag! b prod)))
 
-; No zero-guard yet — see header comment's "Scope".
-(defn arith-div! (b: Builder) (av: Int) (cv: Int) -> Int
+; A zero divisor panics before `sdiv`/`srem`. The panic block does not
+; fall through: `mn_panic` does not return, and `unreachable` is the
+; terminator. The success block stays open so the retagged result is
+; the value later instructions see.
+(defn arith-checked! (b: Builder) (panic-abs: Int) (msg-gid: Int) (op: Int) (av: Int) (cv: Int) -> Int
   (do
     (let ua (arith-untag! b av))
     (let uc (arith-untag! b cv))
-    (let q (emit-binop! b binop-sdiv ua uc))
-    (arith-retag! b q)))
+    (let zero (const-i64! b 0))
+    (let is-zero (emit-cmp2! b icmp-eq uc zero))
+    (let panic-bb (fresh-bb! b))
+    (let ok-bb (fresh-bb! b))
+    (emit-condbr! b panic-bb ok-bb is-zero)
+    (switch-to! b panic-bb)
+    (emit-call-void! b extern-kind-panic panic-abs [msg-gid])
+    (emit-unreachable! b)
+    (switch-to! b ok-bb)
+    (arith-retag! b (emit-binop! b op ua uc))))
 
-(defn arith-rem! (b: Builder) (av: Int) (cv: Int) -> Int
-  (do
-    (let ua (arith-untag! b av))
-    (let uc (arith-untag! b cv))
-    (let r (emit-binop! b binop-srem ua uc))
-    (arith-retag! b r)))
+(defn arith-div! (b: Builder) (panic-abs: Int) (msg-gid: Int) (av: Int) (cv: Int) -> Int
+  (arith-checked! b panic-abs msg-gid binop-sdiv av cv))
+
+(defn arith-rem! (b: Builder) (panic-abs: Int) (msg-gid: Int) (av: Int) (cv: Int) -> Int
+  (arith-checked! b panic-abs msg-gid binop-srem av cv))
 
 ; ---------------------------------------------------------------------------
 ; `StrPool` — every distinct `Str` literal `println`/`print`/`write`
@@ -961,7 +973,7 @@
     (Cons s rest) (str-pool-from-list rest (str-pool-add p s))))
 
 (defn collect-str-pool (forms: (List Ast)) -> StrPool
-  (str-pool-add (str-pool-from-list (pool-string-literals forms) (str-pool-new)) (newline-str)))
+  (str-pool-add (str-pool-add (str-pool-from-list (pool-string-literals forms) (str-pool-new)) (newline-str)) (div-zero-msg)))
 
 ; -- real lowering's own void-call emission: `println`/`print`/`write`
 ; call one of the three fixed runtime externs directly (never a real
@@ -1826,17 +1838,19 @@
   (match args
     [a-ast c-ast]
       (result-bind (lower-expr a-ast env b funcs noop pool)
-        (fn (av) (result-bind (lower-expr c-ast env b funcs noop pool) (fn (cv) (Ok (apply-arith! b op av cv))))))
+        (fn (av) (result-bind (lower-expr c-ast env b funcs noop pool) (fn (cv) (Ok (apply-arith! b pool op av cv))))))
     _ (Err (str-concat "operator " (str-concat op " expects exactly 2 arguments")))))
 
-(defn apply-arith! (b: Builder) (op: Str) (av: Int) (cv: Int) -> Int
+(defn apply-arith! (b: Builder) (pool: StrPool) (op: Str) (av: Int) (cv: Int) -> Int
   (let aw (get! b av))
   (let cw (get! b cv))
+  (let panic-abs (extern-panic-abs (str-pool-count pool)))
+  (let msg-gid (str-pool-get pool (div-zero-msg)))
   (if (= op "+") (arith-add! b aw cw)
     (if (= op "-") (arith-sub! b aw cw)
       (if (= op "*") (arith-mul! b aw cw)
-        (if (= op "/") (arith-div! b aw cw)
-          (arith-rem! b aw cw))))))
+        (if (= op "/") (arith-div! b panic-abs msg-gid aw cw)
+          (arith-rem! b panic-abs msg-gid aw cw))))))
 
 ; -- let (both the inline-body form `(let n e body…)` and the bare,
 ; sequence-threading form `(let n e)` — see `lower-sequence` for the
@@ -1918,6 +1932,15 @@
   (do
     (let sb (sb-new))
     (sb-append-byte! sb 10)
+    (sb-take-str! sb)))
+
+; Trailing 0 so `mn_panic`'s `strlen` stops at the end of the message.
+; The pool stores the bytes as given; a Menard string literal has no NUL.
+(defn div-zero-msg -> Str
+  (do
+    (let sb (sb-new))
+    (sb-append! sb "division by zero")
+    (sb-append-byte! sb 0)
     (sb-take-str! sb)))
 
 (defn lower-effect (f: Ast) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Unit Str)

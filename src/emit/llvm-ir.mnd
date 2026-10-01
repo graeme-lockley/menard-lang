@@ -119,7 +119,9 @@
   (ICallVoid Int Int (List Int))
   ; val-rel — the function's return value (already `i32`-typed, via a
   ; preceding `ICast`, for `main`; tagged `i64` otherwise).
-  (IRet Int))
+  (IRet Int)
+  ; No operands. Terminates the block after `mn_panic`, which does not return.
+  (IUnreachable))
 
 ; One function: `i64`/`i64 x nparams` -> `i64` ABI, except `is-main`
 ; (`(i32, ptr) -> i32`, spec: `mn_init` at entry, untag + trunc before
@@ -159,7 +161,7 @@
 ; Order: mn_write_stdout, mn_print_i64, mn_write_stderr, mn_alloc,
 ; heap helpers (3C), mn_print_str, Str/Ref/SB (3D), Map (3F), closures (3E),
 ; tier-0 I/O (3G: mn_init … mn_exit).
-(pub let extern-count 70)
+(pub let extern-count 71)
 
 (pub defn extern-write-stdout-abs (num-strings: Int) -> Int num-strings)
 (pub defn extern-print-i64-abs (num-strings: Int) -> Int (+ num-strings 1))
@@ -231,6 +233,7 @@
 (pub defn extern-fmul-abs (num-strings: Int) -> Int (+ num-strings 67))
 (pub defn extern-fdiv-abs (num-strings: Int) -> Int (+ num-strings 68))
 (pub defn extern-spawn-capture-abs (num-strings: Int) -> Int (+ num-strings 69))
+(pub defn extern-panic-abs (num-strings: Int) -> Int (+ num-strings 70))
 
 ; Builtin constructor tags — must match runtime/src/variants.c.
 (pub let tag-nil 0)
@@ -246,6 +249,7 @@
 (pub let extern-kind-write 0) ; void(ptr, i64) — write_stdout/write_stderr
 (pub let extern-kind-print 1) ; void(i64) — print_i64 / print_str / mn_exit
 (pub let extern-kind-init 2) ; void(i32, ptr) — mn_init
+(pub let extern-kind-panic 3) ; void(ptr) — mn_panic
 
 (pub let cast-zext 1) ; LLVM CastOps::ZExt — i1 -> i64 for Bool immediates
 (pub let cast-ptrtoint 9) ; LLVM CastOps::PtrToInt — string global -> i64

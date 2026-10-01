@@ -72,7 +72,7 @@ describe("src/mn.mnd check — typer wired after desugar", () => {
   test("rejects an unbound variable with E_TYPE_UNBOUND", () => {
     const out = runMenard("src/mn.mnd", [
       "check",
-      abs("tests/phase2/fixtures/bad-type-unbound.mnd"),
+      abs("tests/negative/bad-type-unbound.mnd"),
     ]);
     expect(out.exitCode).toBe(1);
     expect(out.stderr).toContain("[E_TYPE_UNBOUND]");
@@ -81,7 +81,7 @@ describe("src/mn.mnd check — typer wired after desugar", () => {
   test("rejects a non-Bool if test with E_TYPE_MISMATCH", () => {
     const out = runMenard("src/mn.mnd", [
       "check",
-      abs("tests/phase2/fixtures/bad-type-if-nonbool.mnd"),
+      abs("tests/negative/bad-type-if-nonbool.mnd"),
     ]);
     expect(out.exitCode).toBe(1);
     expect(out.stderr).toContain("[E_TYPE_MISMATCH]");
@@ -101,7 +101,7 @@ describe("src/mn.mnd check — typer wired after desugar", () => {
   test("--dump-after=type never fires when typechecking fails", () => {
     const out = runMenard("src/mn.mnd", [
       "check",
-      abs("tests/phase2/fixtures/bad-type-unbound.mnd"),
+      abs("tests/negative/bad-type-unbound.mnd"),
       "--dump-after=type",
     ]);
     expect(out.exitCode).toBe(1);
@@ -111,7 +111,7 @@ describe("src/mn.mnd check — typer wired after desugar", () => {
   test("still fails a desugar error before the typer ever runs", () => {
     const out = runMenard("src/mn.mnd", [
       "check",
-      abs("tests/phase2/fixtures/bad-desugar-when.mnd"),
+      abs("tests/negative/bad-desugar-when.mnd"),
     ]);
     expect(out.exitCode).toBe(1);
     expect(out.stderr).toContain("[E_DESUGAR_WHEN]");

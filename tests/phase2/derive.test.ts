@@ -97,7 +97,7 @@ describe("src/mn.mnd check — derive planning wired after rooting", () => {
   test("--dump-after=derive never fires when typechecking fails", () => {
     const out = runMenard("src/mn.mnd", [
       "check",
-      abs("tests/phase2/fixtures/bad-type-unbound.mnd"),
+      abs("tests/negative/bad-type-unbound.mnd"),
       "--dump-after=derive",
     ]);
     expect(out.exitCode).toBe(1);

@@ -1,0 +1,4 @@
+(variant (Color) (Red) (Blue))
+(defn f (c: Color) -> Int
+  (match c
+    (Red) 1))

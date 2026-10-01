@@ -260,6 +260,7 @@
 (let func-code-inst-cast 3)
 (let func-code-inst-ret 10)
 (let func-code-inst-br 11)
+(let func-code-inst-unreachable 15)
 (let func-code-inst-alloca 19)
 (let func-code-inst-load 20)
 (let func-code-inst-cmp2 28)
@@ -288,8 +289,9 @@
 (defn ty-print-sig-idx (ma: Int) -> Int (+ (ty-write-sig-idx ma) 1)) ; void(i64)
 (defn ty-alloc-sig-idx (ma: Int) -> Int (+ (ty-print-sig-idx ma) 1)) ; ptr(i64, ptr)
 (defn ty-init-sig-idx (ma: Int) -> Int (+ (ty-alloc-sig-idx ma) 1)) ; void(i32, ptr)
+(defn ty-panic-sig-idx (ma: Int) -> Int (+ (ty-init-sig-idx ma) 1)) ; void(ptr)
 ; String `i`'s (0-indexed, in `globals` order) own `[len x i8]` array type.
-(defn ty-str-array-idx (ma: Int) (i: Int) -> Int (+ (ty-init-sig-idx ma) (+ i 1)))
+(defn ty-str-array-idx (ma: Int) (i: Int) -> Int (+ (ty-panic-sig-idx ma) (+ i 1)))
 
 (defn i64-param-types (n: Int) -> (List Int)
   (if (<= n 0) [] (Cons ty-i64 (i64-param-types (- n 1)))))
@@ -323,7 +325,7 @@
 (defn write-types! (t: BitSink) (ma: Int) (globals: (List Str)) -> Unit
   (do
     (let ns (int-list-length (str-lengths globals)))
-    (write-record! t type-code-numentry [(+ 4 (+ (+ ma 1) (+ 6 ns)))])
+    (write-record! t type-code-numentry [(+ 4 (+ (+ ma 1) (+ 7 ns)))])
     (write-record! t type-code-opaque-pointer [0]) ; idx 0: ptr, addrspace 0
     (write-record! t type-code-integer [64]) ; idx 1: i64
     (write-record! t type-code-integer [32]) ; idx 2: i32
@@ -335,6 +337,7 @@
     (write-record! t type-code-function [0 ty-void ty-i64]) ; void(i64)
     (write-record! t type-code-function [0 ty-ptr ty-i64 ty-ptr]) ; ptr(i64,ptr) mn_alloc
     (write-record! t type-code-function [0 ty-void ty-i32 ty-ptr]) ; void(i32,ptr) mn_init
+    (write-record! t type-code-function [0 ty-void ty-ptr]) ; void(ptr) mn_panic
     (write-array-types! t ma (str-lengths globals))))
 
 ; ---------------------------------------------------------------------------
@@ -438,7 +441,8 @@
     (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_fsub
     (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_fmul
     (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_fdiv
-    (write-extern-decl! m (func-type-idx-for-arity 2)))) ; mn_spawn_capture
+    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_spawn_capture
+    (write-extern-decl! m (ty-panic-sig-idx ma)))) ; mn_panic
 
 ; ---------------------------------------------------------------------------
 ; `MODULE_CODE_GLOBALVAR` — one per string in `LlvmModule`'s `globals`,
@@ -551,7 +555,8 @@
 (defn write-call-void! (f: BitSink) (ma: Int) (kind: Int) (callee-rel: Int) (arg-rels: (List Int)) -> Unit
   (do
     (let fnty (if (= kind extern-kind-write) (ty-write-sig-idx ma)
-      (if (= kind extern-kind-init) (ty-init-sig-idx ma) (ty-print-sig-idx ma))))
+      (if (= kind extern-kind-init) (ty-init-sig-idx ma)
+        (if (= kind extern-kind-panic) (ty-panic-sig-idx ma) (ty-print-sig-idx ma)))))
     (write-record! f func-code-inst-call
       (Cons 0 (Cons call-cc-info (Cons fnty (Cons callee-rel arg-rels)))))))
 
@@ -582,7 +587,8 @@
     (ICondBr t e cond) (write-record! f func-code-inst-br [t e cond])
     (ICall callee args) (write-call! f callee args)
     (ICallVoid kind callee args) (write-call-void! f ma kind callee args)
-    (IRet val) (write-record! f func-code-inst-ret [val])))
+    (IRet val) (write-record! f func-code-inst-ret [val])
+    (IUnreachable) (write-record! f func-code-inst-unreachable [])))
 
 (defn write-items! (f: BitSink) (ma: Int) (items: (List Item)) -> Unit
   (match items
@@ -698,7 +704,8 @@
     (write-record! v vst-code-entry (Cons (extern-fsub-abs num-strings) (str-byte-ops "mn_fsub")))
     (write-record! v vst-code-entry (Cons (extern-fmul-abs num-strings) (str-byte-ops "mn_fmul")))
     (write-record! v vst-code-entry (Cons (extern-fdiv-abs num-strings) (str-byte-ops "mn_fdiv")))
-    (write-record! v vst-code-entry (Cons (extern-spawn-capture-abs num-strings) (str-byte-ops "mn_spawn_capture")))))
+    (write-record! v vst-code-entry (Cons (extern-spawn-capture-abs num-strings) (str-byte-ops "mn_spawn_capture")))
+    (write-record! v vst-code-entry (Cons (extern-panic-abs num-strings) (str-byte-ops "mn_panic")))))
 
 (defn lfunc-list-length (fs: (List LFunc)) -> Int
   (match fs [] 0 (Cons _ rest) (+ 1 (lfunc-list-length rest))))

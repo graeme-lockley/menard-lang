@@ -138,7 +138,7 @@ function emit(entryRelPath: string, outPath: string): { exitCode: number; stderr
  */
 function interpret(
   entryRelPath: string,
-  opts?: { spawn?: boolean },
+  opts?: { panic?: boolean },
 ): { exitCode: number; stdout: string; stderr: string } {
   const entryPath = abs(entryRelPath);
   const source = readFileSync(entryPath);
@@ -147,7 +147,6 @@ function interpret(
   const host = createLiveHost({
     realFs: true,
     argv: [],
-    spawnEnabled: opts?.spawn === true,
     stdout: { write: (b: Uint8Array) => stdoutChunks.push(b) },
     stderr: { write: (b: Uint8Array) => stderrChunks.push(b) },
   });
@@ -156,6 +155,9 @@ function interpret(
   const stdout = stdoutChunks.map((b) => dec.decode(b)).join("");
   const stderr = stderrChunks.map((b) => dec.decode(b)).join("");
   if (!r.ok) {
+    if (opts?.panic === true && r.kind === "panic") {
+      return { exitCode: 1, stdout, stderr: `${r.message}\n` };
+    }
     const detail = r.kind === "diagnostics" ? JSON.stringify(r.diagnostics) : r.message;
     throw new Error(`interpreter failed for ${entryRelPath}: ${detail}`);
   }
@@ -180,7 +182,8 @@ const fixtures: Array<{
   expectExit: number;
   expectDis: RegExp;
   expectStdout?: string;
-  spawn?: boolean;
+  expectStderr?: string;
+  panic?: boolean;
 }> = [
   {
     name: "a literal `main` lowers to a real untag/trunc/ret sequence (no `add`/`call` needed)",
@@ -258,20 +261,28 @@ const fixtures: Array<{
     expectStdout: "(Point 1 2)\n(Red)\n(Rgb 3 4 5)\n",
   },
   {
-    name: "spawn-capture feeds stdin and returns the child's stdout",
-    entry: "tests/phase2/oracle/spawn-capture.mnd",
-    expectExit: 0,
-    expectDis: /\bcall i64 @mn_spawn_capture\b/,
-    expectStdout: "hi\nab",
-    spawn: true,
+    name: "`/` by zero panics before sdiv",
+    entry: "tests/phase2/oracle/div-zero.mnd",
+    expectExit: 1,
+    expectDis: /\bcall void @mn_panic\b/,
+    expectStderr: "division by zero\n",
+    panic: true,
+  },
+  {
+    name: "`%` by zero panics before srem",
+    entry: "tests/phase2/oracle/rem-zero.mnd",
+    expectExit: 1,
+    expectDis: /\bcall void @mn_panic\b/,
+    expectStderr: "division by zero\n",
+    panic: true,
   },
 ];
 
 describe.skipIf(clang === null || llvmDis === null)("interp <-> native oracle (Phase 2 slice 2D/2H)", () => {
-  for (const { name, entry, expectExit, expectDis, expectStdout, spawn } of fixtures) {
+  for (const { name, entry, expectExit, expectDis, expectStdout, expectStderr, panic } of fixtures) {
     test(name, async () => {
       // Interpreter side of the protocol.
-      const interp = interpret(entry, { spawn });
+      const interp = interpret(entry, { panic });
       if (expectStdout === undefined) {
         expect(interp.stdout).toBe("");
       } else {
@@ -318,6 +329,7 @@ describe.skipIf(clang === null || llvmDis === null)("interp <-> native oracle (P
         // (arithmetic, and — this slice — `println`/`print`/`write`'s
         // byte-for-byte fd-1 output).
         expect(ran.stdout).toBe(interp.stdout);
+        expect(ran.stderr).toBe(interp.stderr);
         expect(ran.status).toBe(interp.exitCode);
 
         // Sanity anchor: confirm the shared expectation itself hasn't
@@ -326,6 +338,9 @@ describe.skipIf(clang === null || llvmDis === null)("interp <-> native oracle (P
         expect(interp.exitCode).toBe(expectExit);
         if (expectStdout !== undefined) {
           expect(ran.stdout).toBe(expectStdout);
+        }
+        if (expectStderr !== undefined) {
+          expect(ran.stderr).toBe(expectStderr);
         }
       } finally {
         await rm(bcPath).catch(() => {});

@@ -116,13 +116,13 @@ describe("src/mn.mnd check — desugar wired after casing", () => {
   });
 
   test("still fails a parse error before desugar ever runs", () => {
-    const out = runMenard("src/mn.mnd", ["check", abs("tests/phase2/fixtures/bad-parse.mnd")]);
+    const out = runMenard("src/mn.mnd", ["check", abs("tests/negative/bad-parse.mnd")]);
     expect(out.exitCode).toBe(1);
     expect(out.stderr).toContain("error:");
   });
 
   test("still fails a casing error before desugar ever runs", () => {
-    const out = runMenard("src/mn.mnd", ["check", abs("tests/phase2/fixtures/bad-casing.mnd")]);
+    const out = runMenard("src/mn.mnd", ["check", abs("tests/negative/bad-casing.mnd")]);
     expect(out.exitCode).toBe(1);
     expect(out.stderr).toContain("must begin with a lowercase letter");
   });
@@ -137,7 +137,7 @@ describe("src/mn.mnd check — desugar wired after casing", () => {
 
   for (const { fixture, code } of desugarErrorCases) {
     test(`exits 1 with ${code} on ${fixture}`, () => {
-      const out = runMenard("src/mn.mnd", ["check", abs(`tests/phase2/fixtures/${fixture}`)]);
+      const out = runMenard("src/mn.mnd", ["check", abs(`tests/negative/${fixture}`)]);
       expect(out.exitCode).toBe(1);
       expect(out.stderr).toContain(`[${code}]`);
     });

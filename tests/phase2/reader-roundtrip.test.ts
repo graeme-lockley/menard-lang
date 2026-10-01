@@ -90,13 +90,13 @@ describe("src/mn.mnd check", () => {
   }
 
   test("exits 1 with a diagnostic on a parse error", () => {
-    const out = runMenard("src/mn.mnd", ["check", abs("tests/phase2/fixtures/bad-parse.mnd")]);
+    const out = runMenard("src/mn.mnd", ["check", abs("tests/negative/bad-parse.mnd")]);
     expect(out.exitCode).toBe(1);
     expect(out.stderr).toContain("error:");
   });
 
   test("exits 1 with a diagnostic on a casing error", () => {
-    const out = runMenard("src/mn.mnd", ["check", abs("tests/phase2/fixtures/bad-casing.mnd")]);
+    const out = runMenard("src/mn.mnd", ["check", abs("tests/negative/bad-casing.mnd")]);
     expect(out.exitCode).toBe(1);
     expect(out.stderr).toContain("must begin with a lowercase letter");
   });
