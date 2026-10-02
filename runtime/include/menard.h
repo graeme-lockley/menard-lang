@@ -154,6 +154,15 @@ static inline MnShape *mn_obj_shape(void *ptr) {
 _Noreturn void mn_panic(const char *message);
 
 /*
+ * Menard call stack for panics. The compiler pushes the caller's file and
+ * line before each call and pops after it returns. `mn_panic_at` prints
+ * `file:line: panic: message` and then those frames, innermost caller first.
+ */
+void mn_trace_push(const char *file, int64_t line);
+void mn_trace_pop(void);
+_Noreturn void mn_panic_at(const char *file, int64_t line, const char *message);
+
+/*
  * mn_write_stdout — write `n` raw bytes to fd 1 (`runtime/src/print.c`).
  * fd 1 carries only the compiled program's own output (spec §2.16) —
  * never a panic message, which always goes through `mn_panic` to fd 2

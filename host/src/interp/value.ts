@@ -15,7 +15,7 @@ export type Value =
   | { tag: "variant"; ctor: string; payloads: Value[] }
   | { tag: "record"; name: string; fields: Value[] }
   | { tag: "ref"; cell: { value: Value } }
-  | { tag: "fn"; params: string[]; body: unknown; env: Env }
+  | { tag: "fn"; params: string[]; body: unknown; env: Env; path?: string }
   | { tag: "builtin"; name: string }
   | { tag: "map"; map: MenardMap }
   | { tag: "sb"; sb: StringBuffer };

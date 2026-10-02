@@ -1,0 +1,6 @@
+(println "Hello from Fred!")
+
+(defn main -> Int
+  (println "Main: Fred")
+  0
+)

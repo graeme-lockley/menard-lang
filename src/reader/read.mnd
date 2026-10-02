@@ -17,7 +17,7 @@
 (pub defrec ParseError (span: Span) (message: Str))
 
 (defn (mk-err [a]) (start: Int) (end: Int) (message: Str) -> (Result a ParseError)
-  (Err (ParseError (Span start end) message)))
+  (Err (ParseError (Span start end 0 0) message)))
 
 ; `not` is prelude, not a builtin (see prelude/core.mnd) — restated locally
 ; rather than importing the prelude, to keep the reader dependency-free.
@@ -107,7 +107,7 @@
     (set! pos (+ (deref pos) 1))
     (let sb (sb-new))
     (result-bind (read-string-body src pos start sb)
-      (fn (_) (Ok (StrNode (sb-take-str! sb) (Span start (deref pos))))))))
+      (fn (_) (Ok (StrNode (sb-take-str! sb) (Span start (deref pos) 0 0)))))))
 
 ; ---------------------------------------------------------------------------
 ; Numbers — int and float. See ast.mnd for why floats keep raw source text.
@@ -152,7 +152,7 @@
 
 (defn finish-number-value (src: Str) (pos: (Ref Int)) (start: Int) (saw-dot: Bool) (saw-exp: Bool) -> (Result Ast ParseError)
   (let end (deref pos))
-  (let sp (Span start end))
+  (let sp (Span start end 0 0))
   (if (or saw-dot saw-exp)
     (Ok (FloatNode (str-slice src start (- end start)) sp))
     (Ok (IntNode (parse-int-text src start end) sp))))
@@ -184,7 +184,7 @@
 
 (defn classify-sym (src: Str) (start: Int) (end: Int) -> (Result Ast ParseError)
   (let text (str-slice src start (- end start)))
-  (let sp (Span start end))
+  (let sp (Span start end 0 0))
   (if (= text "true")
     (Ok (BoolNode true sp))
     (if (= text "false")
@@ -230,7 +230,7 @@
     (let list-start (deref pos))
     (set! pos (+ (deref pos) 1))
     (result-bind (read-elems src pos list-start close open-text)
-      (fn (elems) (Ok (mk elems (Span list-start (deref pos))))))))
+      (fn (elems) (Ok (mk elems (Span list-start (deref pos) 0 0)))))))
 
 (defn read-paren (src: Str) (pos: (Ref Int)) -> (Result Ast ParseError)
   (read-bracketed src pos 41 "(" ParenNode))

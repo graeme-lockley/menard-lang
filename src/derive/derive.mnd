@@ -31,7 +31,7 @@
 ; src/reader/read.mnd's header comment for why.
 (pub alias Ast Ast)
 
-(defn sp0 -> Span (Span 0 0))
+(defn sp0 -> Span (Span 0 0 0 1))
 (defn sy (name: Str) -> Ast (SymNode name (sp0)))
 (defn int-lit (n: Int) -> Ast (IntNode n (sp0)))
 (defn bool-lit (flag: Bool) -> Ast (BoolNode flag (sp0)))

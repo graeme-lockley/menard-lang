@@ -67,7 +67,7 @@
   (let n (str-byte-length raw))
   (if (and (> n 0) (= (str-byte raw (- n 1)) 58)) (str-slice raw 0 (- n 1)) raw))
 
-(defn dummy-span -> Span (Span 0 0))
+(defn dummy-span -> Span (Span 0 0 0 1))
 
 (defn append-list (xs: (List Ast)) (ys: (List Ast)) -> (List Ast)
   (match xs

@@ -22,5 +22,5 @@
 ; `lower-program`. Nullary constructors stay the C static objects.
 ; Emit a bitcode module for a program's forms, or an error message if the
 ; program has no lowerable `defn main` (see `lower.mnd`).
-(pub defn emit-program-bc (forms: (List Ast)) (triple: Str) -> (Result Str Str)
-  (lower-program forms triple))
+(pub defn emit-program-bc (forms: (List Ast)) (triple: Str) (paths: (List Str)) -> (Result Str Str)
+  (lower-program forms triple paths))

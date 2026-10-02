@@ -855,7 +855,8 @@
 ; fall through: `mn_panic` does not return, and `unreachable` is the
 ; terminator. The success block stays open so the retagged result is
 ; the value later instructions see.
-(defn arith-checked! (b: Builder) (panic-abs: Int) (msg-gid: Int) (op: Int) (av: Int) (cv: Int) -> Int
+; `file-gid` is the NUL-terminated path global. `line` is a raw i64, not a tagged Int.
+(defn arith-checked! (b: Builder) (panic-at-abs: Int) (file-gid: Int) (line: Int) (msg-gid: Int) (op: Int) (av: Int) (cv: Int) -> Int
   (do
     (let ua (arith-untag! b av))
     (let uc (arith-untag! b cv))
@@ -865,16 +866,17 @@
     (let ok-bb (fresh-bb! b))
     (emit-condbr! b panic-bb ok-bb is-zero)
     (switch-to! b panic-bb)
-    (emit-call-void! b extern-kind-panic panic-abs [msg-gid])
+    (let line-c (const-i64! b line))
+    (emit-call-void! b extern-kind-panic-at panic-at-abs [file-gid line-c msg-gid])
     (emit-unreachable! b)
     (switch-to! b ok-bb)
     (arith-retag! b (emit-binop! b op ua uc))))
 
-(defn arith-div! (b: Builder) (panic-abs: Int) (msg-gid: Int) (av: Int) (cv: Int) -> Int
-  (arith-checked! b panic-abs msg-gid binop-sdiv av cv))
+(defn arith-div! (b: Builder) (panic-at-abs: Int) (file-gid: Int) (line: Int) (msg-gid: Int) (av: Int) (cv: Int) -> Int
+  (arith-checked! b panic-at-abs file-gid line msg-gid binop-sdiv av cv))
 
-(defn arith-rem! (b: Builder) (panic-abs: Int) (msg-gid: Int) (av: Int) (cv: Int) -> Int
-  (arith-checked! b panic-abs msg-gid binop-srem av cv))
+(defn arith-rem! (b: Builder) (panic-at-abs: Int) (file-gid: Int) (line: Int) (msg-gid: Int) (av: Int) (cv: Int) -> Int
+  (arith-checked! b panic-at-abs file-gid line msg-gid binop-srem av cv))
 
 ; ---------------------------------------------------------------------------
 ; `StrPool` — every distinct `Str` literal `println`/`print`/`write`
@@ -915,20 +917,23 @@
 (defn ctor-spec-tag (c: CtorSpec) -> Int (match c (CtorSpec t _) t))
 (defn ctor-spec-arity (c: CtorSpec) -> Int (match c (CtorSpec _ a) a))
 
-(defrec StrPool (order-rev: (List Str)) (by-content: (Map Str Int)) (next: Int) (write-stdout-abs: Int) (print-i64-abs: Int) (write-stderr-abs: Int) (ctors: (Map Str CtorSpec)))
+(defrec StrPool (order-rev: (List Str)) (by-content: (Map Str Int)) (next: Int) (write-stdout-abs: Int) (print-i64-abs: Int) (write-stderr-abs: Int) (ctors: (Map Str CtorSpec)) (origins: (List Str)) (file-gids: (Ref (Map Str Int))))
 
-(defn str-pool-order-rev (p: StrPool) -> (List Str) (match p (StrPool o _ _ _ _ _ _) o))
-(defn str-pool-by-content (p: StrPool) -> (Map Str Int) (match p (StrPool _ m _ _ _ _ _) m))
-(defn str-pool-next (p: StrPool) -> Int (match p (StrPool _ _ n _ _ _ _) n))
-(defn str-pool-write-stdout-abs (p: StrPool) -> Int (match p (StrPool _ _ _ w _ _ _) w))
-(defn str-pool-print-i64-abs (p: StrPool) -> Int (match p (StrPool _ _ _ _ pr _ _) pr))
-(defn str-pool-write-stderr-abs (p: StrPool) -> Int (match p (StrPool _ _ _ _ _ e _) e))
-(defn str-pool-ctors (p: StrPool) -> (Map Str CtorSpec) (match p (StrPool _ _ _ _ _ _ c) c))
+(defn str-pool-order-rev (p: StrPool) -> (List Str) (match p (StrPool o _ _ _ _ _ _ _ _) o))
+(defn str-pool-by-content (p: StrPool) -> (Map Str Int) (match p (StrPool _ m _ _ _ _ _ _ _) m))
+(defn str-pool-next (p: StrPool) -> Int (match p (StrPool _ _ n _ _ _ _ _ _) n))
+(defn str-pool-write-stdout-abs (p: StrPool) -> Int (match p (StrPool _ _ _ w _ _ _ _ _) w))
+(defn str-pool-print-i64-abs (p: StrPool) -> Int (match p (StrPool _ _ _ _ pr _ _ _ _) pr))
+(defn str-pool-write-stderr-abs (p: StrPool) -> Int (match p (StrPool _ _ _ _ _ e _ _ _) e))
+(defn str-pool-ctors (p: StrPool) -> (Map Str CtorSpec) (match p (StrPool _ _ _ _ _ _ c _ _) c))
+(defn str-pool-origins (p: StrPool) -> (List Str) (match p (StrPool _ _ _ _ _ _ _ o _) o))
+(defn str-pool-file-gids (p: StrPool) -> (Ref (Map Str Int)) (match p (StrPool _ _ _ _ _ _ _ _ g) g))
 
 ; Every abs-id field is meaningless until `str-pool-finalize` runs
 ; (collection alone never reads them) — `0 - 1` (`-1`) as a visibly
 ; invalid placeholder, same convention `new-bb`'s unresolved index uses.
-(defn str-pool-new -> StrPool (StrPool [] (map-new) 0 (- 0 1) (- 0 1) (- 0 1) (map-new)))
+(defn str-pool-new (origins: (List Str)) -> StrPool
+  (StrPool [] (map-new) 0 (- 0 1) (- 0 1) (- 0 1) (map-new) origins (ref (map-new))))
 
 (defn str-pool-count (p: StrPool) -> Int (str-pool-next p))
 
@@ -942,7 +947,9 @@
       (str-pool-write-stdout-abs p)
       (str-pool-print-i64-abs p)
       (str-pool-write-stderr-abs p)
-      (str-pool-ctors p))))
+      (str-pool-ctors p)
+      (str-pool-origins p)
+      (str-pool-file-gids p))))
 
 ; Always found once `str-pool-add` has run over every occurrence
 ; `collect-str-pool` sees — see that function's header comment for why
@@ -962,7 +969,7 @@
 (defn str-pool-finalize (p: StrPool) (ctors: (Map Str CtorSpec)) -> StrPool
   (do
     (let s (str-pool-count p))
-    (StrPool (str-pool-order-rev p) (str-pool-by-content p) (str-pool-next p) s (+ s 1) (+ s 2) ctors)))
+    (StrPool (str-pool-order-rev p) (str-pool-by-content p) (str-pool-next p) s (+ s 1) (+ s 2) ctors (str-pool-origins p) (str-pool-file-gids p))))
 
 ; String globals come from `pool.mnd`'s sorted literals. `newline-str` is
 ; appended so a bare `(println)` still has a global; `str-pool-add` leaves
@@ -972,8 +979,46 @@
     [] p
     (Cons s rest) (str-pool-from-list rest (str-pool-add p s))))
 
-(defn collect-str-pool (forms: (List Ast)) -> StrPool
-  (str-pool-add (str-pool-add (str-pool-from-list (pool-string-literals forms) (str-pool-new)) (newline-str)) (div-zero-msg)))
+(defn list-nth-str (xs: (List Str)) (i: Int) -> Str
+  (match xs
+    [] ""
+    (Cons h t) (if (<= i 0) h (list-nth-str t (- i 1)))))
+
+(defn origin-path (pool: StrPool) (origin: Int) -> Str
+  (list-nth-str (str-pool-origins pool) origin))
+
+(defn c-str (s: Str) -> Str
+  (do
+    (let sb (sb-new))
+    (sb-append! sb s)
+    (sb-append-byte! sb 0)
+    (sb-take-str! sb)))
+
+(defn add-origin-cstrs (ps: (List Str)) (p: StrPool) -> StrPool
+  (match ps
+    [] (str-pool-add p (c-str ""))
+    (Cons s rest) (add-origin-cstrs rest (str-pool-add p (c-str s)))))
+
+(defn span-line-clamped (sp: Span) -> Int
+  (do
+    (let n (span-line sp))
+    (if (< n 1) 1 n)))
+
+(defn file-gid-of (pool: StrPool) (origin: Int) -> Int
+  (do
+    (let path (origin-path pool origin))
+    (let gids (str-pool-file-gids pool))
+    (match (map-get (deref gids) path)
+      (Some id) id
+      (None)
+        (do
+          (let id (str-pool-get pool (c-str path)))
+          (set! gids (map-set (deref gids) path id))
+          id))))
+
+(defn collect-str-pool (forms: (List Ast)) (paths: (List Str)) -> StrPool
+  (add-origin-cstrs paths
+    (str-pool-add (str-pool-add (str-pool-from-list (pool-string-literals forms) (str-pool-new paths)) (newline-str)) (div-zero-msg))))
 
 ; -- real lowering's own void-call emission: `println`/`print`/`write`
 ; call one of the three fixed runtime externs directly (never a real
@@ -1038,7 +1083,7 @@
     (IntNode n _) (Ok (const-tagged! b n))
     (BoolNode v _) (Ok (const-bool! b v))
     (SymNode name _) (lower-sym name env b funcs pool)
-    (ParenNode elems _) (lower-paren elems env b funcs noop pool)
+    (ParenNode elems sp) (lower-paren elems sp env b funcs noop pool)
     (BracketNode _ _) (Err "cannot lower a list literal with the real instruction lowerer yet")
     (StrNode s _) (Ok (emit-str-lit! b pool s))
     (FloatNode s _) (Ok (emit-float-lit! b pool s))))
@@ -1092,50 +1137,71 @@
             (let ar-c (const-i64! b arity))
             (Ok (emit-call! b (extern-ctor-closure-abs ns) [tag-c ar-c])))))))
 
-(defn lower-paren (elems: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
+(defn emit-trace-push! (b: Builder) (pool: StrPool) (sp: Span) -> Unit
+  (do
+    (let file-gid (file-gid-of pool (span-origin sp)))
+    (let line (const-i64! b (span-line-clamped sp)))
+    (emit-call-void! b extern-kind-trace-push (extern-trace-push-abs (str-pool-count pool)) [file-gid line])))
+
+(defn emit-trace-pop! (b: Builder) (pool: StrPool) -> Unit
+  (emit-call-void! b extern-kind-trace-pop (extern-trace-pop-abs (str-pool-count pool)) []))
+
+; Push the call expression's file and line, call, then pop. A panic inside
+; the callee leaves the frame in place.
+; `args` are the words the call should receive. Callers that still hold root
+; indexes reload them first; this wrapper does not, so a value loaded out of
+; a shadow slot is not passed to `mn_root_get` a second time.
+(defn emit-traced-call! (b: Builder) (pool: StrPool) (sp: Span) (callee: Int) (args: (List Int)) -> Int
+  (do
+    (emit-trace-push! b pool sp)
+    (let v (emit-call! b callee args))
+    (emit-trace-pop! b pool)
+    v))
+
+(defn lower-paren (elems: (List Ast)) (sp: Span) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (match elems
     [] (Ok (const-unit! b))
-    (Cons head rest) (lower-paren-head head rest env b funcs noop pool)))
+    (Cons head rest) (lower-paren-head head rest sp env b funcs noop pool)))
 
-(defn lower-paren-head (head: Ast) (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
+(defn lower-paren-head (head: Ast) (rest: (List Ast)) (sp: Span) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (match (sym-str head)
-    (None) (lower-apply-value head rest env b funcs noop pool)
-    (Some hn) (lower-named hn rest env b funcs noop pool)))
+    (None) (lower-apply-value head rest sp env b funcs noop pool)
+    (Some hn) (lower-named hn rest sp env b funcs noop pool)))
 
-(defn lower-apply-value (head: Ast) (args: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
+(defn lower-apply-value (head: Ast) (args: (List Ast)) (sp: Span) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (result-bind (lower-expr head env b funcs noop pool)
-    (fn (clo) (lower-apply-clo clo args env b funcs noop pool))))
+    (fn (clo) (lower-apply-clo clo args sp env b funcs noop pool))))
 
-(defn lower-apply-clo (clo: Int) (args: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
+(defn lower-apply-clo (clo: Int) (args: (List Ast)) (sp: Span) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (match args
-    [] (Ok (emit-call-words! b (extern-apply-0-abs (str-pool-count pool)) [clo]))
+    [] (Ok (emit-traced-call! b pool sp (extern-apply-0-abs (str-pool-count pool)) (get-words! b [clo])))
     [a0]
       (result-bind (lower-expr a0 env b funcs noop pool)
-        (fn (arg) (Ok (emit-call-words! b (extern-apply-1-abs (str-pool-count pool)) [clo arg]))))
+        (fn (arg) (Ok (emit-traced-call! b pool sp (extern-apply-1-abs (str-pool-count pool)) (get-words! b [clo arg])))))
     [a0 a1]
       (result-bind (lower-expr a0 env b funcs noop pool)
         (fn (x) (result-bind (lower-expr a1 env b funcs noop pool)
-          (fn (y) (Ok (emit-call-words! b (extern-apply-2-abs (str-pool-count pool)) [clo x y]))))))
+          (fn (y) (Ok (emit-traced-call! b pool sp (extern-apply-2-abs (str-pool-count pool)) (get-words! b [clo x y])))))))
     _ (Err "closure application supports at most 2 arguments currently")))
 
-(defn lower-named (hn: Str) (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
+(defn lower-named (hn: Str) (rest: (List Ast)) (sp: Span) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (if (= hn "if") (lower-if rest env b funcs noop pool)
     (if (= hn "let") (lower-let-inline rest env b funcs noop pool)
       (if (= hn "do") (lower-sequence rest env b funcs noop pool)
         (if (= hn "loop") (lower-loop rest env b funcs noop pool)
           (if (= hn "recur") (lower-recur rest env b funcs noop pool)
             (if (= hn "match") (lower-match rest env b funcs noop pool)
-              (if (is-arith-binop hn) (lower-arith rest hn env b funcs noop pool)
+              (if (is-arith-binop hn) (lower-arith rest hn sp env b funcs noop pool)
                 (if (is-cmp-op hn) (lower-cmp-value rest hn env b funcs noop pool)
                   (if (is-ctor-name hn pool) (lower-ctor hn rest env b funcs noop pool)
                     (match (map-get funcs hn)
-                      (Some _) (lower-call hn rest env b funcs noop pool)
+                      (Some _) (lower-call hn rest sp env b funcs noop pool)
                       (None)
                         (if (is-runtime-op hn) (lower-runtime-op hn rest env b funcs noop pool)
                           (if (is-effect-head hn)
                             (result-then (lower-effect-op hn rest env b funcs noop pool) (fn () (Ok (const-unit! b))))
                             (if (is-unsupported-form hn) (Err (str-concat "cannot lower `" (str-concat hn "` with the real instruction lowerer yet")))
-                              (lower-call hn rest env b funcs noop pool)))))))))))))))
+                              (lower-call hn rest sp env b funcs noop pool)))))))))))))))
 
 ; -- if --
 
@@ -1834,23 +1900,25 @@
 
 ; -- arithmetic --
 
-(defn lower-arith (args: (List Ast)) (op: Str) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
+(defn lower-arith (args: (List Ast)) (op: Str) (sp: Span) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (match args
     [a-ast c-ast]
       (result-bind (lower-expr a-ast env b funcs noop pool)
-        (fn (av) (result-bind (lower-expr c-ast env b funcs noop pool) (fn (cv) (Ok (apply-arith! b pool op av cv))))))
+        (fn (av) (result-bind (lower-expr c-ast env b funcs noop pool) (fn (cv) (Ok (apply-arith! b pool sp op av cv))))))
     _ (Err (str-concat "operator " (str-concat op " expects exactly 2 arguments")))))
 
-(defn apply-arith! (b: Builder) (pool: StrPool) (op: Str) (av: Int) (cv: Int) -> Int
+(defn apply-arith! (b: Builder) (pool: StrPool) (sp: Span) (op: Str) (av: Int) (cv: Int) -> Int
   (let aw (get! b av))
   (let cw (get! b cv))
-  (let panic-abs (extern-panic-abs (str-pool-count pool)))
+  (let panic-at (extern-panic-at-abs (str-pool-count pool)))
+  (let file-gid (file-gid-of pool (span-origin sp)))
+  (let line (span-line-clamped sp))
   (let msg-gid (str-pool-get pool (div-zero-msg)))
   (if (= op "+") (arith-add! b aw cw)
     (if (= op "-") (arith-sub! b aw cw)
       (if (= op "*") (arith-mul! b aw cw)
-        (if (= op "/") (arith-div! b panic-abs msg-gid aw cw)
-          (arith-rem! b panic-abs msg-gid aw cw))))))
+        (if (= op "/") (arith-div! b panic-at file-gid line msg-gid aw cw)
+          (arith-rem! b panic-at file-gid line msg-gid aw cw))))))
 
 ; -- let (both the inline-body form `(let n e body…)` and the bare,
 ; sequence-threading form `(let n e)` — see `lower-sequence` for the
@@ -2012,7 +2080,7 @@
     _ (if is-stdout
         (result-bind (lower-expr s-ast env b funcs noop pool)
           (fn (v) (Ok (emit-call-void! b extern-kind-print (extern-print-str-abs (str-pool-count pool)) [(get! b v)]))))
-        (lower-write-any (IntNode 2 (Span 0 0)) s-ast env b funcs noop pool))))
+        (lower-write-any (IntNode 2 (Span 0 0 0 1)) s-ast env b funcs noop pool))))
 
 (defn lower-write (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Unit Str)
   (match rest
@@ -2095,29 +2163,29 @@
 (defn lower-args-cons (v: Int) (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result (List Int) Str)
   (result-bind (lower-args rest env b funcs noop pool) (fn (vs) (Ok (Cons v vs)))))
 
-(defn lower-call (name: Str) (arg-asts: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
+(defn lower-call (name: Str) (arg-asts: (List Ast)) (sp: Span) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (match (map-get funcs name)
-    (Some fr) (lower-call-with-ref fr name arg-asts env b funcs noop pool)
-    (None) (lower-call-local-or-err name arg-asts env b funcs noop pool)))
+    (Some fr) (lower-call-with-ref fr name arg-asts sp env b funcs noop pool)
+    (None) (lower-call-local-or-err name arg-asts sp env b funcs noop pool)))
 
 ; A local holding a heap closure: `(f arg)` → `mn_apply_1`.
-(defn lower-call-local-or-err (name: Str) (arg-asts: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
+(defn lower-call-local-or-err (name: Str) (arg-asts: (List Ast)) (sp: Span) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (match (map-get env name)
     (None) (Err (str-concat "cannot lower a call to " name))
-    (Some slot) (lower-apply-local slot name arg-asts env b funcs noop pool)))
+    (Some slot) (lower-apply-local slot name arg-asts sp env b funcs noop pool)))
 
-(defn lower-apply-local (slot: Int) (name: Str) (arg-asts: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
+(defn lower-apply-local (slot: Int) (name: Str) (arg-asts: (List Ast)) (sp: Span) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (match arg-asts
     []
       (do
         (let clo (emit-load! b slot))
-        (Ok (emit-call! b (extern-apply-0-abs (str-pool-count pool)) [clo])))
+        (Ok (emit-traced-call! b pool sp (extern-apply-0-abs (str-pool-count pool)) [clo])))
     [a0]
       (result-bind (lower-expr a0 env b funcs noop pool)
         (fn (arg)
           (do
             (let clo (emit-load! b slot))
-            (Ok (emit-call! b (extern-apply-1-abs (str-pool-count pool)) [clo (get! b arg)])))))
+            (Ok (emit-traced-call! b pool sp (extern-apply-1-abs (str-pool-count pool)) [clo (get! b arg)])))))
     [a0 a1]
       (result-bind (lower-expr a0 env b funcs noop pool)
         (fn (arg0)
@@ -2125,13 +2193,13 @@
             (fn (arg1)
               (do
                 (let clo (emit-load! b slot))
-                (Ok (emit-call! b (extern-apply-2-abs (str-pool-count pool))
+                (Ok (emit-traced-call! b pool sp (extern-apply-2-abs (str-pool-count pool))
                   [clo (get! b arg0) (get! b arg1)])))))))
     _ (Err (str-concat "closure application supports 0–2 arguments (calling local `" (str-concat name "`)")))))
 
-(defn lower-call-with-ref (fr: FuncRef) (name: Str) (arg-asts: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
+(defn lower-call-with-ref (fr: FuncRef) (name: Str) (arg-asts: (List Ast)) (sp: Span) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (if (= (ast-list-length arg-asts) (func-ref-arity fr))
-    (result-bind (lower-args arg-asts env b funcs noop pool) (fn (args) (Ok (emit-call-words! b (func-ref-abs fr) args))))
+    (result-bind (lower-args arg-asts env b funcs noop pool) (fn (args) (Ok (emit-traced-call! b pool sp (func-ref-abs fr) (get-words! b args)))))
     (Err (str-concat "arity mismatch calling " name))))
 
 ; ---------------------------------------------------------------------------
@@ -2193,8 +2261,13 @@
 ; libc already defines `write`, `stdin`, `stdout`, and `stderr`. Menard
 ; functions keep their source names for calls; the link symbol is prefixed
 ; so a published `(defn write ...)` does not replace the syscall.
+; `main` is the bootstrap C entry. `mn_<hash>_…` is already the link symbol
+; of a module `main` or init (see `modules/graph.mnd`).
+(defn is-mn-symbol (name: Str) -> Bool
+  (and (>= (str-byte-length name) 3) (= (str-slice name 0 3) "mn_")))
+
 (defn link-symbol (name: Str) -> Str
-  (if (= name "main") "main" (str-concat "menard." name)))
+  (if (or (= name "main") (is-mn-symbol name)) name (str-concat "menard." name)))
 
 (defn lower-one-func-finish (ld: LDefn) (is-main: Bool) (result-abs: Int) (b: Builder) -> (Result LFunc Str)
   (do
@@ -2399,22 +2472,22 @@
       (if (is-folded-int-let f) (drop-folded-int-lets rest)
         (Cons f (drop-folded-int-lets rest)))))
 
-(pub defn lower-program (forms: (List Ast)) (triple: Str) -> (Result Str Str)
-  (lower-program-collected (drop-folded-int-lets (subst-int-constants forms)) triple))
+(pub defn lower-program (forms: (List Ast)) (triple: Str) (paths: (List Str)) -> (Result Str Str)
+  (lower-program-collected (drop-folded-int-lets (subst-int-constants forms)) triple paths))
 
-(defn lower-program-collected (forms: (List Ast)) (triple: Str) -> (Result Str Str)
+(defn lower-program-collected (forms: (List Ast)) (triple: Str) (paths: (List Str)) -> (Result Str Str)
   (do
     (let lds (collect-ldefns-all forms))
     (let word-lds (filter-word-ldefns lds))
     (match (find-ldefn-named word-lds "main")
       (None) (Err "program has no top-level `defn main -> Int …` the real instruction lowerer can handle (`main` must return Int; helpers may use Int/Bool/Unit words)")
-      (Some main-ld) (lower-program-checked-main main-ld word-lds lds forms triple))))
+      (Some main-ld) (lower-program-checked-main main-ld word-lds lds forms triple paths))))
 
-(defn lower-program-checked-main (main-ld: LDefn) (word-lds: (List LDefn)) (all-lds: (List LDefn)) (forms: (List Ast)) (triple: Str) -> (Result Str Str)
+(defn lower-program-checked-main (main-ld: LDefn) (word-lds: (List LDefn)) (all-lds: (List LDefn)) (forms: (List Ast)) (triple: Str) (paths: (List Str)) -> (Result Str Str)
   (if (> (param-arity-of (ldefn-params main-ld)) 0)
     (Err "`main` must take no arguments")
     (if (or (is-int-type (ldefn-ret main-ld)) (is-unit-type (ldefn-ret main-ld)))
-      (lower-program-build word-lds all-lds forms triple)
+      (lower-program-build word-lds all-lds forms triple paths)
       (Err "`main` must return Int or Unit"))))
 
 ; Global value numbering (see `llvm-ir.mnd`'s header comment and this
@@ -2599,11 +2672,11 @@
   (let names (mc-seed lds))
   (mc-propagate lds (mc-build lds names) names (ast-list-length-lds lds)))
 
-(defn lower-program-build (word-lds: (List LDefn)) (all-lds: (List LDefn)) (forms: (List Ast)) (triple: Str) -> (Result Str Str)
+(defn lower-program-build (word-lds: (List LDefn)) (all-lds: (List LDefn)) (forms: (List Ast)) (triple: Str) (paths: (List Str)) -> (Result Str Str)
   (do
     (let extra (collect-non-defn-tops forms))
     (let word-lds2 (replace-main-body word-lds extra))
-    (let pool (str-pool-finalize (collect-str-pool forms) (collect-user-ctors forms)))
+    (let pool (str-pool-finalize (collect-str-pool forms paths) (collect-user-ctors forms)))
     (let num-strings (str-pool-count pool))
     (let num-funcs (ast-list-length-lds word-lds2))
     (let funcs (build-func-refs word-lds2 (+ num-strings extern-count)))

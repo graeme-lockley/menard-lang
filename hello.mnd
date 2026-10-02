@@ -1,12 +1,16 @@
 ; Hello, world
 
+(import "./fred.mnd")
+
 (println "Hello, world!")
 
 123
 
-; `main` is what `menard emit` (src/emit/lower.mnd) looks for and lowers
-; to a real (untag/trunc/`ret`) instruction sequence computing a process
-; exit code — the interpreter also calls it automatically after the
-; top-level forms above (host/src/interp/eval.ts), so both the
-; interpreted and compiled runs of this file exit 0.
-(defn main -> Int 0)
+; The file named on the command line is the entry. Its `main` is the
+; process entry. `fred.mnd`'s `main` runs only for `./mn run ./fred.mnd`.
+; Top-level forms in both files still run.
+(defn main -> Int
+  (println "Main: Hello")
+  0
+)
+    

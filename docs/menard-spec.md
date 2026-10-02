@@ -2708,9 +2708,11 @@ hottest path in the compiler.
   `dump` depth cap (§2.16) is a separate, smaller bound and is not a substitute.
 - `panic` prints to stderr and exits; no unwinding. It is the defined outcome for
   integer division or remainder by zero, and for float operations that would
-  produce NaN or infinity. Any pending `dump` output must be **flushed before**
-  the panic, or the last debug line before a crash is lost — the single most
-  annoying way to lose an hour.
+  produce NaN or infinity. The text is `file:line: panic: message`, then the
+  Menard call stack (`  at file:line`, innermost caller first) so a failure
+  inside a library still names the call that reached it. Any pending `dump`
+  output must be **flushed before** the panic, or the last debug line before a
+  crash is lost — the single most annoying way to lose an hour.
 - **`panic` inside a spawned-child wait does not orphan the child.** The child is
   its own image and the parent is exiting anyway; `posix_spawn` is not `fork`, so
   there is no copied heap left in a half-state. Stated because the opposite is

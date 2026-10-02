@@ -64,7 +64,7 @@ import { existsSync, readFileSync, unlink, mkdtemp } from "node:fs";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { run } from "../../host/src/interp/pipeline.ts";
+import { run, formatPanic } from "../../host/src/interp/pipeline.ts";
 import { createLiveHost } from "../../host/src/host/index.ts";
 
 const rm = promisify(unlink);
@@ -156,7 +156,11 @@ function interpret(
   const stderr = stderrChunks.map((b) => dec.decode(b)).join("");
   if (!r.ok) {
     if (opts?.panic === true && r.kind === "panic") {
-      return { exitCode: 1, stdout, stderr: `${r.message}\n` };
+      return {
+        exitCode: 1,
+        stdout,
+        stderr: formatPanic(r.message, r.sitePath ?? entryPath, r.span, r.frames ?? []),
+      };
     }
     const detail = r.kind === "diagnostics" ? JSON.stringify(r.diagnostics) : r.message;
     throw new Error(`interpreter failed for ${entryRelPath}: ${detail}`);
@@ -264,19 +268,51 @@ const fixtures: Array<{
     name: "`/` by zero panics before sdiv",
     entry: "tests/phase2/oracle/div-zero.mnd",
     expectExit: 1,
-    expectDis: /\bcall void @mn_panic\b/,
-    expectStderr: "division by zero\n",
+    expectDis: /\bcall void @mn_panic_at\b/,
+    expectStderr: panicText("tests/phase2/oracle/div-zero.mnd", 3),
     panic: true,
   },
   {
     name: "`%` by zero panics before srem",
     entry: "tests/phase2/oracle/rem-zero.mnd",
     expectExit: 1,
-    expectDis: /\bcall void @mn_panic\b/,
-    expectStderr: "division by zero\n",
+    expectDis: /\bcall void @mn_panic_at\b/,
+    expectStderr: panicText("tests/phase2/oracle/rem-zero.mnd", 3),
+    panic: true,
+  },
+  {
+    name: "division by zero names the call that reached it",
+    entry: "tests/phase2/oracle/panic-stack.mnd",
+    expectExit: 1,
+    expectDis: /\bcall void @mn_trace_push\b/,
+    expectStderr: panicText("tests/phase2/oracle/panic-stack.mnd", 2, [
+      { entry: "tests/phase2/oracle/panic-stack.mnd", line: 5 },
+    ]),
+    panic: true,
+  },
+  {
+    name: "a panic in an imported module names that file and the caller",
+    entry: "tests/phase2/oracle/panic-app.mnd",
+    expectExit: 1,
+    expectDis: /\bcall void @mn_panic_at\b/,
+    expectStderr: panicText("tests/phase2/oracle/panic-lib.mnd", 2, [
+      { entry: "tests/phase2/oracle/panic-app.mnd", line: 4 },
+    ]),
     panic: true,
   },
 ];
+
+function panicText(
+  entry: string,
+  line: number,
+  frames: { entry: string; line: number }[] = [],
+): string {
+  let text = `${abs(entry)}:${line}: panic: division by zero\n`;
+  for (const frame of frames) {
+    text += `  at ${abs(frame.entry)}:${frame.line}\n`;
+  }
+  return text;
+}
 
 describe.skipIf(clang === null || llvmDis === null)("interp <-> native oracle (Phase 2 slice 2D/2H)", () => {
   for (const { name, entry, expectExit, expectDis, expectStdout, expectStderr, panic } of fixtures) {

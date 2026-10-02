@@ -290,8 +290,10 @@
 (defn ty-alloc-sig-idx (ma: Int) -> Int (+ (ty-print-sig-idx ma) 1)) ; ptr(i64, ptr)
 (defn ty-init-sig-idx (ma: Int) -> Int (+ (ty-alloc-sig-idx ma) 1)) ; void(i32, ptr)
 (defn ty-panic-sig-idx (ma: Int) -> Int (+ (ty-init-sig-idx ma) 1)) ; void(ptr)
+(defn ty-pop-sig-idx (ma: Int) -> Int (+ (ty-panic-sig-idx ma) 1)) ; void()
+(defn ty-panic-at-sig-idx (ma: Int) -> Int (+ (ty-pop-sig-idx ma) 1)) ; void(ptr, i64, ptr)
 ; String `i`'s (0-indexed, in `globals` order) own `[len x i8]` array type.
-(defn ty-str-array-idx (ma: Int) (i: Int) -> Int (+ (ty-panic-sig-idx ma) (+ i 1)))
+(defn ty-str-array-idx (ma: Int) (i: Int) -> Int (+ (ty-panic-at-sig-idx ma) (+ i 1)))
 
 (defn i64-param-types (n: Int) -> (List Int)
   (if (<= n 0) [] (Cons ty-i64 (i64-param-types (- n 1)))))
@@ -320,12 +322,12 @@
 
 ; `ptr`(0), `i64`(1), `i32`(2), `void`(3), one `(i64 x arity) -> i64` per
 ; `arity` in `0..ma`, then `(i32, ptr) -> i32` for `main`, then `i8`, the
-; four fixed extern function types, then one `[len x i8]` array type per
+; the fixed extern function types, then one `[len x i8]` array type per
 ; string global — see header comment.
 (defn write-types! (t: BitSink) (ma: Int) (globals: (List Str)) -> Unit
   (do
     (let ns (int-list-length (str-lengths globals)))
-    (write-record! t type-code-numentry [(+ 4 (+ (+ ma 1) (+ 7 ns)))])
+    (write-record! t type-code-numentry [(+ 4 (+ (+ ma 1) (+ 9 ns)))])
     (write-record! t type-code-opaque-pointer [0]) ; idx 0: ptr, addrspace 0
     (write-record! t type-code-integer [64]) ; idx 1: i64
     (write-record! t type-code-integer [32]) ; idx 2: i32
@@ -338,6 +340,8 @@
     (write-record! t type-code-function [0 ty-ptr ty-i64 ty-ptr]) ; ptr(i64,ptr) mn_alloc
     (write-record! t type-code-function [0 ty-void ty-i32 ty-ptr]) ; void(i32,ptr) mn_init
     (write-record! t type-code-function [0 ty-void ty-ptr]) ; void(ptr) mn_panic
+    (write-record! t type-code-function [0 ty-void]) ; void() mn_trace_pop
+    (write-record! t type-code-function [0 ty-void ty-ptr ty-i64 ty-ptr]) ; void(ptr,i64,ptr) mn_panic_at
     (write-array-types! t ma (str-lengths globals))))
 
 ; ---------------------------------------------------------------------------
@@ -442,7 +446,10 @@
     (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_fmul
     (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_fdiv
     (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_spawn_capture
-    (write-extern-decl! m (ty-panic-sig-idx ma)))) ; mn_panic
+    (write-extern-decl! m (ty-panic-sig-idx ma)) ; mn_panic
+    (write-extern-decl! m (ty-write-sig-idx ma)) ; mn_trace_push void(ptr, i64)
+    (write-extern-decl! m (ty-pop-sig-idx ma)) ; mn_trace_pop void()
+    (write-extern-decl! m (ty-panic-at-sig-idx ma)))) ; mn_panic_at void(ptr, i64, ptr)
 
 ; ---------------------------------------------------------------------------
 ; `MODULE_CODE_GLOBALVAR` — one per string in `LlvmModule`'s `globals`,
@@ -556,7 +563,11 @@
   (do
     (let fnty (if (= kind extern-kind-write) (ty-write-sig-idx ma)
       (if (= kind extern-kind-init) (ty-init-sig-idx ma)
-        (if (= kind extern-kind-panic) (ty-panic-sig-idx ma) (ty-print-sig-idx ma)))))
+        (if (= kind extern-kind-panic) (ty-panic-sig-idx ma)
+          (if (= kind extern-kind-trace-push) (ty-write-sig-idx ma)
+            (if (= kind extern-kind-trace-pop) (ty-pop-sig-idx ma)
+              (if (= kind extern-kind-panic-at) (ty-panic-at-sig-idx ma)
+                (ty-print-sig-idx ma))))))))
     (write-record! f func-code-inst-call
       (Cons 0 (Cons call-cc-info (Cons fnty (Cons callee-rel arg-rels)))))))
 
@@ -705,7 +716,10 @@
     (write-record! v vst-code-entry (Cons (extern-fmul-abs num-strings) (str-byte-ops "mn_fmul")))
     (write-record! v vst-code-entry (Cons (extern-fdiv-abs num-strings) (str-byte-ops "mn_fdiv")))
     (write-record! v vst-code-entry (Cons (extern-spawn-capture-abs num-strings) (str-byte-ops "mn_spawn_capture")))
-    (write-record! v vst-code-entry (Cons (extern-panic-abs num-strings) (str-byte-ops "mn_panic")))))
+    (write-record! v vst-code-entry (Cons (extern-panic-abs num-strings) (str-byte-ops "mn_panic")))
+    (write-record! v vst-code-entry (Cons (extern-trace-push-abs num-strings) (str-byte-ops "mn_trace_push")))
+    (write-record! v vst-code-entry (Cons (extern-trace-pop-abs num-strings) (str-byte-ops "mn_trace_pop")))
+    (write-record! v vst-code-entry (Cons (extern-panic-at-abs num-strings) (str-byte-ops "mn_panic_at")))))
 
 (defn lfunc-list-length (fs: (List LFunc)) -> Int
   (match fs [] 0 (Cons _ rest) (+ 1 (lfunc-list-length rest))))

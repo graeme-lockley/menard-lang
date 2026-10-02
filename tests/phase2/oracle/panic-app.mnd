@@ -1,0 +1,4 @@
+(import "panic-lib.mnd")
+
+(defn main -> Int
+  (boom))

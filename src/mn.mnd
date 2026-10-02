@@ -265,19 +265,19 @@
     [] false
     (Cons f rest) (if (form-is-import f) true (has-import rest))))
 
-(defn front-end (path: Str) (src: Str) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
+(defn front-end (path: Str) (src: Str) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) (List Str) -> Unit)) -> Unit
   (match (read-all src)
     (Ok forms) (front-end-checked path src forms dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive on-ok)
     (Err e) (do (report-parse-error path e) (exit 1))))
 
-(defn front-end-checked (path: Str) (src: Str) (forms: (List Ast)) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
+(defn front-end-checked (path: Str) (src: Str) (forms: (List Ast)) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) (List Str) -> Unit)) -> Unit
   (do
     (maybe-dump forms dump-after-reader)
     (match (check-casing-all forms)
       (Ok _) (front-end-desugared path src forms dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive on-ok)
       (Err e) (do (report-casing-error path e) (exit 1)))))
 
-(defn front-end-desugared (path: Str) (src: Str) (forms: (List Ast)) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
+(defn front-end-desugared (path: Str) (src: Str) (forms: (List Ast)) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) (List Str) -> Unit)) -> Unit
   (match (desugar-all forms)
     (Ok desugared)
       (do
@@ -287,44 +287,47 @@
 
 ; A single file keeps the names the reader saw. An import graph is flattened
 ; and its private bindings renamed before typechecking.
-(defn front-end-loaded (path: Str) (src: Str) (desugared: (List Ast)) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
+(defn front-end-loaded (path: Str) (src: Str) (desugared: (List Ast)) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) (List Str) -> Unit)) -> Unit
   (if (has-import desugared)
     (match (flatten-module-graph path src)
-      (Ok flat) (front-end-typechecked path flat dump-after-type dump-after-close dump-after-root dump-after-derive on-ok)
+      (Ok (Flat flat paths))
+        (front-end-typechecked path flat paths dump-after-type dump-after-close dump-after-root dump-after-derive on-ok)
       (Err msg) (fail-load msg))
-    (front-end-typechecked path desugared dump-after-type dump-after-close dump-after-root dump-after-derive on-ok)))
+    (do
+      (let stamped (stamp-spans desugared src 0))
+      (front-end-typechecked path stamped [path] dump-after-type dump-after-close dump-after-root dump-after-derive on-ok))))
 
-(defn front-end-typechecked (path: Str) (forms: (List Ast)) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
+(defn front-end-typechecked (path: Str) (forms: (List Ast)) (paths: (List Str)) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) (List Str) -> Unit)) -> Unit
   (match (typecheck-forms forms)
     (Ok checked)
       (do
         (maybe-dump checked dump-after-type)
-        (front-end-closed path checked dump-after-close dump-after-root dump-after-derive on-ok))
+        (front-end-closed path checked paths dump-after-close dump-after-root dump-after-derive on-ok))
     (Err es) (do (report-type-errors path es) (exit 1))))
 
-(defn front-end-closed (path: Str) (forms: (List Ast)) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
+(defn front-end-closed (path: Str) (forms: (List Ast)) (paths: (List Str)) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) (List Str) -> Unit)) -> Unit
   (do
     (let closed (closure-convert forms))
     (maybe-dump closed dump-after-close)
-    (front-end-rooted path closed dump-after-root dump-after-derive on-ok)))
+    (front-end-rooted path closed paths dump-after-root dump-after-derive on-ok)))
 
-(defn front-end-rooted (path: Str) (forms: (List Ast)) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
+(defn front-end-rooted (path: Str) (forms: (List Ast)) (paths: (List Str)) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) (List Str) -> Unit)) -> Unit
   (do
     (let rooted (rooting-analyze forms))
     (maybe-dump rooted dump-after-root)
-    (front-end-derived path rooted dump-after-derive on-ok)))
+    (front-end-derived path rooted paths dump-after-derive on-ok)))
 
 (defn maybe-dump-derive-plan (forms: (List Ast)) (dump-after-derive: Bool) -> Unit
   (if dump-after-derive (write-line 2 (describe-derives forms)) ()))
 
-(defn front-end-derived (path: Str) (forms: (List Ast)) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
+(defn front-end-derived (path: Str) (forms: (List Ast)) (paths: (List Str)) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) (List Str) -> Unit)) -> Unit
   (do
     (let derived (plan-derives forms))
     (maybe-dump derived dump-after-derive)
     (maybe-dump-derive-plan forms dump-after-derive)
-    (on-ok derived)))
+    (on-ok derived paths)))
 
-(defn with-source (path: Str) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) -> Unit)) -> Unit
+(defn with-source (path: Str) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) (on-ok: (Fn (List Ast) (List Str) -> Unit)) -> Unit
   (match (read-file path)
     (Ok src) (front-end path src dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive on-ok)
     (Err _) (fail-cannot-read path)))
@@ -332,7 +335,7 @@
 ; ---------------------------------------------------------------------------
 ; check
 
-(defn accept-check (forms: (List Ast)) -> Unit
+(defn accept-check (forms: (List Ast)) (paths: (List Str)) -> Unit
   (exit 0))
 
 (defn run-check (path: Str) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) -> Unit
@@ -414,8 +417,8 @@
     (Ok (SpawnOutput st text _))
       (if (= (status-exit-code st) 0) (triple-or-fail text) "")))
 
-(defn write-module (out: Str) (forms: (List Ast)) -> Unit
-  (match (emit-program-bc forms (clang-target-triple (chosen-cc "")))
+(defn write-module (out: Str) (forms: (List Ast)) (paths: (List Str)) -> Unit
+  (match (emit-program-bc forms (clang-target-triple (chosen-cc "")) paths)
     (Ok bytes) (write-module-bytes out bytes)
     (Err msg) (fail-emit msg)))
 
@@ -424,11 +427,11 @@
     (Ok _) (exit 0)
     (Err _) (fail-cannot-write out)))
 
-(defn accept-emit (path: Str) (has-out: Bool) (out: Str) (forms: (List Ast)) -> Unit
-  (write-module (output-path path has-out out) forms))
+(defn accept-emit (path: Str) (has-out: Bool) (out: Str) (forms: (List Ast)) (paths: (List Str)) -> Unit
+  (write-module (output-path path has-out out) forms paths))
 
 (defn run-emit (path: Str) (has-out: Bool) (out: Str) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) -> Unit
-  (with-source path dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive (fn (forms) (accept-emit path has-out out forms))))
+  (with-source path dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive (fn (forms paths) (accept-emit path has-out out forms paths))))
 
 ; ---------------------------------------------------------------------------
 ; Driver. `cc` and the runtime directory are recorded paths (or flags),
@@ -554,11 +557,11 @@
     (Err _) (fail-spawn bin)
     (Ok st) (exit (status-exit-code st))))
 
-(defn accept-build (cc: Str) (runtime: Str) (bin: Str) (and-run: Bool) (forms: (List Ast)) -> Unit
+(defn accept-build (cc: Str) (runtime: Str) (bin: Str) (and-run: Bool) (forms: (List Ast)) (paths: (List Str)) -> Unit
   (do
     (let bc (str-concat bin ".bc"))
     (let link-out (str-concat bin ".tmp"))
-    (match (emit-program-bc forms (clang-target-triple cc))
+    (match (emit-program-bc forms (clang-target-triple cc) paths)
       (Err msg) (fail-emit msg)
       (Ok bytes)
         (match (write-file bc bytes)
@@ -571,7 +574,7 @@
                 (do (write-line 2 (str-concat "wrote " bin)) (exit 0))))))))
 
 (defn run-build (file: Str) (cc: Str) (runtime: Str) (bin: Str) (and-run: Bool) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) -> Unit
-  (with-source file dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive (fn (forms) (accept-build cc runtime bin and-run forms))))
+  (with-source file dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive (fn (forms paths) (accept-build cc runtime bin and-run forms paths))))
 
 ; Visible PATH search. The driver does not call this for `cc`.
 (defn path-dir-end (s: Str) (i: Int) (n: Int) -> Int

@@ -11,6 +11,13 @@
 ; after flatten. Pub names stay as exported; a second non-alias pub binding of
 ; the same name is an error. Pub `alias` re-exports (common for `Ast`/`Span`)
 ; are allowed to repeat.
+;
+; Every module's `main` is renamed to `mn_<hash>_main`, a stable hash of that
+; module's path, so two modules can each define `main` and a later separate
+; compile can name the symbol without knowing who imported it. Top-level
+; expressions become `mn_<hash>_init`. Flatten then appends one bootstrap
+; `(defn main -> Int …)` that calls those inits in dependency order and then
+; the entry module's mangled main. That bootstrap is the only C `main`.
 
 (import "../reader/ast.mnd")
 (import "../reader/read.mnd")
@@ -21,7 +28,64 @@
 ; Re-export shim — see `emit/bitcode.mnd` / `reader/casing.mnd`.
 (pub alias Ast Ast)
 
-(defn dummy-span -> Span (Span 0 0))
+(defn dummy-span -> Span (Span 0 0 0 1))
+
+(pub defrec Flat (forms: (List Ast)) (paths: (List Str)))
+
+; `present` is false when the entry module has no `main`. `unit-ret` means
+; that `main` is declared `-> Unit`, so the bootstrap returns 0 after calling it.
+(defrec EntryMain (sym: Str) (unit-ret: Bool) (present: Bool))
+
+(defn snoc-str (xs: (List Str)) (s: Str) -> (List Str)
+  (match xs
+    [] [s]
+    (Cons h t) (Cons h (snoc-str t s))))
+
+(defn reverse-ints (xs: (List Int)) (acc: (List Int)) -> (List Int)
+  (match xs [] acc (Cons x rest) (reverse-ints rest (Cons x acc))))
+
+; Byte offset of each line, line 1 at 0. Newline is byte 10.
+(defn collect-line-starts (src: Str) (i: Int) (n: Int) (acc: (List Int)) -> (List Int)
+  (if (>= i n) acc
+    (if (= (str-byte src i) 10)
+      (collect-line-starts src (+ i 1) n (Cons (+ i 1) acc))
+      (collect-line-starts src (+ i 1) n acc))))
+
+(defn line-starts (src: Str) -> (List Int)
+  (reverse-ints (collect-line-starts src 0 (str-byte-length src) [0]) []))
+
+; 1-based line: count of starts at or before `offset`.
+(defn line-number (starts: (List Int)) (offset: Int) (line: Int) -> Int
+  (match starts
+    [] line
+    (Cons s rest)
+      (if (> s offset) line
+        (line-number rest offset (+ line 1)))))
+
+(defn span-at (sp: Span) (origin: Int) (starts: (List Int)) -> Span
+  (let line (line-number starts (span-start sp) 0))
+  (Span (span-start sp) (span-end sp) origin (if (< line 1) 1 line)))
+
+(defn stamp-forms (forms: (List Ast)) (src: Str) (origin: Int) -> (List Ast)
+  (stamp-form-list forms origin (line-starts src)))
+
+(defn stamp-form-list (forms: (List Ast)) (origin: Int) (starts: (List Int)) -> (List Ast)
+  (match forms
+    [] []
+    (Cons a rest) (Cons (stamp-ast a origin starts) (stamp-form-list rest origin starts))))
+
+(defn stamp-ast (a: Ast) (origin: Int) (starts: (List Int)) -> Ast
+  (match a
+    (ParenNode xs sp) (ParenNode (stamp-form-list xs origin starts) (span-at sp origin starts))
+    (BracketNode xs sp) (BracketNode (stamp-form-list xs origin starts) (span-at sp origin starts))
+    (SymNode n sp) (SymNode n (span-at sp origin starts))
+    (IntNode n sp) (IntNode n (span-at sp origin starts))
+    (FloatNode n sp) (FloatNode n (span-at sp origin starts))
+    (StrNode n sp) (StrNode n (span-at sp origin starts))
+    (BoolNode n sp) (BoolNode n (span-at sp origin starts))))
+
+(pub defn stamp-spans (forms: (List Ast)) (src: Str) (origin: Int) -> (List Ast)
+  (stamp-forms forms src origin))
 
 (defn sym-str (a: Ast) -> (Maybe Str)
   (match a (SymNode n _) (Some n) _ (None)))
@@ -237,21 +301,40 @@
 (defn add-rename (renames: (Map Str Str)) (prefix: Str) (name: Str) -> (Map Str Str)
   (map-set renames name (str-concat prefix name)))
 
-(defn build-renames-from-list (names: (List Str)) (pub-names: (Map Str Bool)) (prefix: Str) (acc: (Map Str Str)) -> (Map Str Str)
+; Polynomial hash of the path bytes. The modulus keeps every step inside a
+; 63-bit Int. The same path always yields the same symbol.
+(defn hash-mix (h: Int) (b: Int) -> Int
+  (% (+ (* h 131) b) 2147483647))
+
+(defn hash-bytes (s: Str) (i: Int) (n: Int) (h: Int) -> Int
+  (if (>= i n) h
+    (hash-bytes s (+ i 1) n (hash-mix h (str-byte s i)))))
+
+(defn path-hash (path: Str) -> Int
+  (hash-bytes path 0 (str-byte-length path) 0))
+
+(defn main-symbol (path: Str) -> Str
+  (str-concat "mn_" (str-concat (show (path-hash path)) "_main")))
+
+(defn init-symbol (path: Str) -> Str
+  (str-concat "mn_" (str-concat (show (path-hash path)) "_init")))
+
+(defn build-renames-from-list (names: (List Str)) (pub-names: (Map Str Bool)) (prefix: Str) (main-sym: Str) (acc: (Map Str Str)) -> (Map Str Str)
   (match names
     [] acc
     (Cons n rest)
-      ; Never rename `main` — the lowerer looks for the program entry by that name.
-      (if (or (= n "main") (name-is-pub pub-names n))
-        (build-renames-from-list rest pub-names prefix acc)
-        (build-renames-from-list rest pub-names prefix (add-rename acc prefix n)))))
+      (if (= n "main")
+        (build-renames-from-list rest pub-names prefix main-sym (map-set acc n main-sym))
+        (if (name-is-pub pub-names n)
+          (build-renames-from-list rest pub-names prefix main-sym acc)
+          (build-renames-from-list rest pub-names prefix main-sym (add-rename acc prefix n))))))
 
-(defn build-renames (forms: (List Ast)) (mid: Int) -> (Map Str Str)
+(defn build-renames (forms: (List Ast)) (mid: Int) (main-sym: Str) -> (Map Str Str)
   (do
     (let pub-list (gather-pub-forms-names forms []))
     (let all-list (gather-forms-names forms []))
     (let pub-names (list-to-bool-map pub-list (map-new)))
-    (build-renames-from-list all-list pub-names (module-prefix mid) (map-new))))
+    (build-renames-from-list all-list pub-names (module-prefix mid) main-sym (map-new))))
 
 (defn rename-lookup (renames: (Map Str Str)) (name: Str) -> Str
   (match (map-get renames name) (Some n) n (None) name))
@@ -313,8 +396,10 @@
   (match names
     [] (Ok ())
     (Cons n rest)
-      (result-bind (register-one-export! exports path n kind)
-        (fn (_) (register-export-names! exports path rest kind)))))
+      (if (= n "main")
+        (register-export-names! exports path rest kind)
+        (result-bind (register-one-export! exports path n kind)
+          (fn (_) (register-export-names! exports path rest kind))))))
 
 (defn register-form-exports! (exports: (Ref (Map Str Str))) (path: Str) (form: Ast) -> (Result Unit Str)
   (match form
@@ -335,19 +420,140 @@
       (result-bind (register-form-exports! exports path f)
         (fn (_) (register-forms-exports! exports path rest)))))
 
-; Strip imports/pub, uniquify privates, register pub exports.
-(defn uniquify-module-body (path: Str) (mid: Int) (forms: (List Ast)) (exports: (Ref (Map Str Str))) -> (Result (List Ast) Str)
+; ---------------------------------------------------------------------------
+; Per-module init and the program bootstrap
+
+(defn sym-node (n: Str) -> Ast (SymNode n (dummy-span)))
+
+(defn call-form (name: Str) -> Ast
+  (ParenNode [(sym-node name)] (dummy-span)))
+
+(defn int-form (n: Int) -> Ast (IntNode n (dummy-span)))
+
+(defn unit-form -> Ast (ParenNode [] (dummy-span)))
+
+(defn defn-form (name: Str) (ret: Str) (body: (List Ast)) -> Ast
+  (ParenNode
+    (append-asts [(sym-node "defn") (sym-node name) (sym-node "->") (sym-node ret)] body)
+    (dummy-span)))
+
+(defn is-kept-decl (form: Ast) -> Bool
+  (let k (form-decl-kind form))
+  (or (= k "defn")
+    (or (= k "defrec")
+      (or (= k "variant")
+        (or (= k "alias") (= k "extern"))))))
+
+; Integer `(let name N)` stays at module scope so constant substitution
+; still sees it. Every other top-level expression runs from the init.
+(defn is-int-let (form: Ast) -> Bool
+  (match form
+    (ParenNode [head _ expr] _)
+      (if (is-sym head "let")
+        (match expr (IntNode _ _) true _ false)
+        false)
+    _ false))
+
+(defrec SplitBody (kept: (List Ast)) (init: (List Ast)))
+
+(defn partition-body (forms: (List Ast)) (kept: (List Ast)) (init: (List Ast)) -> SplitBody
+  (match forms
+    [] (SplitBody (reverse-asts kept []) (reverse-asts init []))
+    (Cons f rest)
+      (if (or (is-kept-decl f) (is-int-let f))
+        (partition-body rest (Cons f kept) init)
+        (partition-body rest kept (Cons f init)))))
+
+(defn init-defn (name: Str) (body: (List Ast)) -> Ast
+  (defn-form name "Unit" (append-asts body [(unit-form)])))
+
+(defn with-module-init (path: Str) (forms: (List Ast)) (inits: (Ref (List Str))) -> (List Ast)
+  (match (partition-body forms [] [])
+    (SplitBody kept init)
+      (match init
+        [] kept
+        _
+          (do
+            (let sym (init-symbol path))
+            (set! inits (snoc-str (deref inits) sym))
+            (append-asts kept [(init-defn sym init)])))))
+
+(defn return-after-arrow (xs: (List Ast)) -> (Maybe Str)
+  (match xs
+    [] (None)
+    (Cons x rest)
+      (if (is-sym x "->")
+        (match rest
+          (Cons ret _)
+            (match (sym-str ret) (Some n) (Some n) (None) (Some ""))
+          [] (None))
+        (return-after-arrow rest))))
+
+(defn defn-return-rest (rest: (List Ast)) (want: Str) -> (Maybe Str)
+  (match rest
+    (Cons name-ast after)
+      (match (sym-str name-ast)
+        (Some n) (if (= n want) (return-after-arrow after) (None))
+        (None) (None))
+    [] (None)))
+
+(defn defn-return-named (form: Ast) (want: Str) -> (Maybe Str)
+  (match form
+    (ParenNode (Cons head rest) _)
+      (if (is-sym head "defn") (defn-return-rest rest want) (None))
+    _ (None)))
+
+(defn find-main-return (forms: (List Ast)) (want: Str) -> (Maybe Str)
+  (match forms
+    [] (None)
+    (Cons f rest)
+      (match (defn-return-named f want)
+        (Some r) (Some r)
+        (None) (find-main-return rest want))))
+
+(defn note-entry! (path: Str) (entry-path: Str) (forms: (List Ast)) (entry: (Ref EntryMain)) -> Unit
+  (if (= path entry-path)
+    (match (find-main-return forms (main-symbol path))
+      (Some ret) (set! entry (EntryMain (main-symbol path) (= ret "Unit") true))
+      (None) ())
+    ()))
+
+(defn calls-of (names: (List Str)) -> (List Ast)
+  (match names
+    [] []
+    (Cons n rest) (Cons (call-form n) (calls-of rest))))
+
+(defn bootstrap-body (inits: (List Str)) (main-sym: Str) (unit-ret: Bool) -> (List Ast)
+  (let calls (append-asts (calls-of inits) [(call-form main-sym)]))
+  (if unit-ret (append-asts calls [(int-form 0)]) calls))
+
+(defn bootstrap-defn (inits: (List Str)) (main-sym: Str) (unit-ret: Bool) -> Ast
+  (defn-form "main" "Int" (bootstrap-body inits main-sym unit-ret)))
+
+(defn forms-with-bootstrap (forms: (List Ast)) (inits: (List Str)) (entry: EntryMain) -> (List Ast)
+  (match entry
+    (EntryMain sym unit present)
+      (if present
+        (append-asts forms [(bootstrap-defn inits sym unit)])
+        forms)))
+
+; Strip imports/pub, uniquify privates, rename `main`, lift top-level
+; expressions into this module's init.
+(defn uniquify-module-body (path: Str) (entry-path: Str) (mid: Int) (forms: (List Ast)) (exports: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) -> (Result (List Ast) Str)
   (result-bind (register-forms-exports! exports path forms)
     (fn (_)
       (do
-        (let renames (build-renames forms mid))
+        (let renames (build-renames forms mid (main-symbol path)))
         (let stripped (strip-imports-and-pub forms []))
-        (Ok (rename-forms stripped renames))))))
+        (let renamed (rename-forms stripped renames))
+        (let body (with-module-init path renamed inits))
+        (note-entry! path entry-path body entry)
+        (Ok body)))))
 
 ; ---------------------------------------------------------------------------
 ; Module graph load
 
-(defn load-module-into (path: Str) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) -> (Result Unit Str)
+(defn load-module-into (path: Str) (entry-path: Str) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) (paths: (Ref (List Str))) (sources: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) -> (Result Unit Str)
   (match (map-get (deref visited) path)
     (Some _) (Ok ())
     (None)
@@ -355,51 +561,62 @@
         (set! visited (map-set (deref visited) path true))
         (match (read-file path)
           (Err _) (Err (str-concat "module not found: " path))
-          (Ok src) (load-module-source path src visited acc mid exports)))))
+          (Ok src) (load-module-source path entry-path src visited acc mid exports paths sources inits entry)))))
 
-(defn load-module-source (path: Str) (src: Str) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) -> (Result Unit Str)
-  (match (read-all src)
-    (Err e) (Err (str-concat "parse error in " path))
-    (Ok forms) (load-module-casing path forms visited acc mid exports)))
+(defn load-module-source (path: Str) (entry-path: Str) (src: Str) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) (paths: (Ref (List Str))) (sources: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) -> (Result Unit Str)
+  (do
+    (set! sources (map-set (deref sources) path src))
+    (match (read-all src)
+      (Err e) (Err (str-concat "parse error in " path))
+      (Ok forms) (load-module-casing path entry-path forms visited acc mid exports paths sources inits entry))))
 
-(defn load-module-casing (path: Str) (forms: (List Ast)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) -> (Result Unit Str)
+(defn load-module-casing (path: Str) (entry-path: Str) (forms: (List Ast)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) (paths: (Ref (List Str))) (sources: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) -> (Result Unit Str)
   (match (check-casing-all forms)
     (Err _) (Err (str-concat "casing error in " path))
-    (Ok _) (load-module-desugar path forms visited acc mid exports)))
+    (Ok _) (load-module-desugar path entry-path forms visited acc mid exports paths sources inits entry)))
 
-(defn load-module-desugar (path: Str) (forms: (List Ast)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) -> (Result Unit Str)
+(defn load-module-desugar (path: Str) (entry-path: Str) (forms: (List Ast)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) (paths: (Ref (List Str))) (sources: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) -> (Result Unit Str)
   (match (desugar-all forms)
     (Err _) (Err (str-concat "desugar error in " path))
-    (Ok desugared) (load-module-deps path desugared visited acc mid exports)))
+    (Ok desugared) (load-module-deps path entry-path desugared visited acc mid exports paths sources inits entry)))
 
-(defn load-module-deps (path: Str) (forms: (List Ast)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) -> (Result Unit Str)
+(defn load-module-deps (path: Str) (entry-path: Str) (forms: (List Ast)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) (paths: (Ref (List Str))) (sources: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) -> (Result Unit Str)
   (do
     (let specs (collect-import-specs forms []))
-    (result-bind (load-deps-list path specs visited acc mid exports)
+    (result-bind (load-deps-list path entry-path specs visited acc mid exports paths sources inits entry)
       (fn (_)
         (do
           (let id (deref mid))
           (set! mid (+ id 1))
-          (result-bind (uniquify-module-body path id forms exports)
+          (set! paths (snoc-str (deref paths) path))
+          (let src (match (map-get (deref sources) path) (Some s) s (None) ""))
+          (let stamped (stamp-forms forms src id))
+          (result-bind (uniquify-module-body path entry-path id stamped exports inits entry)
             (fn (body)
               (do
                 (set! acc (append-asts (deref acc) body))
                 (Ok ())))))))))
 
-(defn load-deps-list (from: Str) (specs: (List Str)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) -> (Result Unit Str)
+(defn load-deps-list (from: Str) (entry-path: Str) (specs: (List Str)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) (paths: (Ref (List Str))) (sources: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) -> (Result Unit Str)
   (match specs
     [] (Ok ())
     (Cons spec rest)
-      (result-bind (load-module-into (resolve-import-path from spec) visited acc mid exports)
-        (fn (_) (load-deps-list from rest visited acc mid exports)))))
+      (result-bind (load-module-into (resolve-import-path from spec) entry-path visited acc mid exports paths sources inits entry)
+        (fn (_) (load-deps-list from entry-path rest visited acc mid exports paths sources inits entry)))))
 
-; Public entry: flatten `entry-path` (already read as `src`) into one form list.
-(pub defn flatten-module-graph (entry-path: Str) (src: Str) -> (Result (List Ast) Str)
+; Public entry: flatten `entry-path` (already read as `src`) into forms plus
+; the path of each module id, dependency-first. When the entry defines
+; `main`, the flat list ends with the bootstrap that calls it.
+(pub defn flatten-module-graph (entry-path: Str) (src: Str) -> (Result Flat Str)
   (do
     (let visited (ref (map-new)))
     (let acc (ref []))
     (let mid (ref 0))
     (let exports (ref (map-new)))
+    (let paths (ref []))
+    (let sources (ref (map-new)))
+    (let inits (ref []))
+    (let entry (ref (EntryMain "" false false)))
     (set! visited (map-set (deref visited) entry-path true))
-    (result-bind (load-module-source entry-path src visited acc mid exports)
-      (fn (_) (Ok (deref acc))))))
+    (result-bind (load-module-source entry-path entry-path src visited acc mid exports paths sources inits entry)
+      (fn (_) (Ok (Flat (forms-with-bootstrap (deref acc) (deref inits) (deref entry)) (deref paths)))))))

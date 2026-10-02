@@ -32,7 +32,11 @@ import { ExitSignal, type IoError, type SpawnError, type SpawnStatus } from "../
 import { showValue, equalValue, compareValue, dumpValue } from "./derive.ts";
 import { decodeSymBytes, specialFormOf, Sf } from "./resolve.ts";
 
+export type PanicFrame = { path: string; span: Span };
+
 export class PanicError extends Error {
+  sitePath?: string;
+  frames?: PanicFrame[];
   constructor(
     message: string,
     readonly span?: Span,
@@ -44,7 +48,23 @@ export class PanicError extends Error {
 
 export type EvalResult =
   | { ok: true; value: Value; exitCode?: number; env: Env }
-  | { ok: false; panic: { message: string; span?: Span } };
+  | {
+      ok: false;
+      panic: { message: string; span?: Span; sitePath?: string; frames?: PanicFrame[] };
+    };
+
+/** File of the function currently executing, and the calls that reached it. */
+let evalPath = "<input>";
+let definePath = "<input>";
+let panicCalls: PanicFrame[] = [];
+
+function notePanic(err: PanicError): PanicError {
+  if (err.sitePath === undefined) {
+    err.sitePath = evalPath;
+    err.frames = panicCalls.slice();
+  }
+  return err;
+}
 
 function symName(ast: Ast): string {
   if (ast.tag !== "sym") throw new PanicError("expected symbol", ast.span);
@@ -54,7 +74,7 @@ function symName(ast: Ast): string {
 export function evalProgram(
   forms: Ast[],
   host: Host,
-  opts: { importBindings?: Map<string, Value> } = {},
+  opts: { importBindings?: Map<string, Value>; path?: string; callMain?: boolean } = {},
 ): EvalResult {
   const env = emptyEnv();
   installBuiltins(env);
@@ -63,6 +83,12 @@ export function evalProgram(
       envSet(env, k, v);
     }
   }
+  const savedPath = evalPath;
+  const savedDefine = definePath;
+  const savedCalls = panicCalls;
+  evalPath = opts.path ?? "<input>";
+  definePath = evalPath;
+  panicCalls = [];
   try {
     for (const f of forms) {
       defineTop(f, env);
@@ -83,9 +109,11 @@ export function evalProgram(
       }
       last = evalExpr(f, e, host);
     }
-    const main = envGet(env, "main");
-    if (main && main.tag === "fn") {
-      last = applyFn(main, [], host, forms[forms.length - 1]?.span);
+    if (opts.callMain !== false) {
+      const main = envGet(env, "main");
+      if (main && main.tag === "fn") {
+        last = applyFn(main, [], host, forms[forms.length - 1]?.span);
+      }
     }
     return { ok: true, value: last, env };
   } catch (err) {
@@ -93,9 +121,22 @@ export function evalProgram(
       return { ok: true, value: vUnit(), exitCode: err.code, env };
     }
     if (err instanceof PanicError) {
-      return { ok: false, panic: { message: err.message, span: err.span } };
+      const noted = notePanic(err);
+      return {
+        ok: false,
+        panic: {
+          message: noted.message,
+          span: noted.span,
+          sitePath: noted.sitePath,
+          frames: noted.frames,
+        },
+      };
     }
     throw err;
+  } finally {
+    evalPath = savedPath;
+    definePath = savedDefine;
+    panicCalls = savedCalls;
   }
 }
 
@@ -251,7 +292,7 @@ function defineDefn(ast: Ast & { tag: "list" }, env: Env): void {
   }
   idx++;
   const body = ast.elems.slice(idx);
-  envSet(env, name, { tag: "fn", params, body, env });
+  envSet(env, name, { tag: "fn", params, body, env, path: definePath });
 }
 
 type LoopCtx = { names: string[]; env: Env };
@@ -305,7 +346,8 @@ type Cont =
       loop: LoopCtx;
       span?: Span;
     }
-  | { tag: "panic"; span?: Span };
+  | { tag: "panic"; span?: Span }
+  | { tag: "call"; callerPath: string; span: Span };
 
 type Step =
   | { tag: "value"; value: Value }
@@ -323,7 +365,13 @@ function applyFn(
 ): Value {
   const opened = openFn(fn, args, span);
   if (opened.tag === "value") return opened.value;
-  return driveSequence(opened.forms, opened.env, null, host);
+  const prev = evalPath;
+  evalPath = fn.path ?? evalPath;
+  try {
+    return driveSequence(opened.forms, opened.env, null, host);
+  } finally {
+    evalPath = prev;
+  }
 }
 
 function openFn(
@@ -395,6 +443,7 @@ function drive(
   let loop = startLoop;
   let result: Value = vUnit();
 
+  try {
   for (;;) {
     if (pending !== null) {
       const ast = pending;
@@ -423,6 +472,10 @@ function drive(
       loop = next.loop;
       break;
     }
+  }
+  } catch (err) {
+    if (err instanceof PanicError) notePanic(err);
+    throw err;
   }
 }
 
@@ -749,6 +802,10 @@ function resume(c: Cont, value: Value, stack: Cont[], host: Host): Step {
     }
     case "panic":
       throw new PanicError(valueToPanicMsg(value), c.span);
+    case "call":
+      if (panicCalls.length > 0) panicCalls.pop();
+      evalPath = c.callerPath;
+      return { tag: "value", value };
   }
 }
 
@@ -770,6 +827,10 @@ function applyNow(
   if (opened.tag === "value") return opened;
   const forms = opened.forms;
   if (forms.length === 0) return { tag: "value", value: vUnit() };
+  const callSpan = span ?? { start: 0, end: 0 };
+  panicCalls.push({ path: evalPath, span: callSpan });
+  stack.push({ tag: "call", callerPath: evalPath, span: callSpan });
+  evalPath = callee.path ?? evalPath;
   if (forms.length > 1) {
     stack.push({ tag: "seq", forms, i: 0, env: opened.env, loop });
   }
@@ -781,6 +842,10 @@ function restartLoop(stack: Cont[], args: Value[], span?: Span): Step {
     const top = stack[stack.length - 1]!;
     if (top.tag === "loop-run") break;
     stack.pop();
+    if (top.tag === "call") {
+      if (panicCalls.length > 0) panicCalls.pop();
+      evalPath = top.callerPath;
+    }
   }
   const top = stack[stack.length - 1];
   if (!top || top.tag !== "loop-run") {
@@ -813,6 +878,7 @@ function evalLambda(ast: Ast & { tag: "list" }, env: Env): Value {
     params,
     body: [ast.elems[2]!],
     env,
+    path: evalPath,
   };
 }
 

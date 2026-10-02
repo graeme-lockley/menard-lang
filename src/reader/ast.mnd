@@ -26,15 +26,25 @@
 ; every input, at the cost of not reproducing the host's normalised form.
 ; Revisit once float arithmetic lands.
 
-(pub defrec Span (start: Int) (end: Int))
+; `origin` is the module index in the flatten path list. A single file is 0.
+; `line` is the 1-based source line of `start`, filled before typechecking.
+(pub defrec Span (start: Int) (end: Int) (origin: Int) (line: Int))
 
 (pub defn span-start (sp: Span) -> Int
   (match sp
-    (Span s _) s))
+    (Span s _ _ _) s))
 
 (pub defn span-end (sp: Span) -> Int
   (match sp
-    (Span _ e) e))
+    (Span _ e _ _) e))
+
+(pub defn span-origin (sp: Span) -> Int
+  (match sp
+    (Span _ _ o _) o))
+
+(pub defn span-line (sp: Span) -> Int
+  (match sp
+    (Span _ _ _ n) n))
 
 ; Forward declaration: the current host typer (host/src/type/check.ts,
 ; `collectDef`) resolves each nominal type's own fields/ctors in a single

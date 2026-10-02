@@ -1,0 +1,5 @@
+(defn boom -> Int
+  (/ 1 0))
+
+(defn main -> Int
+  (boom))

@@ -15,6 +15,7 @@ export {
   diagnose,
   run,
   formatRunErrors,
+  formatPanic,
   type PipelineOpts,
   type RunResult,
   type RunOk,

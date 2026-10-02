@@ -4,10 +4,12 @@ import {
   casingErrorToDiagnostic,
 } from "../diagnostic/diagnostic.ts";
 import { formatDiagnostics } from "../diagnostic/format.ts";
+import { buildLineMap, offsetToLineCol } from "../diagnostic/line-map.ts";
+import { readFileSync } from "node:fs";
 import { readAll, checkCasingAll } from "../reader/index.ts";
 import { desugarAll } from "../desugar/index.ts";
 import { typecheckForms, type ImportBundle } from "../type/check.ts";
-import { evalProgram, type EvalResult } from "../interp/eval.ts";
+import { evalProgram, type EvalResult, type PanicFrame } from "../interp/eval.ts";
 import { showValue, type Value, envGet } from "../interp/index.ts";
 import { createHost, type Host } from "../host/index.ts";
 import type { Span } from "../reader/span.ts";
@@ -27,6 +29,8 @@ export type RunPanic = {
   kind: "panic";
   message: string;
   span?: Span;
+  sitePath?: string;
+  frames?: PanicFrame[];
 };
 export type RunResult = RunOk | RunErr | RunPanic;
 
@@ -152,6 +156,8 @@ function runSingle(src: Uint8Array, host: Host): RunResult {
       kind: "panic",
       message: result.panic.message,
       span: result.panic.span,
+      sitePath: result.panic.sitePath,
+      frames: result.panic.frames,
     };
   }
   return { ok: true, value: result.value, exitCode: result.exitCode };
@@ -175,13 +181,19 @@ function runModules(src: Uint8Array, path: string, host: Host): RunResult {
         for (const [k, v] of ex) importBindings.set(k, v);
       }
     }
-    const result = evalProgram(mod.forms, host, { importBindings });
+    const result = evalProgram(mod.forms, host, {
+      importBindings,
+      path: p,
+      callMain: p === path,
+    });
     if (!result.ok) {
       return {
         ok: false,
         kind: "panic",
         message: result.panic.message,
         span: result.panic.span,
+        sitePath: result.panic.sitePath,
+        frames: result.panic.frames,
       };
     }
     const exported = new Map<string, Value>();
@@ -207,20 +219,32 @@ export function formatRunErrors(
   if (result.kind === "diagnostics") {
     return formatDiagnostics(result.diagnostics, source, path);
   }
-  const span = result.span ?? { start: 0, end: 0 };
-  return formatDiagnostics(
-    [
-      {
-        severity: "error",
-        category: "semantic",
-        code: "E_PANIC",
-        message: result.message,
-        span,
-      },
-    ],
-    source,
-    path,
-  );
+  return formatPanic(result.message, result.sitePath ?? path, result.span, result.frames ?? []);
+}
+
+/** `file:line: panic: message` plus `  at file:line`, innermost caller first. */
+export function formatPanic(
+  message: string,
+  path: string,
+  span: Span | undefined,
+  frames: PanicFrame[],
+): string {
+  let out = `${path}:${sourceLine(path, span)}: panic: ${message}\n`;
+  for (let i = frames.length - 1; i >= 0; i--) {
+    const frame = frames[i]!;
+    out += `  at ${frame.path}:${sourceLine(frame.path, frame.span)}\n`;
+  }
+  return out;
+}
+
+function sourceLine(path: string, span: Span | undefined): number {
+  if (!span) return 1;
+  try {
+    const src = readFileSync(path);
+    return offsetToLineCol(buildLineMap(src), span.start).line;
+  } catch {
+    return 1;
+  }
 }
 
 export { showValue, formatDiagnostics };

@@ -111,4 +111,27 @@ describe("modules", () => {
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "bool") expect(r.value.value).toBe(false);
   });
+
+  test("only the entry module's main runs", () => {
+    const host = hostWith({
+      "/fred.mnd": `(println "Hello from Fred!")\n(defn main -> Int\n  (println "Main: Fred")\n  0)\n`,
+      "/hello.mnd": `(import "./fred.mnd")\n(println "Hello, world!")\n(defn main -> Int\n  (println "Main: Hello")\n  0)\n`,
+    });
+    const hello = host.readFile("/hello.mnd");
+    if (!hello.ok) return;
+    const ran = run(hello.bytes, { path: "/hello.mnd", host });
+    expect(ran.ok).toBe(true);
+    const out = host.stdout.map((b) => new TextDecoder().decode(b)).join("");
+    expect(out).toBe("Hello from Fred!\nHello, world!\nMain: Hello\n");
+
+    const fredHost = hostWith({
+      "/fred.mnd": `(println "Hello from Fred!")\n(defn main -> Int\n  (println "Main: Fred")\n  0)\n`,
+    });
+    const fred = fredHost.readFile("/fred.mnd");
+    if (!fred.ok) return;
+    const fredRan = run(fred.bytes, { path: "/fred.mnd", host: fredHost });
+    expect(fredRan.ok).toBe(true);
+    const fredOut = fredHost.stdout.map((b) => new TextDecoder().decode(b)).join("");
+    expect(fredOut).toBe("Hello from Fred!\nMain: Fred\n");
+  });
 });

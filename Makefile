@@ -60,12 +60,9 @@ runtime-clean:
 
 # Phase 2, Goal B: emit a bitcode module for hello.mnd with the (stage0)
 # compiler, link it with $(CC) — never `llvm-as` (ADR 40) — and run the
-# result. `src/emit/lower.mnd` lowers hello.mnd's standalone top-level
-# `(println "Hello, world!")` into a real `mn_write_stdout` call
-# prepended to `main`'s body, then its `(defn main -> Int 0)` to a real
-# untag/trunc/`ret` sequence over the tagged literal `0` — so this now
-# prints "Hello, world!" (via the runtime's fd-1 print helpers) and still
-# returns 0.
+# result. hello.mnd imports fred.mnd. Each module's top-level forms run
+# from that module's init, then the bootstrap calls hello.mnd's main.
+# Prints "Hello from Fred!", "Hello, world!", "Main: Hello", and returns 0.
 #
 # Linked against the runtime (RUNTIME_LIB_SRCS), not the bare `.bc`: slice
 # 2C's oracle (tests/phase2/oracle.test.ts) links the same way, and this
