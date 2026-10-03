@@ -195,6 +195,15 @@ const EXTERN_BUILTIN: Record<string, string> = {
   mn_write_file: "write-file",
   mn_exists: "exists",
   mn_rename: "rename",
+  mn_isatty: "isatty",
+  mn_mtime: "mtime",
+  mn_cwd: "cwd",
+  mn_ensure_dir: "ensure-dir",
+  mn_list_dir: "list-dir",
+  mn_realpath: "realpath",
+  mn_now_ms: "now-ms",
+  mn_remove: "remove",
+  mn_is_dir: "is-dir",
   mn_spawn: "spawn",
   mn_spawn_capture: "spawn-capture",
 };
@@ -948,6 +957,7 @@ function installBuiltins(env: Env): void {
     "None", "Some", "Ok", "Err", "Nil", "Cons",
     "exit", "arg-count", "arg", "write", "read-file", "write-file",
     "getenv", "exists", "rename",
+    "isatty", "mtime", "cwd", "ensure-dir", "list-dir", "realpath", "now-ms", "remove", "is-dir",
     "spawn", "spawn-capture",
     "NotFound", "Permission", "Exists", "IsADirectory", "NotADirectory",
     "InvalidPath", "TooLarge", "Other", "Unsupported",
@@ -1209,6 +1219,40 @@ function applyBuiltin(
     case "exists": {
       const path = new TextDecoder().decode((args[0] as { bytes: Uint8Array }).bytes);
       return vBool(host.exists(path));
+    }
+    case "isatty": {
+      const fd = Number((args[0] as { value: bigint }).value);
+      return vBool(host.isatty(fd));
+    }
+    case "mtime": {
+      const path = new TextDecoder().decode((args[0] as { bytes: Uint8Array }).bytes);
+      return vInt(host.mtime(path));
+    }
+    case "cwd":
+      return vStr(new TextEncoder().encode(host.cwd()));
+    case "ensure-dir": {
+      const path = new TextDecoder().decode((args[0] as { bytes: Uint8Array }).bytes);
+      return vBool(host.ensureDir(path));
+    }
+    case "list-dir": {
+      const path = new TextDecoder().decode((args[0] as { bytes: Uint8Array }).bytes);
+      const listed = host.listDir(path);
+      const text = listed.ok ? listed.names.join("\n") : "";
+      return vStr(new TextEncoder().encode(text));
+    }
+    case "realpath": {
+      const path = new TextDecoder().decode((args[0] as { bytes: Uint8Array }).bytes);
+      return vStr(new TextEncoder().encode(host.realpath(path)));
+    }
+    case "now-ms":
+      return vInt(host.nowMs());
+    case "remove": {
+      const path = new TextDecoder().decode((args[0] as { bytes: Uint8Array }).bytes);
+      return vBool(host.remove(path));
+    }
+    case "is-dir": {
+      const path = new TextDecoder().decode((args[0] as { bytes: Uint8Array }).bytes);
+      return vBool(host.isDir(path));
     }
     case "rename": {
       const from = new TextDecoder().decode((args[0] as { bytes: Uint8Array }).bytes);

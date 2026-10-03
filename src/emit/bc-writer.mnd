@@ -449,7 +449,40 @@
     (write-extern-decl! m (ty-panic-sig-idx ma)) ; mn_panic
     (write-extern-decl! m (ty-write-sig-idx ma)) ; mn_trace_push void(ptr, i64)
     (write-extern-decl! m (ty-pop-sig-idx ma)) ; mn_trace_pop void()
-    (write-extern-decl! m (ty-panic-at-sig-idx ma)))) ; mn_panic_at void(ptr, i64, ptr)
+    (write-extern-decl! m (ty-panic-at-sig-idx ma)) ; mn_panic_at void(ptr, i64, ptr)
+    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_isatty
+    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_mtime
+    (write-extern-decl! m (func-type-idx-for-arity 0)) ; mn_cwd
+    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_ensure_dir
+    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_list_dir
+    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_realpath
+    (write-extern-decl! m (func-type-idx-for-arity 0)) ; mn_now_ms
+    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_remove
+    (write-extern-decl! m (func-type-idx-for-arity 1)))) ; mn_is_dir
+
+(defn write-import-decls! (m: BitSink) (imps: (List Imp)) -> Unit
+  (match imps
+    [] ()
+    (Cons (Imp _ _ ar) rest)
+      (do
+        (write-extern-decl! m (func-type-idx-for-arity ar))
+        (write-import-decls! m rest))))
+
+(defn imp-length (imps: (List Imp)) -> Int
+  (match imps [] 0 (Cons _ rest) (+ 1 (imp-length rest))))
+
+(defn max-imp-arity (imps: (List Imp)) (acc: Int) -> Int
+  (match imps
+    [] acc
+    (Cons (Imp _ _ ar) rest) (if (> ar acc) (max-imp-arity rest ar) (max-imp-arity rest acc))))
+
+(defn write-import-vst! (v: BitSink) (imps: (List Imp)) (idx: Int) -> Unit
+  (match imps
+    [] ()
+    (Cons (Imp _ link _) rest)
+      (do
+        (write-record! v vst-code-entry (Cons idx (str-byte-ops link)))
+        (write-import-vst! v rest (+ idx 1)))))
 
 ; ---------------------------------------------------------------------------
 ; `MODULE_CODE_GLOBALVAR` — one per string in `LlvmModule`'s `globals`,
@@ -719,7 +752,16 @@
     (write-record! v vst-code-entry (Cons (extern-panic-abs num-strings) (str-byte-ops "mn_panic")))
     (write-record! v vst-code-entry (Cons (extern-trace-push-abs num-strings) (str-byte-ops "mn_trace_push")))
     (write-record! v vst-code-entry (Cons (extern-trace-pop-abs num-strings) (str-byte-ops "mn_trace_pop")))
-    (write-record! v vst-code-entry (Cons (extern-panic-at-abs num-strings) (str-byte-ops "mn_panic_at")))))
+    (write-record! v vst-code-entry (Cons (extern-panic-at-abs num-strings) (str-byte-ops "mn_panic_at")))
+    (write-record! v vst-code-entry (Cons (extern-isatty-abs num-strings) (str-byte-ops "mn_isatty")))
+    (write-record! v vst-code-entry (Cons (extern-mtime-abs num-strings) (str-byte-ops "mn_mtime")))
+    (write-record! v vst-code-entry (Cons (extern-cwd-abs num-strings) (str-byte-ops "mn_cwd")))
+    (write-record! v vst-code-entry (Cons (extern-ensure-dir-abs num-strings) (str-byte-ops "mn_ensure_dir")))
+    (write-record! v vst-code-entry (Cons (extern-list-dir-abs num-strings) (str-byte-ops "mn_list_dir")))
+    (write-record! v vst-code-entry (Cons (extern-realpath-abs num-strings) (str-byte-ops "mn_realpath")))
+    (write-record! v vst-code-entry (Cons (extern-now-ms-abs num-strings) (str-byte-ops "mn_now_ms")))
+    (write-record! v vst-code-entry (Cons (extern-remove-abs num-strings) (str-byte-ops "mn_remove")))
+    (write-record! v vst-code-entry (Cons (extern-is-dir-abs num-strings) (str-byte-ops "mn_is_dir")))))
 
 (defn lfunc-list-length (fs: (List LFunc)) -> Int
   (match fs [] 0 (Cons _ rest) (+ 1 (lfunc-list-length rest))))
@@ -750,19 +792,23 @@
   (do
     (let fs (llvm-module-funcs mod))
     (let globals (llvm-module-globals mod))
+    (let imps (llvm-module-imports mod))
+    (let ni (imp-length imps))
     ; Heap helpers need arities up to 3 (str-slice) even when user code is narrower.
     (let ma0 (max-arity-of fs))
-    (let ma (if (< ma0 3) 3 ma0))
+    (let ma1 (max-imp-arity imps ma0))
+    (let ma (if (< ma1 3) 3 ma1))
     (let ns (int-list-length (str-lengths globals)))
     (write-record! m module-code-version [1]) ; version 1: relative value ids
     (write-target-triple! m triple)
     (enter-subblock! m type-block-id (fn (t) (write-types! t ma globals)))
-    (write-globalvars! m ma (str-lengths globals) 0 (+ ns (+ extern-count (lfunc-list-length fs))))
+    (write-globalvars! m ma (str-lengths globals) 0 (+ ns (+ extern-count (+ ni (lfunc-list-length fs)))))
     (write-extern-decls! m ma)
+    (write-import-decls! m imps)
     (write-function-decls! m fs ma)
     (enter-subblock! m constants-block-id (fn (c) (write-global-consts! c ma globals 0)))
     (write-function-bodies! m ma fs)
-    (enter-subblock! m value-symtab-block-id (fn (v) (do (write-extern-vst-entries! v ns) (write-vst-entries! v fs (+ ns extern-count)))))))
+    (enter-subblock! m value-symtab-block-id (fn (v) (do (write-extern-vst-entries! v ns) (write-import-vst! v imps (+ ns extern-count)) (write-vst-entries! v fs (+ ns (+ extern-count ni))))))))
 
 ; The raw (unwrapped) bitcode bytes for `mod` — magic `BC\xC0\xDE`
 ; followed by the module block above. No Darwin wrapper (ADR 40).

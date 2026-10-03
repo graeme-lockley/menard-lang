@@ -249,6 +249,15 @@ function installBuiltins(env: TypeEnv): void {
   env.values.set("getenv", { params: [], type: tFn([S], tMaybe(S)) });
   env.values.set("exists", { params: [], type: tFn([S], B) });
   env.values.set("rename", { params: [], type: tFn([S, S], tResult(U, ioType)) });
+  env.values.set("isatty", { params: [], type: tFn([I], B) });
+  env.values.set("mtime", { params: [], type: tFn([S], I) });
+  env.values.set("cwd", { params: [], type: tFn([], S) });
+  env.values.set("ensure-dir", { params: [], type: tFn([S], B) });
+  env.values.set("list-dir", { params: [], type: tFn([S], S) });
+  env.values.set("realpath", { params: [], type: tFn([S], S) });
+  env.values.set("now-ms", { params: [], type: tFn([], I) });
+  env.values.set("remove", { params: [], type: tFn([S], B) });
+  env.values.set("is-dir", { params: [], type: tFn([S], B) });
 
   // Tier 1½ — process spawning (§2.15)
   const spawnSpan = { start: 0, end: 0 };

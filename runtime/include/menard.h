@@ -278,6 +278,17 @@ MnWord mn_spawn_capture(MnWord argv_list, MnWord stdin_str);
 MnWord mn_getenv(MnWord name);                 /* → (Maybe Str) */
 MnWord mn_exists(MnWord path_str);             /* → Bool */
 MnWord mn_rename(MnWord from_str, MnWord to_str); /* → (Result Unit IoError) */
+/* Cache and diagnostics seam. Paths are Menard strings. mtime is
+ * milliseconds since the epoch, or 0 when the path is missing. */
+MnWord mn_isatty(MnWord fd_tagged);            /* → Bool */
+MnWord mn_mtime(MnWord path_str);              /* → Int */
+MnWord mn_cwd(void);                           /* → Str */
+MnWord mn_ensure_dir(MnWord path_str);         /* → Bool; mkdir -p */
+MnWord mn_list_dir(MnWord path_str);           /* → Str; newline-separated */
+MnWord mn_realpath(MnWord path_str);           /* → Str; empty on failure */
+MnWord mn_now_ms(void);                        /* → Int */
+MnWord mn_remove(MnWord path_str);             /* → Bool */
+MnWord mn_is_dir(MnWord path_str);             /* → Bool */
 
 #ifdef __cplusplus
 }

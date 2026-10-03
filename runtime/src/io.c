@@ -7,8 +7,10 @@
  */
 #include "menard.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <poll.h>
 #include <spawn.h>
 #include <stdio.h>
@@ -16,6 +18,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #define HDR ((int64_t)sizeof(void *))
@@ -648,4 +651,156 @@ MnWord mn_rename(MnWord from_str, MnWord to_str) {
     return mn_err(io_err_from_errno(err));
   }
   return mn_ok(MN_UNIT);
+}
+
+MnWord mn_isatty(MnWord fd_tagged) {
+  int fd = (int)mn_word_to_int(fd_tagged);
+  return isatty(fd) ? MN_TRUE : MN_FALSE;
+}
+
+static int64_t mtime_ms(const struct stat *st) {
+#if defined(__APPLE__)
+  return (int64_t)st->st_mtimespec.tv_sec * 1000 +
+         (int64_t)st->st_mtimespec.tv_nsec / 1000000;
+#else
+  return (int64_t)st->st_mtim.tv_sec * 1000 + (int64_t)st->st_mtim.tv_nsec / 1000000;
+#endif
+}
+
+MnWord mn_mtime(MnWord path_str) {
+  char *path = str_to_cstr(path_str);
+  struct stat st;
+  int rc = stat(path, &st);
+  free(path);
+  if (rc != 0) {
+    return mn_int_to_word(0);
+  }
+  return mn_int_to_word(mtime_ms(&st));
+}
+
+MnWord mn_cwd(void) {
+  char buf[PATH_MAX];
+  if (getcwd(buf, sizeof buf) == NULL) {
+    return mn_str_new(0, 0);
+  }
+  return mn_str_new((int64_t)(uintptr_t)buf, (int64_t)strlen(buf));
+}
+
+static int mkdir_one(const char *path) {
+  if (mkdir(path, 0755) == 0 || errno == EEXIST) {
+    return 1;
+  }
+  return 0;
+}
+
+MnWord mn_ensure_dir(MnWord path_str) {
+  char *path = str_to_cstr(path_str);
+  size_t n = strlen(path);
+  int ok = 1;
+  size_t i;
+  for (i = 1; i < n; i++) {
+    if (path[i] == '/') {
+      path[i] = '\0';
+      if (!mkdir_one(path)) {
+        ok = 0;
+      }
+      path[i] = '/';
+    }
+  }
+  if (n > 0 && path[n - 1] != '/') {
+    if (!mkdir_one(path)) {
+      ok = 0;
+    }
+  }
+  free(path);
+  return ok ? MN_TRUE : MN_FALSE;
+}
+
+MnWord mn_list_dir(MnWord path_str) {
+  char *path = str_to_cstr(path_str);
+  DIR *d = opendir(path);
+  free(path);
+  if (d == NULL) {
+    return mn_str_new(0, 0);
+  }
+  size_t cap = 256;
+  size_t len = 0;
+  char *buf = (char *)malloc(cap);
+  if (buf == NULL) {
+    closedir(d);
+    mn_panic("mn_list_dir: out of memory");
+  }
+  struct dirent *ent;
+  int first = 1;
+  while ((ent = readdir(d)) != NULL) {
+    if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
+      continue;
+    }
+    size_t nl = strlen(ent->d_name);
+    size_t extra = first ? 0 : 1;
+    size_t need = len + extra + nl + 1;
+    if (need > cap) {
+      size_t ncap = cap;
+      while (ncap < need) {
+        ncap *= 2;
+      }
+      char *nb = (char *)realloc(buf, ncap);
+      if (nb == NULL) {
+        free(buf);
+        closedir(d);
+        mn_panic("mn_list_dir: out of memory");
+      }
+      buf = nb;
+      cap = ncap;
+    }
+    if (!first) {
+      buf[len++] = '\n';
+    }
+    memcpy(buf + len, ent->d_name, nl);
+    len += nl;
+    first = 0;
+  }
+  closedir(d);
+  MnWord s = mn_str_new((int64_t)(uintptr_t)buf, (int64_t)len);
+  free(buf);
+  return s;
+}
+
+MnWord mn_realpath(MnWord path_str) {
+  char *path = str_to_cstr(path_str);
+  char *resolved = realpath(path, NULL);
+  free(path);
+  if (resolved == NULL) {
+    return mn_str_new(0, 0);
+  }
+  MnWord s = mn_str_new((int64_t)(uintptr_t)resolved, (int64_t)strlen(resolved));
+  free(resolved);
+  return s;
+}
+
+MnWord mn_now_ms(void) {
+  struct timespec ts;
+  if (clock_gettime(CLOCK_REALTIME, &ts) != 0) {
+    return mn_int_to_word(0);
+  }
+  int64_t ms = (int64_t)ts.tv_sec * 1000 + (int64_t)ts.tv_nsec / 1000000;
+  return mn_int_to_word(ms);
+}
+
+MnWord mn_remove(MnWord path_str) {
+  char *path = str_to_cstr(path_str);
+  int rc = unlink(path);
+  free(path);
+  return rc == 0 ? MN_TRUE : MN_FALSE;
+}
+
+MnWord mn_is_dir(MnWord path_str) {
+  char *path = str_to_cstr(path_str);
+  struct stat st;
+  int rc = stat(path, &st);
+  free(path);
+  if (rc != 0) {
+    return MN_FALSE;
+  }
+  return S_ISDIR(st.st_mode) ? MN_TRUE : MN_FALSE;
 }

@@ -33,6 +33,18 @@ export type Host = {
   getenv(name: string): string | null;
   exists(path: string): boolean;
   rename(from: string, to: string): { ok: true } | { ok: false; error: IoError };
+  /** stderr/stdout tty check. `fd` 1 is stdout, 2 is stderr. */
+  isatty(fd: number): boolean;
+  /** Milliseconds since the epoch, or 0 when missing. */
+  mtime(path: string): bigint;
+  cwd(): string;
+  /** mkdir -p. */
+  ensureDir(path: string): boolean;
+  /** Absolute path, or "" when it cannot be resolved. */
+  realpath(path: string): string;
+  nowMs(): bigint;
+  remove(path: string): boolean;
+  isDir(path: string): boolean;
   /** Program arguments after CLI `--` (not including the script path). */
   argv: string[];
   /** Truncate to 8 bits and request process exit. Never returns. */
@@ -251,6 +263,102 @@ function ensureParentDirs(dirs: Set<string>, filePath: string): void {
   }
 }
 
+function virtualOs(fs: VirtualFs): Pick<
+  Host,
+  "isatty" | "mtime" | "cwd" | "ensureDir" | "realpath" | "nowMs" | "remove" | "isDir"
+> {
+  return {
+    isatty() {
+      return false;
+    },
+    mtime(path) {
+      const p = normalize(path);
+      return fs.files.has(p) || fs.dirs.has(p) ? 1n : 0n;
+    },
+    cwd() {
+      return "/";
+    },
+    ensureDir(path) {
+      const p = normalize(path);
+      ensureParentDirs(fs.dirs, p + "/x");
+      fs.dirs.add(p);
+      return true;
+    },
+    realpath(path) {
+      const p = normalize(path);
+      if (fs.files.has(p) || fs.dirs.has(p) || hasChildren(fs, p)) return p;
+      return "";
+    },
+    nowMs() {
+      return BigInt(Date.now());
+    },
+    remove(path) {
+      return fs.files.delete(normalize(path));
+    },
+    isDir(path) {
+      const p = normalize(path);
+      if (fs.files.has(p)) return false;
+      return fs.dirs.has(p) || hasChildren(fs, p);
+    },
+  };
+}
+
+function realOs(): Pick<
+  Host,
+  "isatty" | "mtime" | "cwd" | "ensureDir" | "realpath" | "nowMs" | "remove" | "isDir"
+> {
+  return {
+    isatty(fd) {
+      if (fd === 1) return !!process.stdout.isTTY;
+      if (fd === 2) return !!process.stderr.isTTY;
+      return false;
+    },
+    mtime(path) {
+      try {
+        return BigInt(Math.trunc(nodeFs.statSync(path).mtimeMs));
+      } catch {
+        return 0n;
+      }
+    },
+    cwd() {
+      return process.cwd();
+    },
+    ensureDir(path) {
+      try {
+        nodeFs.mkdirSync(path, { recursive: true });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    realpath(path) {
+      try {
+        return nodeFs.realpathSync(path);
+      } catch {
+        return "";
+      }
+    },
+    nowMs() {
+      return BigInt(Date.now());
+    },
+    remove(path) {
+      try {
+        nodeFs.unlinkSync(path);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    isDir(path) {
+      try {
+        return nodeFs.statSync(path).isDirectory();
+      } catch {
+        return false;
+      }
+    },
+  };
+}
+
 function hasChildren(fs: VirtualFs, p: string): boolean {
   const prefix = p === "/" ? "/" : p + "/";
   for (const f of fs.files.keys()) if (f.startsWith(prefix)) return true;
@@ -378,6 +486,7 @@ export function createHost(
     },
     ...fsOps(fs),
     ...spawnOps(spawnEnabled),
+    ...virtualOs(fs),
     getenv(name) {
       const env = opts.env ?? {};
       const v = env[name];
@@ -437,6 +546,7 @@ export function createLiveHost(
     },
     ...fsOps(fs),
     ...spawnOps(spawnEnabled),
+    ...virtualOs(fs),
     getenv(name) {
       const v = process.env[name];
       return v === undefined ? null : v;
@@ -533,5 +643,6 @@ export function createRealHost(
       throw new ExitSignal(code & 0xff);
     },
     ...spawnOps(spawnEnabled),
+    ...realOs(),
   };
 }

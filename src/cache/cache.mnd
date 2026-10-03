@@ -1,0 +1,322 @@
+; `~/.menard` cache. Interface files and objects mirror the canonical
+; absolute source path. Bitcode itself never stores that path or a
+; timestamp; both live only here.
+;
+; An interface is a list of forms:
+;   (mni 1) (src HASH) (dep HASH "abs") (init "sym"|-) (main "sym" "Ret"|-)
+;   (fn "name" "link" ARITY) (ctor "name" TAG ARITY) (stub <decl>)
+
+(import "../reader/ast.mnd")
+(import "../reader/read.mnd")
+(import "../reader/print.mnd")
+(import "../modules/graph.mnd")
+
+(pub defrec DepRec (hash: Int) (path: Str))
+(pub defrec FnRec (name: Str) (link: Str) (arity: Int))
+(pub defrec CtorRec (name: Str) (tag: Int) (arity: Int))
+(pub defrec Iface
+  (src-hash: Int)
+  (deps: (List DepRec))
+  (init: Str)
+  (main-sym: Str)
+  (main-ret: Str)
+  (fns: (List FnRec))
+  (ctors: (List CtorRec))
+  (stubs: (List Ast)))
+
+(defn sym-str (ast: Ast) -> (Maybe Str)
+  (match ast (SymNode n _) (Some n) _ (None)))
+
+(defn blank -> Span (Span 0 0 0 1))
+
+(defn quote-str (s: Str) -> Str
+  (print-form (StrNode s (blank))))
+
+(defn starts-with (s: Str) (prefix: Str) -> Bool
+  (do
+    (let n (str-byte-length prefix))
+    (and (>= (str-byte-length s) n) (= (str-slice s 0 n) prefix))))
+
+(defn dirname-of (path: Str) -> Str
+  (do
+    (let n (str-byte-length path))
+    (let slash (last-slash path (- n 1)))
+    (if (< slash 0) "."
+      (if (= slash 0) "/" (str-slice path 0 slash)))))
+
+(defn last-slash (s: Str) (i: Int) -> Int
+  (if (< i 0) (- 0 1)
+    (if (= (str-byte s i) 47) i
+      (last-slash s (- i 1)))))
+
+(pub defn cache-root -> Str
+  (match (getenv "MENARD_CACHE")
+    (Some s) (if (> (str-byte-length s) 0) s (default-cache))
+    (None) (default-cache)))
+
+(defn default-cache -> Str
+  (match (getenv "HOME")
+    (Some h) (if (> (str-byte-length h) 0) (str-concat h "/.menard") "/tmp/menard")
+    (None) "/tmp/menard"))
+
+(pub defn canonical-path (path: Str) -> Str
+  (do
+    (let direct (realpath path))
+    (if (> (str-byte-length direct) 0) direct
+      (normalize-path
+        (if (starts-with path "/") path
+          (str-concat (cwd) (str-concat "/" path)))))))
+
+; Path recorded in panic frames and diagnostics. Relative to the
+; working directory when the file lives under it, so the object bytes
+; do not contain an absolute path.
+(pub defn display-path (abs: Str) -> Str
+  (do
+    (let prefix (str-concat (cwd) "/"))
+    (if (starts-with abs prefix)
+      (str-slice abs (str-byte-length prefix) (- (str-byte-length abs) (str-byte-length prefix)))
+      abs)))
+
+(defn cache-base (abs: Str) -> Str
+  (str-concat (cache-root) abs))
+
+(pub defn iface-path (abs: Str) -> Str
+  (str-concat (cache-base abs) ".mni"))
+
+(pub defn object-path (abs: Str) -> Str
+  (str-concat (cache-base abs) ".bc"))
+
+(pub defn cache-bin (abs: Str) -> Str
+  (str-concat (cache-root) (str-concat "/out/" (show (bytes-hash abs)))))
+
+(pub defn ensure-parent (path: Str) -> Bool
+  (ensure-dir (dirname-of path)))
+
+(pub defn hash-file (path: Str) -> Int
+  (match (read-file path)
+    (Ok s) (bytes-hash s)
+    (Err _) 0))
+
+(defn nl -> Str
+  (do
+    (let sb (sb-new))
+    (sb-append-byte! sb 10)
+    (sb-take-str! sb)))
+
+(defn add-line (sb: StringBuffer) (s: Str) -> Unit
+  (do
+    (sb-append! sb s)
+    (sb-append! sb (nl))
+    ()))
+
+(defn write-deps (sb: StringBuffer) (deps: (List DepRec)) -> Unit
+  (match deps
+    [] ()
+    (Cons (DepRec h p) rest)
+      (do
+        (add-line sb (str-concat "(dep " (str-concat (show h) (str-concat " " (str-concat (quote-str p) ")")))))
+        (write-deps sb rest))))
+
+(defn write-fns (sb: StringBuffer) (fns: (List FnRec)) -> Unit
+  (match fns
+    [] ()
+    (Cons (FnRec name link ar) rest)
+      (do
+        (add-line sb
+          (str-concat "(fn "
+            (str-concat (quote-str name)
+              (str-concat " "
+                (str-concat (quote-str link)
+                  (str-concat " " (str-concat (show ar) ")")))))))
+        (write-fns sb rest))))
+
+(defn write-ctors (sb: StringBuffer) (ctors: (List CtorRec)) -> Unit
+  (match ctors
+    [] ()
+    (Cons (CtorRec name tag ar) rest)
+      (do
+        (add-line sb
+          (str-concat "(ctor "
+            (str-concat (quote-str name)
+              (str-concat " " (str-concat (show tag) (str-concat " " (str-concat (show ar) ")")))))))
+        (write-ctors sb rest))))
+
+(defn write-stubs (sb: StringBuffer) (stubs: (List Ast)) -> Unit
+  (match stubs
+    [] ()
+    (Cons f rest)
+      (do
+        (add-line sb (str-concat "(stub " (str-concat (print-form f) ")")))
+        (write-stubs sb rest))))
+
+(defn dash (s: Str) -> Str
+  (if (= (str-byte-length s) 0) "-" s))
+
+(defn iface-text (iface: Iface) -> Str
+  (match iface
+    (Iface src deps init main-sym main-ret fns ctors stubs)
+      (do
+        (let sb (sb-new))
+        (add-line sb "(mni 1)")
+        (add-line sb (str-concat "(src " (str-concat (show src) ")")))
+        (write-deps sb deps)
+        (add-line sb (str-concat "(init " (str-concat (quote-str (dash init)) ")")))
+        (add-line sb
+          (str-concat "(main "
+            (str-concat (quote-str (dash main-sym))
+              (str-concat " " (str-concat (quote-str (dash main-ret)) ")")))))
+        (write-fns sb fns)
+        (write-ctors sb ctors)
+        (write-stubs sb stubs)
+        (sb-take-str! sb))))
+
+(pub defn write-iface (abs: Str) (iface: Iface) -> Bool
+  (do
+    (let path (iface-path abs))
+    (ensure-parent path)
+    (match (write-file path (iface-text iface))
+      (Ok _) true
+      (Err _) false)))
+
+(defn undash (s: Str) -> Str
+  (if (= s "-") "" s))
+
+(defn head-of (a: Ast) -> Str
+  (match a
+    (ParenNode (Cons h _) _)
+      (match (sym-str h) (Some n) n (None) "")
+    _ ""))
+
+(defn elem-str (elems: (List Ast)) (i: Int) -> Str
+  (match elems
+    [] ""
+    (Cons e rest)
+      (if (= i 0)
+        (match e (StrNode s _) s _ "")
+        (elem-str rest (- i 1)))))
+
+(defn elem-int (elems: (List Ast)) (i: Int) -> Int
+  (match elems
+    [] 0
+    (Cons e rest)
+      (if (= i 0)
+        (match e (IntNode n _) n _ 0)
+        (elem-int rest (- i 1)))))
+
+(defn elem-ast (elems: (List Ast)) (i: Int) -> (Maybe Ast)
+  (match elems
+    [] (None)
+    (Cons e rest)
+      (if (= i 0) (Some e) (elem-ast rest (- i 1)))))
+
+(defn reverse-deps (xs: (List DepRec)) (acc: (List DepRec)) -> (List DepRec)
+  (match xs [] acc (Cons x rest) (reverse-deps rest (Cons x acc))))
+
+(defn reverse-fns (xs: (List FnRec)) (acc: (List FnRec)) -> (List FnRec)
+  (match xs [] acc (Cons x rest) (reverse-fns rest (Cons x acc))))
+
+(defn reverse-ctors (xs: (List CtorRec)) (acc: (List CtorRec)) -> (List CtorRec)
+  (match xs [] acc (Cons x rest) (reverse-ctors rest (Cons x acc))))
+
+(defn reverse-asts (xs: (List Ast)) (acc: (List Ast)) -> (List Ast)
+  (match xs [] acc (Cons x rest) (reverse-asts rest (Cons x acc))))
+
+(defn take-form (a: Ast) (src-hash: (Ref Int)) (deps: (Ref (List DepRec))) (init: (Ref Str)) (main-sym: (Ref Str)) (main-ret: (Ref Str)) (fns: (Ref (List FnRec))) (ctors: (Ref (List CtorRec))) (stubs: (Ref (List Ast))) -> Unit
+  (match a
+    (ParenNode elems _)
+      (do
+        (let h (head-of a))
+        (if (= h "src") (set! src-hash (elem-int elems 1))
+          (if (= h "dep") (set! deps (Cons (DepRec (elem-int elems 1) (elem-str elems 2)) (deref deps)))
+            (if (= h "init") (set! init (undash (elem-str elems 1)))
+              (if (= h "main")
+                (do
+                  (set! main-sym (undash (elem-str elems 1)))
+                  (set! main-ret (undash (elem-str elems 2)))
+                  ())
+                (if (= h "fn") (set! fns (Cons (FnRec (elem-str elems 1) (elem-str elems 2) (elem-int elems 3)) (deref fns)))
+                  (if (= h "ctor") (set! ctors (Cons (CtorRec (elem-str elems 1) (elem-int elems 2) (elem-int elems 3)) (deref ctors)))
+                    (if (= h "stub")
+                      (match (elem-ast elems 1)
+                        (Some inner) (set! stubs (Cons inner (deref stubs)))
+                        (None) ())
+                      ())))))))
+        ())
+    _ ()))
+
+(defn take-forms (forms: (List Ast)) (src-hash: (Ref Int)) (deps: (Ref (List DepRec))) (init: (Ref Str)) (main-sym: (Ref Str)) (main-ret: (Ref Str)) (fns: (Ref (List FnRec))) (ctors: (Ref (List CtorRec))) (stubs: (Ref (List Ast))) -> Unit
+  (match forms
+    [] ()
+    (Cons f rest)
+      (do
+        (take-form f src-hash deps init main-sym main-ret fns ctors stubs)
+        (take-forms rest src-hash deps init main-sym main-ret fns ctors stubs))))
+
+(defn iface-from-forms (forms: (List Ast)) -> Iface
+  (do
+    (let src-hash (ref 0))
+    (let deps (ref []))
+    (let init (ref ""))
+    (let main-sym (ref ""))
+    (let main-ret (ref ""))
+    (let fns (ref []))
+    (let ctors (ref []))
+    (let stubs (ref []))
+    (take-forms forms src-hash deps init main-sym main-ret fns ctors stubs)
+    (Iface
+      (deref src-hash)
+      (reverse-deps (deref deps) [])
+      (deref init)
+      (deref main-sym)
+      (deref main-ret)
+      (reverse-fns (deref fns) [])
+      (reverse-ctors (deref ctors) [])
+      (reverse-asts (deref stubs) []))))
+
+(pub defn read-iface (abs: Str) -> (Maybe Iface)
+  (match (read-file (iface-path abs))
+    (Err _) (None)
+    (Ok text)
+      (match (read-all text)
+        (Err _) (None)
+        (Ok forms) (Some (iface-from-forms forms)))))
+
+(defn deps-match (deps: (List DepRec)) -> Bool
+  (match deps
+    [] true
+    (Cons (DepRec h path) rest)
+      (if (= h (hash-file (iface-path path))) (deps-match rest) false)))
+
+(defn stamps-fresh (abs: Str) -> Bool
+  (do
+    (let src (mtime abs))
+    (let iface (mtime (iface-path abs)))
+    (let obj (mtime (object-path abs)))
+    (and (and (> src 0) (and (> iface src) (> obj src))) true)))
+
+(pub defn iface-fresh (abs: Str) (iface: Iface) -> Bool
+  (match iface
+    (Iface src deps _ _ _ _ _ _)
+      (and (exists (object-path abs))
+        (and (deps-match deps)
+          (or (stamps-fresh abs) (= (hash-file abs) src))))))
+
+(pub defn remove-cache (abs: Str) -> Unit
+  (do
+    (remove (iface-path abs))
+    (remove (object-path abs))
+    ()))
+
+(defn split-acc (s: Str) (i: Int) (start: Int) (n: Int) (acc: (List Str)) -> (List Str)
+  (if (> i n) acc
+    (if (or (= i n) (= (str-byte s i) 10))
+      (if (= i start)
+        (split-acc s (+ i 1) (+ i 1) n acc)
+        (split-acc s (+ i 1) (+ i 1) n (Cons (str-slice s start (- i start)) acc)))
+      (split-acc s (+ i 1) start n acc))))
+
+(defn reverse-strs (xs: (List Str)) (acc: (List Str)) -> (List Str)
+  (match xs [] acc (Cons x rest) (reverse-strs rest (Cons x acc))))
+
+(pub defn split-lines (s: Str) -> (List Str)
+  (reverse-strs (split-acc s 0 0 (str-byte-length s) []) []))

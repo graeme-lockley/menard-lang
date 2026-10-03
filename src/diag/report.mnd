@@ -1,0 +1,167 @@
+; Rust-style diagnostics for the native driver.
+;
+; `path:line:col: error[CODE]: message`, a gutter, the source line, and
+; carets. Column is a byte offset, matching `host/src/diagnostic`. Color
+; is applied only when stderr is a terminal and `NO_COLOR` is unset, so
+; a pipe stays plain text.
+
+(import "../reader/ast.mnd")
+(import "../../stdlib/io.mnd")
+
+(pub alias Span Span)
+
+(defn nl -> Str
+  (do
+    (let sb (sb-new))
+    (sb-append-byte! sb 10)
+    (sb-take-str! sb)))
+
+(defn esc (codes: Str) -> Str
+  (do
+    (let sb (sb-new))
+    (sb-append-byte! sb 27)
+    (sb-append! sb codes)
+    (sb-take-str! sb)))
+
+(pub defn tty-color (fd: Int) -> Bool
+  (and (isatty fd)
+    (match (getenv "NO_COLOR")
+      (None) true
+      (Some _) false)))
+
+(pub defn paint-text (on: Bool) (code: Str) (s: Str) -> Str
+  (if on (str-concat (esc code) (str-concat s (esc "[0m"))) s))
+
+; `Compiling` / `Linking` are light grey, the file name dark grey.
+; Color follows stderr, same rule as diagnostics.
+(pub defn progress-line (verb: Str) (name: Str) (ms: Int) -> Str
+  (do
+    (let on (tty-color 2))
+    (let sb (sb-new))
+    (sb-append-byte! sb 10)
+    (let nl (sb-take-str! sb))
+    (str-concat (paint-text on "[38;5;248m" verb)
+      (str-concat " "
+        (str-concat (paint-text on "[38;5;240m" name)
+          (str-concat " "
+            (str-concat (paint-text on "[38;5;248m" (str-concat (show ms) "ms"))
+              nl)))))))
+
+(defn color-on -> Bool
+  (tty-color 2))
+
+(defn paint (on: Bool) (code: Str) (s: Str) -> Str
+  (paint-text on code s))
+
+(defn repeat-str (s: Str) (n: Int) (acc: Str) -> Str
+  (if (<= n 0) acc (repeat-str s (- n 1) (str-concat acc s))))
+
+(defn pad-left (s: Str) (w: Int) -> Str
+  (do
+    (let n (str-byte-length s))
+    (if (>= n w) s (str-concat (repeat-str " " (- w n) "") s))))
+
+(defn digits-of (n: Int) (acc: Int) -> Int
+  (if (< n 10) acc (digits-of (/ n 10) (+ acc 1))))
+
+(defn clamp (n: Int) (hi: Int) -> Int
+  (if (< n 0) 0 (if (> n hi) hi n)))
+
+; Walk bytes up to `offset`, counting newlines. Column is 1-based.
+(defn walk-loc (src: Str) (offset: Int) (i: Int) (line: Int) (start: Int) (n: Int) -> Int
+  (if (or (>= i offset) (>= i n)) start
+    (if (= (str-byte src i) 10)
+      (walk-loc src offset (+ i 1) (+ line 1) (+ i 1) n)
+      (walk-loc src offset (+ i 1) line start n))))
+
+(defn walk-line (src: Str) (offset: Int) (i: Int) (line: Int) (n: Int) -> Int
+  (if (or (>= i offset) (>= i n)) line
+    (if (= (str-byte src i) 10)
+      (walk-line src offset (+ i 1) (+ line 1) n)
+      (walk-line src offset (+ i 1) line n))))
+
+(defn line-end (src: Str) (i: Int) (n: Int) -> Int
+  (if (>= i n) n
+    (if (= (str-byte src i) 10) i
+      (line-end src (+ i 1) n))))
+
+(defn drop-cr (src: Str) (start: Int) (end: Int) -> Int
+  (if (and (> end start) (= (str-byte src (- end 1)) 13)) (- end 1) end))
+
+(defn line-text (src: Str) (start: Int) -> Str
+  (do
+    (let n (str-byte-length src))
+    (let end (drop-cr src start (line-end src start n)))
+    (if (>= start end) "" (str-slice src start (- end start)))))
+
+(defn loc-line (src: Str) (offset: Int) -> Int
+  (walk-line src (clamp offset (str-byte-length src)) 0 1 (str-byte-length src)))
+
+(defn loc-start (src: Str) (offset: Int) -> Int
+  (walk-loc src (clamp offset (str-byte-length src)) 0 1 0 (str-byte-length src)))
+
+(defn loc-col (src: Str) (offset: Int) -> Int
+  (do
+    (let n (str-byte-length src))
+    (let off (clamp offset n))
+    (+ (- off (loc-start src off)) 1)))
+
+; Underline from the start column through the end column on this line.
+; A zero-width span still marks one caret.
+(defn caret-len (src: Str) (sp: Span) (col: Int) (text: Str) -> Int
+  (do
+    (let start-line (loc-line src (span-start sp)))
+    (let end-off (if (> (span-end sp) (span-start sp)) (- (span-end sp) 1) (span-start sp)))
+    (let end-line (loc-line src end-off))
+    (let end-col (if (= end-line start-line) (loc-col src end-off) (+ (str-byte-length text) 1)))
+    (let raw (if (> (span-end sp) (span-start sp)) (+ (- end-col col) 1) 1))
+    (let capped (if (> (+ (- col 1) raw) (+ (str-byte-length text) 1))
+                  (- (+ (str-byte-length text) 1) (- col 1))
+                  raw))
+    (if (< capped 1) 1 capped)))
+
+(defn format-span (path: Str) (src: Str) (sp: Span) (sev: Str) (code: Str) (msg: Str) -> Str
+  (do
+    (let on (color-on))
+    (let line (loc-line src (span-start sp)))
+    (let col (loc-col src (span-start sp)))
+    (let text (line-text src (loc-start src (span-start sp))))
+    (let gw (digits-of line 1))
+    (let sev-color (if (= sev "warning") "[33m" "[31m"))
+    (let carets (caret-len src sp col text))
+    (str-concat
+      (paint on "[1m" path)
+      (str-concat ":"
+        (str-concat (show line)
+          (str-concat ":"
+            (str-concat (show col)
+              (str-concat ": "
+                (str-concat (paint on sev-color sev)
+                  (str-concat "["
+                    (str-concat code
+                      (str-concat "]: "
+                        (str-concat msg
+                          (str-concat (nl)
+                            (str-concat "  |"
+                              (str-concat (nl)
+                                (str-concat (pad-left (show line) gw)
+                                  (str-concat " | "
+                                    (str-concat text
+                                      (str-concat (nl)
+                                        (str-concat (repeat-str " " gw "")
+                                          (str-concat " | "
+                                            (str-concat (repeat-str " " (- col 1) "")
+                                              (str-concat (paint on sev-color (repeat-str "^" carets ""))
+                                                (nl)))))))))))))))))))))))))
+
+(pub defn report-span (path: Str) (src: Str) (sp: Span) (sev: Str) (code: Str) (msg: Str) -> Unit
+  (do
+    (write stderr (format-span path src sp sev code msg))
+    ()))
+
+(pub defn report-plain (msg: Str) -> Unit
+  (do
+    (write stderr "error: ")
+    (write stderr msg)
+    (write stderr (nl))
+    ()))

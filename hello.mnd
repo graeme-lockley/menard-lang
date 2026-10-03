@@ -4,7 +4,7 @@
 
 (println "Hello, world!")
 
-123
+(pub defn adder (n: Int) -> Int (+ n 1))
 
 ; The file named on the command line is the entry. Its `main` is the
 ; process entry. `fred.mnd`'s `main` runs only for `./mn run ./fred.mnd`.

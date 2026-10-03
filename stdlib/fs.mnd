@@ -11,3 +11,40 @@
 
 (pub defn rename (from: Str) (to: Str) -> (Result Unit IoError)
   (mn_rename from to))
+
+(extern mn_isatty (fd: Int) -> Bool)
+(extern mn_mtime (path: Str) -> Int)
+(extern mn_cwd -> Str)
+(extern mn_ensure_dir (path: Str) -> Bool)
+(extern mn_list_dir (path: Str) -> Str)
+(extern mn_realpath (path: Str) -> Str)
+(extern mn_now_ms -> Int)
+(extern mn_remove (path: Str) -> Bool)
+(extern mn_is_dir (path: Str) -> Bool)
+
+(pub defn isatty (fd: Int) -> Bool
+  (mn_isatty fd))
+
+(pub defn mtime (path: Str) -> Int
+  (mn_mtime path))
+
+(pub defn cwd -> Str
+  (mn_cwd))
+
+(pub defn ensure-dir (path: Str) -> Bool
+  (mn_ensure_dir path))
+
+(pub defn list-dir (path: Str) -> Str
+  (mn_list_dir path))
+
+(pub defn realpath (path: Str) -> Str
+  (mn_realpath path))
+
+(pub defn now-ms -> Int
+  (mn_now_ms))
+
+(pub defn remove (path: Str) -> Bool
+  (mn_remove path))
+
+(pub defn is-dir (path: Str) -> Bool
+  (mn_is_dir path))

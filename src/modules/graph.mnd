@@ -28,6 +28,8 @@
 ; Re-export shim — see `emit/bitcode.mnd` / `reader/casing.mnd`.
 (pub alias Ast Ast)
 
+; Zero-width on purpose. `lower.mnd` skips panic frames for a call with no
+; source extent, so these bootstrap calls do not show up as `file:1`.
 (defn dummy-span -> Span (Span 0 0 0 1))
 
 (pub defrec Flat (forms: (List Ast)) (paths: (List Str)))
@@ -620,3 +622,33 @@
     (set! visited (map-set (deref visited) entry-path true))
     (result-bind (load-module-source entry-path entry-path src visited acc mid exports paths sources inits entry)
       (fn (_) (Ok (Flat (forms-with-bootstrap (deref acc) (deref inits) (deref entry)) (deref paths)))))))
+
+; Separate compilation uses the same path hash and rename walk. The
+; hash is of whatever string the caller passes; the driver canonicalizes
+; first so `./fred.mnd` and `fred.mnd` are one module.
+(pub defn bytes-hash (s: Str) -> Int
+  (path-hash s))
+
+(pub defn link-of (path: Str) (name: Str) -> Str
+  (str-concat "mn_" (str-concat (show (path-hash path)) (str-concat "_" name))))
+
+(pub defn rename-module-forms (forms: (List Ast)) (renames: (Map Str Str)) -> (List Ast)
+  (rename-forms forms renames))
+
+(pub defn strip-module-forms (forms: (List Ast)) -> (List Ast)
+  (strip-imports-and-pub forms []))
+
+(pub defn import-specs (forms: (List Ast)) -> (List Str)
+  (collect-import-specs forms []))
+
+(pub defn resolve-import (from-path: Str) (spec: Str) -> Str
+  (resolve-import-path from-path spec))
+
+(pub defn normalize-path (path: Str) -> Str
+  (path-normalize path))
+
+(pub defn module-init-forms (path: Str) (forms: (List Ast)) (inits: (Ref (List Str))) -> (List Ast)
+  (with-module-init path forms inits))
+
+(pub defn defn-return-type (forms: (List Ast)) (name: Str) -> (Maybe Str)
+  (find-main-return forms name))

@@ -160,7 +160,9 @@ describe("src/mn.mnd emit", () => {
     const inPath = join(dir, "hello.mnd");
     const defaultOut = join(dir, "hello.bc");
     const { writeFile: writeFileCb } = await import("node:fs");
-    await promisify(writeFileCb)(inPath, readFileSync(abs("hello.mnd")));
+    const writeFile = promisify(writeFileCb);
+    await writeFile(inPath, readFileSync(abs("hello.mnd")));
+    await writeFile(join(dir, "fred.mnd"), readFileSync(abs("fred.mnd")));
     const out = runMenard("src/mn.mnd", ["emit", inPath]);
     expect(out.exitCode).toBe(0);
     const bytes = await readFile(defaultOut);

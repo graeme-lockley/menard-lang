@@ -175,7 +175,7 @@ bun test ../tests
 ### Emit and link a native binary (Phase 2 smoke)
 
 ```bash
-make hello-native   # stage0 emit -> clang link -> run; prints "Hello, world!" and exit 0
+make hello-native   # stage0 emit -> clang link -> run; prints "Hello from Fred!", "Hello, world!", "Main: Hello"; exit 0
 ```
 
 This runs the compiler (`src/mn.mnd`, in Menard, interpreted by the Phase 1

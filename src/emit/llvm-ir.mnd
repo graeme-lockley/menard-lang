@@ -143,10 +143,16 @@
 ; externs, and `funcs` share one combined module-scope value-numbering
 ; space, in that order (globals, then externs, then `funcs`), which both
 ; modules must agree on byte-for-byte.
-(pub defrec LlvmModule (funcs: (List LFunc)) (globals: (List Str)))
+; A cross-module function the object calls but does not define. `name` is
+; the Menard name the call uses; `link` is the symbol clang resolves.
+; Abs ids follow the fixed runtime externs, in this list's order.
+(pub defrec Imp (name: Str) (link: Str) (arity: Int))
 
-(pub defn llvm-module-funcs (m: LlvmModule) -> (List LFunc) (match m (LlvmModule fs _) fs))
-(pub defn llvm-module-globals (m: LlvmModule) -> (List Str) (match m (LlvmModule _ gs) gs))
+(pub defrec LlvmModule (funcs: (List LFunc)) (globals: (List Str)) (imports: (List Imp)))
+
+(pub defn llvm-module-funcs (m: LlvmModule) -> (List LFunc) (match m (LlvmModule fs _ _) fs))
+(pub defn llvm-module-globals (m: LlvmModule) -> (List Str) (match m (LlvmModule _ gs _) gs))
+(pub defn llvm-module-imports (m: LlvmModule) -> (List Imp) (match m (LlvmModule _ _ is) is))
 
 ; ---------------------------------------------------------------------------
 ; The fixed runtime externs — always declared, in this fixed order,
@@ -161,7 +167,7 @@
 ; Order: mn_write_stdout, mn_print_i64, mn_write_stderr, mn_alloc,
 ; heap helpers (3C), mn_print_str, Str/Ref/SB (3D), Map (3F), closures (3E),
 ; tier-0 I/O (3G: mn_init … mn_exit).
-(pub let extern-count 74)
+(pub let extern-count 83)
 
 (pub defn extern-write-stdout-abs (num-strings: Int) -> Int num-strings)
 (pub defn extern-print-i64-abs (num-strings: Int) -> Int (+ num-strings 1))
@@ -237,6 +243,15 @@
 (pub defn extern-trace-push-abs (num-strings: Int) -> Int (+ num-strings 71))
 (pub defn extern-trace-pop-abs (num-strings: Int) -> Int (+ num-strings 72))
 (pub defn extern-panic-at-abs (num-strings: Int) -> Int (+ num-strings 73))
+(pub defn extern-isatty-abs (num-strings: Int) -> Int (+ num-strings 74))
+(pub defn extern-mtime-abs (num-strings: Int) -> Int (+ num-strings 75))
+(pub defn extern-cwd-abs (num-strings: Int) -> Int (+ num-strings 76))
+(pub defn extern-ensure-dir-abs (num-strings: Int) -> Int (+ num-strings 77))
+(pub defn extern-list-dir-abs (num-strings: Int) -> Int (+ num-strings 78))
+(pub defn extern-realpath-abs (num-strings: Int) -> Int (+ num-strings 79))
+(pub defn extern-now-ms-abs (num-strings: Int) -> Int (+ num-strings 80))
+(pub defn extern-remove-abs (num-strings: Int) -> Int (+ num-strings 81))
+(pub defn extern-is-dir-abs (num-strings: Int) -> Int (+ num-strings 82))
 
 ; Builtin constructor tags — must match runtime/src/variants.c.
 (pub let tag-nil 0)

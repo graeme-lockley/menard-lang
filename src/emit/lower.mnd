@@ -188,6 +188,7 @@
 
 (pub alias Ast Ast)
 (pub alias Span Span)
+(pub alias Imp Imp)
 
 ; ---------------------------------------------------------------------------
 ; Small Ast helpers, restated locally per `src/`'s "no prelude import"
@@ -1137,6 +1138,13 @@
             (let ar-c (const-i64! b arity))
             (Ok (emit-call! b (extern-ctor-closure-abs ns) [tag-c ar-c])))))))
 
+; A reader span covers a source extent (`end` > `start`). Compiler-built
+; calls — the import bootstrap's calls to module inits and to the entry
+; `main` — use a zero-width span (`graph.mnd`'s `dummy-span`). That span's
+; origin is 0, the first loaded file, so recording it names the wrong file.
+(defn span-located (sp: Span) -> Bool
+  (> (span-end sp) (span-start sp)))
+
 (defn emit-trace-push! (b: Builder) (pool: StrPool) (sp: Span) -> Unit
   (do
     (let file-gid (file-gid-of pool (span-origin sp)))
@@ -1147,16 +1155,22 @@
   (emit-call-void! b extern-kind-trace-pop (extern-trace-pop-abs (str-pool-count pool)) []))
 
 ; Push the call expression's file and line, call, then pop. A panic inside
-; the callee leaves the frame in place.
+; the callee leaves the frame in place. A zero-width span is not a source
+; location, so the call is emitted with no frame.
 ; `args` are the words the call should receive. Callers that still hold root
 ; indexes reload them first; this wrapper does not, so a value loaded out of
 ; a shadow slot is not passed to `mn_root_get` a second time.
-(defn emit-traced-call! (b: Builder) (pool: StrPool) (sp: Span) (callee: Int) (args: (List Int)) -> Int
+(defn emit-traced-call-at! (b: Builder) (pool: StrPool) (sp: Span) (callee: Int) (args: (List Int)) -> Int
   (do
     (emit-trace-push! b pool sp)
     (let v (emit-call! b callee args))
     (emit-trace-pop! b pool)
     v))
+
+(defn emit-traced-call! (b: Builder) (pool: StrPool) (sp: Span) (callee: Int) (args: (List Int)) -> Int
+  (if (span-located sp)
+    (emit-traced-call-at! b pool sp callee args)
+    (emit-call! b callee args)))
 
 (defn lower-paren (elems: (List Ast)) (sp: Span) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (match elems
@@ -1605,6 +1619,24 @@
   "getenv"
   "exists"
   "rename"
+  "isatty"
+  "mtime"
+  "cwd"
+  "ensure-dir"
+  "list-dir"
+  "realpath"
+  "now-ms"
+  "remove"
+  "is-dir"
+  "mn_isatty"
+  "mn_mtime"
+  "mn_cwd"
+  "mn_ensure_dir"
+  "mn_list_dir"
+  "mn_realpath"
+  "mn_now_ms"
+  "mn_remove"
+  "mn_is_dir"
   "mn_arg_count"
   "mn_arg"
   "mn_read_file"
@@ -1630,7 +1662,18 @@
             (if (= hn "mn_spawn_capture") "spawn-capture"
             (if (= hn "mn_getenv") "getenv"
               (if (= hn "mn_exists") "exists"
-                (if (= hn "mn_rename") "rename" hn))))))))))
+                (if (= hn "mn_rename") "rename" (os-menard-name hn)))))))))))
+
+(defn os-menard-name (hn: Str) -> Str
+  (if (= hn "mn_isatty") "isatty"
+    (if (= hn "mn_mtime") "mtime"
+      (if (= hn "mn_cwd") "cwd"
+        (if (= hn "mn_ensure_dir") "ensure-dir"
+          (if (= hn "mn_list_dir") "list-dir"
+            (if (= hn "mn_realpath") "realpath"
+              (if (= hn "mn_now_ms") "now-ms"
+                (if (= hn "mn_remove") "remove"
+                  (if (= hn "mn_is_dir") "is-dir" hn))))))))))
 
 (defn effect-alias (hn: Str) -> Str
   (if (= hn "mn_write") "write"
@@ -1639,7 +1682,20 @@
 (defn runtime-op-abs (hn: Str) (ns: Int) -> Int
   (runtime-op-abs-named (seam-menard-name hn) ns))
 
+(defn os-op-abs (hn: Str) (ns: Int) -> Int
+  (if (= hn "isatty") (extern-isatty-abs ns)
+    (if (= hn "mtime") (extern-mtime-abs ns)
+      (if (= hn "cwd") (extern-cwd-abs ns)
+        (if (= hn "ensure-dir") (extern-ensure-dir-abs ns)
+          (if (= hn "list-dir") (extern-list-dir-abs ns)
+            (if (= hn "realpath") (extern-realpath-abs ns)
+              (if (= hn "now-ms") (extern-now-ms-abs ns)
+                (if (= hn "remove") (extern-remove-abs ns)
+                  (extern-is-dir-abs ns))))))))))
+
 (defn runtime-op-abs-named (hn: Str) (ns: Int) -> Int
+  (if (str-in-list hn ["isatty" "mtime" "cwd" "ensure-dir" "list-dir" "realpath" "now-ms" "remove" "is-dir"])
+    (os-op-abs hn ns)
   (if (= hn "f+") (extern-fadd-abs ns)
     (if (= hn "f-") (extern-fsub-abs ns)
       (if (= hn "f*") (extern-fmul-abs ns)
@@ -1681,16 +1737,18 @@
                                                                       (if (= hn "spawn-capture") (extern-spawn-capture-abs ns)
                                                                       (if (= hn "getenv") (extern-getenv-abs ns)
                                                                         (if (= hn "exists") (extern-exists-abs ns)
-                                                              (extern-rename-abs ns)))))))))))))))))))))))))))))))))))))))))))
+                                                              (extern-rename-abs ns))))))))))))))))))))))))))))))))))))))))))))
 
 (defn runtime-op-arity (hn: Str) -> Int
   (runtime-op-arity-named (seam-menard-name hn)))
 
 (defn runtime-op-arity-named (hn: Str) -> Int
+  (if (or (= hn "cwd") (= hn "now-ms")) 0
+  (if (str-in-list hn ["isatty" "mtime" "ensure-dir" "list-dir" "realpath" "remove" "is-dir"]) 1
   (if (or (= hn "sb-new") (or (= hn "map-new") (or (= hn "mn-env-0") (= hn "arg-count")))) 0
     (if (str-in-list hn ["str-byte-length" "ref" "deref" "sb-take-str!" "map-size" "mn-env-1" "mn-env-new" "arg" "read-file" "mn-apply-0" "show" "sb-length" "dump" "spawn" "getenv" "exists"]) 1
       (if (or (= hn "str-slice") (or (= hn "map-set") (or (= hn "mn-apply-2") (= hn "mn-env-set")))) 3
-        2))))
+        2))))))
 
 (defn lower-runtime-op (hn: Str) (args: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (if (= hn "mn-closure-new")
@@ -2487,7 +2545,7 @@
   (if (> (param-arity-of (ldefn-params main-ld)) 0)
     (Err "`main` must take no arguments")
     (if (or (is-int-type (ldefn-ret main-ld)) (is-unit-type (ldefn-ret main-ld)))
-      (lower-program-build word-lds all-lds forms triple paths)
+      (lower-program-build word-lds all-lds forms triple paths [] [])
       (Err "`main` must return Int or Unit"))))
 
 ; Global value numbering (see `llvm-ir.mnd`'s header comment and this
@@ -2508,6 +2566,7 @@
   (mc-pure-body (effect-alias (seam-menard-name hn))))
 
 (defn mc-pure-body (hn: Str) -> Bool
+  (or (str-in-list hn ["isatty" "mtime" "now-ms" "ensure-dir" "remove" "is-dir"])
   (or (or (or (or (= hn "if") (= hn "let")) (or (= hn "do") (= hn "loop")))
         (or (or (= hn "recur") (= hn "match"))
             (or (or (= hn "println") (= hn "print")) (or (= hn "shadow-push") (= hn "shadow-pop")))))
@@ -2516,7 +2575,7 @@
           (or (or (or (or (= hn "mn-env-get") (= hn "arg-count")) (or (= hn "exists") (= hn "sb-length")))
                 (or (or (= hn "dump") (= hn "+")) (or (= hn "-") (= hn "*"))))
               (or (or (or (= hn "/") (= hn "%")) (or (= hn "<") (= hn ">")))
-                  (or (or (= hn "<=") (= hn ">=")) (or (= hn "=") (= hn "compare"))))))))
+                  (or (or (= hn "<=") (= hn ">=")) (or (= hn "=") (= hn "compare")))))))))
 
 (defn mc-alloc-name (hn: Str) -> Bool
   (mc-alloc-body (seam-menard-name hn)))
@@ -2528,7 +2587,8 @@
             (or (or (= hn "mn-env-new") (= hn "mn-closure-new")) (or (= hn "mn-apply-0") (= hn "mn-apply-1"))))
           (or (or (or (= hn "mn-apply-2") (= hn "arg")) (or (= hn "read-file") (= hn "write-file")))
               (or (or (= hn "show") (or (= hn "spawn") (= hn "spawn-capture"))) (or (= hn "getenv") (= hn "rename")))
-              (or (or (= hn "f+") (= hn "f-")) (or (= hn "f*") (= hn "f/")))))))
+              (or (or (= hn "f+") (= hn "f-")) (or (= hn "f*") (= hn "f/")))
+              (or (or (= hn "cwd") (= hn "list-dir")) (= hn "realpath"))))))
 
 (defn mc-ctor-alloc (hn: Str) -> Bool
   (and (is-upper-name hn) (and (not (= hn "Nil")) (not (= hn "None")))))
@@ -2672,17 +2732,133 @@
   (let names (mc-seed lds))
   (mc-propagate lds (mc-build lds names) names (ast-list-length-lds lds)))
 
-(defn lower-program-build (word-lds: (List LDefn)) (all-lds: (List LDefn)) (forms: (List Ast)) (triple: Str) (paths: (List Str)) -> (Result Str Str)
+; Imported constructors keep the tag recorded in the dependency's
+; interface. Names already in `seeds` are not assigned again, so a leaf
+; change cannot renumber a constructor another module already inlined.
+(pub defrec CtorSeed (name: Str) (tag: Int) (arity: Int))
+(pub defrec CtorTable (specs: (Map Str CtorSpec)) (local: (List CtorSeed)))
+
+(defn seed-specs (seeds: (List CtorSeed)) (acc: (Map Str CtorSpec)) -> (Map Str CtorSpec)
+  (match seeds
+    [] acc
+    (Cons (CtorSeed n t a) rest) (seed-specs rest (map-set acc n (CtorSpec t a)))))
+
+(defn max-seed-tag (seeds: (List CtorSeed)) (acc: Int) -> Int
+  (match seeds
+    [] acc
+    (Cons (CtorSeed _ t _) rest) (if (> t acc) (max-seed-tag rest t) (max-seed-tag rest acc))))
+
+(defn seed-start (seeds: (List CtorSeed)) -> Int
+  (let m (+ (max-seed-tag seeds (- user-ctor-tag-base 1)) 1))
+  (if (> m user-ctor-tag-base) m user-ctor-tag-base))
+
+(defn reverse-seeds (xs: (List CtorSeed)) (acc: (List CtorSeed)) -> (List CtorSeed)
+  (match xs [] acc (Cons x rest) (reverse-seeds rest (Cons x acc))))
+
+(defn note-ctor (acc: (Map Str CtorSpec)) (name: Str) (arity: Int) (tag-ref: (Ref Int)) (local: (Ref (List CtorSeed))) -> (Map Str CtorSpec)
+  (match (map-get acc name)
+    (Some _) acc
+    (None)
+      (do
+        (let tag (deref tag-ref))
+        (set! tag-ref (+ tag 1))
+        (set! local (Cons (CtorSeed name tag arity) (deref local)))
+        (map-set acc name (CtorSpec tag arity)))))
+
+(defn note-one-variant (c: Ast) (acc: (Map Str CtorSpec)) (tag-ref: (Ref Int)) (local: (Ref (List CtorSeed))) -> (Map Str CtorSpec)
+  (match c
+    (ParenNode (Cons cname-ast payload) _)
+      (match (sym-str cname-ast)
+        (None) acc
+        (Some name)
+          (match (builtin-ctor-tag-of name)
+            (Some _) acc
+            (None) (note-ctor acc name (ast-list-length payload) tag-ref local)))
+    _ acc))
+
+(defn note-variant-ctors (ctors: (List Ast)) (acc: (Map Str CtorSpec)) (tag-ref: (Ref Int)) (local: (Ref (List CtorSeed))) -> (Map Str CtorSpec)
+  (match ctors
+    [] acc
+    (Cons c rest) (note-variant-ctors rest (note-one-variant c acc tag-ref local) tag-ref local)))
+
+(defn note-defrec (rest: (List Ast)) (acc: (Map Str CtorSpec)) (tag-ref: (Ref Int)) (local: (Ref (List CtorSeed))) -> (Map Str CtorSpec)
+  (match rest
+    (Cons name-part fields)
+      (match (decl-name-of name-part)
+        (None) acc
+        (Some name)
+          (match (builtin-ctor-tag-of name)
+            (Some _) acc
+            (None) (note-ctor acc name (ast-list-length fields) tag-ref local)))
+    [] acc))
+
+(defn note-ctor-named (hn: Str) (rest: (List Ast)) (acc: (Map Str CtorSpec)) (tag-ref: (Ref Int)) (local: (Ref (List CtorSeed))) -> (Map Str CtorSpec)
+  (if (= hn "variant")
+    (match rest
+      (Cons _ ctors) (note-variant-ctors ctors acc tag-ref local)
+      [] acc)
+    (if (= hn "defrec") (note-defrec rest acc tag-ref local) acc)))
+
+(defn note-ctor-form (ast: Ast) (acc: (Map Str CtorSpec)) (tag-ref: (Ref Int)) (local: (Ref (List CtorSeed))) -> (Map Str CtorSpec)
+  (match (unwrap-pub ast)
+    (ParenNode (Cons head rest) _)
+      (match (sym-str head)
+        (None) acc
+        (Some hn) (note-ctor-named hn rest acc tag-ref local))
+    _ acc))
+
+(defn note-ctor-forms (forms: (List Ast)) (acc: (Map Str CtorSpec)) (tag-ref: (Ref Int)) (local: (Ref (List CtorSeed))) -> (Map Str CtorSpec)
+  (match forms
+    [] acc
+    (Cons f rest) (note-ctor-forms rest (note-ctor-form f acc tag-ref local) tag-ref local)))
+
+(pub defn ctor-info (forms: (List Ast)) (seeds: (List CtorSeed)) -> CtorTable
+  (do
+    (let local (ref []))
+    (let tag-ref (ref (seed-start seeds)))
+    (let specs (note-ctor-forms forms (seed-specs seeds (map-new)) tag-ref local))
+    (CtorTable specs (reverse-seeds (deref local) []))))
+
+(defn imp-count (imps: (List Imp)) -> Int
+  (match imps [] 0 (Cons _ rest) (+ 1 (imp-count rest))))
+
+; Locals keep the abs ids `build-func-refs` assigned. An import whose
+; Menard name is also a local function stays local; its declaration is
+; still emitted so the id sequence matches the bitcode writer.
+(defn add-imp-refs (imps: (List Imp)) (idx: Int) (acc: (Map Str FuncRef)) -> (Map Str FuncRef)
+  (match imps
+    [] acc
+    (Cons (Imp name _ ar) rest)
+      (match (map-get acc name)
+        (Some _) (add-imp-refs rest (+ idx 1) acc)
+        (None) (add-imp-refs rest (+ idx 1) (map-set acc name (FuncRef idx ar))))))
+
+(defn lower-program-build (word-lds: (List LDefn)) (all-lds: (List LDefn)) (forms: (List Ast)) (triple: Str) (paths: (List Str)) (imports: (List Imp)) (seeds: (List CtorSeed)) -> (Result Str Str)
   (do
     (let extra (collect-non-defn-tops forms))
     (let word-lds2 (replace-main-body word-lds extra))
-    (let pool (str-pool-finalize (collect-str-pool forms paths) (collect-user-ctors forms)))
+    (let specs (match (ctor-info forms seeds) (CtorTable s _) s))
+    (let pool (str-pool-finalize (collect-str-pool forms paths) specs))
     (let num-strings (str-pool-count pool))
     (let num-funcs (ast-list-length-lds word-lds2))
-    (let funcs (build-func-refs word-lds2 (+ num-strings extern-count)))
+    (let nimps (imp-count imports))
+    (let funcs0 (build-func-refs word-lds2 (+ num-strings (+ extern-count nimps))))
+    (let funcs (add-imp-refs imports (+ num-strings extern-count) funcs0))
     (let noop (collect-noop-names all-lds))
-    (let num-globals (+ (* 2 num-strings) (+ extern-count num-funcs)))
+    (let num-globals (+ (* 2 num-strings) (+ extern-count (+ nimps num-funcs))))
     (let mc (mc-analyze word-lds2))
     (match (lower-all-funcs word-lds2 num-globals funcs noop pool mc)
-      (Ok lfuncs) (Ok (write-module-bc (LlvmModule lfuncs (str-pool-strs pool)) triple))
+      (Ok lfuncs) (Ok (write-module-bc (LlvmModule lfuncs (str-pool-strs pool) imports) triple))
       (Err msg) (Err (str-concat "cannot lower `main`: " msg)))))
+
+(defn lower-program-collected-sep (forms: (List Ast)) (triple: Str) (paths: (List Str)) (imports: (List Imp)) (seeds: (List CtorSeed)) -> (Result Str Str)
+  (do
+    (let lds (collect-ldefns-all forms))
+    (let word-lds (filter-word-ldefns lds))
+    (lower-program-build word-lds lds forms triple paths imports seeds)))
+
+; One module, with cross-module calls declared from `imports` and
+; constructor tags seeded from dependencies. `main` is optional: a
+; library object has none, and the bootstrap object is the only C main.
+(pub defn lower-program-sep (forms: (List Ast)) (triple: Str) (paths: (List Str)) (imports: (List Imp)) (seeds: (List CtorSeed)) -> (Result Str Str)
+  (lower-program-collected-sep (drop-folded-int-lets (subst-int-constants forms)) triple paths imports seeds))

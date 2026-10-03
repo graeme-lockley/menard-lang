@@ -307,7 +307,16 @@
     (value-set env "spawn" (Scheme [] (t-fn [(t-list (t-str))] (t-result (t-nominal "SpawnStatus" [] "variant") (t-nominal "IoError" [] "variant")))))
     (value-set env "getenv" (Scheme [] (t-fn [(t-str)] (t-maybe (t-str)))))
     (value-set env "exists" (Scheme [] (t-fn [(t-str)] (t-bool))))
-    (value-set env "rename" (Scheme [] (t-fn [(t-str) (t-str)] (t-result (t-unit) (t-nominal "IoError" [] "variant")))))))
+    (value-set env "rename" (Scheme [] (t-fn [(t-str) (t-str)] (t-result (t-unit) (t-nominal "IoError" [] "variant")))))
+    (value-set env "isatty" (Scheme [] (t-fn [(t-int)] (t-bool))))
+    (value-set env "mtime" (Scheme [] (t-fn [(t-str)] (t-int))))
+    (value-set env "cwd" (Scheme [] (t-fn [] (t-str))))
+    (value-set env "ensure-dir" (Scheme [] (t-fn [(t-str)] (t-bool))))
+    (value-set env "list-dir" (Scheme [] (t-fn [(t-str)] (t-str))))
+    (value-set env "realpath" (Scheme [] (t-fn [(t-str)] (t-str))))
+    (value-set env "now-ms" (Scheme [] (t-fn [] (t-int))))
+    (value-set env "remove" (Scheme [] (t-fn [(t-str)] (t-bool))))
+    (value-set env "is-dir" (Scheme [] (t-fn [(t-str)] (t-bool))))))
 
 (defn install-builtins (env: TypeEnv) -> Unit
   (do

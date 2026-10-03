@@ -115,7 +115,7 @@ describe.skipIf(clang === null)("src/emit/bc-writer.mnd — a real bitcode encod
 
       const ran = spawnSync(binPath, [], { encoding: "utf-8" });
       expect(ran.status).toBe(0);
-      expect(ran.stdout).toBe("Hello, world!\n");
+      expect(ran.stdout).toBe("Hello from Fred!\nHello, world!\nMain: Hello\n");
     } finally {
       await rm(bcPath).catch(() => {});
       await rm(binPath).catch(() => {});
