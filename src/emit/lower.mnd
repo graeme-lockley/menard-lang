@@ -1817,6 +1817,7 @@
         (None) (Err "unsupported match pattern"))
     (IntNode n _) (bind-int-pat! n val else-bb env b)
     (BoolNode flag _) (bind-bool-pat! flag val else-bb env b)
+    (StrNode s _) (bind-str-pat! s val else-bb env b pool)
     _ (Err "unsupported match pattern")))
 
 (defn bind-nullary-pat! (cname: Str) (val: Int) (else-bb: BB) (env: (Map Str Int)) (b: Builder) (pool: StrPool) -> (Result (Map Str Int) Str)
@@ -1852,6 +1853,20 @@
   (do
     (let lit (const-tagged! b n))
     (let cond (emit-cmp2! b icmp-eq val lit))
+    (let ok-bb (fresh-bb! b))
+    (emit-condbr! b ok-bb else-bb cond)
+    (switch-to! b ok-bb)
+    (Ok env)))
+
+; `val` is the scrutinee word. Root it before `mn_str_new`: that allocation
+; can copy, and a word held only in a register would not be updated.
+(defn bind-str-pat! (s: Str) (val: Int) (else-bb: BB) (env: (Map Str Int)) (b: Builder) (pool: StrPool) -> (Result (Map Str Int) Str)
+  (do
+    (let rooted (keep! b val))
+    (let lit (keep! b (emit-str-lit! b pool s)))
+    (let eqw (emit-call! b (extern-equal-abs (str-pool-count pool)) [(get! b rooted) (get! b lit)]))
+    (let f (const-false! b))
+    (let cond (emit-cmp2! b icmp-ne eqw f))
     (let ok-bb (fresh-bb! b))
     (emit-condbr! b ok-bb else-bb cond)
     (switch-to! b ok-bb)
@@ -2689,7 +2704,8 @@
     _ (mc-walk-empty)))
 
 ; Loop bindings and match patterns look like calls. Walking them would
-; mark every arithmetic loop and every match as may-collect.
+; mark every arithmetic loop and every match as may-collect. A string
+; literal pattern is the exception: it lowers to `mn_str_new`.
 (defn mc-walk-loop-inits (pairs: (List Ast)) (names: (Map Str Bool)) -> McWalk
   (match pairs
     [] (mc-walk-empty)
@@ -2708,10 +2724,25 @@
         (None) (mc-walk-or (mc-walk-ast bindings names) (mc-walk-ast body names)))
     _ (mc-walk-forms rest names)))
 
+(defn mc-pat-alloc (pat: Ast) -> Bool
+  (match pat
+    (StrNode _ _) true
+    (ParenNode elems _) (mc-asts-alloc elems)
+    (BracketNode elems _) (mc-asts-alloc elems)
+    _ false))
+
+(defn mc-asts-alloc (xs: (List Ast)) -> Bool
+  (match xs
+    [] false
+    (Cons p rest) (if (mc-pat-alloc p) true (mc-asts-alloc rest))))
+
 (defn mc-walk-match-clauses (xs: (List Ast)) (names: (Map Str Bool)) -> McWalk
   (match xs
     [] (mc-walk-empty)
-    (Cons _pat (Cons body rest)) (mc-walk-or (mc-walk-ast body names) (mc-walk-match-clauses rest names))
+    (Cons pat (Cons body rest))
+      (mc-walk-or
+        (if (mc-pat-alloc pat) (McWalk true []) (mc-walk-empty))
+        (mc-walk-or (mc-walk-ast body names) (mc-walk-match-clauses rest names)))
     [other] (mc-walk-ast other names)))
 
 (defn mc-walk-match (rest: (List Ast)) (names: (Map Str Bool)) -> McWalk

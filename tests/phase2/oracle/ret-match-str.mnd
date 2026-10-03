@@ -1,0 +1,11 @@
+; String literal patterns lower to `mn_str_new` + `mn_equal`.
+; "Int" → 1, "Float" → 2, anything else → 0. Exit 3.
+
+(defn code (name: Str) -> Int
+  (match name
+    "Int" 1
+    "Float" 2
+    _ 0))
+
+(defn main -> Int
+  (+ (code "Int") (+ (code "Float") (code "nope"))))

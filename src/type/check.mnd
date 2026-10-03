@@ -587,15 +587,16 @@
     (parse-type-expr-sym-prim env name sp)))
 
 (defn parse-type-expr-sym-prim (env: TypeEnv) (name: Str) (sp: Span) -> Type
-  (if (= name "Int") (t-int)
-    (if (= name "Float") (t-float)
-      (if (= name "Bool") (t-bool)
-        (if (= name "Char") (t-char)
-          (if (= name "Str") (t-str)
-            (if (= name "Sym") (t-sym)
-              (if (= name "Unit") (t-unit)
-                (if (= name "StringBuffer") (t-string-buffer)
-                  (parse-type-expr-sym-named env name sp))))))))))
+  (match name
+    "Int"          (t-int)
+    "Float"        (t-float)
+    "Bool"         (t-bool)
+    "Char"         (t-char)
+    "Str"          (t-str)
+    "Sym"          (t-sym)
+    "Unit"         (t-unit)
+    "StringBuffer" (t-string-buffer)
+    _              (parse-type-expr-sym-named env name sp)))
 
 (defn parse-type-expr-sym-named (env: TypeEnv) (name: Str) (sp: Span) -> Type
   (match (alias-get env name)
@@ -622,13 +623,14 @@
 (defn t-ref-of (elem: Type) -> Type (t-ref elem))
 
 (defn parse-type-expr-app-named (env: TypeEnv) (hn: Str) (args: (List Ast)) (sp: Span) (params: (List Str)) -> Type
-  (if (= hn "List") (parse-type-expr-one env "List" args sp params t-list-of)
-    (if (= hn "Maybe") (parse-type-expr-one env "Maybe" args sp params t-maybe-of)
-      (if (= hn "Ref") (parse-type-expr-one env "Ref" args sp params t-ref-of)
-        (if (= hn "Map") (parse-type-expr-two env "Map" args sp params t-map)
-          (if (= hn "Result") (parse-type-expr-two env "Result" args sp params t-result)
-            (if (= hn "Fn") (parse-type-expr-fn env args sp params)
-              (parse-type-expr-nominal env hn args sp params))))))))
+  (match hn
+    "List"   (parse-type-expr-one env "List" args sp params t-list-of)
+    "Maybe"  (parse-type-expr-one env "Maybe" args sp params t-maybe-of)
+    "Ref"    (parse-type-expr-one env "Ref" args sp params t-ref-of)
+    "Map"    (parse-type-expr-two env "Map" args sp params t-map)
+    "Result" (parse-type-expr-two env "Result" args sp params t-result)
+    "Fn"     (parse-type-expr-fn env args sp params)
+    _        (parse-type-expr-nominal env hn args sp params)))
 
 (defn parse-type-expr-one (env: TypeEnv) (name: Str) (args: (List Ast)) (sp: Span) (params: (List Str)) (mk: (Fn Type -> Type)) -> Type
   (match args
@@ -729,11 +731,12 @@
     (Some hn) (collect-def-named env hn rest sp)))
 
 (defn collect-def-named (env: TypeEnv) (hn: Str) (rest: (List Ast)) (sp: Span) -> Unit
-  (if (= hn "pub") (collect-def-elems env rest sp)
-    (if (= hn "alias") (collect-alias env rest sp)
-      (if (= hn "defrec") (collect-defrec env rest sp)
-        (if (= hn "variant") (collect-variant env rest sp)
-          ())))))
+  (match hn
+    "pub"     (collect-def-elems env rest sp)
+    "alias"   (collect-alias env rest sp)
+    "defrec"  (collect-defrec env rest sp)
+    "variant" (collect-variant env rest sp)
+    _         ()))
 
 ; alias
 
@@ -948,10 +951,11 @@
     (Some p) (register-parsed-scheme env p)))
 
 (defn collect-defn-scheme-named (env: TypeEnv) (hn: Str) (rest: (List Ast)) (elems: (List Ast)) (sp: Span) -> Unit
-  (if (= hn "pub") (collect-defn-scheme-elems env rest sp)
-    (if (= hn "defn") (register-defn-scheme env elems sp)
-      (if (= hn "extern") (register-defn-scheme env elems sp)
-        ()))))
+  (match hn
+    "pub"    (collect-defn-scheme-elems env rest sp)
+    "defn"   (register-defn-scheme env elems sp)
+    "extern" (register-defn-scheme env elems sp)
+    _        ()))
 
 (defn collect-defn-scheme-head (env: TypeEnv) (head: Ast) (rest: (List Ast)) (elems: (List Ast)) (sp: Span) -> Unit
   (match (sym-str head)
@@ -1299,10 +1303,11 @@
   (match xs [] (fresh-var-anon env) (Cons x rest) (if (= i 0) x (nth-or-fresh rest (- i 1) env))))
 
 (defn bind-ctor-scrut-specific (env: TypeEnv) (type-name: Str) (arg-vars: (List Type)) (scrut: Type) (sp: Span) -> Unit
-  (if (= type-name "Maybe") (do (unify env scrut (t-maybe (nth-or-fresh arg-vars 0 env)) sp) ())
-    (if (= type-name "List") (do (unify env scrut (t-list (nth-or-fresh arg-vars 0 env)) sp) ())
-      (if (= type-name "Result") (do (unify env scrut (t-result (nth-or-fresh arg-vars 0 env) (nth-or-fresh arg-vars 1 env)) sp) ())
-        (do (unify env scrut (t-nominal type-name arg-vars (nominal-kind-of env type-name)) sp) ())))))
+  (match type-name
+    "Maybe"  (do (unify env scrut (t-maybe (nth-or-fresh arg-vars 0 env)) sp) ())
+    "List"   (do (unify env scrut (t-list (nth-or-fresh arg-vars 0 env)) sp) ())
+    "Result" (do (unify env scrut (t-result (nth-or-fresh arg-vars 0 env) (nth-or-fresh arg-vars 1 env)) sp) ())
+    _        (do (unify env scrut (t-nominal type-name arg-vars (nominal-kind-of env type-name)) sp) ())))
 
 (defn zip-param-map (params: (List Str)) (vars: (List Type)) -> (Map Str Type)
   (match params
@@ -1509,19 +1514,20 @@
 ; -- paren dispatch --
 
 (defn infer-paren-named (env: TypeEnv) (hn: Str) (elems: (List Ast)) (rest: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
-  (if (= hn "if") (infer-if env elems sp local)
-    (if (= hn "let") (infer-let env elems sp local)
-      (if (= hn "do") (infer-do env rest local)
-        (if (= hn "loop") (infer-loop env elems sp local)
-          (if (= hn "recur") (infer-recur env elems sp local)
-            (if (= hn "panic") (infer-panic env rest local)
-              (if (= hn "return") (infer-return env rest local)
-                (if (= hn "match") (infer-match env elems sp local)
-                  (if (= hn "fn") (infer-lambda env elems sp local)
-                    (if (= hn "lambda") (infer-lambda env elems sp local)
-                      (if (= hn "quote") (infer-quote-form rest)
-                        (if (= hn "set!") (infer-set-bang env elems sp local)
-                          (infer-app env elems sp local))))))))))))))
+  (match hn
+    "if"     (infer-if env elems sp local)
+    "let"    (infer-let env elems sp local)
+    "do"     (infer-do env rest local)
+    "loop"   (infer-loop env elems sp local)
+    "recur"  (infer-recur env elems sp local)
+    "panic"  (infer-panic env rest local)
+    "return" (infer-return env rest local)
+    "match"  (infer-match env elems sp local)
+    "fn"     (infer-lambda env elems sp local)
+    "lambda" (infer-lambda env elems sp local)
+    "quote"  (infer-quote-form rest)
+    "set!"   (infer-set-bang env elems sp local)
+    _        (infer-app env elems sp local)))
 
 (defn infer-paren-head (env: TypeEnv) (head: Ast) (rest: (List Ast)) (elems: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
   (match (sym-str head)
@@ -1557,15 +1563,16 @@
     _ (do (infer env ast (deref top-local)) ())))
 
 (defn typecheck-top-named (env: TypeEnv) (hn: Str) (rest: (List Ast)) (elems: (List Ast)) (sp: Span) (ast: Ast) (top-local: (Ref (Map Str Type))) -> Unit
-  (if (= hn "pub") (typecheck-top env (ParenNode rest sp) top-local)
-    (if (= hn "alias") ()
-      (if (= hn "defrec") ()
-        (if (= hn "variant") ()
-          (if (= hn "extern") ()
-            (if (= hn "import") ()
-              (if (= hn "defn") (typecheck-defn env elems sp)
-                (if (= hn "let") (typecheck-top-let env elems sp ast top-local)
-                  (do (infer env ast (deref top-local)) ()))))))))))
+  (match hn
+    "pub"     (typecheck-top env (ParenNode rest sp) top-local)
+    "alias"   ()
+    "defrec"  ()
+    "variant" ()
+    "extern"  ()
+    "import"  ()
+    "defn"    (typecheck-defn env elems sp)
+    "let"     (typecheck-top-let env elems sp ast top-local)
+    _         (do (infer env ast (deref top-local)) ())))
 
 (defn typecheck-top-dispatch (env: TypeEnv) (head: Ast) (rest: (List Ast)) (elems: (List Ast)) (sp: Span) (ast: Ast) (top-local: (Ref (Map Str Type))) -> Unit
   (match (sym-str head)
