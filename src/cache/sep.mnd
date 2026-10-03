@@ -556,8 +556,9 @@
     (let d (- (now-ms) started))
     (if (< d 0) 0 d)))
 
+; Same rule as `mn.mnd`'s `note-compiling`: a tty, and not `--quiet`.
 (defn note-progress (verb: Str) (abs: Str) (ctx: Ctx) (ms: Int) -> Unit
-  (if (ctx-quiet ctx) ()
+  (if (or (ctx-quiet ctx) (not (isatty 2))) ()
     (do
       (write stderr (progress-line verb (display-path abs) ms))
       ())))

@@ -165,10 +165,15 @@
 (defn has-quiet -> Bool
   (has-flag-from "--quiet" 0 (arg-count)))
 
+; Progress is for a person watching a terminal. A captured stderr — tests,
+; pipes, CI logs — stays empty unless something actually failed. `--quiet`
+; suppresses it even on a tty.
 (defn note-compiling (path: Str) (ms: Int) -> Unit
   (if (has-quiet) ()
-    (do
-      (write stderr (progress-line "Compiling" (display-path (canonical-path path)) ms))
+    (if (isatty 2)
+      (do
+        (write stderr (progress-line "Compiling" (display-path (canonical-path path)) ms))
+        ())
       ())))
 
 (defn explicit-out -> Bool
@@ -700,6 +705,11 @@
 ; reuse a fresh interface instead of parsing it again. `emit` stays a
 ; single flat bitcode file so the fixed-point gate can compare bytes.
 (defn run-cached (file: Str) (bin: Str) (do-link: Bool) (and-run: Bool) -> Unit
+  (if (exists file)
+    (run-cached-existing file bin do-link and-run)
+    (fail-cannot-read file)))
+
+(defn run-cached-existing (file: Str) (bin: Str) (do-link: Bool) (and-run: Bool) -> Unit
   (do
     (let cc (chosen-cc (flag-value "--cc")))
     (let runtime (chosen-runtime (flag-value "--runtime")))

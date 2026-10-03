@@ -92,7 +92,7 @@ describe("src/mn.mnd check", () => {
   test("exits 1 with a diagnostic on a parse error", () => {
     const out = runMenard("src/mn.mnd", ["check", abs("tests/negative/bad-parse.mnd")]);
     expect(out.exitCode).toBe(1);
-    expect(out.stderr).toContain("error:");
+    expect(out.stderr).toContain("error[");
   });
 
   test("exits 1 with a diagnostic on a casing error", () => {

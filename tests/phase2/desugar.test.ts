@@ -118,7 +118,7 @@ describe("src/mn.mnd check — desugar wired after casing", () => {
   test("still fails a parse error before desugar ever runs", () => {
     const out = runMenard("src/mn.mnd", ["check", abs("tests/negative/bad-parse.mnd")]);
     expect(out.exitCode).toBe(1);
-    expect(out.stderr).toContain("error:");
+    expect(out.stderr).toContain("error[");
   });
 
   test("still fails a casing error before desugar ever runs", () => {

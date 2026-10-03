@@ -303,6 +303,13 @@ function virtualOs(fs: VirtualFs): Pick<
   };
 }
 
+/** A replaced stdout/stderr sink is not a terminal, even if the process's own fd is. */
+function sinkIsTTY(sink: ByteSink): boolean {
+  if (sink === process.stdout) return !!process.stdout.isTTY;
+  if (sink === process.stderr) return !!process.stderr.isTTY;
+  return false;
+}
+
 function realOs(): Pick<
   Host,
   "isatty" | "mtime" | "cwd" | "ensureDir" | "realpath" | "nowMs" | "remove" | "isDir"
@@ -644,5 +651,10 @@ export function createRealHost(
     },
     ...spawnOps(spawnEnabled),
     ...realOs(),
+    isatty(fd) {
+      if (fd === 1) return sinkIsTTY(out);
+      if (fd === 2) return sinkIsTTY(err);
+      return false;
+    },
   };
 }
