@@ -53,7 +53,7 @@ ci: typecheck test
 # (`make` or `make bootstrap`). The GitHub Actions bootstrap job runs this
 # after the fixed point, so it does not rebuild ./mn.
 native-test:
-	./mn test
+	./mn test --verbose
 
 # Standalone smoke `main` linked with the runtime (see runtime/README.md).
 runtime-smoke:
