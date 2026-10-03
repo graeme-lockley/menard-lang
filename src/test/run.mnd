@@ -3,6 +3,8 @@
 ; under `~/.menard`, never in the working tree.
 ;
 ; One line per file, then `N passed (…ms)` or `M failed, N passed (…ms)`.
+; The suite is one binary and one process. A `file <path>` line on its
+; stdout starts that file's pass/fail lines.
 ; Green and red only when stdout is a terminal and `NO_COLOR` is unset.
 
 (import "../diag/report.mnd")
@@ -122,46 +124,66 @@
     (write stdout (nl))
     ()))
 
-(defn run-file (path: Str) (clean: Bool) (verbose: Bool) (quiet: Bool) (cc: Str) (runtime: Str) (on: Bool) -> Counts
-  (do
-    (let abs (canonical-path path))
-    (let bin (cache-bin (str-concat abs "#test")))
-    (match (build-program path clean true cc runtime bin true quiet)
-      (Err msg)
-        (do
-          (if (> (str-byte-length msg) 0) (report-plain msg) ())
-          (file-line path false on)
-          (Counts 0 1))
-      (Ok _)
-        (match (spawn-capture [bin] "")
-          (Err _)
-            (do
-              (file-line path false on)
-              (Counts 0 1))
-          (Ok (SpawnOutput st text err))
-            (do
-              (let lines (split-lines text))
-              (if verbose (print-verbose lines on) ())
-              (let counted (count-lines lines))
-              (match counted
-                (Counts p f)
-                  (do
-                    (let bad (or (> f 0) (not (= (status->exit-code st) 0))))
-                    (file-line path (not bad) on)
-                    (if (> f 0) (explain-file path lines) ())
-                    (if (and bad (> (str-byte-length err) 0))
-                      (do (write stderr err) (write stderr (nl)) ())
-                      ())
-                    (if (and bad (= f 0)) (Counts p 1) counted))))))))
-
-(defn run-files (files: (List Str)) (clean: Bool) (verbose: Bool) (quiet: Bool) (cc: Str) (runtime: Str) (on: Bool) (acc: Counts) -> Counts
-  (match files
+(defn rev-strs (xs: (List Str)) (acc: (List Str)) -> (List Str)
+  (match xs
     [] acc
-    (Cons f rest)
-      (match (run-file f clean verbose quiet cc runtime on)
-        (Counts p fai)
-          (match acc
-            (Counts ap af) (run-files rest clean verbose quiet cc runtime on (Counts (+ ap p) (+ af fai)))))))
+    (Cons x rest) (rev-strs rest (Cons x acc))))
+
+; `file <path>` is printed by the suite bootstrap before that file's tests.
+(defn file-path (line: Str) -> (Maybe Str)
+  (if (starts-with line "file ")
+    (Some (str-slice line 5 (- (str-byte-length line) 5)))
+    (None)))
+
+(defrec RunAcc (path: Str) (lines: (List Str)) (passed: Int) (failed: Int))
+
+; `exit-bad` is the process status, applied only to the file that was
+; running when the process stopped. A panic aborts the rest of the suite.
+(defn flush-file (path: Str) (lines: (List Str)) (verbose: Bool) (on: Bool) (exit-bad: Bool) -> Counts
+  (if (= (str-byte-length path) 0)
+    (if exit-bad (Counts 0 1) (Counts 0 0))
+    (do
+      (let ordered (rev-strs lines []))
+      (if verbose (print-verbose ordered on) ())
+      (match (count-lines ordered)
+        (Counts p f)
+          (do
+            (let bad (or (> f 0) exit-bad))
+            (file-line path (not bad) on)
+            (if (> f 0) (explain-file path ordered) ())
+            (if (and bad (= f 0)) (Counts p 1) (Counts p f)))))))
+
+(defn take-lines (lines: (List Str)) (acc: RunAcc) (verbose: Bool) (on: Bool) -> RunAcc
+  (match lines
+    [] acc
+    (Cons line rest)
+      (match acc
+        (RunAcc path buf passed failed)
+          (match (file-path line)
+            (Some next)
+              (match (flush-file path buf verbose on false)
+                (Counts p f)
+                  (take-lines rest (RunAcc next [] (+ passed p) (+ failed f)) verbose on))
+            (None)
+              (take-lines rest (RunAcc path (Cons line buf) passed failed) verbose on)))))
+
+(defn finish-acc (acc: RunAcc) (verbose: Bool) (on: Bool) (exit-bad: Bool) (err: Str) -> Counts
+  (match acc
+    (RunAcc path buf passed failed)
+      (do
+        (match (flush-file path buf verbose on exit-bad)
+          (Counts p f)
+            (do
+              (if (and exit-bad (> (str-byte-length err) 0))
+                (do (write stderr err) (write stderr (nl)) ())
+                ())
+              (Counts (+ passed p) (+ failed f)))))))
+
+(defn report-suite-error (msg: Str) (started: Int) (on: Bool) -> Int
+  (do
+    (if (> (str-byte-length msg) 0) (report-plain msg) ())
+    (summary (Counts 0 1) (- (now-ms) started) on)
+    1))
 
 (pub defn run-suite (path: Str) (clean: Bool) (verbose: Bool) (quiet: Bool) (cc: Str) (runtime: Str) -> Int
   (do
@@ -175,6 +197,15 @@
         (do
           (let on (tty-color 1))
           (let started (now-ms))
-          (let totals (run-files files clean verbose quiet cc runtime on (Counts 0 0)))
-          (summary totals (- (now-ms) started) on)
-          (match totals (Counts _ f) (if (> f 0) 1 0))))))
+          (match (build-suite files path clean cc runtime quiet)
+            (Err msg) (report-suite-error msg started on)
+            (Ok bin)
+              (match (spawn-capture [bin] "")
+                (Err _) (report-suite-error (str-concat "cannot spawn " bin) started on)
+                (Ok (SpawnOutput st text err))
+                  (do
+                    (let exit-bad (not (= (status->exit-code st) 0)))
+                    (let acc (take-lines (split-lines text) (RunAcc "" [] 0 0) verbose on))
+                    (let totals (finish-acc acc verbose on exit-bad err))
+                    (summary totals (- (now-ms) started) on)
+                    (match totals (Counts _ f) (if (> f 0) 1 0)))))))))

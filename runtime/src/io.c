@@ -244,8 +244,9 @@ static MnWord make_signalled(int sig) {
   return (MnWord)obj;
 }
 
-/* `(List Str)` is Nil/Cons. No PATH search: posix_spawn, not posix_spawnp. */
-#define SPAWN_MAX 64
+/* `(List Str)` is Nil/Cons. No PATH search: posix_spawn, not posix_spawnp.
+   A suite link passes one object per module plus the runtime sources. */
+#define SPAWN_MAX 512
 
 /* SpawnError tags that are not also IoError. SpawnOutput is the record. */
 #define TAG_SPAWN_OUTPUT 32

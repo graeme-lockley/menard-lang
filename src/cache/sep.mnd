@@ -1,7 +1,8 @@
 ; Separate compilation. Each module is lowered to its own object under
 ; `~/.menard`. Cross-module calls are declarations of `mn_<hash>_<name>`.
 ; A bootstrap object is the only C `main`: it runs module inits in
-; dependency order, then the entry module's main.
+; dependency order, then the entry module's main. `build-suite` links
+; every test file into that one bootstrap.
 ;
 ; `mn emit` does not use this path. It still lowers one flat module so
 ; the fixed-point gate stays a single deterministic bitcode file.
@@ -35,21 +36,30 @@
   (order: (Ref (List Str)))
   (inits: (Ref (List Str)))
   (quiet: Bool)
-  (versions: (Ref (Map Str Str))))
+  (versions: (Ref (Map Str Str)))
+  (suite: (Ref (Map Str Bool))))
 
 (defn sym-str (ast: Ast) -> (Maybe Str)
   (match ast (SymNode n _) (Some n) _ (None)))
 
-(defn ctx-entry (c: Ctx) -> Str (match c (Ctx e _ _ _ _ _ _ _ _ _) e))
-(defn ctx-for-test (c: Ctx) -> Bool (match c (Ctx _ f _ _ _ _ _ _ _ _) f))
-(defn ctx-clean (c: Ctx) -> Bool (match c (Ctx _ _ k _ _ _ _ _ _ _) k))
-(defn ctx-triple (c: Ctx) -> Str (match c (Ctx _ _ _ t _ _ _ _ _ _) t))
-(defn ctx-done (c: Ctx) -> (Ref (Map Str Iface)) (match c (Ctx _ _ _ _ d _ _ _ _ _) d))
-(defn ctx-visiting (c: Ctx) -> (Ref (Map Str Bool)) (match c (Ctx _ _ _ _ _ v _ _ _ _) v))
-(defn ctx-order (c: Ctx) -> (Ref (List Str)) (match c (Ctx _ _ _ _ _ _ o _ _ _) o))
-(defn ctx-inits (c: Ctx) -> (Ref (List Str)) (match c (Ctx _ _ _ _ _ _ _ i _ _) i))
-(defn ctx-quiet (c: Ctx) -> Bool (match c (Ctx _ _ _ _ _ _ _ _ q _) q))
-(defn ctx-versions (c: Ctx) -> (Ref (Map Str Str)) (match c (Ctx _ _ _ _ _ _ _ _ _ v) v))
+(defn ctx-entry (c: Ctx) -> Str (match c (Ctx e _ _ _ _ _ _ _ _ _ _) e))
+(defn ctx-for-test (c: Ctx) -> Bool (match c (Ctx _ f _ _ _ _ _ _ _ _ _) f))
+(defn ctx-clean (c: Ctx) -> Bool (match c (Ctx _ _ k _ _ _ _ _ _ _ _) k))
+(defn ctx-triple (c: Ctx) -> Str (match c (Ctx _ _ _ t _ _ _ _ _ _ _) t))
+(defn ctx-done (c: Ctx) -> (Ref (Map Str Iface)) (match c (Ctx _ _ _ _ d _ _ _ _ _ _) d))
+(defn ctx-visiting (c: Ctx) -> (Ref (Map Str Bool)) (match c (Ctx _ _ _ _ _ v _ _ _ _ _) v))
+(defn ctx-order (c: Ctx) -> (Ref (List Str)) (match c (Ctx _ _ _ _ _ _ o _ _ _ _) o))
+(defn ctx-inits (c: Ctx) -> (Ref (List Str)) (match c (Ctx _ _ _ _ _ _ _ i _ _ _) i))
+(defn ctx-quiet (c: Ctx) -> Bool (match c (Ctx _ _ _ _ _ _ _ _ q _ _) q))
+(defn ctx-versions (c: Ctx) -> (Ref (Map Str Str)) (match c (Ctx _ _ _ _ _ _ _ _ _ v _) v))
+(defn ctx-suite (c: Ctx) -> (Ref (Map Str Bool)) (match c (Ctx _ _ _ _ _ _ _ _ _ _ s) s))
+
+; A suite member gets a generated test `main`. A dependency compiled in
+; the same context does not, even when `for-test` is set on the context.
+(defn suite-member (ctx: Ctx) (abs: Str) -> Bool
+  (match (map-get (deref (ctx-suite ctx)) abs)
+    (Some _) true
+    (None) false))
 
 (defrec Surface (fns: (List FnRec)) (ctors: (List CtorRec)) (stubs: (List Ast)))
 
@@ -226,6 +236,22 @@
       (match (defn-name f)
         (Some n) (add-rename rest path (map-set acc n (link-of path n)))
         (None) (add-rename rest path acc))))
+
+; Closure conversion runs after defn renaming, so each module's lifted
+; `__lamN` would otherwise link as the same `menard.__lamN`.
+(defn is-lam-name (n: Str) -> Bool
+  (and (>= (str-byte-length n) 5) (= (str-slice n 0 5) "__lam")))
+
+(defn add-lam-rename (forms: (List Ast)) (path: Str) (acc: (Map Str Str)) -> (Map Str Str)
+  (match forms
+    [] acc
+    (Cons f rest)
+      (match (defn-name f)
+        (Some n)
+          (if (is-lam-name n)
+            (add-lam-rename rest path (map-set acc n (link-of path n)))
+            (add-lam-rename rest path acc))
+        (None) (add-lam-rename rest path acc))))
 
 (defn extern-stub (form: Ast) -> (Maybe Ast)
   (match (defn-rest form)
@@ -472,7 +498,7 @@
 
 (defn finish-fresh (abs: Str) (iface: Iface) (ctx: Ctx) -> (Result Iface Str)
   (match ctx
-    (Ctx _ _ _ _ done _ order inits _ _)
+    (Ctx _ _ _ _ done _ order inits _ _ _)
       (match iface
         (Iface _ _ init _ _ _ _ _)
           (do
@@ -486,7 +512,7 @@
 (defn compile-forms (abs: Str) (src: Str) (display: Str) (forms: (List Ast)) (direct: (List DepRec)) (ctx: Ctx) -> (Result Iface Str)
   (do
     (let started (now-ms))
-    (let for-test (and (ctx-for-test ctx) (= abs (ctx-entry ctx))))
+    (let for-test (or (suite-member ctx abs) (and (ctx-for-test ctx) (= abs (ctx-entry ctx)))))
     (let exported (collect-exports forms abs [] [] []))
     (let body0 (prepare-body (strip-module-forms forms) for-test))
     (let surface (surface-of direct (deref (ctx-done ctx))))
@@ -534,7 +560,8 @@
     (let init-ref (ref []))
     (let with-init (module-init-forms abs renamed init-ref))
     (let closed (closure-convert with-init))
-    (let rooted (rooting-analyze closed))
+    (let unique (rename-module-forms closed (add-lam-rename closed abs (map-new))))
+    (let rooted (rooting-analyze unique))
     (let derived (plan-derives rooted))
     (let seeds (ctors-to-seeds ctors))
     (let info (ctor-info derived seeds))
@@ -609,6 +636,12 @@
 (defn note-linking (abs: Str) (ctx: Ctx) (ms: Int) -> Unit
   (note-progress "Linking" abs ctx ms))
 
+(defn note-link-label (label: Str) (ctx: Ctx) (ms: Int) -> Unit
+  (if (or (ctx-quiet ctx) (not (isatty 2))) ()
+    (do
+      (write stderr (progress-line "Linking" label ms))
+      ())))
+
 (defn compile-file (abs: Str) (ctx: Ctx) -> (Result Iface Str)
   (compile-file-read abs ctx))
 
@@ -651,7 +684,7 @@
 
 (defn ensure-mod (abs: Str) (ctx: Ctx) -> (Result Iface Str)
   (match ctx
-    (Ctx _ _ clean _ done visiting _ _ _ _)
+    (Ctx _ _ clean _ done visiting _ _ _ _ _)
       (match (map-get (deref done) abs)
         (Some iface) (Ok iface)
         (None)
@@ -663,6 +696,16 @@
                 (if clean (remove-cache abs) ())
                 (ensure-body abs ctx))))))
 
+(defn iface-main (iface: Iface) -> Str
+  (match iface
+    (Iface _ _ _ main-sym _ _ _ _) main-sym))
+
+; A suite member's object has to export `main`. An interface left by a
+; non-test compile of the same file does not, so it is not reusable.
+(defn reusable (ctx: Ctx) (abs: Str) (iface: Iface) -> Bool
+  (and (iface-fresh abs iface)
+    (or (not (suite-member ctx abs)) (> (str-byte-length (iface-main iface)) 0))))
+
 (defn ensure-body (abs: Str) (ctx: Ctx) -> (Result Iface Str)
   (match (read-iface abs)
     (Some iface)
@@ -670,7 +713,7 @@
         (Iface _ deps _ _ _ _ _ _)
           (match (ensure-list (dep-paths deps) ctx)
             (Ok _)
-              (if (iface-fresh abs iface)
+              (if (reusable ctx abs iface)
                 (finish-fresh abs iface ctx)
                 (compile-file abs ctx))
             (Err e) (Err e)))
@@ -690,7 +733,7 @@
       (if (= (str-byte-length main-sym) 0)
         (Err "program has no top-level `defn main`")
         (match ctx
-          (Ctx _ _ _ triple _ _ order inits _ _)
+          (Ctx _ _ _ triple _ _ order inits _ _ _)
             (do
               (let unit (= main-ret "Unit"))
               (let syms (snoc-str (deref inits) main-sym))
@@ -719,13 +762,139 @@
   (do
     (let abs (canonical-path entry))
     (let triple (triple-from-clang cc))
-    (let ctx (Ctx abs for-test clean triple (ref (map-new)) (ref (map-new)) (ref []) (ref []) quiet (ref (map-new))))
+    (let ctx (Ctx abs for-test clean triple (ref (map-new)) (ref (map-new)) (ref []) (ref []) quiet (ref (map-new)) (ref (map-new))))
     (match (ensure-mod abs ctx)
       (Ok iface)
         (if do-link
           (link-closure abs iface ctx cc runtime bin)
           (Ok ""))
       (Err e) (Err e))))
+
+(defrec SuiteSym (display: Str) (sym: Str))
+
+(defn canon-files (displays: (List Str)) -> (List Str)
+  (match displays
+    [] []
+    (Cons d rest) (Cons (canonical-path d) (canon-files rest))))
+
+(defn fill-suite (paths: (List Str)) (acc: (Map Str Bool)) -> (Map Str Bool)
+  (match paths
+    [] acc
+    (Cons p rest) (fill-suite rest (map-set acc p true))))
+
+(defn join-key (paths: (List Str)) (sb: StringBuffer) (first: Bool) -> Unit
+  (match paths
+    [] ()
+    (Cons p rest)
+      (do
+        (if first () (sb-append-byte! sb 10))
+        (sb-append! sb p)
+        (join-key rest sb false))))
+
+; Canonical paths in discovery order. A newline cannot appear in a path,
+; so two different lists never share a key.
+(defn suite-key (paths: (List Str)) -> Str
+  (do
+    (let sb (sb-new))
+    (join-key paths sb true)
+    (sb-to-str sb)))
+
+(defn marker-call (display: Str) -> Ast
+  (ParenNode [(sym "println") (str-node "file ") (str-node display)] (blank)))
+
+(defn case-calls (cases: (List SuiteSym)) -> (List Ast)
+  (match cases
+    [] []
+    (Cons (SuiteSym display name) rest)
+      (Cons (marker-call display)
+        (Cons (ParenNode [(sym name)] (blank))
+          (case-calls rest)))))
+
+(defn case-syms (cases: (List SuiteSym)) -> (List Str)
+  (match cases
+    [] []
+    (Cons (SuiteSym _ name) rest) (Cons name (case-syms rest))))
+
+; Inits once, then a `file <path>` marker and that file's `mn_<hash>_main`.
+; The marker is two string literals: a computed concat would print as a pointer.
+(defn suite-bootstrap (inits: (List Str)) (cases: (List SuiteSym)) -> (List Ast)
+  (do
+    (let calls (append-asts (calls-of inits) (case-calls cases)))
+    (let body (append-asts calls [(int-node 0)]))
+    [(ParenNode
+       (append-asts [(sym "defn") (sym "main") (sym "->") (sym "Int")] body)
+       (blank))]))
+
+(defn collect-cases (displays: (List Str)) (paths: (List Str)) (done: (Map Str Iface)) -> (Result (List SuiteSym) Str)
+  (match displays
+    []
+      (match paths
+        [] (Ok [])
+        (Cons _ _) (Err "suite paths diverged"))
+    (Cons d ds)
+      (match paths
+        [] (Err "suite paths diverged")
+        (Cons a as)
+          (match (map-get done a)
+            (None) (Err (str-concat "missing module: " d))
+            (Some iface)
+              (do
+                (let main-sym (iface-main iface))
+                (if (> (str-byte-length main-sym) 0)
+                  (match (collect-cases ds as done)
+                    (Ok rest) (Ok (Cons (SuiteSym d main-sym) rest))
+                    (Err e) (Err e))
+                  (Err (str-concat "no main in " d))))))))
+
+(defn link-failed (msg: Str) -> (Result Str Str)
+  (if (has-nl msg)
+    (do (write stderr msg) (Err "link failed"))
+    (Err msg)))
+
+(defn link-suite (key: Str) (cases: (List SuiteSym)) (ctx: Ctx) (cc: Str) (runtime: Str) (bin: Str) (label: Str) -> (Result Str Str)
+  (match ctx
+    (Ctx _ _ _ triple _ _ order inits _ _ _)
+      (do
+        (let inits0 (deref inits))
+        (let syms (append-strs inits0 (case-syms cases)))
+        (let forms (suite-bootstrap inits0 cases))
+        (match (lower-program-sep forms triple ["<bootstrap>"] (imps-of-syms syms) [])
+          (Err msg) (Err msg)
+          (Ok bytes)
+            (do
+              (let bp (boot-path key))
+              (write-if-changed bp bytes)
+              (let objs (snoc-str (deref order) bp))
+              (if (any-newer objs bin)
+                (do
+                  (let started (now-ms))
+                  (match (link-objs cc runtime objs bin)
+                    (Ok out) (do (note-link-label label ctx (since started)) (Ok out))
+                    (Err msg)
+                      (do
+                        (note-link-label label ctx (since started))
+                        (link-failed msg))))
+                (Ok bin)))))))
+
+; One context, one bootstrap, one binary. The binary path is the hash of
+; the canonical file list, so a second run with the same files links nothing
+; when every object and the bootstrap are older than that binary.
+(pub defn build-suite (displays: (List Str)) (label: Str) (clean: Bool) (cc: Str) (runtime: Str) (quiet: Bool) -> (Result Str Str)
+  (do
+    (let paths (canon-files displays))
+    (let key (suite-key paths))
+    (let bin (cache-bin key))
+    (let triple (triple-from-clang cc))
+    (let ctx
+      (Ctx "" true clean triple
+        (ref (map-new)) (ref (map-new)) (ref []) (ref [])
+        quiet (ref (map-new)) (ref (fill-suite paths (map-new)))))
+    (match (ensure-list paths ctx)
+      (Err e) (Err e)
+      (Ok _)
+        (match (collect-cases displays paths (deref (ctx-done ctx)))
+          (Err e) (Err e)
+          (Ok cases) (link-suite key cases ctx cc runtime bin label)))))
 
 (defn triple-marker -> Str "target triple = \"")
 
