@@ -144,13 +144,29 @@
       (match (sym-str h) (Some n) (if (= n "defn") (Some rest) (None)) (None) (None))
     _ (None)))
 
+; `(defn f …)` or `(defn (f [a]) …)`.
+(defn bare-name (name: Ast) -> (Maybe Str)
+  (match name
+    (SymNode n _) (Some n)
+    (ParenNode (Cons h _) _) (sym-str h)
+    _ (None)))
+
 (defn defn-name (form: Ast) -> (Maybe Str)
   (match (defn-rest form)
     (None) (None)
     (Some rest)
       (match rest
-        (Cons name _) (sym-str name)
+        (Cons name _) (bare-name name)
         [] (None))))
+
+; A stub is typechecked without the source's private `(variant Name)`
+; forward declaration. A variant that mentions itself needs that empty
+; declaration first, or the payload types are unknown.
+(defn variant-forward (form: Ast) -> Ast
+  (match (unwrap-pub form)
+    (ParenNode (Cons _ (Cons name-part _)) sp)
+      (ParenNode [(sym "variant") name-part] sp)
+    _ form))
 
 (defn is-test-form (form: Ast) -> Bool
   (is-head form "test"))
@@ -326,9 +342,12 @@
                     (push-fn fns n (link-of path n) (fn-arity r))
                     names
                     (Cons stub stubs)))))
-      (if (or (= k "variant") (= k "defrec") (= k "alias") (= k "extern"))
-        (collect-exports rest path fns (ctor-names-of form names) (Cons (unwrap-pub form) stubs))
-        (collect-exports rest path fns names stubs)))))
+      (if (= k "variant")
+        (collect-exports rest path fns (ctor-names-of form names)
+          (Cons (unwrap-pub form) (Cons (variant-forward form) stubs)))
+        (if (or (= k "defrec") (= k "alias") (= k "extern"))
+          (collect-exports rest path fns (ctor-names-of form names) (Cons (unwrap-pub form) stubs))
+          (collect-exports rest path fns names stubs))))))
 
 (defn empty-surface -> Surface (Surface [] [] []))
 
@@ -349,7 +368,9 @@
     (Iface _ _ _ _ _ fns ctors stubs)
       (match acc
         (Surface af ac as)
-          (Surface (surface-add-fns fns af) (append-ctors ctors ac) (append-asts stubs as)))))
+          ; Stubs are typechecked in this order, so a dependency's variant
+          ; has to precede the alias that names it.
+          (Surface (surface-add-fns fns af) (append-ctors ctors ac) (append-asts as stubs)))))
 
 (defn append-ctors (xs: (List CtorRec)) (ys: (List CtorRec)) -> (List CtorRec)
   (match xs [] ys (Cons x rest) (Cons x (append-ctors rest ys))))
@@ -363,7 +384,7 @@
         (match (map-get done path)
           (None) acc
           (Some iface)
-            (walk-deps iface done seen (surface-add iface acc))))))
+            (surface-add iface (walk-deps iface done seen acc))))))
 
 (defn walk-deps (iface: Iface) (done: (Map Str Iface)) (seen: (Ref (Map Str Bool))) (acc: Surface) -> Surface
   (match iface
