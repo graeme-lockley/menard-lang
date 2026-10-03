@@ -1,13 +1,13 @@
 ; Exercises the functions every file has without an import.
 
-(test "id returns its argument" (= (id 41) 41))
+test "id returns its argument" = id(41) == 41
 
-(test "not negates a bool" (= (not true) false))
+test "not negates a bool" = not(true) == false
 
-(test "min picks the smaller int" (= (min 2 5) 2))
+test "min picks the smaller int" = min(2, 5) == 2
 
-(test "max picks the larger int" (= (max 2 5) 5))
+test "max picks the larger int" = max(2, 5) == 5
 
-(test "abs of a negative int is positive" (= (abs -3) 3))
+test "abs of a negative int is positive" = abs(-3) == 3
 
-(test "clamp limits n to the range" (= (clamp 0 10 15) 10))
+test "clamp limits n to the range" = clamp(0, 10, 15) == 10

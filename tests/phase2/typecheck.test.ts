@@ -81,7 +81,7 @@ describe("src/mn.mnd check — typer wired after desugar", () => {
       abs("tests/negative/bad-desugar-when.mnd"),
     ]);
     expect(out.exitCode).toBe(1);
-    expect(out.stderr).toContain("[E_DESUGAR_WHEN]");
+    expect(out.stderr).toContain("[E_PARSE]");
     expect(out.stderr).not.toContain("E_TYPE_");
   });
 });

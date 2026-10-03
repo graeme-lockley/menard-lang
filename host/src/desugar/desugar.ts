@@ -279,20 +279,11 @@ function desugarOr(ast: Ast & { tag: "list" }, diags: Diagnostic[]): Ast {
   }
   if (args.length === 1) return desugarNode(args[0]!, diags);
   const [x, ...rest] = args;
-  const restForm = list("paren", [sym("or", ast.span), ...rest], ast.span);
-  return desugarNode(
-    list(
-      "paren",
-      [
-        sym("if", ast.span),
-        x!,
-        x!,
-        restForm,
-      ],
-      ast.span,
-    ),
-    diags,
-  );
+  // Desugar the test once. A left-nested `||` chain would otherwise walk the
+  // left operand twice at every level.
+  const dx = desugarNode(x!, diags);
+  const drest = desugarNode(list("paren", [sym("or", ast.span), ...rest], ast.span), diags);
+  return list("paren", [sym("if", ast.span), dx, dx, drest], ast.span);
 }
 
 function desugarCond(ast: Ast & { tag: "list" }, diags: Diagnostic[]): Ast {

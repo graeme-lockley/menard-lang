@@ -9,8 +9,8 @@ function hostWith(files: Record<string, string>) {
 describe("modules", () => {
   test("import brings in pub defn", () => {
     const host = hostWith({
-      "/math.mnd": `(pub defn add (x: Int) (y: Int) -> Int (+ x y))\n(defn hidden (x: Int) -> Int x)\n`,
-      "/main.mnd": `(import "./math.mnd")\n(add 2 3)\n`,
+      "/math.mnd": `pub let add(x: Int, y: Int) -> Int =\n  x + y\nlet hidden(x: Int) -> Int =\n  x\n`,
+      "/main.mnd": `import "./math.mnd"\nadd(2, 3)\n`,
     });
     const src = host.readFile("/main.mnd");
     expect(src.ok).toBe(true);
@@ -22,8 +22,8 @@ describe("modules", () => {
 
   test("private defn is not visible to importer", () => {
     const host = hostWith({
-      "/math.mnd": `(defn hidden (x: Int) -> Int x)\n`,
-      "/main.mnd": `(import "./math.mnd")\n(hidden 1)\n`,
+      "/math.mnd": `let hidden(x: Int) -> Int =\n  x\n`,
+      "/main.mnd": `import "./math.mnd"\nhidden(1)\n`,
     });
     const src = host.readFile("/main.mnd");
     if (!src.ok) return;
@@ -33,8 +33,8 @@ describe("modules", () => {
 
   test("import cycle is diagnosed", () => {
     const host = hostWith({
-      "/a.mnd": `(import "./b.mnd")\n`,
-      "/b.mnd": `(import "./a.mnd")\n`,
+      "/a.mnd": `import "./b.mnd"\n`,
+      "/b.mnd": `import "./a.mnd"\n`,
     });
     const src = host.readFile("/a.mnd");
     if (!src.ok) return;
@@ -47,7 +47,7 @@ describe("modules", () => {
 
   test("missing import is diagnosed", () => {
     const host = hostWith({
-      "/main.mnd": `(import "./nope.mnd")\n`,
+      "/main.mnd": `import "./nope.mnd"\n`,
     });
     const src = host.readFile("/main.mnd");
     if (!src.ok) return;
@@ -57,7 +57,7 @@ describe("modules", () => {
 
   test("extern outside seam modules is an error", () => {
     const host = hostWith({
-      "/user.mnd": `(extern mn_foo (x: Int) -> Int)\n`,
+      "/user.mnd": `extern mn_foo(x: Int) -> Int\n`,
     });
     const src = host.readFile("/user.mnd");
     if (!src.ok) return;
@@ -67,8 +67,8 @@ describe("modules", () => {
 
   test("extern is allowed in seam module path", () => {
     const host = hostWith({
-      "/stdlib/io.mnd": `(pub variant IoError (NotFound))\n(pub extern write (fd: Int) (s: Str) -> (Result Unit IoError))\n`,
-      "/main.mnd": `(import "./stdlib/io.mnd")\n(write 1 "ok")\n`,
+      "/stdlib/io.mnd": `pub type IoError =\n  | NotFound\n\nextern mn_write(fd: Int, s: Str) -> Result Unit IoError\n\npub let write(fd: Int, s: Str) -> Result Unit IoError =\n  mn_write(fd, s)\n`,
+      "/main.mnd": `import "./stdlib/io.mnd"\nwrite(1, "ok")\n`,
     });
     const src = host.readFile("/main.mnd");
     if (!src.ok) return;
@@ -82,8 +82,11 @@ describe("modules", () => {
 
   test("pub signature must not mention a private nominal type", () => {
     const host = hostWith({
-      "/t.mnd": `(variant Hidden (H Int))
-(pub defn make (n: Int) -> Hidden (H n))
+      "/t.mnd": `type Hidden =
+  | H(Int)
+
+pub let make(n: Int) -> Hidden =
+  H(n)
 `,
     });
     const src = host.readFile("/t.mnd");
@@ -94,7 +97,7 @@ describe("modules", () => {
 
   test("std/basics is in scope without an import", () => {
     const host = hostWith({
-      "/main.mnd": "(not true)\n",
+      "/main.mnd": "not(true)\n",
     });
     const src = host.readFile("/main.mnd");
     if (!src.ok) return;
@@ -105,8 +108,8 @@ describe("modules", () => {
 
   test("only the entry module's main runs", () => {
     const host = hostWith({
-      "/fred.mnd": `(println "Hello from Fred!")\n(defn main -> Int\n  (println "Main: Fred")\n  0)\n`,
-      "/hello.mnd": `(import "./fred.mnd")\n(println "Hello, world!")\n(defn main -> Int\n  (println "Main: Hello")\n  0)\n`,
+      "/fred.mnd": `println("Hello from Fred!")\nlet main() -> Int = {\n  println("Main: Fred")\n  0\n}\n`,
+      "/hello.mnd": `import "./fred.mnd"\nprintln("Hello, world!")\nlet main() -> Int = {\n  println("Main: Hello")\n  0\n}\n`,
     });
     const hello = host.readFile("/hello.mnd");
     if (!hello.ok) return;
@@ -116,7 +119,7 @@ describe("modules", () => {
     expect(out).toBe("Hello from Fred!\nHello, world!\nMain: Hello\n");
 
     const fredHost = hostWith({
-      "/fred.mnd": `(println "Hello from Fred!")\n(defn main -> Int\n  (println "Main: Fred")\n  0)\n`,
+      "/fred.mnd": `println("Hello from Fred!")\nlet main() -> Int = {\n  println("Main: Fred")\n  0\n}\n`,
     });
     const fred = fredHost.readFile("/fred.mnd");
     if (!fred.ok) return;

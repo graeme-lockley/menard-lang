@@ -6,41 +6,46 @@
 ; Usage: bun run host/src/cli/menard.ts run src/tools/pool-dump.mnd -- <file.mnd>
 ; The same summary is src/pool/pool.test.mnd.
 
-(import "../reader/ast.mnd")
-(import "../reader/read.mnd")
-(import "../pool/pool.mnd")
-(import std/io)
-(import std/sys)
+import "../reader/ast.mnd"
 
-(let nl
-  (do
-    (let sb (sb-new))
-    (sb-append-byte! sb 10)
-    (sb-take-str! sb)))
+import "../reader/read.mnd"
 
-(defn fail (msg: Str) -> Unit
-  (do
-    (write stderr msg)
-    (write stderr nl)
-    (exit 1)))
+import "../pool/pool.mnd"
 
-(defn fail-parse (path: Str) (e: ParseError) -> Unit
-  (match e
-    (ParseError _ msg) (fail (str-concat path ": parse error: " msg))))
+import std/io
 
-(defn print-summary (forms: (List Ast)) -> Unit
-  (do
-    (println (pool-summary forms))
-    (exit 0)))
+import std/sys
 
-(defn check-source (path: Str) (src: Str) -> Unit
-  (match (read-all src)
-    (Ok forms) (print-summary forms)
-    (Err e) (fail-parse path e)))
+let nl =
+  {
+    let sb = sb-new()
+    sb-append-byte!(sb, 10)
+    sb-take-str!(sb)
+  }
 
-(defn main -> Unit
-  (if (< (arg-count) 1)
-    (fail "usage: pool-dump.mnd <file.mnd>")
-    (match (read-file (arg 0))
-      (Ok src) (check-source (arg 0) src)
-      (Err _) (fail (str-concat "cannot read " (arg 0))))))
+let fail(msg: Str) -> Unit {
+  write(stderr, msg)
+  write(stderr, nl)
+  exit(1)
+}
+
+let fail-parse(path: Str, e: ParseError) -> Unit =
+  match (e)
+    | ParseError(_, msg) -> fail(str-concat(path, ": parse error: ", msg))
+
+let print-summary(forms: List Ast) -> Unit {
+  println(pool-summary(forms))
+  exit(0)
+}
+
+let check-source(path: Str, src: Str) -> Unit =
+  match (read-all(src))
+    | Ok(forms) -> print-summary(forms)
+    | Err(e) -> fail-parse(path, e)
+
+let main() -> Unit =
+  if arg-count() < 1 -> fail("usage: pool-dump.mnd <file.mnd>")
+   | else ->
+    match (read-file(arg(0)))
+      | Ok(src) -> check-source(arg(0), src)
+      | Err(_) -> fail(str-concat("cannot read ", arg(0)))

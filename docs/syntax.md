@@ -170,7 +170,7 @@ An alias takes no type parameters. `alias IntTree = Tree Int` is the way to
 name an applied type. A record has one constructor, the type's name, and
 fields in declaration order. A `type` alternative is a constructor: a bare
 name when it has no payload, or `Name(type, …)` when it does. The empty
-forward declaration `(variant Ast)` is not part of this syntax. The typer
+forward declaration with no constructors is not part of this syntax. The typer
 registers every type name before checking payloads, so a type may mention
 itself.
 
@@ -307,10 +307,10 @@ list        = "[" expr,* "]"
 `ref`, `deref`, and `set!` are written as calls: `ref(n)`, `deref(i)`,
 `set!(i, deref(i) - 1)`. `set!` 's first argument is a name.
 
-A call's `...` splices a list argument and may appear on any argument, as
-today. `sum()`, `sum(1, 2, 3)`, `sum(...xs)`, and `sum(1, ...xs, 1)` have
-the same packing rules as `(sum)`, `(sum 1 2 3)`, `(sum ... xs)`, and
-`(sum ... xs 1)`.
+A call's `...` splices a list argument and may appear on any argument.
+`sum()` packs an empty list, `sum(1, 2, 3)` packs those elements,
+`sum(...xs)` splices `xs`, and `sum(1, ...xs, 1)` puts `1` on either side
+of that splice.
 
 `recur(e, …)` appears only in tail position of its `loop` body. `return`
 exits the enclosing function. `while` yields `Unit`. `loop` yields the value
@@ -498,12 +498,13 @@ always binary; prefix `-` on a non-literal is the one-argument negation.
 | `cond` | `if` |
 | `when` | `if` with no `else`, body of type `Unit` |
 | `and`, `or` | `&&`, `\|\|` |
-| prefix calls `(f a b)` | `f(a, b)` |
-| `(= a b)` | `a == b` |
+| a call written as a head followed by its arguments | `f(a, b)` |
+| equality written as a call | `a == b` |
 
-S-expression source is not accepted. There is no reader mode that parses both
-syntaxes. The interpreter and the Menard reader accept and reject the same
-programs, and they report the same diagnostic code at the same primary span.
+The forms in the table above are not accepted as source. There is no reader
+mode that parses an older spelling beside this one. The interpreter and the
+Menard reader accept and reject the same programs, and they report the same
+diagnostic code at the same primary span.
 
 ---
 

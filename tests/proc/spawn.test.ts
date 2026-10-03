@@ -9,7 +9,7 @@ const scratch = mkdtempSync(join(tmpdir(), "menard-spawn-"));
 
 function runProc(src: string, host: Host) {
   const path = join(scratch, "main.mnd");
-  const text = `(import std/proc)\n${src}`;
+  const text = `import std/proc\n${src}`;
   writeFileSync(path, text);
   return run(text, { path, host });
 }
@@ -18,9 +18,9 @@ const stub = join(import.meta.dir, "../../stub-child/main.ts");
 const bun = process.execPath;
 
 function listStr(...xs: string[]): string {
-  let acc = "(Nil)";
+  let acc = "Nil()";
   for (let i = xs.length - 1; i >= 0; i--) {
-    acc = `(Cons "${xs[i]!.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}" ${acc})`;
+    acc = `Cons("${xs[i]!.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}", ${acc})`;
   }
   return acc;
 }
@@ -28,7 +28,7 @@ function listStr(...xs: string[]): string {
 describe("spawn (real child)", () => {
   test("empty argv is InvalidArgument", () => {
     const real = createRealHost({ spawnEnabled: true });
-    const r = runProc(`(spawn (Nil))`, real);
+    const r = runProc(`spawn(Nil())`, real);
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "variant") {
       expect(r.value.ctor).toBe("Err");
@@ -40,11 +40,12 @@ describe("spawn (real child)", () => {
   test("NUL in an argument is InvalidArgument", () => {
     const real = createRealHost({ spawnEnabled: true });
     const r = runProc(
-      `(let sb (sb-new)
-         (do
-           (sb-append! sb "a")
-           (sb-append-byte! sb 0)
-           (spawn (Cons (sb-to-str sb) (Nil)))))`,
+      `{
+  let sb = sb-new()
+  sb-append!(sb, "a")
+  sb-append-byte!(sb, 0)
+  spawn(Cons(sb-to-str(sb), Nil()))
+}`,
       real,
     );
     expect(r.ok).toBe(true);
@@ -57,7 +58,7 @@ describe("spawn (real child)", () => {
 
   test("missing argv[0] is NotFound", () => {
     const real = createRealHost({ spawnEnabled: true });
-    const r = runProc(`(spawn ${listStr("./no-such-menard-child-xyz")})`, real);
+    const r = runProc(`spawn(${listStr("./no-such-menard-child-xyz")})`, real);
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "variant") {
       expect(r.value.ctor).toBe("Err");
@@ -68,7 +69,7 @@ describe("spawn (real child)", () => {
 
   test("spawn stub-child exit status", () => {
     const real = createRealHost({ spawnEnabled: true });
-    const r = runProc(`(spawn ${listStr(bun, stub, "exit", "42")})`, real);
+    const r = runProc(`spawn(${listStr(bun, stub, "exit", "42")})`, real);
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "variant") {
       expect(r.value.ctor).toBe("Ok");
@@ -83,7 +84,7 @@ describe("spawn (real child)", () => {
 
   test("spawn-capture feeds stdin and captures stdout", () => {
     const real = createRealHost({ spawnEnabled: true });
-    const r = runProc(`(spawn-capture ${listStr(bun, stub, "cat-stdin")} "hi")`, real);
+    const r = runProc(`spawn-capture(${listStr(bun, stub, "cat-stdin")}, "hi")`, real);
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "variant" && r.value.ctor === "Ok") {
       const out = r.value.payloads[0];

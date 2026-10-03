@@ -6,7 +6,7 @@ describe("std/basics", () => {
   test("not is in scope without an import", () => {
     const host = createHost({
       fs: createVirtualFs({
-        "/main.mnd": "(not true)\n",
+        "/main.mnd": "not(true)\n",
       }),
     });
     const src = host.readFile("/main.mnd");

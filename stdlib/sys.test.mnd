@@ -1,7 +1,7 @@
 ; Arguments and the environment.
 
-(import std/sys)
+import std/sys
 
-(test "arg-count is a number" (>= (arg-count) 0))
+test "arg-count is a number" = arg-count() >= 0
 
-(test "an unset name is none" (= (getenv "MENARD_NOT_A_REAL_VAR") (None)))
+test "an unset name is none" = getenv("MENARD_NOT_A_REAL_VAR") == None()

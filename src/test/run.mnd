@@ -7,205 +7,250 @@
 ; stdout starts that file's pass/fail lines.
 ; Green and red only when stdout is a terminal and `NO_COLOR` is unset.
 
-(import "../diag/report.mnd")
-(import "../reader/ast.mnd")
-(import "../reader/read.mnd")
-(import "../cache/cache.mnd")
-(import "../cache/sep.mnd")
-(import std/console)
-(import std/fs)
-(import std/io)
-(import std/proc)
-(import std/string)
-(import std/test)
+import "../diag/report.mnd"
 
-(let nl
-  (do
-    (let sb (sb-new))
-    (sb-append-byte! sb 10)
-    (sb-take-str! sb)))
+import "../reader/ast.mnd"
 
-(defn print-verbose (lines: (List Str)) (on: Bool) -> Unit
-  (match lines
-    [] ()
-    (Cons line rest)
-      (do
-        (if (or (starts-with line "pass ") (starts-with line "fail "))
-          (do
-            (write stdout "  ")
-            (write stdout
-              (if (starts-with line "pass ")
-                (paint on "[32m" line)
-                (paint on "[31m" line)))
-            (write stdout nl)
-            ())
-          ())
-        (print-verbose rest on))))
+import "../reader/read.mnd"
+
+import "../cache/cache.mnd"
+
+import "../cache/sep.mnd"
+
+import std/console
+
+import std/fs
+
+import std/io
+
+import std/proc
+
+import std/string
+
+import std/test
+
+let nl =
+  {
+    let sb = sb-new()
+    sb-append-byte!(sb, 10)
+    sb-take-str!(sb)
+  }
+
+let print-verbose(lines: List Str, on: Bool) -> Unit =
+  match (lines)
+    | [] -> ()
+    | Cons(line, rest) ->
+      {
+        if starts-with(line, "pass ") || starts-with(line, "fail ") ->
+          {
+            write(stdout, "  ")
+            write(
+              stdout,
+              if starts-with(line, "pass ") -> paint(on, "[32m", line)
+               | else -> paint(on, "[31m", line)
+            )
+            write(stdout, nl)
+            ()
+          }
+        print-verbose(rest, on)
+      }
 
 ; A passing file stays a single status line. A failure points at the
 ; assertion expression, the same way a compile error points at its span.
-(defn fail-name (line: Str) -> (Maybe Str)
-  (if (starts-with line "fail ")
-    (Some (str-slice line 5 (- (str-byte-length line) 5)))
-    (None)))
+let fail-name(line: Str) -> Maybe Str =
+  if starts-with(line, "fail ") -> Some(str-slice(line, 5, str-byte-length(line) - 5))
+   | else -> None()
 
-(defn sym-text (a: Ast) -> (Maybe Str)
-  (match a (SymNode s _) (Some s) _ (None)))
+let sym-text(a: Ast) -> Maybe Str =
+  match (a)
+    | SymNode(s, _) -> Some(s)
+    | _ -> None()
 
-(defn str-text (a: Ast) -> (Maybe Str)
-  (match a (StrNode s _) (Some s) _ (None)))
+let str-text(a: Ast) -> Maybe Str =
+  match (a)
+    | StrNode(s, _) -> Some(s)
+    | _ -> None()
 
-(defn list-head (xs: (List Ast)) -> (Maybe Ast)
-  (match xs (Cons h _) (Some h) [] (None)))
+let list-head(xs: List Ast) -> Maybe Ast =
+  match (xs)
+    | Cons(h, _) -> Some(h)
+    | [] -> None()
 
-(defn list-second (xs: (List Ast)) -> (Maybe Ast)
-  (match xs (Cons _ (Cons n _)) (Some n) _ (None)))
+let list-second(xs: List Ast) -> Maybe Ast =
+  match (xs)
+    | Cons(_, Cons(n, _)) -> Some(n)
+    | _ -> None()
 
-(defn third (xs: (List Ast)) -> (Maybe Ast)
-  (match xs (Cons _ (Cons _ (Cons e _))) (Some e) _ (None)))
+let third(xs: List Ast) -> Maybe Ast =
+  match (xs)
+    | Cons(_, Cons(_, Cons(e, _))) -> Some(e)
+    | _ -> None()
 
-(defn test-named (form: Ast) (name: Str) -> (Maybe Ast)
-  (match form
-    (ParenNode elems _)
-      (match (list-head elems)
-        (Some h)
-          (match (sym-text h)
-            (Some s)
-              (if (= s "test")
-                (match (list-second elems)
-                  (Some n)
-                    (match (str-text n)
-                      (Some text) (if (= text name) (third elems) (None))
-                      (None) (None))
-                  (None) (None))
-                (None))
-            (None) (None))
-        (None) (None))
-    _ (None)))
+let test-named(form: Ast, name: Str) -> Maybe Ast =
+  match (form)
+    | ParenNode(elems, _) ->
+      match (list-head(elems))
+        | Some(h) ->
+          match (sym-text(h))
+            | Some(s) ->
+              if s == "test" ->
+                match (list-second(elems))
+                  | Some(n) ->
+                    match (str-text(n))
+                      | Some(text) ->
+                        if text == name -> third(elems)
+                         | else -> None()
+                      | None -> None()
+                  | None -> None()
+               | else -> None()
+            | None -> None()
+        | None -> None()
+    | _ -> None()
 
-(defn find-named (forms: (List Ast)) (name: Str) -> (Maybe Ast)
-  (match forms
-    [] (None)
-    (Cons f rest)
-      (match (test-named f name)
-        (Some expr) (Some expr)
-        (None) (find-named rest name))))
+let find-named(forms: List Ast, name: Str) -> Maybe Ast =
+  match (forms)
+    | [] -> None()
+    | Cons(f, rest) ->
+      match (test-named(f, name))
+        | Some(expr) -> Some(expr)
+        | None -> find-named(rest, name)
 
-(defn explain-one (path: Str) (src: Str) (forms: (List Ast)) (name: Str) -> Unit
-  (match (find-named forms name)
-    (Some expr)
-      (report-span path src (ast-span expr) "error" "E_TEST"
-        (str-concat "assertion failed: " name))
-    (None) (report-plain (str-concat "assertion failed: " name))))
+let explain-one(path: Str, src: Str, forms: List Ast, name: Str) -> Unit =
+  match (find-named(forms, name))
+    | Some(expr) -> report-span(path, src, ast-span(expr), "error", "E_TEST", str-concat("assertion failed: ", name))
+    | None -> report-plain(str-concat("assertion failed: ", name))
 
-(defn explain-fails (path: Str) (src: Str) (forms: (List Ast)) (lines: (List Str)) -> Unit
-  (match lines
-    [] ()
-    (Cons line rest)
-      (do
-        (match (fail-name line)
-          (Some name) (explain-one path src forms name)
-          (None) ())
-        (explain-fails path src forms rest))))
+let explain-fails(path: Str, src: Str, forms: List Ast, lines: List Str) -> Unit =
+  match (lines)
+    | [] -> ()
+    | Cons(line, rest) ->
+      {
+        match (fail-name(line))
+          | Some(name) -> explain-one(path, src, forms, name)
+          | None -> ()
+        explain-fails(path, src, forms, rest)
+      }
 
-(defn explain-file (path: Str) (lines: (List Str)) -> Unit
-  (match (read-file path)
-    (Err _) ()
-    (Ok src)
-      (match (read-all src)
-        (Err _) ()
-        (Ok forms) (explain-fails path src forms lines))))
+let explain-file(path: Str, lines: List Str) -> Unit =
+  match (read-file(path))
+    | Err(_) -> ()
+    | Ok(src) ->
+      match (read-all(src))
+        | Err(_) -> ()
+        | Ok(forms) -> explain-fails(path, src, forms, lines)
 
-(defn file-line (path: Str) (ok: Bool) (on: Bool) -> Unit
-  (do
-    (write stdout path)
-    (write stdout " ... ")
-    (write stdout (if ok (paint on "[32m" "ok") (paint on "[31m" "FAILED")))
-    (write stdout nl)
-    ()))
+let file-line(path: Str, ok: Bool, on: Bool) -> Unit {
+  write(stdout, path)
+  write(stdout, " ... ")
+  write(
+    stdout,
+    if ok -> paint(on, "[32m", "ok")
+     | else -> paint(on, "[31m", "FAILED")
+  )
+  write(stdout, nl)
+  ()
+}
 
-(defn rev-strs (xs: (List Str)) (acc: (List Str)) -> (List Str)
-  (match xs
-    [] acc
-    (Cons x rest) (rev-strs rest (Cons x acc))))
+let rev-strs(xs: List Str, acc: List Str) -> List Str =
+  match (xs)
+    | [] -> acc
+    | Cons(x, rest) -> rev-strs(rest, Cons(x, acc))
 
 ; `file <path>` is printed by the suite bootstrap before that file's tests.
-(defn file-path (line: Str) -> (Maybe Str)
-  (if (starts-with line "file ")
-    (Some (str-slice line 5 (- (str-byte-length line) 5)))
-    (None)))
+let file-path(line: Str) -> Maybe Str =
+  if starts-with(line, "file ") -> Some(str-slice(line, 5, str-byte-length(line) - 5))
+   | else -> None()
 
-(defrec RunAcc (path: Str) (lines: (List Str)) (passed: Int) (failed: Int))
+record RunAcc {
+  path: Str
+  lines: List Str
+  passed: Int
+  failed: Int
+}
 
 ; `exit-bad` is the process status, applied only to the file that was
 ; running when the process stopped. A panic aborts the rest of the suite.
-(defn flush-file (path: Str) (lines: (List Str)) (verbose: Bool) (on: Bool) (exit-bad: Bool) -> Counts
-  (if (= (str-byte-length path) 0)
-    (if exit-bad (Counts 0 1) (Counts 0 0))
-    (do
-      (let ordered (rev-strs lines []))
-      (if verbose (print-verbose ordered on) ())
-      (match (count-lines ordered)
-        (Counts p f)
-          (do
-            (let bad (or (> f 0) exit-bad))
-            (file-line path (not bad) on)
-            (if (> f 0) (explain-file path ordered) ())
-            (if (and bad (= f 0)) (Counts p 1) (Counts p f)))))))
+let flush-file(path: Str, lines: List Str, verbose: Bool, on: Bool, exit-bad: Bool) -> Counts =
+  if str-byte-length(path) == 0 ->
+    if exit-bad -> Counts(0, 1)
+     | else -> Counts(0, 0)
+   | else ->
+    {
+      let ordered = rev-strs(lines, [])
+      if verbose -> print-verbose(ordered, on)
+      match (count-lines(ordered))
+        | Counts(p, f) ->
+          {
+            let bad = f > 0 || exit-bad
+            file-line(path, not(bad), on)
+            if f > 0 -> explain-file(path, ordered)
+            if bad && f == 0 -> Counts(p, 1)
+             | else -> Counts(p, f)
+          }
+    }
 
-(defn take-lines (lines: (List Str)) (acc: RunAcc) (verbose: Bool) (on: Bool) -> RunAcc
-  (match lines
-    [] acc
-    (Cons line rest)
-      (match acc
-        (RunAcc path buf passed failed)
-          (match (file-path line)
-            (Some next)
-              (match (flush-file path buf verbose on false)
-                (Counts p f)
-                  (take-lines rest (RunAcc next [] (+ passed p) (+ failed f)) verbose on))
-            (None)
-              (take-lines rest (RunAcc path (Cons line buf) passed failed) verbose on)))))
+let take-lines(lines: List Str, acc: RunAcc, verbose: Bool, on: Bool) -> RunAcc =
+  match (lines)
+    | [] -> acc
+    | Cons(line, rest) ->
+      match (acc)
+        | RunAcc(path, buf, passed, failed) ->
+          match (file-path(line))
+            | Some(next) ->
+              match (flush-file(path, buf, verbose, on, false))
+                | Counts(p, f) -> take-lines(rest, RunAcc(next, [], passed + p, failed + f), verbose, on)
+            | None -> take-lines(rest, RunAcc(path, Cons(line, buf), passed, failed), verbose, on)
 
-(defn finish-acc (acc: RunAcc) (verbose: Bool) (on: Bool) (exit-bad: Bool) (err: Str) -> Counts
-  (match acc
-    (RunAcc path buf passed failed)
-      (do
-        (match (flush-file path buf verbose on exit-bad)
-          (Counts p f)
-            (do
-              (if (and exit-bad (> (str-byte-length err) 0))
-                (do (write stderr err) (write stderr nl) ())
-                ())
-              (Counts (+ passed p) (+ failed f)))))))
+let finish-acc(acc: RunAcc, verbose: Bool, on: Bool, exit-bad: Bool, err: Str) -> Counts =
+  match (acc)
+    | RunAcc(path, buf, passed, failed) ->
+      {
+        match (flush-file(path, buf, verbose, on, exit-bad))
+          | Counts(p, f) ->
+            {
+              if exit-bad && str-byte-length(err) > 0 ->
+                {
+                  write(stderr, err)
+                  write(stderr, nl)
+                  ()
+                }
+              Counts(passed + p, failed + f)
+            }
+      }
 
-(defn report-suite-error (msg: Str) (started: Int) (on: Bool) -> Int
-  (do
-    (if (> (str-byte-length msg) 0) (report-plain msg) ())
-    (summary (Counts 0 1) (- (now-ms) started) on)
-    1))
+let report-suite-error(msg: Str, started: Int, on: Bool) -> Int {
+  if str-byte-length(msg) > 0 -> report-plain(msg)
+  summary(Counts(0, 1), now-ms() - started, on)
+  1
+}
 
-(pub defn run-suite (path: Str) (clean: Bool) (verbose: Bool) (quiet: Bool) (cc: Str) (runtime: Str) -> Int
-  (do
-    (let files (discover path))
-    (match files
-      []
-        (do
-          (report-plain (str-concat "no tests found in " path))
-          1)
-      (Cons _ _)
-        (do
-          (let on (tty-color 1))
-          (let started (now-ms))
-          (match (build-suite files path clean cc runtime quiet)
-            (Err msg) (report-suite-error msg started on)
-            (Ok bin)
-              (match (spawn-capture [bin] "")
-                (Err _) (report-suite-error (str-concat "cannot spawn " bin) started on)
-                (Ok (SpawnOutput st text err))
-                  (do
-                    (let exit-bad (not (= (status->exit-code st) 0)))
-                    (let acc (take-lines (split-lines text) (RunAcc "" [] 0 0) verbose on))
-                    (let totals (finish-acc acc verbose on exit-bad err))
-                    (summary totals (- (now-ms) started) on)
-                    (match totals (Counts _ f) (if (> f 0) 1 0)))))))))
+pub let run-suite(path: Str, clean: Bool, verbose: Bool, quiet: Bool, cc: Str, runtime: Str) -> Int {
+  let files = discover(path)
+  match (files)
+    | [] ->
+      {
+        report-plain(str-concat("no tests found in ", path))
+        1
+      }
+    | Cons(_, _) ->
+      {
+        let on = tty-color(1)
+        let started = now-ms()
+        match (build-suite(files, path, clean, cc, runtime, quiet))
+          | Err(msg) -> report-suite-error(msg, started, on)
+          | Ok(bin) ->
+            match (spawn-capture([bin], ""))
+              | Err(_) -> report-suite-error(str-concat("cannot spawn ", bin), started, on)
+              | Ok(SpawnOutput(st, text, err)) ->
+                {
+                  let exit-bad = status-exit-code(st) != 0
+                  let acc = take-lines(split-lines(text), RunAcc("", [], 0, 0), verbose, on)
+                  let totals = finish-acc(acc, verbose, on, exit-bad, err)
+                  summary(totals, now-ms() - started, on)
+                  match (totals)
+                    | Counts(_, f) ->
+                      if f > 0 -> 1
+                       | else -> 0
+                }
+      }
+}

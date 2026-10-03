@@ -1,10 +1,10 @@
 ; Slice 2G/3C oracle fixture: `match` on `Nil`/`Cons` for a `(List Int)`.
 ; Expect exit 60 (`10 + 20 + 30`).
 
-(defn list-sum (xs: (List Int)) -> Int
-  (match xs
-    [] 0
-    (Cons h t) (+ h (list-sum t))))
+let list-sum(xs: List Int) -> Int =
+  match (xs)
+    | [] -> 0
+    | Cons(h, t) -> h + list-sum(t)
 
-(defn main -> Int
-  (list-sum [10 20 30]))
+let main() -> Int =
+  list-sum([10, 20, 30])

@@ -23,12 +23,12 @@
  *
  * - **Native:** the process exit code is `main`'s `Int` return, per the
  *   C `main` the emitted `.bc` defines.
- * - **Interpreter:** each fixture ends with a top-level `(defn main ->
- *   Int …)` and nothing else; `evalProgram` (host/src/interp/eval.ts)
+ * - **Interpreter:** each fixture ends with a top-level `let main() ->
+ *   Int` and nothing else; `evalProgram` (host/src/interp/eval.ts)
  *   automatically calls `main` after the top-level forms and returns its
  *   value as the program's result — so `run()`'s `result.value` *is*
  *   the same `Int` native's `main` returns, needing no fixture-visible
- *   `(main)` call. Truncating that `Int` to 8 bits, unsigned
+ *   `main()` call. Truncating that `Int` to 8 bits, unsigned
  *   (`BigInt.asUintN(8, …)`), matches how a process exit code is itself
  *   truncated to `[0, 256)` by the OS (`& 0xff`, spec-consistent with
  *   `Host.exit`'s own `code & 0xff` in host/src/host/host.ts).
@@ -38,8 +38,8 @@
  *   `println`, and both sides' captured stdout bytes are asserted equal
  *   to each other (not just to a hardcoded string) — the same "agree
  *   with each other, not just a hardcoded answer" discipline the exit
- *   code comparison below already has. `hello.mnd` itself (`(println
- *   "Hello, world!")`, `123`, `(defn main -> Int 0)`) is covered by
+ *   code comparison below already has. `hello.mnd` itself (`println(
+ *   "Hello, world!")`, `123`, `let main() -> Int = 0`) is covered by
  *   `tests/phase2/emit-link.test.ts` and `tests/phase2/bc-writer.test.ts`
  *   instead, which both now also assert its stdout.
  *
@@ -165,7 +165,7 @@ function interpret(
     const detail = r.kind === "diagnostics" ? JSON.stringify(r.diagnostics) : r.message;
     throw new Error(`interpreter failed for ${entryRelPath}: ${detail}`);
   }
-  // An explicit `(exit n)` wins if a fixture ever calls it; these
+  // An explicit `exit(n)` wins if a fixture ever calls it; these
   // fixtures don't, so this falls through to the auto-called `main`'s
   // `Int` result instead (see header comment).
   if (r.exitCode !== undefined) {
@@ -196,7 +196,7 @@ const fixtures: Array<{
     expectDis: /\bret i32\b/,
   },
   {
-    name: "`(+ 20 22)` lowers to a real tagged `add` (not a folded `ret i32 42`)",
+    name: "`20 + 22` lowers to a real tagged `add` (not a folded `ret i32 42`)",
     entry: "tests/phase2/oracle/ret-add.mnd",
     expectExit: 42,
     expectDis: /\badd i64\b/,
@@ -214,7 +214,7 @@ const fixtures: Array<{
     expectDis: /\bcall i64 @mn_(closure_new|apply_1)\b/,
   },
   {
-    name: "a standalone top-level `(println ...)` lowers to a real `mn_write_stdout` call, prepended into `main`",
+    name: "a standalone top-level `println(...)` lowers to a real `mn_write_stdout` call, prepended into `main`",
     entry: "tests/phase2/oracle/println-hello.mnd",
     expectExit: 7,
     expectDis: /\bcall void @mn_write_stdout\b/,

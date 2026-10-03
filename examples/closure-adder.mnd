@@ -3,42 +3,45 @@
 ; Prints the list before and after.
 ; Run with: `./mn run examples/closure-adder.mnd`
 
-(defn adder (n: Int) -> (Fn Int -> Int)
-  (fn (m) (+ n m)))
+let adder(n: Int) -> (Int) -> Int =
+  fn (m) = n + m
 
-(defn (map [a]) (f: (Fn a -> a)) (xs: (List a)) -> (List a)
-  (match xs
-    [] []
-    (Cons h t) (Cons (f h) (map f t))))
+let map[a](f: (a) -> a, xs: List a) -> List a =
+  match (xs)
+    | [] -> []
+    | Cons(h, t) -> Cons(f(h), map(f, t))
 
-(defn print-elems (xs: (List Int)) -> Int
-  (match xs
-    [] 0
-    (Cons h t)
-      (do
-        (print h)
-        (match t
-          [] 0
-          _
-            (do
-              (print " ")
-              (print-elems t))))))
+let print-elems(xs: List Int) -> Int =
+  match (xs)
+    | [] -> 0
+    | Cons(h, t) ->
+      {
+        print(h)
+        match (t)
+          | [] -> 0
+          | _ ->
+            {
+              print(" ")
+              print-elems(t)
+            }
+      }
 
-(defn print-list (xs: (List Int)) -> Int
-  (do
-    (print "(")
-    (print-elems xs)
-    (print ")")
-    0))
+let print-list(xs: List Int) -> Int {
+  print("(")
+  print-elems(xs)
+  print(")")
+  0
+}
 
-(defn main -> Int
-  (let before [1 2 3])
-  (let add40 (adder 40))
-  (let after (map add40 before))
-  (print "before: ")
-  (print-list before)
-  (println)
-  (print "after:  ")
-  (print-list after)
-  (println)
-  0)
+let main() -> Int {
+  let before = [1, 2, 3]
+  let add40 = adder(40)
+  let after = map(add40, before)
+  print("before: ")
+  print-list(before)
+  println()
+  print("after:  ")
+  print-list(after)
+  println()
+  0
+}

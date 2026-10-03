@@ -55,26 +55,49 @@
 ; sees below is already exactly what belongs in the record; this module
 ; does no value-numbering of its own.
 
-(import "./llvm-ir.mnd")
+import "./llvm-ir.mnd"
 
-(pub alias LlvmModule LlvmModule)
-(pub alias LFunc LFunc)
-(pub alias Item Item)
+pub alias LlvmModule = LlvmModule
 
-(let end-block-code 0)
-(let enter-subblock-code 1)
-(let unabbrev-record-code 3)
-(let abbrev-width 2) ; every block here uses this; see header comment
+pub alias LFunc = LFunc
 
-(pub let bitstream-magic-byte-0 66) ; 'B'
-(pub let bitstream-magic-byte-1 67) ; 'C'
-(pub let bitstream-magic-byte-2 192) ; 0xC0
-(pub let bitstream-magic-byte-3 222) ; 0xDE
+pub alias Item = Item
 
-(pub let wrapper-magic-byte-0 222) ; 0xDE — 0x0B17C0DE, byte 0 (LE)
-(pub let wrapper-magic-byte-1 192) ; 0xC0 — byte 1
-(pub let wrapper-magic-byte-2 23) ; 0x17 — byte 2
-(pub let wrapper-magic-byte-3 11) ; 0x0B — byte 3
+let end-block-code = 0
+
+let enter-subblock-code = 1
+
+let unabbrev-record-code = 3
+
+let abbrev-width = 2
+
+ ; every block here uses this; see header comment
+
+pub let bitstream-magic-byte-0 = 66
+
+ ; 'B'
+pub let bitstream-magic-byte-1 = 67
+
+ ; 'C'
+pub let bitstream-magic-byte-2 = 192
+
+ ; 0xC0
+pub let bitstream-magic-byte-3 = 222
+
+ ; 0xDE
+
+pub let wrapper-magic-byte-0 = 222
+
+ ; 0xDE — 0x0B17C0DE, byte 0 (LE)
+pub let wrapper-magic-byte-1 = 192
+
+ ; 0xC0 — byte 1
+pub let wrapper-magic-byte-2 = 23
+
+ ; 0x17 — byte 2
+pub let wrapper-magic-byte-3 = 11
+
+ ; 0x0B — byte 3
 
 ; ---------------------------------------------------------------------------
 ; Small local helpers (`src/`'s "no prelude import" rule — see
@@ -83,160 +106,178 @@
 
 ; 2^n for n in 0..32. A loop, not `(* 2 (pow2 (- n 1)))`: that recursion
 ; was one call per bit on every bitstream write.
-(defn pow2 (n: Int) -> Int
-  (loop ((i 0) (acc 1))
-    (if (>= i n) acc (recur (+ i 1) (* acc 2)))))
+let pow2(n: Int) -> Int =
+  loop (i = 0, acc = 1)
+    if i >= n -> acc
+     | else -> recur(i + 1, acc * 2)
 
-(defn int-list-length (xs: (List Int)) -> Int
-  (match xs
-    [] 0
-    (Cons _ rest) (+ 1 (int-list-length rest))))
+let int-list-length(xs: List Int) -> Int =
+  match (xs)
+    | [] -> 0
+    | Cons(_, rest) -> 1 + int-list-length(rest)
 
-(defn max-int (a: Int) (b: Int) -> Int (if (> a b) a b))
+let max-int(a: Int, b: Int) -> Int =
+  if a > b -> a
+   | else -> b
 
-(defn str-byte-ops-from (s: Str) (i: Int) (n: Int) -> (List Int)
-  (if (>= i n)
-    []
-    (Cons (str-byte s i) (str-byte-ops-from s (+ i 1) n))))
+let str-byte-ops-from(s: Str, i: Int, n: Int) -> List Int =
+  if i >= n -> []
+   | else -> Cons(str-byte(s, i), str-byte-ops-from(s, i + 1, n))
 
 ; A Str's bytes as a `(List Int)` — how a record's inline name operands
 ; (`vst-code-entry`, below) are built from a function's literal name.
-(defn str-byte-ops (s: Str) -> (List Int)
-  (str-byte-ops-from s 0 (str-byte-length s)))
+let str-byte-ops(s: Str) -> List Int =
+  str-byte-ops-from(s, 0, str-byte-length(s))
 
 ; ---------------------------------------------------------------------------
 ; BitSink: pending bits (`pending`, `pending-bits`) plus the accumulated
 ; output bytes (`buf`). See the header comment.
 
-(defrec BitSink (buf: StringBuffer) (pending: (Ref Int)) (pending-bits: (Ref Int)))
+record BitSink {
+  buf: StringBuffer
+  pending: Ref Int
+  pending-bits: Ref Int
+}
 
-(defn sink-buf (s: BitSink) -> StringBuffer
-  (match s (BitSink b _ _) b))
-(defn sink-pending (s: BitSink) -> (Ref Int)
-  (match s (BitSink _ p _) p))
-(defn sink-pending-bits (s: BitSink) -> (Ref Int)
-  (match s (BitSink _ _ b) b))
+let sink-buf(s: BitSink) -> StringBuffer =
+  match (s)
+    | BitSink(b, _, _) -> b
 
-(defn bitsink-new -> BitSink
-  (BitSink (sb-new) (ref 0) (ref 0)))
+let sink-pending(s: BitSink) -> Ref Int =
+  match (s)
+    | BitSink(_, p, _) -> p
+
+let sink-pending-bits(s: BitSink) -> Ref Int =
+  match (s)
+    | BitSink(_, _, b) -> b
+
+let bitsink-new() -> BitSink =
+  BitSink(sb-new(), ref(0), ref(0))
 
 ; Flush every whole byte currently pending (`pending-bits >= 8`) into
 ; `buf`. Bits above the flushed byte survive in `pending`, shifted down.
 ; The field walker is the hot path: matching `BitSink` once, then
 ; touching the refs directly, instead of re-matching on every deref.
-(defn bitsink-flush-fields! (buf: StringBuffer) (pending: (Ref Int)) (pending-bits: (Ref Int)) -> Unit
-  (if (>= (deref pending-bits) 8)
-    (do
-      (let p (deref pending))
-      (sb-append-byte! buf (% p 256))
-      (set! pending (/ p 256))
-      (set! pending-bits (- (deref pending-bits) 8))
-      (bitsink-flush-fields! buf pending pending-bits))
-    ()))
+let bitsink-flush-fields!(buf: StringBuffer, pending: Ref Int, pending-bits: Ref Int) -> Unit =
+  if deref(pending-bits) >= 8 ->
+    {
+      let p = deref(pending)
+      sb-append-byte!(buf, p % 256)
+      set!(pending, p / 256)
+      set!(pending-bits, deref(pending-bits) - 8)
+      bitsink-flush-fields!(buf, pending, pending-bits)
+    }
 
-(defn bitsink-flush! (s: BitSink) -> Unit
-  (match s
-    (BitSink buf pending pending-bits)
-      (bitsink-flush-fields! buf pending pending-bits)))
+let bitsink-flush!(s: BitSink) -> Unit =
+  match (s)
+    | BitSink(buf, pending, pending-bits) -> bitsink-flush-fields!(buf, pending, pending-bits)
 
 ; Write the low `width` bits of `value` (unsigned, `value < 2^width`).
 ; `value`'s bits occupy positions [pending-bits, pending-bits+width) and
 ; `pending`'s current bits occupy [0, pending-bits) — disjoint ranges, so
 ; `+` here is exactly bitwise OR (see the header comment's no-bitwise-ops
 ; note).
-(defn bitsink-write-fixed! (s: BitSink) (value: Int) (width: Int) -> Unit
-  (match s
-    (BitSink buf pending pending-bits)
-      (if (= width 0) ()
-        (do
-          (let shift (deref pending-bits))
-          (let p (deref pending))
-          (set! pending (+ p (* value (pow2 shift))))
-          (set! pending-bits (+ shift width))
-          (bitsink-flush-fields! buf pending pending-bits)))))
+let bitsink-write-fixed!(s: BitSink, value: Int, width: Int) -> Unit =
+  match (s)
+    | BitSink(buf, pending, pending-bits) ->
+      if width == 0 -> ()
+       | else ->
+        {
+          let shift = deref(pending-bits)
+          let p = deref(pending)
+          set!(pending, p + value * pow2(shift))
+          set!(pending-bits, shift + width)
+          bitsink-flush-fields!(buf, pending, pending-bits)
+        }
 
 ; VBR(width): `value` split into (width-1)-bit chunks, least-significant
 ; chunk first, each chunk's high bit set iff another chunk follows.
-(defn bitsink-write-vbr-chunks! (s: BitSink) (value: Int) (cont-bit: Int) (width: Int) -> Unit
-  (do
-    (let chunk (% value cont-bit))
-    (let rest (/ value cont-bit))
-    (if (= rest 0)
-      (bitsink-write-fixed! s chunk width)
-      (do
-        (bitsink-write-fixed! s (+ chunk cont-bit) width)
-        (bitsink-write-vbr-chunks! s rest cont-bit width)))))
+let bitsink-write-vbr-chunks!(s: BitSink, value: Int, cont-bit: Int, width: Int) -> Unit {
+  let chunk = value % cont-bit
+  let rest = value / cont-bit
+  if rest == 0 -> bitsink-write-fixed!(s, chunk, width)
+   | else ->
+    {
+      bitsink-write-fixed!(s, chunk + cont-bit, width)
+      bitsink-write-vbr-chunks!(s, rest, cont-bit, width)
+    }
+}
 
-(defn bitsink-write-vbr! (s: BitSink) (value: Int) (width: Int) -> Unit
-  (bitsink-write-vbr-chunks! s value (pow2 (- width 1)) width))
+let bitsink-write-vbr!(s: BitSink, value: Int, width: Int) -> Unit =
+  bitsink-write-vbr-chunks!(s, value, pow2(width - 1), width)
 
-(defn bitsink-total-bits (s: BitSink) -> Int
-  (+ (* (sb-length (sink-buf s)) 8) (deref (sink-pending-bits s))))
+let bitsink-total-bits(s: BitSink) -> Int =
+  sb-length(sink-buf(s)) * 8 + deref(sink-pending-bits(s))
 
 ; Pad with zero bits to the next 32-bit boundary. Every rendered block
 ; body ends with one of these right after its `END_BLOCK` — see the
 ; header comment on why that makes backpatching unnecessary.
-(defn bitsink-align32! (s: BitSink) -> Unit
-  (do
-    (let rem (% (bitsink-total-bits s) 32))
-    (if (= rem 0) () (bitsink-write-fixed! s 0 (- 32 rem)))))
+let bitsink-align32!(s: BitSink) -> Unit {
+  let rem = bitsink-total-bits(s) % 32
+  if rem == 0 -> ()
+   | else -> bitsink-write-fixed!(s, 0, 32 - rem)
+}
 
 ; Append already byte-aligned bytes verbatim. Only ever called right
 ; after a `bitsink-align32!` (this sink's own, or — for a spliced-in
 ; block body — the fact that `render-block-body!` always returns a whole
 ; number of bytes), so `pending-bits` is always 0 here.
-(defn bitsink-append-raw! (s: BitSink) (raw: Str) -> Unit
-  (sb-append! (sink-buf s) raw))
+let bitsink-append-raw!(s: BitSink, raw: Str) -> Unit =
+  sb-append!(sink-buf(s), raw)
 
-(defn bitsink-finish! (s: BitSink) -> Str
-  (sb-take-str! (sink-buf s)))
+let bitsink-finish!(s: BitSink) -> Str =
+  sb-take-str!(sink-buf(s))
 
 ; ---------------------------------------------------------------------------
 ; Bitstream structure: blocks and unabbreviated records, built on BitSink.
 
 ; One record: `UNABBREV_RECORD code numops op...`, every field VBR6.
-(defn write-record-ops! (s: BitSink) (ops: (List Int)) -> Unit
-  (match ops
-    [] ()
-    (Cons op rest) (do (bitsink-write-vbr! s op 6) (write-record-ops! s rest))))
+let write-record-ops!(s: BitSink, ops: List Int) -> Unit =
+  match (ops)
+    | [] -> ()
+    | Cons(op, rest) ->
+      {
+        bitsink-write-vbr!(s, op, 6)
+        write-record-ops!(s, rest)
+      }
 
-(defn write-record! (s: BitSink) (code: Int) (ops: (List Int)) -> Unit
-  (do
-    (bitsink-write-fixed! s unabbrev-record-code abbrev-width)
-    (bitsink-write-vbr! s code 6)
-    (bitsink-write-vbr! s (int-list-length ops) 6)
-    (write-record-ops! s ops)))
+let write-record!(s: BitSink, code: Int, ops: List Int) -> Unit {
+  bitsink-write-fixed!(s, unabbrev-record-code, abbrev-width)
+  bitsink-write-vbr!(s, code, 6)
+  bitsink-write-vbr!(s, int-list-length(ops), 6)
+  write-record-ops!(s, ops)
+}
 
 ; Render a block's body (records/subblocks written by `write-body!` into
 ; a fresh sink) terminated by `END_BLOCK` + `align32`. The result is
 ; always a whole number of 32-bit words — see the header comment.
-(defn render-block-body! (write-body: (Fn BitSink -> Unit)) -> Str
-  (do
-    (let s (bitsink-new))
-    (write-body s)
-    (bitsink-write-fixed! s end-block-code abbrev-width)
-    (bitsink-align32! s)
-    (bitsink-finish! s)))
+let render-block-body!(write-body: (BitSink) -> Unit) -> Str {
+  let s = bitsink-new()
+  write-body(s)
+  bitsink-write-fixed!(s, end-block-code, abbrev-width)
+  bitsink-align32!(s)
+  bitsink-finish!(s)
+}
 
-(defn append-word32-le! (s: BitSink) (n: Int) -> Unit
-  (do
-    (sb-append-byte! (sink-buf s) (% n 256))
-    (sb-append-byte! (sink-buf s) (% (/ n 256) 256))
-    (sb-append-byte! (sink-buf s) (% (/ n 65536) 256))
-    (sb-append-byte! (sink-buf s) (% (/ n 16777216) 256))))
+let append-word32-le!(s: BitSink, n: Int) -> Unit {
+  sb-append-byte!(sink-buf(s), n % 256)
+  sb-append-byte!(sink-buf(s), n / 256 % 256)
+  sb-append-byte!(sink-buf(s), n / 65536 % 256)
+  sb-append-byte!(sink-buf(s), n / 16777216 % 256)
+}
 
 ; Enter a subblock of `parent`: render its body in isolation (so its
 ; length in words is known), then write the `ENTER_SUBBLOCK` header, the
 ; length word, and splice the body in as raw bytes — never backpatched.
-(defn enter-subblock! (parent: BitSink) (block-id: Int) (write-body: (Fn BitSink -> Unit)) -> Unit
-  (do
-    (let body (render-block-body! write-body))
-    (bitsink-write-fixed! parent enter-subblock-code abbrev-width)
-    (bitsink-write-vbr! parent block-id 8)
-    (bitsink-write-vbr! parent abbrev-width 4)
-    (bitsink-align32! parent)
-    (append-word32-le! parent (/ (str-byte-length body) 4))
-    (bitsink-append-raw! parent body)))
+let enter-subblock!(parent: BitSink, block-id: Int, write-body: (BitSink) -> Unit) -> Unit {
+  let body = render-block-body!(write-body)
+  bitsink-write-fixed!(parent, enter-subblock-code, abbrev-width)
+  bitsink-write-vbr!(parent, block-id, 8)
+  bitsink-write-vbr!(parent, abbrev-width, 4)
+  bitsink-align32!(parent)
+  append-word32-le!(parent, str-byte-length(body) / 4)
+  bitsink-append-raw!(parent, body)
+}
 
 ; ---------------------------------------------------------------------------
 ; Block ids and record codes actually used here (see
@@ -244,42 +285,67 @@
 ; this subset comes from, and how each was confirmed; only what this
 ; module needs is named).
 
-(let module-block-id 8)
-(let constants-block-id 11)
-(let function-block-id 12)
-(let value-symtab-block-id 14)
-(let type-block-id 17)
+let module-block-id = 8
 
-(let module-code-version 1)
-(let module-code-triple 2)
-(let module-code-globalvar 7)
-(let module-code-function 8)
+let constants-block-id = 11
 
-(let type-code-numentry 1)
-(let type-code-void 2)
-(let type-code-integer 7)
-(let type-code-array 11)
-(let type-code-function 21)
-(let type-code-opaque-pointer 25)
+let function-block-id = 12
 
-(let cst-code-settype 1)
-(let cst-code-null 2)
-(let cst-code-integer 4)
-(let cst-code-string 8)
+let value-symtab-block-id = 14
 
-(let func-code-declareblocks 1)
-(let func-code-inst-binop 2)
-(let func-code-inst-cast 3)
-(let func-code-inst-ret 10)
-(let func-code-inst-br 11)
-(let func-code-inst-unreachable 15)
-(let func-code-inst-alloca 19)
-(let func-code-inst-load 20)
-(let func-code-inst-cmp2 28)
-(let func-code-inst-call 34)
-(let func-code-inst-store 44)
+let type-block-id = 17
 
-(let vst-code-entry 1)
+let module-code-version = 1
+
+let module-code-triple = 2
+
+let module-code-globalvar = 7
+
+let module-code-function = 8
+
+let type-code-numentry = 1
+
+let type-code-void = 2
+
+let type-code-integer = 7
+
+let type-code-array = 11
+
+let type-code-function = 21
+
+let type-code-opaque-pointer = 25
+
+let cst-code-settype = 1
+
+let cst-code-null = 2
+
+let cst-code-integer = 4
+
+let cst-code-string = 8
+
+let func-code-declareblocks = 1
+
+let func-code-inst-binop = 2
+
+let func-code-inst-cast = 3
+
+let func-code-inst-ret = 10
+
+let func-code-inst-br = 11
+
+let func-code-inst-unreachable = 15
+
+let func-code-inst-alloca = 19
+
+let func-code-inst-load = 20
+
+let func-code-inst-cmp2 = 28
+
+let func-code-inst-call = 34
+
+let func-code-inst-store = 44
+
+let vst-code-entry = 1
 
 ; The fixed leading type-table indices every module here uses (see
 ; `write-types!` below): `ptr`, `i64`, `i32`, `void`, then one function
@@ -288,73 +354,107 @@
 ; extern function types (`void(ptr,i64)`, `void(i64)`, `ptr(i64,ptr)` for
 ; `mn_alloc`, `void(i32,ptr)` for `mn_init`), then one `[len x i8]` array
 ; type per string global, in `LlvmModule`'s `globals` order.
-(let ty-ptr 0)
-(let ty-i64 1)
-(let ty-i32 2)
-(let ty-void 3)
+let ty-ptr = 0
 
-(defn func-type-idx-for-arity (arity: Int) -> Int (+ 4 arity))
-(defn main-type-idx (ma: Int) -> Int (+ 4 ma 1))
+let ty-i64 = 1
+
+let ty-i32 = 2
+
+let ty-void = 3
+
+let func-type-idx-for-arity(arity: Int) -> Int =
+  4 + arity
+
+let main-type-idx(ma: Int) -> Int =
+  4 + ma + 1
+
 ; One slot right after `main`'s own type — see header comment's ordering.
-(defn ty-i8-idx (ma: Int) -> Int (+ (main-type-idx ma) 1))
-(defn ty-write-sig-idx (ma: Int) -> Int (+ (ty-i8-idx ma) 1)) ; void(ptr, i64)
-(defn ty-print-sig-idx (ma: Int) -> Int (+ (ty-write-sig-idx ma) 1)) ; void(i64)
-(defn ty-alloc-sig-idx (ma: Int) -> Int (+ (ty-print-sig-idx ma) 1)) ; ptr(i64, ptr)
-(defn ty-init-sig-idx (ma: Int) -> Int (+ (ty-alloc-sig-idx ma) 1)) ; void(i32, ptr)
-(defn ty-panic-sig-idx (ma: Int) -> Int (+ (ty-init-sig-idx ma) 1)) ; void(ptr)
-(defn ty-pop-sig-idx (ma: Int) -> Int (+ (ty-panic-sig-idx ma) 1)) ; void()
-(defn ty-panic-at-sig-idx (ma: Int) -> Int (+ (ty-pop-sig-idx ma) 1)) ; void(ptr, i64, ptr)
+let ty-i8-idx(ma: Int) -> Int =
+  main-type-idx(ma) + 1
+
+let ty-write-sig-idx(ma: Int) -> Int =
+  ty-i8-idx(ma) + 1
+
+ ; void(ptr, i64)
+let ty-print-sig-idx(ma: Int) -> Int =
+  ty-write-sig-idx(ma) + 1
+
+ ; void(i64)
+let ty-alloc-sig-idx(ma: Int) -> Int =
+  ty-print-sig-idx(ma) + 1
+
+ ; ptr(i64, ptr)
+let ty-init-sig-idx(ma: Int) -> Int =
+  ty-alloc-sig-idx(ma) + 1
+
+ ; void(i32, ptr)
+let ty-panic-sig-idx(ma: Int) -> Int =
+  ty-init-sig-idx(ma) + 1
+
+ ; void(ptr)
+let ty-pop-sig-idx(ma: Int) -> Int =
+  ty-panic-sig-idx(ma) + 1
+
+ ; void()
+let ty-panic-at-sig-idx(ma: Int) -> Int =
+  ty-pop-sig-idx(ma) + 1
+
+ ; void(ptr, i64, ptr)
 ; String `i`'s (0-indexed, in `globals` order) own `[len x i8]` array type.
-(defn ty-str-array-idx (ma: Int) (i: Int) -> Int (+ (ty-panic-at-sig-idx ma) i 1))
+let ty-str-array-idx(ma: Int, i: Int) -> Int =
+  ty-panic-at-sig-idx(ma) + i + 1
 
-(defn i64-param-types (n: Int) -> (List Int)
-  (if (<= n 0) [] (Cons ty-i64 (i64-param-types (- n 1)))))
+let i64-param-types(n: Int) -> List Int =
+  if n <= 0 -> []
+   | else -> Cons(ty-i64, i64-param-types(n - 1))
 
-(defn write-func-types! (t: BitSink) (arity: Int) (ma: Int) -> Unit
-  (if (> arity ma)
-    ()
-    (do
-      (write-record! t type-code-function (Cons 0 (Cons ty-i64 (i64-param-types arity))))
-      (write-func-types! t (+ arity 1) ma))))
+let write-func-types!(t: BitSink, arity: Int, ma: Int) -> Unit =
+  if arity > ma -> ()
+   | else ->
+    {
+      write-record!(t, type-code-function, Cons(0, Cons(ty-i64, i64-param-types(arity))))
+      write-func-types!(t, arity + 1, ma)
+    }
 
 ; One `[len x i8]` array type per string in `globals`, in order — see
 ; header comment's trailing "then one ... array type per string global".
-(defn str-lengths (globals: (List Str)) -> (List Int)
-  (match globals
-    [] []
-    (Cons g rest) (Cons (str-byte-length g) (str-lengths rest))))
+let str-lengths(globals: List Str) -> List Int =
+  match (globals)
+    | [] -> []
+    | Cons(g, rest) -> Cons(str-byte-length(g), str-lengths(rest))
 
-(defn write-array-types! (t: BitSink) (ma: Int) (lens: (List Int)) -> Unit
-  (match lens
-    [] ()
-    (Cons len rest)
-      (do
-        (write-record! t type-code-array [len (ty-i8-idx ma)])
-        (write-array-types! t ma rest))))
+let write-array-types!(t: BitSink, ma: Int, lens: List Int) -> Unit =
+  match (lens)
+    | [] -> ()
+    | Cons(len, rest) ->
+      {
+        write-record!(t, type-code-array, [len, ty-i8-idx(ma)])
+        write-array-types!(t, ma, rest)
+      }
 
 ; `ptr`(0), `i64`(1), `i32`(2), `void`(3), one `(i64 x arity) -> i64` per
 ; `arity` in `0..ma`, then `(i32, ptr) -> i32` for `main`, then `i8`, the
 ; the fixed extern function types, then one `[len x i8]` array type per
 ; string global — see header comment.
-(defn write-types! (t: BitSink) (ma: Int) (globals: (List Str)) -> Unit
-  (do
-    (let ns (int-list-length (str-lengths globals)))
-    (write-record! t type-code-numentry [(+ 4 ma 1 9 ns)])
-    (write-record! t type-code-opaque-pointer [0]) ; idx 0: ptr, addrspace 0
-    (write-record! t type-code-integer [64]) ; idx 1: i64
-    (write-record! t type-code-integer [32]) ; idx 2: i32
-    (write-record! t type-code-void []) ; idx 3: void
-    (write-func-types! t 0 ma)
-    (write-record! t type-code-function [0 ty-i32 ty-i32 ty-ptr]) ; (i32, ptr) -> i32 (main)
-    (write-record! t type-code-integer [8]) ; i8
-    (write-record! t type-code-function [0 ty-void ty-ptr ty-i64]) ; void(ptr,i64)
-    (write-record! t type-code-function [0 ty-void ty-i64]) ; void(i64)
-    (write-record! t type-code-function [0 ty-ptr ty-i64 ty-ptr]) ; ptr(i64,ptr) mn_alloc
-    (write-record! t type-code-function [0 ty-void ty-i32 ty-ptr]) ; void(i32,ptr) mn_init
-    (write-record! t type-code-function [0 ty-void ty-ptr]) ; void(ptr) mn_panic
-    (write-record! t type-code-function [0 ty-void]) ; void() mn_trace_pop
-    (write-record! t type-code-function [0 ty-void ty-ptr ty-i64 ty-ptr]) ; void(ptr,i64,ptr) mn_panic_at
-    (write-array-types! t ma (str-lengths globals))))
+let write-types!(t: BitSink, ma: Int, globals: List Str) -> Unit {
+  let ns = int-list-length(str-lengths(globals))
+  write-record!(t, type-code-numentry, [4 + ma + 1 + 9 + ns])
+  write-record!(t, type-code-opaque-pointer, [0])
+  write-record!(t, type-code-integer, [64])
+  write-record!(t, type-code-integer, [32])
+  write-record!(t, type-code-void, [])
+  write-func-types!(t, 0, ma)
+  write-record!(t, type-code-function, [0, ty-i32, ty-i32, ty-ptr])
+  write-record!(t, type-code-integer, [8])
+  write-record!(t, type-code-function, [0, ty-void, ty-ptr, ty-i64])
+  write-record!(t, type-code-function, [0, ty-void, ty-i64])
+  write-record!(t, type-code-function, [0, ty-ptr, ty-i64, ty-ptr])
+  write-record!(t, type-code-function, [0, ty-void, ty-i32, ty-ptr])
+  write-record!(t, type-code-function, [0, ty-void, ty-ptr])
+  write-record!(t, type-code-function, [0, ty-void])
+  write-record!(t, type-code-function, [0, ty-void, ty-ptr, ty-i64, ty-ptr])
+  write-array-types!(t, ma, str-lengths(globals))
+}
 
 ; ---------------------------------------------------------------------------
 ; `MODULE_CODE_FUNCTION` — one per function, in module order (this order
@@ -364,14 +464,17 @@
 ; type idx, ccc, has a body (not a declaration-only proto), external
 ; linkage; the remaining fields (paramattrs, alignment, section,
 ; visibility) are left at their all-zero defaults, same as slice 2A.
-(defn write-function-decls! (m: BitSink) (fs: (List LFunc)) (ma: Int) -> Unit
-  (match fs
-    [] ()
-    (Cons f rest)
-      (do
-        (let ty (if (lfunc-is-main f) (main-type-idx ma) (func-type-idx-for-arity (lfunc-nparams f))))
-        (write-record! m module-code-function [ty 0 0 0 0 0 0 0]) 
-        (write-function-decls! m rest ma))))
+let write-function-decls!(m: BitSink, fs: List LFunc, ma: Int) -> Unit =
+  match (fs)
+    | [] -> ()
+    | Cons(f, rest) ->
+      {
+        let ty =
+          if lfunc-is-main(f) -> main-type-idx(ma)
+           | else -> func-type-idx-for-arity(lfunc-nparams(f))
+        write-record!(m, module-code-function, [ty, 0, 0, 0, 0, 0, 0, 0])
+        write-function-decls!(m, rest, ma)
+      }
 
 ; ---------------------------------------------------------------------------
 ; The three fixed runtime externs (`llvm-ir.mnd`'s `extern-count`) —
@@ -383,121 +486,129 @@
 ; user function's own `MODULE_CODE_FUNCTION` — see `write-module-body!`'s
 ; ordering and `llvm-ir.mnd`'s `extern-write-stdout-abs`/etc. for why
 ; that fixes each extern's abs id to `num-strings + 0/1/2`.
-(defn write-extern-decl! (m: BitSink) (ty: Int) -> Unit
-  (write-record! m module-code-function [ty 0 1 0 0 0 0 0]))
+let write-extern-decl!(m: BitSink, ty: Int) -> Unit =
+  write-record!(m, module-code-function, [ty, 0, 1, 0, 0, 0, 0, 0])
 
-(defn write-extern-decls! (m: BitSink) (ma: Int) -> Unit
-  (do
-    (write-extern-decl! m (ty-write-sig-idx ma)) ; mn_write_stdout
-    (write-extern-decl! m (ty-print-sig-idx ma)) ; mn_print_i64
-    (write-extern-decl! m (ty-write-sig-idx ma)) ; mn_write_stderr
-    (write-extern-decl! m (ty-alloc-sig-idx ma)) ; mn_alloc
-    (write-extern-decl! m (func-type-idx-for-arity 0)) ; mn_nil
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_cons
-    (write-extern-decl! m (func-type-idx-for-arity 0)) ; mn_none
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_some
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_ok
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_err
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_tag
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_slot
-    (write-extern-decl! m (ty-print-sig-idx ma)) ; mn_print_str
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_str_new
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_str_concat
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_str_byte_length
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_str_byte
-    (write-extern-decl! m (func-type-idx-for-arity 3)) ; mn_str_slice
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_ref_new
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_ref_deref
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_ref_set
-    (write-extern-decl! m (func-type-idx-for-arity 0)) ; mn_sb_new
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_sb_append
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_sb_append_byte
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_sb_take_str
-    (write-extern-decl! m (func-type-idx-for-arity 0)) ; mn_map_new
-    (write-extern-decl! m (func-type-idx-for-arity 3)) ; mn_map_set
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_map_get
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_map_has
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_map_size
-    (write-extern-decl! m (func-type-idx-for-arity 0)) ; mn_env_0
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_env_1
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_env_get
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_closure_new
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_apply_1
-    (write-extern-decl! m (ty-init-sig-idx ma)) ; mn_init
-    (write-extern-decl! m (func-type-idx-for-arity 0)) ; mn_arg_count
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_arg
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_read_file
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_write_file
-    (write-extern-decl! m (ty-print-sig-idx ma)) ; mn_exit void(i64)
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_new
-    (write-extern-decl! m (func-type-idx-for-arity 3)) ; mn_set_slot
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_apply_0
-    (write-extern-decl! m (func-type-idx-for-arity 3)) ; mn_apply_2
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_closure_bare
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_ctor_closure
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_show
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_env_new
-    (write-extern-decl! m (func-type-idx-for-arity 3)) ; mn_env_set
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_equal
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_compare
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_write (i64, i64) -> i64
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_sb_length
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_dump
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_spawn
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_getenv
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_exists
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_rename
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_root_keep
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_root_get
-    (write-extern-decl! m (func-type-idx-for-arity 0)) ; mn_root_save
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_root_restore
-    (write-extern-decl! m (ty-write-sig-idx ma)) ; mn_root_push(ptr, i64)
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_float_from_str
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_fadd
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_fsub
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_fmul
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_fdiv
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_spawn_capture
-    (write-extern-decl! m (ty-panic-sig-idx ma)) ; mn_panic
-    (write-extern-decl! m (ty-write-sig-idx ma)) ; mn_trace_push void(ptr, i64)
-    (write-extern-decl! m (ty-pop-sig-idx ma)) ; mn_trace_pop void()
-    (write-extern-decl! m (ty-panic-at-sig-idx ma)) ; mn_panic_at void(ptr, i64, ptr)
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_isatty
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_mtime
-    (write-extern-decl! m (func-type-idx-for-arity 0)) ; mn_cwd
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_ensure_dir
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_list_dir
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_realpath
-    (write-extern-decl! m (func-type-idx-for-arity 0)) ; mn_now_ms
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_remove
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_is_dir
-    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_sb_to_str
-    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_slot_get
-    (write-extern-decl! m (func-type-idx-for-arity 3)))) ; mn_slot_set
+let write-extern-decls!(m: BitSink, ma: Int) -> Unit {
+  write-extern-decl!(m, ty-write-sig-idx(ma))
+  write-extern-decl!(m, ty-print-sig-idx(ma))
+  write-extern-decl!(m, ty-write-sig-idx(ma))
+  write-extern-decl!(m, ty-alloc-sig-idx(ma))
+  write-extern-decl!(m, func-type-idx-for-arity(0))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(0))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, ty-print-sig-idx(ma))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(3))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(0))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(0))
+  write-extern-decl!(m, func-type-idx-for-arity(3))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(0))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, ty-init-sig-idx(ma))
+  write-extern-decl!(m, func-type-idx-for-arity(0))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, ty-print-sig-idx(ma))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(3))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(3))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(3))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(0))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, ty-write-sig-idx(ma))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, ty-panic-sig-idx(ma))
+  write-extern-decl!(m, ty-write-sig-idx(ma))
+  write-extern-decl!(m, ty-pop-sig-idx(ma))
+  write-extern-decl!(m, ty-panic-at-sig-idx(ma))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(0))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(0))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(3))
+}
 
-(defn write-import-decls! (m: BitSink) (imps: (List Imp)) -> Unit
-  (match imps
-    [] ()
-    (Cons (Imp _ _ ar) rest)
-      (do
-        (write-extern-decl! m (func-type-idx-for-arity ar))
-        (write-import-decls! m rest))))
+ ; mn_slot_set
 
-(defn imp-length (imps: (List Imp)) -> Int
-  (match imps [] 0 (Cons _ rest) (+ 1 (imp-length rest))))
+let write-import-decls!(m: BitSink, imps: List Imp) -> Unit =
+  match (imps)
+    | [] -> ()
+    | Cons(Imp(_, _, ar), rest) ->
+      {
+        write-extern-decl!(m, func-type-idx-for-arity(ar))
+        write-import-decls!(m, rest)
+      }
 
-(defn max-imp-arity (imps: (List Imp)) (acc: Int) -> Int
-  (match imps
-    [] acc
-    (Cons (Imp _ _ ar) rest) (if (> ar acc) (max-imp-arity rest ar) (max-imp-arity rest acc))))
+let imp-length(imps: List Imp) -> Int =
+  match (imps)
+    | [] -> 0
+    | Cons(_, rest) -> 1 + imp-length(rest)
 
-(defn write-import-vst! (v: BitSink) (imps: (List Imp)) (idx: Int) -> Unit
-  (match imps
-    [] ()
-    (Cons (Imp _ link _) rest)
-      (do
-        (write-record! v vst-code-entry (Cons idx (str-byte-ops link)))
-        (write-import-vst! v rest (+ idx 1)))))
+let max-imp-arity(imps: List Imp, acc: Int) -> Int =
+  match (imps)
+    | [] -> acc
+    | Cons(Imp(_, _, ar), rest) ->
+      if ar > acc -> max-imp-arity(rest, ar)
+       | else -> max-imp-arity(rest, acc)
+
+let write-import-vst!(v: BitSink, imps: List Imp, idx: Int) -> Unit =
+  match (imps)
+    | [] -> ()
+    | Cons(Imp(_, link, _), rest) ->
+      {
+        write-record!(v, vst-code-entry, Cons(idx, str-byte-ops(link)))
+        write-import-vst!(v, rest, idx + 1)
+      }
 
 ; ---------------------------------------------------------------------------
 ; `MODULE_CODE_GLOBALVAR` — one per string in `LlvmModule`'s `globals`,
@@ -525,19 +636,21 @@
 ; that function): with `S` strings declared as `GLOBALVAR`s first, string
 ; `i`'s initializer is the `i`-th constant declared there, at abs id
 ; `num-strings + extern-count + num-funcs + i` — `init-base` below.
-(let globalvar-flags 3) ; isconst(1) | explicit-type(2)
+let globalvar-flags = 3
 
-(defn write-globalvar! (m: BitSink) (ma: Int) (i: Int) (len: Int) (init-base: Int) -> Unit
-  (write-record! m module-code-globalvar
-    [(ty-str-array-idx ma i) globalvar-flags (+ init-base i 1) 0 0 0 0 0 0 0 0 0 0 0]))
+ ; isconst(1) | explicit-type(2)
 
-(defn write-globalvars! (m: BitSink) (ma: Int) (lens: (List Int)) (i: Int) (init-base: Int) -> Unit
-  (match lens
-    [] ()
-    (Cons len rest)
-      (do
-        (write-globalvar! m ma i len init-base)
-        (write-globalvars! m ma rest (+ i 1) init-base))))
+let write-globalvar!(m: BitSink, ma: Int, i: Int, len: Int, init-base: Int) -> Unit =
+  write-record!(m, module-code-globalvar, [ty-str-array-idx(ma, i), globalvar-flags, init-base + i + 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+
+let write-globalvars!(m: BitSink, ma: Int, lens: List Int, i: Int, init-base: Int) -> Unit =
+  match (lens)
+    | [] -> ()
+    | Cons(len, rest) ->
+      {
+        write-globalvar!(m, ma, i, len, init-base)
+        write-globalvars!(m, ma, rest, i + 1, init-base)
+      }
 
 ; ---------------------------------------------------------------------------
 ; The module-level `CONSTANTS_BLOCK` holding every string global's own
@@ -551,22 +664,22 @@
 ; where a real `llvm-as`-assembled module places it, which is what fixes
 ; each initializer's own abs id to continue the same numbering `write-
 ; globalvar!`'s `init-base` already assumes.
-(defn write-global-const! (c: BitSink) (ma: Int) (i: Int) (s: Str) -> Unit
-  (do
-    (write-record! c cst-code-settype [(ty-str-array-idx ma i)])
     ; A zero-length array is `zeroinitializer` (`CST_CODE_NULL`). An empty
     ; `CST_CODE_STRING` record is rejected as "Invalid string record".
-    (if (= (str-byte-length s) 0)
-      (write-record! c cst-code-null [])
-      (write-record! c cst-code-string (str-byte-ops s)))))
+let write-global-const!(c: BitSink, ma: Int, i: Int, s: Str) -> Unit {
+  write-record!(c, cst-code-settype, [ty-str-array-idx(ma, i)])
+  if str-byte-length(s) == 0 -> write-record!(c, cst-code-null, [])
+   | else -> write-record!(c, cst-code-string, str-byte-ops(s))
+}
 
-(defn write-global-consts! (c: BitSink) (ma: Int) (globals: (List Str)) (i: Int) -> Unit
-  (match globals
-    [] ()
-    (Cons s rest)
-      (do
-        (write-global-const! c ma i s)
-        (write-global-consts! c ma rest (+ i 1)))))
+let write-global-consts!(c: BitSink, ma: Int, globals: List Str, i: Int) -> Unit =
+  match (globals)
+    | [] -> ()
+    | Cons(s, rest) ->
+      {
+        write-global-const!(c, ma, i, s)
+        write-global-consts!(c, ma, rest, i + 1)
+      }
 
 ; ---------------------------------------------------------------------------
 ; Encoding an `Int` constant as LLVM's usual sign-rotated `i64`/`i32`
@@ -575,30 +688,29 @@
 ; distinct constant it interns (see `llvm-ir.mnd`'s `IConstI64`/
 ; `IConstI32`); this module only ever writes the already-encoded integer
 ; it is handed.
-(pub defn encode-signed-i64 (v: Int) -> Int
-  (if (>= v 0) (* v 2) (+ (* (- v) 2) 1)))
+pub let encode-signed-i64(v: Int) -> Int =
+  if v >= 0 -> v * 2
+   | else -> -v * 2 + 1
 
 ; `SETTYPE ty; INTEGER encoded` (or `NULL` for the zero shortcut, exactly
 ; as slice 2A's single-constant writer used) — one function-local constant,
 ; consuming the next value id exactly like an instruction (see
 ; `llvm-ir.mnd`'s "Constants are interleaved" note).
-(defn write-const! (c: BitSink) (ty: Int) (encoded: Int) -> Unit
-  (do
-    (write-record! c cst-code-settype [ty])
-    (if (= encoded 0)
-      (write-record! c cst-code-null [])
-      (write-record! c cst-code-integer [encoded]))))
+let write-const!(c: BitSink, ty: Int, encoded: Int) -> Unit {
+  write-record!(c, cst-code-settype, [ty])
+  if encoded == 0 -> write-record!(c, cst-code-null, [])
+   | else -> write-record!(c, cst-code-integer, [encoded])
+}
 
 ; `cc = 0` (ccc, spec §3.4's "C calling convention everywhere") with bit
 ; 15 (`1 << 15`) set — "explicit callee type follows", required with
 ; opaque pointers (the callee's function type can't be read off the
 ; pointee type of an opaque `ptr @callee`). Confirmed against the dump —
 ; see `write-ssa.ts`'s header comment.
-(let call-cc-info 32768)
+let call-cc-info = 32768
 
-(defn write-call! (f: BitSink) (callee-rel: Int) (arg-rels: (List Int)) -> Unit
-  (write-record! f func-code-inst-call
-    (Cons 0 (Cons call-cc-info (Cons (func-type-idx-for-arity (int-list-length arg-rels)) (Cons callee-rel arg-rels)))))) 
+let write-call!(f: BitSink, callee-rel: Int, arg-rels: List Int) -> Unit =
+  write-record!(f, func-code-inst-call, Cons(0, Cons(call-cc-info, Cons(func-type-idx-for-arity(int-list-length(arg-rels)), Cons(callee-rel, arg-rels)))))
 
 ; `println`/`print`/`write` lowering's void call — same record shape as
 ; `write-call!` (the format doesn't distinguish "produces a value" from
@@ -607,54 +719,56 @@
 ; `fnty`), except `fnty` is one of the two fixed extern signatures
 ; (`llvm-ir.mnd`'s `ICallVoid` doc comment for why `kind`, not arity,
 ; picks it) rather than a `(i64^n)->i64` family member.
-(defn write-call-void! (f: BitSink) (ma: Int) (kind: Int) (callee-rel: Int) (arg-rels: (List Int)) -> Unit
-  (do
-    (let fnty
-      (cond
-        ((= kind extern-kind-write) (ty-write-sig-idx ma))
-        ((= kind extern-kind-init) (ty-init-sig-idx ma))
-        ((= kind extern-kind-panic) (ty-panic-sig-idx ma))
-        ((= kind extern-kind-trace-push) (ty-write-sig-idx ma))
-        ((= kind extern-kind-trace-pop) (ty-pop-sig-idx ma))
-        ((= kind extern-kind-panic-at) (ty-panic-at-sig-idx ma))
-        (else (ty-print-sig-idx ma))))
-    (write-record! f func-code-inst-call
-      (Cons 0 (Cons call-cc-info (Cons fnty (Cons callee-rel arg-rels)))))))
+let write-call-void!(f: BitSink, ma: Int, kind: Int, callee-rel: Int, arg-rels: List Int) -> Unit {
+  let fnty =
+    if kind == extern-kind-write -> ty-write-sig-idx(ma)
+     | kind == extern-kind-init -> ty-init-sig-idx(ma)
+     | kind == extern-kind-panic -> ty-panic-sig-idx(ma)
+     | kind == extern-kind-trace-push -> ty-write-sig-idx(ma)
+     | kind == extern-kind-trace-pop -> ty-pop-sig-idx(ma)
+     | kind == extern-kind-panic-at -> ty-panic-at-sig-idx(ma)
+     | else -> ty-print-sig-idx(ma)
+  write-record!(f, func-code-inst-call, Cons(0, Cons(call-cc-info, Cons(fnty, Cons(callee-rel, arg-rels)))))
+}
 
 ; One `Item` -> one record (or, for a constant, one tiny nested
 ; `CONSTANTS_BLOCK`). See `llvm-ir.mnd`'s header comment for exactly what
 ; each field means and which are (and are not) already relative. `ma`
 ; (max user-function arity) is only needed for `ICallVoid`'s `fnty`
 ; lookup above.
-(defn write-item! (f: BitSink) (ma: Int) (item: Item) -> Unit
-  (match item
-    (IConstI64 enc) (enter-subblock! f constants-block-id (fn (c) (write-const! c ty-i64 enc)))
-    (IConstI32 enc) (enter-subblock! f constants-block-id (fn (c) (write-const! c ty-i32 enc)))
     ; [allocatedTy(i64), sizeTy(i32), sizeValAbs, align|explicitType] —
     ; align 8 -> log2(8)+1 = 4; bit 6 (64) is the opaque-pointer "explicit
     ; allocated type" flag, always set here (confirmed against the dump).
-    (IAlloca size-abs) (write-record! f func-code-inst-alloca [ty-i64 ty-i32 size-abs 68])
-    (IBinop op lhs rhs) (write-record! f func-code-inst-binop [lhs rhs op])
-    (ICmp2 pred lhs rhs) (write-record! f func-code-inst-cmp2 [lhs rhs pred])
-    (ICast op val ty) (write-record! f func-code-inst-cast [val ty op])
     ; [ptrRel, valRel, alignCode, isVolatile] — align 8 -> 4, no explicit
     ; type bit (only `alloca` carries that one).
-    (IStore ptr val) (write-record! f func-code-inst-store [ptr val 4 0])
     ; [ptrRel, destTypeIdx, alignCode, isVolatile] — needs the explicit
     ; type (the opposite direction from `store`: nothing else tells the
     ; reader what is being loaded through an opaque `ptr`).
-    (ILoad ptr) (write-record! f func-code-inst-load [ptr ty-i64 4 0])
-    (IBr bb) (write-record! f func-code-inst-br [bb])
-    (ICondBr t e cond) (write-record! f func-code-inst-br [t e cond])
-    (ICall callee args) (write-call! f callee args)
-    (ICallVoid kind callee args) (write-call-void! f ma kind callee args)
-    (IRet val) (write-record! f func-code-inst-ret [val])
-    (IUnreachable) (write-record! f func-code-inst-unreachable [])))
+let write-item!(f: BitSink, ma: Int, item: Item) -> Unit =
+  match (item)
+    | IConstI64(enc) -> enter-subblock!(f, constants-block-id, fn (c) = write-const!(c, ty-i64, enc))
+    | IConstI32(enc) -> enter-subblock!(f, constants-block-id, fn (c) = write-const!(c, ty-i32, enc))
+    | IAlloca(size-abs) -> write-record!(f, func-code-inst-alloca, [ty-i64, ty-i32, size-abs, 68])
+    | IBinop(op, lhs, rhs) -> write-record!(f, func-code-inst-binop, [lhs, rhs, op])
+    | ICmp2(pred, lhs, rhs) -> write-record!(f, func-code-inst-cmp2, [lhs, rhs, pred])
+    | ICast(op, val, ty) -> write-record!(f, func-code-inst-cast, [val, ty, op])
+    | IStore(ptr, val) -> write-record!(f, func-code-inst-store, [ptr, val, 4, 0])
+    | ILoad(ptr) -> write-record!(f, func-code-inst-load, [ptr, ty-i64, 4, 0])
+    | IBr(bb) -> write-record!(f, func-code-inst-br, [bb])
+    | ICondBr(t, e, cond) -> write-record!(f, func-code-inst-br, [t, e, cond])
+    | ICall(callee, args) -> write-call!(f, callee, args)
+    | ICallVoid(kind, callee, args) -> write-call-void!(f, ma, kind, callee, args)
+    | IRet(val) -> write-record!(f, func-code-inst-ret, [val])
+    | IUnreachable -> write-record!(f, func-code-inst-unreachable, [])
 
-(defn write-items! (f: BitSink) (ma: Int) (items: (List Item)) -> Unit
-  (match items
-    [] ()
-    (Cons it rest) (do (write-item! f ma it) (write-items! f ma rest))))
+let write-items!(f: BitSink, ma: Int, items: List Item) -> Unit =
+  match (items)
+    | [] -> ()
+    | Cons(it, rest) ->
+      {
+        write-item!(f, ma, it)
+        write-items!(f, ma, rest)
+      }
 
 ; One function's `FUNCTION_BLOCK`: `DECLAREBLOCKS`, then every `Item` in
 ; stream order (see `llvm-ir.mnd`'s "Basic blocks are implicit" note — no
@@ -663,133 +777,137 @@
 ; `VALUE_SYMTAB` inside the function body — see slice 2A's rationale
 ; (unnamed SSA values are perfectly valid IR; only the module-level
 ; `VALUE_SYMTAB` naming each `@function` is written, below).
-(defn write-function-body! (f: BitSink) (ma: Int) (lf: LFunc) -> Unit
-  (do
-    (write-record! f func-code-declareblocks [(lfunc-nblocks lf)])
-    (write-items! f ma (lfunc-items lf))))
+let write-function-body!(f: BitSink, ma: Int, lf: LFunc) -> Unit {
+  write-record!(f, func-code-declareblocks, [lfunc-nblocks(lf)])
+  write-items!(f, ma, lfunc-items(lf))
+}
 
-(defn write-function-bodies! (m: BitSink) (ma: Int) (fs: (List LFunc)) -> Unit
-  (match fs
-    [] ()
-    (Cons f rest)
-      (do
-        (enter-subblock! m function-block-id (fn (fb) (write-function-body! fb ma f)))
-        (write-function-bodies! m ma rest))))
+let write-function-bodies!(m: BitSink, ma: Int, fs: List LFunc) -> Unit =
+  match (fs)
+    | [] -> ()
+    | Cons(f, rest) ->
+      {
+        enter-subblock!(m, function-block-id, fn (fb) = write-function-body!(fb, ma, f))
+        write-function-bodies!(m, ma, rest)
+      }
 
 ; `VST_CODE_ENTRY [valueid, char...]` — one per user function, `valueid`
 ; its module-scope global value id (`idx`, matching `write-function-
 ; decls!`'s numbering exactly: `num-strings + extern-count + list
 ; position`, since `write-module-body!` writes strings, then externs,
 ; then every user function's own declaration, in that fixed order).
-(defn write-vst-entries! (v: BitSink) (fs: (List LFunc)) (idx: Int) -> Unit
-  (match fs
-    [] ()
-    (Cons f rest)
-      (do
-        (write-record! v vst-code-entry (Cons idx (str-byte-ops (lfunc-name f))))
-        (write-vst-entries! v rest (+ idx 1)))))
+let write-vst-entries!(v: BitSink, fs: List LFunc, idx: Int) -> Unit =
+  match (fs)
+    | [] -> ()
+    | Cons(f, rest) ->
+      {
+        write-record!(v, vst-code-entry, Cons(idx, str-byte-ops(lfunc-name(f))))
+        write-vst-entries!(v, rest, idx + 1)
+      }
 
 ; The three fixed runtime externs' own `VST_CODE_ENTRY`s — unlike a
 ; string global (never named, see `write-globalvar!`'s doc comment),
 ; these *must* be named: the linker resolves each one against the real
 ; `mn_write_stdout`/`mn_print_i64`/`mn_write_stderr` C symbol
 ; (`runtime/src/print.c`) by exactly this name.
-(defn write-extern-vst-entries! (v: BitSink) (num-strings: Int) -> Unit
-  (do
-    (write-record! v vst-code-entry (Cons (extern-write-stdout-abs num-strings) (str-byte-ops "mn_write_stdout")))
-    (write-record! v vst-code-entry (Cons (extern-print-i64-abs num-strings) (str-byte-ops "mn_print_i64")))
-    (write-record! v vst-code-entry (Cons (extern-write-stderr-abs num-strings) (str-byte-ops "mn_write_stderr")))
-    (write-record! v vst-code-entry (Cons (extern-alloc-abs num-strings) (str-byte-ops "mn_alloc")))
-    (write-record! v vst-code-entry (Cons (extern-nil-abs num-strings) (str-byte-ops "mn_nil")))
-    (write-record! v vst-code-entry (Cons (extern-cons-abs num-strings) (str-byte-ops "mn_cons")))
-    (write-record! v vst-code-entry (Cons (extern-none-abs num-strings) (str-byte-ops "mn_none")))
-    (write-record! v vst-code-entry (Cons (extern-some-abs num-strings) (str-byte-ops "mn_some")))
-    (write-record! v vst-code-entry (Cons (extern-ok-abs num-strings) (str-byte-ops "mn_ok")))
-    (write-record! v vst-code-entry (Cons (extern-err-abs num-strings) (str-byte-ops "mn_err")))
-    (write-record! v vst-code-entry (Cons (extern-tag-abs num-strings) (str-byte-ops "mn_tag")))
-    (write-record! v vst-code-entry (Cons (extern-slot-abs num-strings) (str-byte-ops "mn_slot")))
-    (write-record! v vst-code-entry (Cons (extern-print-str-abs num-strings) (str-byte-ops "mn_print_str")))
-    (write-record! v vst-code-entry (Cons (extern-str-new-abs num-strings) (str-byte-ops "mn_str_new")))
-    (write-record! v vst-code-entry (Cons (extern-str-concat-abs num-strings) (str-byte-ops "mn_str_concat")))
-    (write-record! v vst-code-entry (Cons (extern-str-byte-length-abs num-strings) (str-byte-ops "mn_str_byte_length")))
-    (write-record! v vst-code-entry (Cons (extern-str-byte-abs num-strings) (str-byte-ops "mn_str_byte")))
-    (write-record! v vst-code-entry (Cons (extern-str-slice-abs num-strings) (str-byte-ops "mn_str_slice")))
-    (write-record! v vst-code-entry (Cons (extern-ref-new-abs num-strings) (str-byte-ops "mn_ref_new")))
-    (write-record! v vst-code-entry (Cons (extern-ref-deref-abs num-strings) (str-byte-ops "mn_ref_deref")))
-    (write-record! v vst-code-entry (Cons (extern-ref-set-abs num-strings) (str-byte-ops "mn_ref_set")))
-    (write-record! v vst-code-entry (Cons (extern-sb-new-abs num-strings) (str-byte-ops "mn_sb_new")))
-    (write-record! v vst-code-entry (Cons (extern-sb-append-abs num-strings) (str-byte-ops "mn_sb_append")))
-    (write-record! v vst-code-entry (Cons (extern-sb-append-byte-abs num-strings) (str-byte-ops "mn_sb_append_byte")))
-    (write-record! v vst-code-entry (Cons (extern-sb-take-str-abs num-strings) (str-byte-ops "mn_sb_take_str")))
-    (write-record! v vst-code-entry (Cons (extern-map-new-abs num-strings) (str-byte-ops "mn_map_new")))
-    (write-record! v vst-code-entry (Cons (extern-map-set-abs num-strings) (str-byte-ops "mn_map_set")))
-    (write-record! v vst-code-entry (Cons (extern-map-get-abs num-strings) (str-byte-ops "mn_map_get")))
-    (write-record! v vst-code-entry (Cons (extern-map-has-abs num-strings) (str-byte-ops "mn_map_has")))
-    (write-record! v vst-code-entry (Cons (extern-map-size-abs num-strings) (str-byte-ops "mn_map_size")))
-    (write-record! v vst-code-entry (Cons (extern-env-0-abs num-strings) (str-byte-ops "mn_env_0")))
-    (write-record! v vst-code-entry (Cons (extern-env-1-abs num-strings) (str-byte-ops "mn_env_1")))
-    (write-record! v vst-code-entry (Cons (extern-env-get-abs num-strings) (str-byte-ops "mn_env_get")))
-    (write-record! v vst-code-entry (Cons (extern-closure-new-abs num-strings) (str-byte-ops "mn_closure_new")))
-    (write-record! v vst-code-entry (Cons (extern-apply-1-abs num-strings) (str-byte-ops "mn_apply_1")))
-    (write-record! v vst-code-entry (Cons (extern-init-abs num-strings) (str-byte-ops "mn_init")))
-    (write-record! v vst-code-entry (Cons (extern-arg-count-abs num-strings) (str-byte-ops "mn_arg_count")))
-    (write-record! v vst-code-entry (Cons (extern-arg-abs num-strings) (str-byte-ops "mn_arg")))
-    (write-record! v vst-code-entry (Cons (extern-read-file-abs num-strings) (str-byte-ops "mn_read_file")))
-    (write-record! v vst-code-entry (Cons (extern-write-file-abs num-strings) (str-byte-ops "mn_write_file")))
-    (write-record! v vst-code-entry (Cons (extern-exit-abs num-strings) (str-byte-ops "mn_exit")))
-    (write-record! v vst-code-entry (Cons (extern-new-abs num-strings) (str-byte-ops "mn_new")))
-    (write-record! v vst-code-entry (Cons (extern-set-slot-abs num-strings) (str-byte-ops "mn_set_slot")))
-    (write-record! v vst-code-entry (Cons (extern-apply-0-abs num-strings) (str-byte-ops "mn_apply_0")))
-    (write-record! v vst-code-entry (Cons (extern-apply-2-abs num-strings) (str-byte-ops "mn_apply_2")))
-    (write-record! v vst-code-entry (Cons (extern-closure-bare-abs num-strings) (str-byte-ops "mn_closure_bare")))
-    (write-record! v vst-code-entry (Cons (extern-ctor-closure-abs num-strings) (str-byte-ops "mn_ctor_closure")))
-    (write-record! v vst-code-entry (Cons (extern-show-abs num-strings) (str-byte-ops "mn_show")))
-    (write-record! v vst-code-entry (Cons (extern-env-new-abs num-strings) (str-byte-ops "mn_env_new")))
-    (write-record! v vst-code-entry (Cons (extern-env-set-abs num-strings) (str-byte-ops "mn_env_set")))
-    (write-record! v vst-code-entry (Cons (extern-equal-abs num-strings) (str-byte-ops "mn_equal")))
-    (write-record! v vst-code-entry (Cons (extern-compare-abs num-strings) (str-byte-ops "mn_compare")))
-    (write-record! v vst-code-entry (Cons (extern-write-abs num-strings) (str-byte-ops "mn_write")))
-    (write-record! v vst-code-entry (Cons (extern-sb-length-abs num-strings) (str-byte-ops "mn_sb_length")))
-    (write-record! v vst-code-entry (Cons (extern-dump-abs num-strings) (str-byte-ops "mn_dump")))
-    (write-record! v vst-code-entry (Cons (extern-spawn-abs num-strings) (str-byte-ops "mn_spawn")))
-    (write-record! v vst-code-entry (Cons (extern-getenv-abs num-strings) (str-byte-ops "mn_getenv")))
-    (write-record! v vst-code-entry (Cons (extern-exists-abs num-strings) (str-byte-ops "mn_exists")))
-    (write-record! v vst-code-entry (Cons (extern-rename-abs num-strings) (str-byte-ops "mn_rename")))
-    (write-record! v vst-code-entry (Cons (extern-root-keep-abs num-strings) (str-byte-ops "mn_root_keep")))
-    (write-record! v vst-code-entry (Cons (extern-root-get-abs num-strings) (str-byte-ops "mn_root_get")))
-    (write-record! v vst-code-entry (Cons (extern-root-save-abs num-strings) (str-byte-ops "mn_root_save")))
-    (write-record! v vst-code-entry (Cons (extern-root-restore-abs num-strings) (str-byte-ops "mn_root_restore")))
-    (write-record! v vst-code-entry (Cons (extern-root-push-abs num-strings) (str-byte-ops "mn_root_push")))
-    (write-record! v vst-code-entry (Cons (extern-float-from-str-abs num-strings) (str-byte-ops "mn_float_from_str")))
-    (write-record! v vst-code-entry (Cons (extern-fadd-abs num-strings) (str-byte-ops "mn_fadd")))
-    (write-record! v vst-code-entry (Cons (extern-fsub-abs num-strings) (str-byte-ops "mn_fsub")))
-    (write-record! v vst-code-entry (Cons (extern-fmul-abs num-strings) (str-byte-ops "mn_fmul")))
-    (write-record! v vst-code-entry (Cons (extern-fdiv-abs num-strings) (str-byte-ops "mn_fdiv")))
-    (write-record! v vst-code-entry (Cons (extern-spawn-capture-abs num-strings) (str-byte-ops "mn_spawn_capture")))
-    (write-record! v vst-code-entry (Cons (extern-panic-abs num-strings) (str-byte-ops "mn_panic")))
-    (write-record! v vst-code-entry (Cons (extern-trace-push-abs num-strings) (str-byte-ops "mn_trace_push")))
-    (write-record! v vst-code-entry (Cons (extern-trace-pop-abs num-strings) (str-byte-ops "mn_trace_pop")))
-    (write-record! v vst-code-entry (Cons (extern-panic-at-abs num-strings) (str-byte-ops "mn_panic_at")))
-    (write-record! v vst-code-entry (Cons (extern-isatty-abs num-strings) (str-byte-ops "mn_isatty")))
-    (write-record! v vst-code-entry (Cons (extern-mtime-abs num-strings) (str-byte-ops "mn_mtime")))
-    (write-record! v vst-code-entry (Cons (extern-cwd-abs num-strings) (str-byte-ops "mn_cwd")))
-    (write-record! v vst-code-entry (Cons (extern-ensure-dir-abs num-strings) (str-byte-ops "mn_ensure_dir")))
-    (write-record! v vst-code-entry (Cons (extern-list-dir-abs num-strings) (str-byte-ops "mn_list_dir")))
-    (write-record! v vst-code-entry (Cons (extern-realpath-abs num-strings) (str-byte-ops "mn_realpath")))
-    (write-record! v vst-code-entry (Cons (extern-now-ms-abs num-strings) (str-byte-ops "mn_now_ms")))
-    (write-record! v vst-code-entry (Cons (extern-remove-abs num-strings) (str-byte-ops "mn_remove")))
-    (write-record! v vst-code-entry (Cons (extern-is-dir-abs num-strings) (str-byte-ops "mn_is_dir")))
-    (write-record! v vst-code-entry (Cons (extern-sb-to-str-abs num-strings) (str-byte-ops "mn_sb_to_str")))
-    (write-record! v vst-code-entry (Cons (extern-slot-get-abs num-strings) (str-byte-ops "mn_slot_get")))
-    (write-record! v vst-code-entry (Cons (extern-slot-set-abs num-strings) (str-byte-ops "mn_slot_set")))))
+let write-extern-vst-entries!(v: BitSink, num-strings: Int) -> Unit {
+  write-record!(v, vst-code-entry, Cons(extern-write-stdout-abs(num-strings), str-byte-ops("mn_write_stdout")))
+  write-record!(v, vst-code-entry, Cons(extern-print-i64-abs(num-strings), str-byte-ops("mn_print_i64")))
+  write-record!(v, vst-code-entry, Cons(extern-write-stderr-abs(num-strings), str-byte-ops("mn_write_stderr")))
+  write-record!(v, vst-code-entry, Cons(extern-alloc-abs(num-strings), str-byte-ops("mn_alloc")))
+  write-record!(v, vst-code-entry, Cons(extern-nil-abs(num-strings), str-byte-ops("mn_nil")))
+  write-record!(v, vst-code-entry, Cons(extern-cons-abs(num-strings), str-byte-ops("mn_cons")))
+  write-record!(v, vst-code-entry, Cons(extern-none-abs(num-strings), str-byte-ops("mn_none")))
+  write-record!(v, vst-code-entry, Cons(extern-some-abs(num-strings), str-byte-ops("mn_some")))
+  write-record!(v, vst-code-entry, Cons(extern-ok-abs(num-strings), str-byte-ops("mn_ok")))
+  write-record!(v, vst-code-entry, Cons(extern-err-abs(num-strings), str-byte-ops("mn_err")))
+  write-record!(v, vst-code-entry, Cons(extern-tag-abs(num-strings), str-byte-ops("mn_tag")))
+  write-record!(v, vst-code-entry, Cons(extern-slot-abs(num-strings), str-byte-ops("mn_slot")))
+  write-record!(v, vst-code-entry, Cons(extern-print-str-abs(num-strings), str-byte-ops("mn_print_str")))
+  write-record!(v, vst-code-entry, Cons(extern-str-new-abs(num-strings), str-byte-ops("mn_str_new")))
+  write-record!(v, vst-code-entry, Cons(extern-str-concat-abs(num-strings), str-byte-ops("mn_str_concat")))
+  write-record!(v, vst-code-entry, Cons(extern-str-byte-length-abs(num-strings), str-byte-ops("mn_str_byte_length")))
+  write-record!(v, vst-code-entry, Cons(extern-str-byte-abs(num-strings), str-byte-ops("mn_str_byte")))
+  write-record!(v, vst-code-entry, Cons(extern-str-slice-abs(num-strings), str-byte-ops("mn_str_slice")))
+  write-record!(v, vst-code-entry, Cons(extern-ref-new-abs(num-strings), str-byte-ops("mn_ref_new")))
+  write-record!(v, vst-code-entry, Cons(extern-ref-deref-abs(num-strings), str-byte-ops("mn_ref_deref")))
+  write-record!(v, vst-code-entry, Cons(extern-ref-set-abs(num-strings), str-byte-ops("mn_ref_set")))
+  write-record!(v, vst-code-entry, Cons(extern-sb-new-abs(num-strings), str-byte-ops("mn_sb_new")))
+  write-record!(v, vst-code-entry, Cons(extern-sb-append-abs(num-strings), str-byte-ops("mn_sb_append")))
+  write-record!(v, vst-code-entry, Cons(extern-sb-append-byte-abs(num-strings), str-byte-ops("mn_sb_append_byte")))
+  write-record!(v, vst-code-entry, Cons(extern-sb-take-str-abs(num-strings), str-byte-ops("mn_sb_take_str")))
+  write-record!(v, vst-code-entry, Cons(extern-map-new-abs(num-strings), str-byte-ops("mn_map_new")))
+  write-record!(v, vst-code-entry, Cons(extern-map-set-abs(num-strings), str-byte-ops("mn_map_set")))
+  write-record!(v, vst-code-entry, Cons(extern-map-get-abs(num-strings), str-byte-ops("mn_map_get")))
+  write-record!(v, vst-code-entry, Cons(extern-map-has-abs(num-strings), str-byte-ops("mn_map_has")))
+  write-record!(v, vst-code-entry, Cons(extern-map-size-abs(num-strings), str-byte-ops("mn_map_size")))
+  write-record!(v, vst-code-entry, Cons(extern-env-0-abs(num-strings), str-byte-ops("mn_env_0")))
+  write-record!(v, vst-code-entry, Cons(extern-env-1-abs(num-strings), str-byte-ops("mn_env_1")))
+  write-record!(v, vst-code-entry, Cons(extern-env-get-abs(num-strings), str-byte-ops("mn_env_get")))
+  write-record!(v, vst-code-entry, Cons(extern-closure-new-abs(num-strings), str-byte-ops("mn_closure_new")))
+  write-record!(v, vst-code-entry, Cons(extern-apply-1-abs(num-strings), str-byte-ops("mn_apply_1")))
+  write-record!(v, vst-code-entry, Cons(extern-init-abs(num-strings), str-byte-ops("mn_init")))
+  write-record!(v, vst-code-entry, Cons(extern-arg-count-abs(num-strings), str-byte-ops("mn_arg_count")))
+  write-record!(v, vst-code-entry, Cons(extern-arg-abs(num-strings), str-byte-ops("mn_arg")))
+  write-record!(v, vst-code-entry, Cons(extern-read-file-abs(num-strings), str-byte-ops("mn_read_file")))
+  write-record!(v, vst-code-entry, Cons(extern-write-file-abs(num-strings), str-byte-ops("mn_write_file")))
+  write-record!(v, vst-code-entry, Cons(extern-exit-abs(num-strings), str-byte-ops("mn_exit")))
+  write-record!(v, vst-code-entry, Cons(extern-new-abs(num-strings), str-byte-ops("mn_new")))
+  write-record!(v, vst-code-entry, Cons(extern-set-slot-abs(num-strings), str-byte-ops("mn_set_slot")))
+  write-record!(v, vst-code-entry, Cons(extern-apply-0-abs(num-strings), str-byte-ops("mn_apply_0")))
+  write-record!(v, vst-code-entry, Cons(extern-apply-2-abs(num-strings), str-byte-ops("mn_apply_2")))
+  write-record!(v, vst-code-entry, Cons(extern-closure-bare-abs(num-strings), str-byte-ops("mn_closure_bare")))
+  write-record!(v, vst-code-entry, Cons(extern-ctor-closure-abs(num-strings), str-byte-ops("mn_ctor_closure")))
+  write-record!(v, vst-code-entry, Cons(extern-show-abs(num-strings), str-byte-ops("mn_show")))
+  write-record!(v, vst-code-entry, Cons(extern-env-new-abs(num-strings), str-byte-ops("mn_env_new")))
+  write-record!(v, vst-code-entry, Cons(extern-env-set-abs(num-strings), str-byte-ops("mn_env_set")))
+  write-record!(v, vst-code-entry, Cons(extern-equal-abs(num-strings), str-byte-ops("mn_equal")))
+  write-record!(v, vst-code-entry, Cons(extern-compare-abs(num-strings), str-byte-ops("mn_compare")))
+  write-record!(v, vst-code-entry, Cons(extern-write-abs(num-strings), str-byte-ops("mn_write")))
+  write-record!(v, vst-code-entry, Cons(extern-sb-length-abs(num-strings), str-byte-ops("mn_sb_length")))
+  write-record!(v, vst-code-entry, Cons(extern-dump-abs(num-strings), str-byte-ops("mn_dump")))
+  write-record!(v, vst-code-entry, Cons(extern-spawn-abs(num-strings), str-byte-ops("mn_spawn")))
+  write-record!(v, vst-code-entry, Cons(extern-getenv-abs(num-strings), str-byte-ops("mn_getenv")))
+  write-record!(v, vst-code-entry, Cons(extern-exists-abs(num-strings), str-byte-ops("mn_exists")))
+  write-record!(v, vst-code-entry, Cons(extern-rename-abs(num-strings), str-byte-ops("mn_rename")))
+  write-record!(v, vst-code-entry, Cons(extern-root-keep-abs(num-strings), str-byte-ops("mn_root_keep")))
+  write-record!(v, vst-code-entry, Cons(extern-root-get-abs(num-strings), str-byte-ops("mn_root_get")))
+  write-record!(v, vst-code-entry, Cons(extern-root-save-abs(num-strings), str-byte-ops("mn_root_save")))
+  write-record!(v, vst-code-entry, Cons(extern-root-restore-abs(num-strings), str-byte-ops("mn_root_restore")))
+  write-record!(v, vst-code-entry, Cons(extern-root-push-abs(num-strings), str-byte-ops("mn_root_push")))
+  write-record!(v, vst-code-entry, Cons(extern-float-from-str-abs(num-strings), str-byte-ops("mn_float_from_str")))
+  write-record!(v, vst-code-entry, Cons(extern-fadd-abs(num-strings), str-byte-ops("mn_fadd")))
+  write-record!(v, vst-code-entry, Cons(extern-fsub-abs(num-strings), str-byte-ops("mn_fsub")))
+  write-record!(v, vst-code-entry, Cons(extern-fmul-abs(num-strings), str-byte-ops("mn_fmul")))
+  write-record!(v, vst-code-entry, Cons(extern-fdiv-abs(num-strings), str-byte-ops("mn_fdiv")))
+  write-record!(v, vst-code-entry, Cons(extern-spawn-capture-abs(num-strings), str-byte-ops("mn_spawn_capture")))
+  write-record!(v, vst-code-entry, Cons(extern-panic-abs(num-strings), str-byte-ops("mn_panic")))
+  write-record!(v, vst-code-entry, Cons(extern-trace-push-abs(num-strings), str-byte-ops("mn_trace_push")))
+  write-record!(v, vst-code-entry, Cons(extern-trace-pop-abs(num-strings), str-byte-ops("mn_trace_pop")))
+  write-record!(v, vst-code-entry, Cons(extern-panic-at-abs(num-strings), str-byte-ops("mn_panic_at")))
+  write-record!(v, vst-code-entry, Cons(extern-isatty-abs(num-strings), str-byte-ops("mn_isatty")))
+  write-record!(v, vst-code-entry, Cons(extern-mtime-abs(num-strings), str-byte-ops("mn_mtime")))
+  write-record!(v, vst-code-entry, Cons(extern-cwd-abs(num-strings), str-byte-ops("mn_cwd")))
+  write-record!(v, vst-code-entry, Cons(extern-ensure-dir-abs(num-strings), str-byte-ops("mn_ensure_dir")))
+  write-record!(v, vst-code-entry, Cons(extern-list-dir-abs(num-strings), str-byte-ops("mn_list_dir")))
+  write-record!(v, vst-code-entry, Cons(extern-realpath-abs(num-strings), str-byte-ops("mn_realpath")))
+  write-record!(v, vst-code-entry, Cons(extern-now-ms-abs(num-strings), str-byte-ops("mn_now_ms")))
+  write-record!(v, vst-code-entry, Cons(extern-remove-abs(num-strings), str-byte-ops("mn_remove")))
+  write-record!(v, vst-code-entry, Cons(extern-is-dir-abs(num-strings), str-byte-ops("mn_is_dir")))
+  write-record!(v, vst-code-entry, Cons(extern-sb-to-str-abs(num-strings), str-byte-ops("mn_sb_to_str")))
+  write-record!(v, vst-code-entry, Cons(extern-slot-get-abs(num-strings), str-byte-ops("mn_slot_get")))
+  write-record!(v, vst-code-entry, Cons(extern-slot-set-abs(num-strings), str-byte-ops("mn_slot_set")))
+}
 
-(defn lfunc-list-length (fs: (List LFunc)) -> Int
-  (match fs [] 0 (Cons _ rest) (+ 1 (lfunc-list-length rest))))
+let lfunc-list-length(fs: List LFunc) -> Int =
+  match (fs)
+    | [] -> 0
+    | Cons(_, rest) -> 1 + lfunc-list-length(rest)
 
-(defn max-arity-of (fs: (List LFunc)) -> Int
-  (match fs
-    [] 0
-    (Cons f rest) (max-int (lfunc-nparams f) (max-arity-of rest))))
+let max-arity-of(fs: List LFunc) -> Int =
+  match (fs)
+    | [] -> 0
+    | Cons(f, rest) -> max-int(lfunc-nparams(f), max-arity-of(rest))
 
 ; ---------------------------------------------------------------------------
 ; Module value numbering, spelled out once (see `llvm-ir.mnd`'s header
@@ -804,43 +922,53 @@
 ; Clang warns `overriding the module target triple` when this record is
 ; missing or differs from the compiler it is linking with. An empty
 ; string leaves the record out (callers that cannot ask clang).
-(defn write-target-triple! (m: BitSink) (triple: Str) -> Unit
-  (if (= (str-byte-length triple) 0) ()
-    (write-record! m module-code-triple (str-byte-ops triple))))
+let write-target-triple!(m: BitSink, triple: Str) -> Unit =
+  if str-byte-length(triple) == 0 -> ()
+   | else -> write-record!(m, module-code-triple, str-byte-ops(triple))
 
-(defn write-module-body! (m: BitSink) (mod: LlvmModule) (triple: Str) -> Unit
-  (do
-    (let fs (llvm-module-funcs mod))
-    (let globals (llvm-module-globals mod))
-    (let imps (llvm-module-imports mod))
-    (let ni (imp-length imps))
     ; Heap helpers need arities up to 3 (str-slice) even when user code is narrower.
-    (let ma0 (max-arity-of fs))
-    (let ma1 (max-imp-arity imps ma0))
-    (let ma (if (< ma1 3) 3 ma1))
-    (let ns (int-list-length (str-lengths globals)))
-    (write-record! m module-code-version [1]) ; version 1: relative value ids
-    (write-target-triple! m triple)
-    (enter-subblock! m type-block-id (fn (t) (write-types! t ma globals)))
-    (write-globalvars! m ma (str-lengths globals) 0 (+ ns extern-count ni (lfunc-list-length fs)))
-    (write-extern-decls! m ma)
-    (write-import-decls! m imps)
-    (write-function-decls! m fs ma)
-    (enter-subblock! m constants-block-id (fn (c) (write-global-consts! c ma globals 0)))
-    (write-function-bodies! m ma fs)
-    (enter-subblock! m value-symtab-block-id (fn (v) (do (write-extern-vst-entries! v ns) (write-import-vst! v imps (+ ns extern-count)) (write-vst-entries! v fs (+ ns extern-count ni)))))))
+let write-module-body!(m: BitSink, mod: LlvmModule, triple: Str) -> Unit {
+  let fs = llvm-module-funcs(mod)
+  let globals = llvm-module-globals(mod)
+  let imps = llvm-module-imports(mod)
+  let ni = imp-length(imps)
+  let ma0 = max-arity-of(fs)
+  let ma1 = max-imp-arity(imps, ma0)
+  let ma =
+    if ma1 < 3 -> 3
+     | else -> ma1
+  let ns = int-list-length(str-lengths(globals))
+  write-record!(m, module-code-version, [1])
+  write-target-triple!(m, triple)
+  enter-subblock!(m, type-block-id, fn (t) = write-types!(t, ma, globals))
+  write-globalvars!(m, ma, str-lengths(globals), 0, ns + extern-count + ni + lfunc-list-length(fs))
+  write-extern-decls!(m, ma)
+  write-import-decls!(m, imps)
+  write-function-decls!(m, fs, ma)
+  enter-subblock!(m, constants-block-id, fn (c) = write-global-consts!(c, ma, globals, 0))
+  write-function-bodies!(m, ma, fs)
+  enter-subblock!(
+    m,
+    value-symtab-block-id,
+    fn (v) {
+      write-extern-vst-entries!(v, ns)
+      write-import-vst!(v, imps, ns + extern-count)
+      write-vst-entries!(v, fs, ns + extern-count + ni)
+    }
+  )
+}
 
 ; The raw (unwrapped) bitcode bytes for `mod` — magic `BC\xC0\xDE`
 ; followed by the module block above. No Darwin wrapper (ADR 40).
 ; `src/emit/lower.mnd` is the one caller: it lowers a program's forms to
 ; an `LlvmModule` with real instructions and hands it here — this
 ; function itself knows nothing about `Ast` or lowering.
-(pub defn write-module-bc (mod: LlvmModule) (triple: Str) -> Str
-  (do
-    (let top (bitsink-new))
-    (sb-append-byte! (sink-buf top) bitstream-magic-byte-0)
-    (sb-append-byte! (sink-buf top) bitstream-magic-byte-1)
-    (sb-append-byte! (sink-buf top) bitstream-magic-byte-2)
-    (sb-append-byte! (sink-buf top) bitstream-magic-byte-3)
-    (enter-subblock! top module-block-id (fn (m) (write-module-body! m mod triple)))
-    (bitsink-finish! top)))
+pub let write-module-bc(mod: LlvmModule, triple: Str) -> Str {
+  let top = bitsink-new()
+  sb-append-byte!(sink-buf(top), bitstream-magic-byte-0)
+  sb-append-byte!(sink-buf(top), bitstream-magic-byte-1)
+  sb-append-byte!(sink-buf(top), bitstream-magic-byte-2)
+  sb-append-byte!(sink-buf(top), bitstream-magic-byte-3)
+  enter-subblock!(top, module-block-id, fn (m) = write-module-body!(m, mod, triple))
+  bitsink-finish!(top)
+}

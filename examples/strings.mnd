@@ -2,13 +2,14 @@
 ; Prints: "hel" + "lo" = hello (5 bytes)
 ; Run with: `./mn run examples/strings.mnd`
 
-(import std/io)
+import std/io
 
-(defn main -> Int
-  (let s (str-concat "hel" "lo"))
-  (print "\"hel\" + \"lo\" = ")
-  (write stdout s)
-  (print " (")
-  (print (str-byte-length s))
-  (println " bytes)")
-  0)
+let main() -> Int {
+  let s = str-concat("hel", "lo")
+  print("\"hel\" + \"lo\" = ")
+  write(stdout, s)
+  print(" (")
+  print(str-byte-length(s))
+  println(" bytes)")
+  0
+}

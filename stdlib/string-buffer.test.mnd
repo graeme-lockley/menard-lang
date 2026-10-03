@@ -1,9 +1,10 @@
 ; StringBuffer helpers.
 
-(import std/string-buffer)
+import std/string-buffer
 
-(test "append show writes the spelling"
-  (do
-    (let sb (sb-new))
-    (sb-append-show! sb 41)
-    (= (sb-to-str sb) "41")))
+test "append show writes the spelling" =
+  {
+    let sb = sb-new()
+    sb-append-show!(sb, 41)
+    sb-to-str(sb) == "41"
+  }

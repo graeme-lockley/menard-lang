@@ -1,1 +1,4 @@
-(cond)
+let f() -> Int = {
+  let g(n: Int) -> Int = n
+  1
+}

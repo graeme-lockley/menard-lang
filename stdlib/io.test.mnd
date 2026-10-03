@@ -1,9 +1,9 @@
 ; Standard streams.
 
-(import std/io)
+import std/io
 
-(test "stdin is 0" (= stdin 0))
+test "stdin is 0" = stdin == 0
 
-(test "stdout is 1" (= stdout 1))
+test "stdout is 1" = stdout == 1
 
-(test "stderr is 2" (= stderr 2))
+test "stderr is 2" = stderr == 2

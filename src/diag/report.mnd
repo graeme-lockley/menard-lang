@@ -5,145 +5,133 @@
 ; is applied only when stderr is a terminal and `NO_COLOR` is unset, so
 ; a pipe stays plain text.
 
-(import "../reader/ast.mnd")
-(import std/console)
-(import std/io)
+import "../reader/ast.mnd"
 
-(pub alias Span Span)
+import std/console
 
-(let nl
-  (do
-    (let sb (sb-new))
-    (sb-append-byte! sb 10)
-    (sb-take-str! sb)))
+import std/io
+
+pub alias Span = Span
+
+let nl =
+  {
+    let sb = sb-new()
+    sb-append-byte!(sb, 10)
+    sb-take-str!(sb)
+  }
 
 ; `Compiling` / `Linking` are light grey, the file name dark grey.
 ; Color follows stderr, same rule as diagnostics.
-(pub defn progress-line (verb: Str) (name: Str) (ms: Int) -> Str
-  (do
-    (let on (tty-color 2))
-    (let sb (sb-new))
-    (sb-append-byte! sb 10)
-    (let nl (sb-take-str! sb))
-    (str-concat (paint on "[38;5;248m" verb)
-                " "
-                (paint on "[38;5;240m" name)
-                " "
-                (paint on "[38;5;248m" (str-concat (show ms) "ms"))
-                nl)))
+pub let progress-line(verb: Str, name: Str, ms: Int) -> Str {
+  let on = tty-color(2)
+  let sb = sb-new()
+  sb-append-byte!(sb, 10)
+  let nl = sb-take-str!(sb)
+  str-concat(paint(on, "[38;5;248m", verb), " ", paint(on, "[38;5;240m", name), " ", paint(on, "[38;5;248m", str-concat(show(ms), "ms")), nl)
+}
 
-(defn color-on -> Bool
-  (tty-color 2))
+let color-on() -> Bool =
+  tty-color(2)
 
-(defn repeat-str (s: Str) (n: Int) (acc: Str) -> Str
-  (if (<= n 0) acc (repeat-str s (- n 1) (str-concat acc s))))
+let repeat-str(s: Str, n: Int, acc: Str) -> Str =
+  if n <= 0 -> acc
+   | else -> repeat-str(s, n - 1, str-concat(acc, s))
 
-(defn pad-left (s: Str) (w: Int) -> Str
-  (do
-    (let n (str-byte-length s))
-    (if (>= n w) s (str-concat (repeat-str " " (- w n) "") s))))
+let pad-left(s: Str, w: Int) -> Str {
+  let n = str-byte-length(s)
+  if n >= w -> s
+   | else -> str-concat(repeat-str(" ", w - n, ""), s)
+}
 
-(defn digits-of (n: Int) (acc: Int) -> Int
-  (if (< n 10) acc (digits-of (/ n 10) (+ acc 1))))
+let digits-of(n: Int, acc: Int) -> Int =
+  if n < 10 -> acc
+   | else -> digits-of(n / 10, acc + 1)
 
 ; Walk bytes up to `offset`, counting newlines. Column is 1-based.
 ; A call per byte overflows the stack on a source the size of `lower.mnd`.
-(defn walk-loc (src: Str) (offset: Int) (i: Int) (line: Int) (start: Int) (n: Int) -> Int
-  (loop ((j i) (ln line) (st start))
-    (if (or (>= j offset) (>= j n)) st
-      (if (= (str-byte src j) 10)
-        (recur (+ j 1) (+ ln 1) (+ j 1))
-        (recur (+ j 1) ln st)))))
+let walk-loc(src: Str, offset: Int, i: Int, line: Int, start: Int, n: Int) -> Int =
+  loop (j = i, ln = line, st = start)
+    if j >= offset || j >= n -> st
+     | str-byte(src, j) == 10 -> recur(j + 1, ln + 1, j + 1)
+     | else -> recur(j + 1, ln, st)
 
-(defn walk-line (src: Str) (offset: Int) (i: Int) (line: Int) (n: Int) -> Int
-  (loop ((j i) (ln line))
-    (if (or (>= j offset) (>= j n)) ln
-      (if (= (str-byte src j) 10)
-        (recur (+ j 1) (+ ln 1))
-        (recur (+ j 1) ln)))))
+let walk-line(src: Str, offset: Int, i: Int, line: Int, n: Int) -> Int =
+  loop (j = i, ln = line)
+    if j >= offset || j >= n -> ln
+     | str-byte(src, j) == 10 -> recur(j + 1, ln + 1)
+     | else -> recur(j + 1, ln)
 
-(defn line-end (src: Str) (i: Int) (n: Int) -> Int
-  (loop ((j i))
-    (if (>= j n) n
-      (if (= (str-byte src j) 10) j
-        (recur (+ j 1))))))
+let line-end(src: Str, i: Int, n: Int) -> Int =
+  loop (j = i)
+    if j >= n -> n
+     | str-byte(src, j) == 10 -> j
+     | else -> recur(j + 1)
 
-(defn drop-cr (src: Str) (start: Int) (end: Int) -> Int
-  (if (and (> end start) (= (str-byte src (- end 1)) 13)) (- end 1) end))
+let drop-cr(src: Str, start: Int, end: Int) -> Int =
+  if end > start && str-byte(src, end - 1) == 13 -> end - 1
+   | else -> end
 
-(defn line-text (src: Str) (start: Int) -> Str
-  (do
-    (let n (str-byte-length src))
-    (let end (drop-cr src start (line-end src start n)))
-    (if (>= start end) "" (str-slice src start (- end start)))))
+let line-text(src: Str, start: Int) -> Str {
+  let n = str-byte-length(src)
+  let end = drop-cr(src, start, line-end(src, start, n))
+  if start >= end -> ""
+   | else -> str-slice(src, start, end - start)
+}
 
-(defn loc-line (src: Str) (offset: Int) -> Int
-  (walk-line src (clamp 0 (str-byte-length src) offset) 0 1 (str-byte-length src)))
+let loc-line(src: Str, offset: Int) -> Int =
+  walk-line(src, clamp(0, str-byte-length(src), offset), 0, 1, str-byte-length(src))
 
-(defn loc-start (src: Str) (offset: Int) -> Int
-  (walk-loc src (clamp 0 (str-byte-length src) offset) 0 1 0 (str-byte-length src)))
+let loc-start(src: Str, offset: Int) -> Int =
+  walk-loc(src, clamp(0, str-byte-length(src), offset), 0, 1, 0, str-byte-length(src))
 
-(defn loc-col (src: Str) (offset: Int) -> Int
-  (do
-    (let n (str-byte-length src))
-    (let off (clamp 0 n offset))
-    (+ (- off (loc-start src off)) 1)))
+let loc-col(src: Str, offset: Int) -> Int {
+  let n = str-byte-length(src)
+  let off = clamp(0, n, offset)
+  off - loc-start(src, off) + 1
+}
 
 ; Underline from the start column through the end column on this line.
 ; A zero-width span still marks one caret.
-(defn caret-len (src: Str) (sp: Span) (col: Int) (text: Str) -> Int
-  (do
-    (let start-line (loc-line src (span-start sp)))
-    (let end-off (if (> (span-end sp) (span-start sp)) (- (span-end sp) 1) (span-start sp)))
-    (let end-line (loc-line src end-off))
-    (let end-col (if (= end-line start-line) (loc-col src end-off) (+ (str-byte-length text) 1)))
-    (let raw (if (> (span-end sp) (span-start sp)) (+ (- end-col col) 1) 1))
-    (let capped (if (> (+ (- col 1) raw) (+ (str-byte-length text) 1))
-                  (- (+ (str-byte-length text) 1) (- col 1))
-                  raw))
-    (if (< capped 1) 1 capped)))
+let caret-len(src: Str, sp: Span, col: Int, text: Str) -> Int {
+  let start-line = loc-line(src, span-start(sp))
+  let end-off =
+    if span-end(sp) > span-start(sp) -> span-end(sp) - 1
+     | else -> span-start(sp)
+  let end-line = loc-line(src, end-off)
+  let end-col =
+    if end-line == start-line -> loc-col(src, end-off)
+     | else -> str-byte-length(text) + 1
+  let raw =
+    if span-end(sp) > span-start(sp) -> end-col - col + 1
+     | else -> 1
+  let capped =
+    if col - 1 + raw > str-byte-length(text) + 1 -> str-byte-length(text) + 1 - col - 1
+     | else -> raw
+  if capped < 1 -> 1
+   | else -> capped
+}
 
-(defn format-span (path: Str) (src: Str) (sp: Span) (sev: Str) (code: Str) (msg: Str) -> Str
-  (do
-    (let on (color-on))
-    (let line (loc-line src (span-start sp)))
-    (let col (loc-col src (span-start sp)))
-    (let text (line-text src (loc-start src (span-start sp))))
-    (let gw (digits-of line 1))
-    (let sev-color (if (= sev "warning") "[33m" "[31m"))
-    (let carets (caret-len src sp col text))
-    (str-concat (paint on "[1m" path)
-                ":"
-                (show line)
-                ":"
-                (show col)
-                ": "
-                (paint on sev-color sev)
-                "["
-                code
-                "]: "
-                msg
-                nl
-                "  |"
-                nl
-                (pad-left (show line) gw)
-                " | "
-                text
-                nl
-                (repeat-str " " gw "")
-                " | "
-                (repeat-str " " (- col 1) "")
-                (paint on sev-color (repeat-str "^" carets ""))
-                nl)))
+let format-span(path: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str) -> Str {
+  let on = color-on()
+  let line = loc-line(src, span-start(sp))
+  let col = loc-col(src, span-start(sp))
+  let text = line-text(src, loc-start(src, span-start(sp)))
+  let gw = digits-of(line, 1)
+  let sev-color =
+    if sev == "warning" -> "[33m"
+     | else -> "[31m"
+  let carets = caret-len(src, sp, col, text)
+  str-concat(paint(on, "[1m", path), ":", show(line), ":", show(col), ": ", paint(on, sev-color, sev), "[", code, "]: ", msg, nl, "  |", nl, pad-left(show(line), gw), " | ", text, nl, repeat-str(" ", gw, ""), " | ", repeat-str(" ", col - 1, ""), paint(on, sev-color, repeat-str("^", carets, "")), nl)
+}
 
-(pub defn report-span (path: Str) (src: Str) (sp: Span) (sev: Str) (code: Str) (msg: Str) -> Unit
-  (do
-    (write stderr (format-span path src sp sev code msg))
-    ()))
+pub let report-span(path: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str) -> Unit {
+  write(stderr, format-span(path, src, sp, sev, code, msg))
+  ()
+}
 
-(pub defn report-plain (msg: Str) -> Unit
-  (do
-    (write stderr "error: ")
-    (write stderr msg)
-    (write stderr nl)
-    ()))
+pub let report-plain(msg: Str) -> Unit {
+  write(stderr, "error: ")
+  write(stderr, msg)
+  write(stderr, nl)
+  ()
+}

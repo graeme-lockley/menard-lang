@@ -24,18 +24,26 @@
 ;     sees them on a real pipeline run. A caller that typechecks
 ;     un-desugared forms directly will see `E_TYPE_UNBOUND` on those heads.
 
-(import "../reader/ast.mnd")
-(import "../desugar/rest.mnd")
-(import "./types.mnd")
-(import std/list)
+import "../reader/ast.mnd"
+
+import "../desugar/rest.mnd"
+
+import "./types.mnd"
+
+import std/list
 
 ; Re-export shim — see reader/casing.mnd for why this is needed: a `pub`
 ; signature (typecheck-forms, below) may not mention a private nominal
 ; type, even one imported from elsewhere.
-(pub alias Ast Ast)
-(pub alias Span Span)
+pub alias Ast = Ast
 
-(pub defrec TypeError (span: Span) (code: Str) (message: Str))
+pub alias Span = Span
+
+pub record TypeError {
+  span: Span
+  code: Str
+  message: Str
+}
 
 ; ---------------------------------------------------------------------------
 ; Environment. Every field below is a `Ref` for the same reason
@@ -52,563 +60,643 @@
 ; identical to discarding a fresh `Subst` per body, at the cost of the map
 ; growing monotonically instead of being reclaimed.
 
-(defrec TypeEnv
-  (values: (Ref (Map Str Scheme)))
-  (types: (Ref (Map Str TypeDef)))
-  (ctors: (Ref (Map Str CtorInfo)))
-  (aliases: (Ref (Map Str Type)))
-  (next-var: (Ref Int))
-  (diags: (Ref (List TypeError)))
-  (subst: (Ref (Map Int Type)))
-  (loop-bindings: (Ref (Maybe (List Type)))))
+record TypeEnv {
+  values: Ref (Map Str Scheme)
+  types: Ref (Map Str TypeDef)
+  ctors: Ref (Map Str CtorInfo)
+  aliases: Ref (Map Str Type)
+  next-var: Ref Int
+  diags: Ref (List TypeError)
+  subst: Ref (Map Int Type)
+  loop-bindings: Ref (Maybe (List Type))
+}
 
-(defn env-values (env: TypeEnv) -> (Ref (Map Str Scheme))
-  (match env (TypeEnv v _ _ _ _ _ _ _) v))
-(defn env-types (env: TypeEnv) -> (Ref (Map Str TypeDef))
-  (match env (TypeEnv _ v _ _ _ _ _ _) v))
-(defn env-ctors (env: TypeEnv) -> (Ref (Map Str CtorInfo))
-  (match env (TypeEnv _ _ v _ _ _ _ _) v))
-(defn env-aliases (env: TypeEnv) -> (Ref (Map Str Type))
-  (match env (TypeEnv _ _ _ v _ _ _ _) v))
-(defn env-next-var (env: TypeEnv) -> (Ref Int)
-  (match env (TypeEnv _ _ _ _ v _ _ _) v))
-(defn env-diags (env: TypeEnv) -> (Ref (List TypeError))
-  (match env (TypeEnv _ _ _ _ _ v _ _) v))
-(defn env-subst (env: TypeEnv) -> (Ref (Map Int Type))
-  (match env (TypeEnv _ _ _ _ _ _ v _) v))
-(defn env-loop-bindings (env: TypeEnv) -> (Ref (Maybe (List Type)))
-  (match env (TypeEnv _ _ _ _ _ _ _ v) v))
+let env-values(env: TypeEnv) -> Ref (Map Str Scheme) =
+  match (env)
+    | TypeEnv(v, _, _, _, _, _, _, _) -> v
 
-(defn value-get (env: TypeEnv) (name: Str) -> (Maybe Scheme)
-  (map-get (deref (env-values env)) name))
-(defn value-set (env: TypeEnv) (name: Str) (s: Scheme) -> Unit
-  (set! (env-values env) (map-set (deref (env-values env)) name s)))
+let env-types(env: TypeEnv) -> Ref (Map Str TypeDef) =
+  match (env)
+    | TypeEnv(_, v, _, _, _, _, _, _) -> v
 
-(defn type-get (env: TypeEnv) (name: Str) -> (Maybe TypeDef)
-  (map-get (deref (env-types env)) name))
-(defn type-set (env: TypeEnv) (name: Str) (td: TypeDef) -> Unit
-  (set! (env-types env) (map-set (deref (env-types env)) name td)))
+let env-ctors(env: TypeEnv) -> Ref (Map Str CtorInfo) =
+  match (env)
+    | TypeEnv(_, _, v, _, _, _, _, _) -> v
 
-(defn ctor-get (env: TypeEnv) (name: Str) -> (Maybe CtorInfo)
-  (map-get (deref (env-ctors env)) name))
-(defn ctor-set (env: TypeEnv) (name: Str) (c: CtorInfo) -> Unit
-  (set! (env-ctors env) (map-set (deref (env-ctors env)) name c)))
+let env-aliases(env: TypeEnv) -> Ref (Map Str Type) =
+  match (env)
+    | TypeEnv(_, _, _, v, _, _, _, _) -> v
 
-(defn alias-get (env: TypeEnv) (name: Str) -> (Maybe Type)
-  (map-get (deref (env-aliases env)) name))
-(defn alias-set (env: TypeEnv) (name: Str) (t: Type) -> Unit
-  (set! (env-aliases env) (map-set (deref (env-aliases env)) name t)))
+let env-next-var(env: TypeEnv) -> Ref Int =
+  match (env)
+    | TypeEnv(_, _, _, _, v, _, _, _) -> v
+
+let env-diags(env: TypeEnv) -> Ref (List TypeError) =
+  match (env)
+    | TypeEnv(_, _, _, _, _, v, _, _) -> v
+
+let env-subst(env: TypeEnv) -> Ref (Map Int Type) =
+  match (env)
+    | TypeEnv(_, _, _, _, _, _, v, _) -> v
+
+let env-loop-bindings(env: TypeEnv) -> Ref (Maybe (List Type)) =
+  match (env)
+    | TypeEnv(_, _, _, _, _, _, _, v) -> v
+
+let value-get(env: TypeEnv, name: Str) -> Maybe Scheme =
+  map-get(deref(env-values(env)), name)
+
+let value-set(env: TypeEnv, name: Str, s: Scheme) -> Unit =
+  set!(env-values(env), map-set(deref(env-values(env)), name, s))
+
+let type-get(env: TypeEnv, name: Str) -> Maybe TypeDef =
+  map-get(deref(env-types(env)), name)
+
+let type-set(env: TypeEnv, name: Str, td: TypeDef) -> Unit =
+  set!(env-types(env), map-set(deref(env-types(env)), name, td))
+
+let ctor-get(env: TypeEnv, name: Str) -> Maybe CtorInfo =
+  map-get(deref(env-ctors(env)), name)
+
+let ctor-set(env: TypeEnv, name: Str, c: CtorInfo) -> Unit =
+  set!(env-ctors(env), map-set(deref(env-ctors(env)), name, c))
+
+let alias-get(env: TypeEnv, name: Str) -> Maybe Type =
+  map-get(deref(env-aliases(env)), name)
+
+let alias-set(env: TypeEnv, name: Str, t: Type) -> Unit =
+  set!(env-aliases(env), map-set(deref(env-aliases(env)), name, t))
 
 ; The one true mutating primitive in this file, named the way
 ; desugar.mnd's `push-diag!` is: it is the diagnostic accumulator.
-(defn err! (env: TypeEnv) (code: Str) (message: Str) (span: Span) -> Unit
-  (set! (env-diags env) (Cons (TypeError span code message) (deref (env-diags env)))))
+let err!(env: TypeEnv, code: Str, message: Str, span: Span) -> Unit =
+  set!(env-diags(env), Cons(TypeError(span, code, message), deref(env-diags(env))))
 
-(defn fresh-var (env: TypeEnv) (name: Str) -> Type
-  (do
-    (let id (deref (env-next-var env)))
-    (set! (env-next-var env) (+ id 1))
-    (TVar id name)))
+let fresh-var(env: TypeEnv, name: Str) -> Type {
+  let id = deref(env-next-var(env))
+  set!(env-next-var(env), id + 1)
+  TVar(id, name)
+}
 
-(defn fresh-var-anon (env: TypeEnv) -> Type
-  (fresh-var env ""))
+let fresh-var-anon(env: TypeEnv) -> Type =
+  fresh-var(env, "")
 
 ; ---------------------------------------------------------------------------
 ; Small Ast helpers, restated locally per src/'s "no prelude import" rule.
 
-(defn sym-str (ast: Ast) -> (Maybe Str)
-  (match ast (SymNode n _) (Some n) _ (None)))
+let sym-str(ast: Ast) -> Maybe Str =
+  match (ast)
+    | SymNode(n, _) -> Some(n)
+    | _ -> None()
 
-(defn is-sym (ast: Ast) (name: Str) -> Bool
-  (match (sym-str ast) (Some n) (= n name) (None) false))
+let is-sym(ast: Ast, name: Str) -> Bool =
+  match (sym-str(ast))
+    | Some(n) -> n == name
+    | None -> false
 
-(defn strip-trailing-colon (raw: Str) -> Str
-  (let n (str-byte-length raw))
-  (if (and (> n 0) (= (str-byte raw (- n 1)) 58)) (str-slice raw 0 (- n 1)) raw))
+let strip-trailing-colon(raw: Str) -> Str {
+  let n = str-byte-length(raw)
+  if n > 0 && str-byte(raw, n - 1) == 58 -> str-slice(raw, 0, n - 1)
+   | else -> raw
+}
 
-(defn field-name (ast: Ast) -> (Maybe Str)
-  (match (sym-str ast)
-    (None) (None)
-    (Some s) (Some (strip-trailing-colon s))))
+let field-name(ast: Ast) -> Maybe Str =
+  match (sym-str(ast))
+    | None -> None()
+    | Some(s) -> Some(strip-trailing-colon(s))
 
 ; ---------------------------------------------------------------------------
 ; Builtins (§2.8.1/§2.8.2): the Int/Bool/Str ops, intrinsics, Map,
 ; StringBuffer, Maybe/Result/List and the Tier-0 host seam that the
 ; compiler's own source (and any Phase 2 program) needs.
 
-(defn install-arith (env: TypeEnv) -> Unit
-  (do
-    (value-set env "+" (Scheme [] (t-fn [(t-int) (t-int)] (t-int))))
-    (value-set env "-" (Scheme [] (t-fn [(t-int) (t-int)] (t-int))))
-    (value-set env "*" (Scheme [] (t-fn [(t-int) (t-int)] (t-int))))
-    (value-set env "/" (Scheme [] (t-fn [(t-int) (t-int)] (t-int))))
-    (value-set env "%" (Scheme [] (t-fn [(t-int) (t-int)] (t-int))))
-    (value-set env "f+" (Scheme [] (t-fn [(t-float) (t-float)] (t-float))))
-    (value-set env "f-" (Scheme [] (t-fn [(t-float) (t-float)] (t-float))))
-    (value-set env "f*" (Scheme [] (t-fn [(t-float) (t-float)] (t-float))))
-    (value-set env "f/" (Scheme [] (t-fn [(t-float) (t-float)] (t-float))))
-    (value-set env "<" (Scheme [] (t-fn [(t-int) (t-int)] (t-bool))))
-    (value-set env ">" (Scheme [] (t-fn [(t-int) (t-int)] (t-bool))))
-    (value-set env "<=" (Scheme [] (t-fn [(t-int) (t-int)] (t-bool))))
-    (value-set env ">=" (Scheme [] (t-fn [(t-int) (t-int)] (t-bool))))))
+let install-arith(env: TypeEnv) -> Unit {
+  value-set(env, "+", Scheme([], t-fn([t-int(), t-int()], t-int())))
+  value-set(env, "-", Scheme([], t-fn([t-int(), t-int()], t-int())))
+  value-set(env, "*", Scheme([], t-fn([t-int(), t-int()], t-int())))
+  value-set(env, "/", Scheme([], t-fn([t-int(), t-int()], t-int())))
+  value-set(env, "%", Scheme([], t-fn([t-int(), t-int()], t-int())))
+  value-set(env, "f+", Scheme([], t-fn([t-float(), t-float()], t-float())))
+  value-set(env, "f-", Scheme([], t-fn([t-float(), t-float()], t-float())))
+  value-set(env, "f*", Scheme([], t-fn([t-float(), t-float()], t-float())))
+  value-set(env, "f/", Scheme([], t-fn([t-float(), t-float()], t-float())))
+  value-set(env, "<", Scheme([], t-fn([t-int(), t-int()], t-bool())))
+  value-set(env, ">", Scheme([], t-fn([t-int(), t-int()], t-bool())))
+  value-set(env, "<=", Scheme([], t-fn([t-int(), t-int()], t-bool())))
+  value-set(env, ">=", Scheme([], t-fn([t-int(), t-int()], t-bool())))
+}
 
-(defn install-intrinsics (env: TypeEnv) -> Unit
-  (do
-    (value-set env "show" (Scheme ["a"] (t-fn [(TParam "a")] (t-str))))
-    (value-set env "print" (Scheme [] (t-fn [] (t-unit))))
-    (value-set env "println" (Scheme [] (t-fn [] (t-unit))))
-    (value-set env "=" (Scheme ["a"] (t-fn [(TParam "a") (TParam "a")] (t-bool))))
-    (value-set env "compare" (Scheme ["a"] (t-fn [(TParam "a") (TParam "a")] (t-int))))
-    (value-set env "dump" (Scheme ["a"] (t-fn [(TParam "a")] (t-unit))))))
+let install-intrinsics(env: TypeEnv) -> Unit {
+  value-set(env, "show", Scheme(["a"], t-fn([TParam("a")], t-str())))
+  value-set(env, "print", Scheme([], t-fn([], t-unit())))
+  value-set(env, "println", Scheme([], t-fn([], t-unit())))
+  value-set(env, "=", Scheme(["a"], t-fn([TParam("a"), TParam("a")], t-bool())))
+  value-set(env, "compare", Scheme(["a"], t-fn([TParam("a"), TParam("a")], t-int())))
+  value-set(env, "dump", Scheme(["a"], t-fn([TParam("a")], t-unit())))
+}
 
-(defn install-ref-ops (env: TypeEnv) -> Unit
-  (do
-    (value-set env "ref" (Scheme ["a"] (t-fn [(TParam "a")] (t-ref (TParam "a")))))
-    (value-set env "deref" (Scheme ["a"] (t-fn [(t-ref (TParam "a"))] (TParam "a"))))))
+let install-ref-ops(env: TypeEnv) -> Unit {
+  value-set(env, "ref", Scheme(["a"], t-fn([TParam("a")], t-ref(TParam("a")))))
+  value-set(env, "deref", Scheme(["a"], t-fn([t-ref(TParam("a"))], TParam("a"))))
+}
 
-(defn install-str-ops (env: TypeEnv) -> Unit
-  (do
-    (value-set env "str-byte-length" (Scheme [] (t-fn [(t-str)] (t-int))))
-    (value-set env "str-byte" (Scheme [] (t-fn [(t-str) (t-int)] (t-int))))
-    (value-set env "str-slice" (Scheme [] (t-fn [(t-str) (t-int) (t-int)] (t-str))))
-    (value-set env "str-concat" (Scheme [] (t-fn [(t-str) (t-str)] (t-str))))
-    (value-set env "char->str" (Scheme [] (t-fn [(t-char)] (t-str))))))
+let install-str-ops(env: TypeEnv) -> Unit {
+  value-set(env, "str-byte-length", Scheme([], t-fn([t-str()], t-int())))
+  value-set(env, "str-byte", Scheme([], t-fn([t-str(), t-int()], t-int())))
+  value-set(env, "str-slice", Scheme([], t-fn([t-str(), t-int(), t-int()], t-str())))
+  value-set(env, "str-concat", Scheme([], t-fn([t-str(), t-str()], t-str())))
+  value-set(env, "char->str", Scheme([], t-fn([t-char()], t-str())))
+}
 
-(defn install-map-ops (env: TypeEnv) -> Unit
-  (do
-    (value-set env "map-new" (Scheme ["k" "v"] (t-fn [] (t-map (TParam "k") (TParam "v")))))
-    (value-set env "map-get" (Scheme ["k" "v"] (t-fn [(t-map (TParam "k") (TParam "v")) (TParam "k")] (t-maybe (TParam "v")))))
-    (value-set env "map-set" (Scheme ["k" "v"] (t-fn [(t-map (TParam "k") (TParam "v")) (TParam "k") (TParam "v")] (t-map (TParam "k") (TParam "v")))))
-    (value-set env "map-has" (Scheme ["k" "v"] (t-fn [(t-map (TParam "k") (TParam "v")) (TParam "k")] (t-bool))))
-    (value-set env "map-size" (Scheme ["k" "v"] (t-fn [(t-map (TParam "k") (TParam "v"))] (t-int))))
-    (value-set env "map-keys" (Scheme ["k" "v"] (t-fn [(t-map (TParam "k") (TParam "v"))] (t-list (TParam "k")))))))
+let install-map-ops(env: TypeEnv) -> Unit {
+  value-set(env, "map-new", Scheme(["k", "v"], t-fn([], t-map(TParam("k"), TParam("v")))))
+  value-set(env, "map-get", Scheme(["k", "v"], t-fn([t-map(TParam("k"), TParam("v")), TParam("k")], t-maybe(TParam("v")))))
+  value-set(env, "map-set", Scheme(["k", "v"], t-fn([t-map(TParam("k"), TParam("v")), TParam("k"), TParam("v")], t-map(TParam("k"), TParam("v")))))
+  value-set(env, "map-has", Scheme(["k", "v"], t-fn([t-map(TParam("k"), TParam("v")), TParam("k")], t-bool())))
+  value-set(env, "map-size", Scheme(["k", "v"], t-fn([t-map(TParam("k"), TParam("v"))], t-int())))
+  value-set(env, "map-keys", Scheme(["k", "v"], t-fn([t-map(TParam("k"), TParam("v"))], t-list(TParam("k")))))
+}
 
-(defn install-sb-ops (env: TypeEnv) -> Unit
-  (do
-    (value-set env "sb-new" (Scheme [] (t-fn [] (t-string-buffer))))
-    (value-set env "sb-append!" (Scheme [] (t-fn [(t-string-buffer) (t-str)] (t-unit))))
-    (value-set env "sb-append-byte!" (Scheme [] (t-fn [(t-string-buffer) (t-int)] (t-unit))))
-    (value-set env "sb-length" (Scheme [] (t-fn [(t-string-buffer)] (t-int))))
-    (value-set env "sb-clear!" (Scheme [] (t-fn [(t-string-buffer)] (t-unit))))
-    (value-set env "sb-to-str" (Scheme [] (t-fn [(t-string-buffer)] (t-str))))
-    (value-set env "sb-take-str!" (Scheme [] (t-fn [(t-string-buffer)] (t-str))))))
+let install-sb-ops(env: TypeEnv) -> Unit {
+  value-set(env, "sb-new", Scheme([], t-fn([], t-string-buffer())))
+  value-set(env, "sb-append!", Scheme([], t-fn([t-string-buffer(), t-str()], t-unit())))
+  value-set(env, "sb-append-byte!", Scheme([], t-fn([t-string-buffer(), t-int()], t-unit())))
+  value-set(env, "sb-length", Scheme([], t-fn([t-string-buffer()], t-int())))
+  value-set(env, "sb-clear!", Scheme([], t-fn([t-string-buffer()], t-unit())))
+  value-set(env, "sb-to-str", Scheme([], t-fn([t-string-buffer()], t-str())))
+  value-set(env, "sb-take-str!", Scheme([], t-fn([t-string-buffer()], t-str())))
+}
 
-(defn install-maybe (env: TypeEnv) -> Unit
-  (do
-    (type-set env "Maybe"
-      (VariantDef "Maybe" ["a"]
-        [(VariantCtor "None" (Nil)) (VariantCtor "Some" (Cons (TParam "a") (Nil)))]))
-    (ctor-set env "None" (CtorInfo "Maybe" [] ["a"]))
-    (ctor-set env "Some" (CtorInfo "Maybe" [(TParam "a")] ["a"]))
-    (value-set env "None" (Scheme ["a"] (t-fn [] (t-maybe (TParam "a")))))
-    (value-set env "Some" (Scheme ["a"] (t-fn [(TParam "a")] (t-maybe (TParam "a")))))))
+let install-maybe(env: TypeEnv) -> Unit {
+  type-set(env, "Maybe", VariantDef("Maybe", ["a"], [VariantCtor("None", Nil()), VariantCtor("Some", Cons(TParam("a"), Nil()))]))
+  ctor-set(env, "None", CtorInfo("Maybe", [], ["a"]))
+  ctor-set(env, "Some", CtorInfo("Maybe", [TParam("a")], ["a"]))
+  value-set(env, "None", Scheme(["a"], t-fn([], t-maybe(TParam("a")))))
+  value-set(env, "Some", Scheme(["a"], t-fn([TParam("a")], t-maybe(TParam("a")))))
+}
 
-(defn install-result (env: TypeEnv) -> Unit
-  (do
-    (type-set env "Result"
-      (VariantDef "Result" ["t" "e"]
-        [(VariantCtor "Ok" (Cons (TParam "t") (Nil))) (VariantCtor "Err" (Cons (TParam "e") (Nil)))]))
-    (ctor-set env "Ok" (CtorInfo "Result" [(TParam "t")] ["t" "e"]))
-    (ctor-set env "Err" (CtorInfo "Result" [(TParam "e")] ["t" "e"]))
-    (value-set env "Ok" (Scheme ["t" "e"] (t-fn [(TParam "t")] (t-result (TParam "t") (TParam "e")))))
-    (value-set env "Err" (Scheme ["t" "e"] (t-fn [(TParam "e")] (t-result (TParam "t") (TParam "e")))))))
+let install-result(env: TypeEnv) -> Unit {
+  type-set(env, "Result", VariantDef("Result", ["t", "e"], [VariantCtor("Ok", Cons(TParam("t"), Nil())), VariantCtor("Err", Cons(TParam("e"), Nil()))]))
+  ctor-set(env, "Ok", CtorInfo("Result", [TParam("t")], ["t", "e"]))
+  ctor-set(env, "Err", CtorInfo("Result", [TParam("e")], ["t", "e"]))
+  value-set(env, "Ok", Scheme(["t", "e"], t-fn([TParam("t")], t-result(TParam("t"), TParam("e")))))
+  value-set(env, "Err", Scheme(["t", "e"], t-fn([TParam("e")], t-result(TParam("t"), TParam("e")))))
+}
 
-(defn install-list-type (env: TypeEnv) -> Unit
-  (do
-    (type-set env "List"
-      (VariantDef "List" ["a"]
-        [
-  (VariantCtor "Nil" (Nil))
-  (VariantCtor "Cons" (Cons (TParam "a") (Cons (t-list (TParam "a")) (Nil))))]))
-    (ctor-set env "Nil" (CtorInfo "List" [] ["a"]))
-    (ctor-set env "Cons" (CtorInfo "List" [(TParam "a") (t-list (TParam "a"))] ["a"]))
-    (value-set env "Nil" (Scheme ["a"] (t-fn [] (t-list (TParam "a")))))
-    (value-set env "Cons" (Scheme ["a"] (t-fn [(TParam "a") (t-list (TParam "a"))] (t-list (TParam "a")))))))
+let install-list-type(env: TypeEnv) -> Unit {
+  type-set(env, "List", VariantDef("List", ["a"], [VariantCtor("Nil", Nil()), VariantCtor("Cons", Cons(TParam("a"), Cons(t-list(TParam("a")), Nil())))]))
+  ctor-set(env, "Nil", CtorInfo("List", [], ["a"]))
+  ctor-set(env, "Cons", CtorInfo("List", [TParam("a"), t-list(TParam("a"))], ["a"]))
+  value-set(env, "Nil", Scheme(["a"], t-fn([], t-list(TParam("a")))))
+  value-set(env, "Cons", Scheme(["a"], t-fn([TParam("a"), t-list(TParam("a"))], t-list(TParam("a")))))
+}
 
-(defn install-builtins (env: TypeEnv) -> Unit
-  (do
-    (install-arith env)
-    (install-intrinsics env)
-    (install-ref-ops env)
-    (install-str-ops env)
-    (install-map-ops env)
-    (install-sb-ops env)
-    (install-maybe env)
-    (install-result env)
-    (install-list-type env)))
+let install-builtins(env: TypeEnv) -> Unit {
+  install-arith(env)
+  install-intrinsics(env)
+  install-ref-ops(env)
+  install-str-ops(env)
+  install-map-ops(env)
+  install-sb-ops(env)
+  install-maybe(env)
+  install-result(env)
+  install-list-type(env)
+}
 
-(defn empty-env -> TypeEnv
-  (do
-    (let env
-      (TypeEnv
-        (ref (map-new))
-        (ref (map-new))
-        (ref (map-new))
-        (ref (map-new))
-        (ref 0)
-        (ref [])
-        (ref (map-new))
-        (ref (None))))
-    (install-builtins env)
-    env))
+let empty-env() -> TypeEnv {
+  let env = TypeEnv(ref(map-new()), ref(map-new()), ref(map-new()), ref(map-new()), ref(0), ref([]), ref(map-new()), ref(None()))
+  install-builtins(env)
+  env
+}
 
 ; ---------------------------------------------------------------------------
 ; Substitution: apply, occurs-check, unify. `subst` lives on `env` (a Ref),
 ; so every function below that needs it just takes `env`.
 
-(defn apply-subst (env: TypeEnv) (t: Type) -> Type
-  (match t
-    (TVar id _) (apply-subst-var env t id)
-    (TList e) (t-list (apply-subst env e))
-    (TMap k v) (t-map (apply-subst env k) (apply-subst env v))
-    (TMaybe e) (t-maybe (apply-subst env e))
-    (TResult o e) (t-result (apply-subst env o) (apply-subst env e))
-    (TRef e) (t-ref (apply-subst env e))
-    (TFn ps r) (t-fn (apply-subst-list env ps) (apply-subst env r))
-    (TNominal n a k) (TNominal n (apply-subst-list env a) k)
-    _ t))
+let apply-subst(env: TypeEnv, t: Type) -> Type =
+  match (t)
+    | TVar(id, _) -> apply-subst-var(env, t, id)
+    | TList(e) -> t-list(apply-subst(env, e))
+    | TMap(k, v) -> t-map(apply-subst(env, k), apply-subst(env, v))
+    | TMaybe(e) -> t-maybe(apply-subst(env, e))
+    | TResult(o, e) -> t-result(apply-subst(env, o), apply-subst(env, e))
+    | TRef(e) -> t-ref(apply-subst(env, e))
+    | TFn(ps, r) -> t-fn(apply-subst-list(env, ps), apply-subst(env, r))
+    | TNominal(n, a, k) -> TNominal(n, apply-subst-list(env, a), k)
+    | _ -> t
 
-(defn apply-subst-var (env: TypeEnv) (t: Type) (id: Int) -> Type
-  (match (map-get (deref (env-subst env)) id)
-    (Some bound) (apply-subst env bound)
-    (None) t))
+let apply-subst-var(env: TypeEnv, t: Type, id: Int) -> Type =
+  match (map-get(deref(env-subst(env)), id))
+    | Some(bound) -> apply-subst(env, bound)
+    | None -> t
 
-(defn apply-subst-list (env: TypeEnv) (xs: (List Type)) -> (List Type)
-  (match xs
-    [] []
-    (Cons x rest) (Cons (apply-subst env x) (apply-subst-list env rest))))
+let apply-subst-list(env: TypeEnv, xs: List Type) -> List Type =
+  match (xs)
+    | [] -> []
+    | Cons(x, rest) -> Cons(apply-subst(env, x), apply-subst-list(env, rest))
 
-(defn occurs (env: TypeEnv) (id: Int) (t: Type) -> Bool
-  (occurs-in env id (apply-subst env t)))
+let occurs(env: TypeEnv, id: Int, t: Type) -> Bool =
+  occurs-in(env, id, apply-subst(env, t))
 
-(defn occurs-in (env: TypeEnv) (id: Int) (t: Type) -> Bool
-  (match t
-    (TVar tid _) (= tid id)
-    (TList e) (occurs env id e)
-    (TMaybe e) (occurs env id e)
-    (TRef e) (occurs env id e)
-    (TMap k v) (or (occurs env id k) (occurs env id v))
-    (TResult o e) (or (occurs env id o) (occurs env id e))
-    (TFn ps r) (or (occurs-list env id ps) (occurs env id r))
-    (TNominal _ a _) (occurs-list env id a)
-    _ false))
+let occurs-in(env: TypeEnv, id: Int, t: Type) -> Bool =
+  match (t)
+    | TVar(tid, _) -> tid == id
+    | TList(e) -> occurs(env, id, e)
+    | TMaybe(e) -> occurs(env, id, e)
+    | TRef(e) -> occurs(env, id, e)
+    | TMap(k, v) -> occurs(env, id, k) || occurs(env, id, v)
+    | TResult(o, e) -> occurs(env, id, o) || occurs(env, id, e)
+    | TFn(ps, r) -> occurs-list(env, id, ps) || occurs(env, id, r)
+    | TNominal(_, a, _) -> occurs-list(env, id, a)
+    | _ -> false
 
-(defn occurs-list (env: TypeEnv) (id: Int) (xs: (List Type)) -> Bool
-  (match xs
-    [] false
-    (Cons x rest) (or (occurs env id x) (occurs-list env id rest))))
+let occurs-list(env: TypeEnv, id: Int, xs: List Type) -> Bool =
+  match (xs)
+    | [] -> false
+    | Cons(x, rest) -> occurs(env, id, x) || occurs-list(env, id, rest)
 
-(defn unify (env: TypeEnv) (a: Type) (b: Type) (span: Span) -> Bool
-  (let ta (apply-subst env a))
-  (let tb (apply-subst env b))
-  (if (type-equal ta tb) true (unify-dispatch env ta tb span)))
+let unify(env: TypeEnv, a: Type, b: Type, span: Span) -> Bool {
+  let ta = apply-subst(env, a)
+  let tb = apply-subst(env, b)
+  if type-equal(ta, tb) -> true
+   | else -> unify-dispatch(env, ta, tb, span)
+}
 
-(defn unify-dispatch (env: TypeEnv) (ta: Type) (tb: Type) (span: Span) -> Bool
-  (match ta
-    (TVar id _) (unify-var env id tb span)
-    _ (unify-nonvar env ta tb span)))
+let unify-dispatch(env: TypeEnv, ta: Type, tb: Type, span: Span) -> Bool =
+  match (ta)
+    | TVar(id, _) -> unify-var(env, id, tb, span)
+    | _ -> unify-nonvar(env, ta, tb, span)
 
-(defn unify-var (env: TypeEnv) (id: Int) (tb: Type) (span: Span) -> Bool
-  (if (occurs env id tb)
-    (do (err! env "E_TYPE_OCCURS" "infinite type" span) false)
-    (do (set! (env-subst env) (map-set (deref (env-subst env)) id tb)) true)))
+let unify-var(env: TypeEnv, id: Int, tb: Type, span: Span) -> Bool =
+  if occurs(env, id, tb) ->
+    {
+      err!(env, "E_TYPE_OCCURS", "infinite type", span)
+      false
+    }
+   | else ->
+    {
+      set!(env-subst(env), map-set(deref(env-subst(env)), id, tb))
+      true
+    }
 
-(defn unify-nonvar (env: TypeEnv) (ta: Type) (tb: Type) (span: Span) -> Bool
-  (match tb
-    (TVar id _) (unify-var env id ta span)
-    _ (unify-structural env ta tb span)))
+let unify-nonvar(env: TypeEnv, ta: Type, tb: Type, span: Span) -> Bool =
+  match (tb)
+    | TVar(id, _) -> unify-var(env, id, ta, span)
+    | _ -> unify-structural(env, ta, tb, span)
 
-(defn unify-structural (env: TypeEnv) (ta: Type) (tb: Type) (span: Span) -> Bool
-  (match ta
-    (TParam na) (unify-param env na tb span)
-    (TList ea) (unify-list env ea tb span)
-    (TMaybe ea) (unify-maybe env ea tb span)
-    (TRef ea) (unify-ref env ea tb span)
-    (TMap ka va) (unify-map env ka va tb span)
-    (TResult oa ea) (unify-result env oa ea tb span)
-    (TFn pa ra) (unify-fn env pa ra tb span)
-    (TNominal na aa ka) (unify-nominal env na aa ka tb span)
-    _ (unify-mismatch env ta tb span)))
+let unify-structural(env: TypeEnv, ta: Type, tb: Type, span: Span) -> Bool =
+  match (ta)
+    | TParam(na) -> unify-param(env, na, tb, span)
+    | TList(ea) -> unify-list(env, ea, tb, span)
+    | TMaybe(ea) -> unify-maybe(env, ea, tb, span)
+    | TRef(ea) -> unify-ref(env, ea, tb, span)
+    | TMap(ka, va) -> unify-map(env, ka, va, tb, span)
+    | TResult(oa, ea) -> unify-result(env, oa, ea, tb, span)
+    | TFn(pa, ra) -> unify-fn(env, pa, ra, tb, span)
+    | TNominal(na, aa, ka) -> unify-nominal(env, na, aa, ka, tb, span)
+    | _ -> unify-mismatch(env, ta, tb, span)
 
-(defn unify-param (env: TypeEnv) (na: Str) (tb: Type) (span: Span) -> Bool
-  (match tb
-    (TParam nb) (if (= na nb) true (unify-mismatch env (TParam na) tb span))
-    _ (unify-mismatch env (TParam na) tb span)))
+let unify-param(env: TypeEnv, na: Str, tb: Type, span: Span) -> Bool =
+  match (tb)
+    | TParam(nb) ->
+      if na == nb -> true
+       | else -> unify-mismatch(env, TParam(na), tb, span)
+    | _ -> unify-mismatch(env, TParam(na), tb, span)
 
-(defn unify-list (env: TypeEnv) (ea: Type) (tb: Type) (span: Span) -> Bool
-  (match tb
-    (TList eb) (unify env ea eb span)
-    _ (unify-mismatch env (t-list ea) tb span)))
+let unify-list(env: TypeEnv, ea: Type, tb: Type, span: Span) -> Bool =
+  match (tb)
+    | TList(eb) -> unify(env, ea, eb, span)
+    | _ -> unify-mismatch(env, t-list(ea), tb, span)
 
-(defn unify-maybe (env: TypeEnv) (ea: Type) (tb: Type) (span: Span) -> Bool
-  (match tb
-    (TMaybe eb) (unify env ea eb span)
-    _ (unify-mismatch env (t-maybe ea) tb span)))
+let unify-maybe(env: TypeEnv, ea: Type, tb: Type, span: Span) -> Bool =
+  match (tb)
+    | TMaybe(eb) -> unify(env, ea, eb, span)
+    | _ -> unify-mismatch(env, t-maybe(ea), tb, span)
 
-(defn unify-ref (env: TypeEnv) (ea: Type) (tb: Type) (span: Span) -> Bool
-  (match tb
-    (TRef eb) (unify env ea eb span)
-    _ (unify-mismatch env (t-ref ea) tb span)))
+let unify-ref(env: TypeEnv, ea: Type, tb: Type, span: Span) -> Bool =
+  match (tb)
+    | TRef(eb) -> unify(env, ea, eb, span)
+    | _ -> unify-mismatch(env, t-ref(ea), tb, span)
 
-(defn unify-map (env: TypeEnv) (ka: Type) (va: Type) (tb: Type) (span: Span) -> Bool
-  (match tb
-    (TMap kb vb) (if (unify env ka kb span) (unify env va vb span) false)
-    _ (unify-mismatch env (t-map ka va) tb span)))
+let unify-map(env: TypeEnv, ka: Type, va: Type, tb: Type, span: Span) -> Bool =
+  match (tb)
+    | TMap(kb, vb) ->
+      if unify(env, ka, kb, span) -> unify(env, va, vb, span)
+       | else -> false
+    | _ -> unify-mismatch(env, t-map(ka, va), tb, span)
 
-(defn unify-result (env: TypeEnv) (oa: Type) (ea: Type) (tb: Type) (span: Span) -> Bool
-  (match tb
-    (TResult ob eb) (if (unify env oa ob span) (unify env ea eb span) false)
-    _ (unify-mismatch env (t-result oa ea) tb span)))
+let unify-result(env: TypeEnv, oa: Type, ea: Type, tb: Type, span: Span) -> Bool =
+  match (tb)
+    | TResult(ob, eb) ->
+      if unify(env, oa, ob, span) -> unify(env, ea, eb, span)
+       | else -> false
+    | _ -> unify-mismatch(env, t-result(oa, ea), tb, span)
 
-(defn unify-fn (env: TypeEnv) (pa: (List Type)) (ra: Type) (tb: Type) (span: Span) -> Bool
-  (match tb
-    (TFn pb rb) (unify-fn-params env pa pb ra rb span)
-    _ (unify-mismatch env (t-fn pa ra) tb span)))
+let unify-fn(env: TypeEnv, pa: List Type, ra: Type, tb: Type, span: Span) -> Bool =
+  match (tb)
+    | TFn(pb, rb) -> unify-fn-params(env, pa, pb, ra, rb, span)
+    | _ -> unify-mismatch(env, t-fn(pa, ra), tb, span)
 
-(defn unify-fn-params (env: TypeEnv) (pa: (List Type)) (pb: (List Type)) (ra: Type) (rb: Type) (span: Span) -> Bool
-  (if (= (length pa) (length pb))
-    (if (unify-list-pairwise env pa pb span) (unify env ra rb span) false)
-    (do
-      (err! env "E_TYPE_ARITY"
-        (str-concat "function arity mismatch: expected "
-                    (show (length pa))
-                    ", found "
-                    (show (length pb)))
-        span)
-      false)))
+let unify-fn-params(env: TypeEnv, pa: List Type, pb: List Type, ra: Type, rb: Type, span: Span) -> Bool =
+  if length(pa) == length(pb) ->
+    if unify-list-pairwise(env, pa, pb, span) -> unify(env, ra, rb, span)
+     | else -> false
+   | else ->
+    {
+      err!(env, "E_TYPE_ARITY", str-concat("function arity mismatch: expected ", show(length(pa)), ", found ", show(length(pb))), span)
+      false
+    }
 
-(defn unify-list-pairwise (env: TypeEnv) (xs: (List Type)) (ys: (List Type)) (span: Span) -> Bool
-  (match xs
-    [] true
-    (Cons x xrest)
-      (match ys
-        [] true
-        (Cons y yrest) (if (unify env x y span) (unify-list-pairwise env xrest yrest span) false))))
+let unify-list-pairwise(env: TypeEnv, xs: List Type, ys: List Type, span: Span) -> Bool =
+  match (xs)
+    | [] -> true
+    | Cons(x, xrest) ->
+      match (ys)
+        | [] -> true
+        | Cons(y, yrest) ->
+          if unify(env, x, y, span) -> unify-list-pairwise(env, xrest, yrest, span)
+           | else -> false
 
-(defn unify-nominal (env: TypeEnv) (na: Str) (aa: (List Type)) (ka: Str) (tb: Type) (span: Span) -> Bool
-  (match tb
-    (TNominal nb ab kb) (unify-nominal-same env na aa ka nb ab kb span)
-    _ (unify-mismatch env (TNominal na aa ka) tb span)))
+let unify-nominal(env: TypeEnv, na: Str, aa: List Type, ka: Str, tb: Type, span: Span) -> Bool =
+  match (tb)
+    | TNominal(nb, ab, kb) -> unify-nominal-same(env, na, aa, ka, nb, ab, kb, span)
+    | _ -> unify-mismatch(env, TNominal(na, aa, ka), tb, span)
 
-(defn unify-nominal-same (env: TypeEnv) (na: Str) (aa: (List Type)) (ka: Str) (nb: Str) (ab: (List Type)) (kb: Str) (span: Span) -> Bool
-  (if (= na nb)
-    (if (= (length aa) (length ab))
-      (unify-list-pairwise env aa ab span)
-      (do (err! env "E_TYPE_MISMATCH" (str-concat "type argument count mismatch for " na) span) false))
-    (unify-mismatch env (TNominal na aa ka) (TNominal nb ab kb) span)))
+let unify-nominal-same(env: TypeEnv, na: Str, aa: List Type, ka: Str, nb: Str, ab: List Type, kb: Str, span: Span) -> Bool =
+  if na == nb ->
+    if length(aa) == length(ab) -> unify-list-pairwise(env, aa, ab, span)
+     | else ->
+      {
+        err!(env, "E_TYPE_MISMATCH", str-concat("type argument count mismatch for ", na), span)
+        false
+      }
+   | else -> unify-mismatch(env, TNominal(na, aa, ka), TNominal(nb, ab, kb), span)
 
-(defn unify-mismatch (env: TypeEnv) (ta: Type) (tb: Type) (span: Span) -> Bool
-  (do
-    (err! env "E_TYPE_MISMATCH"
-      (str-concat "expected " (type-show ta) ", found " (type-show tb))
-      span)
-    false))
+let unify-mismatch(env: TypeEnv, ta: Type, tb: Type, span: Span) -> Bool {
+  err!(env, "E_TYPE_MISMATCH", str-concat("expected ", type-show(ta), ", found ", type-show(tb)), span)
+  false
+}
 
-(defn expect-type (env: TypeEnv) (got: Type) (expected: Type) (span: Span) -> Type
-  (do
-    (unify env got expected span)
-    (apply-subst env expected)))
+let expect-type(env: TypeEnv, got: Type, expected: Type, span: Span) -> Type {
+  unify(env, got, expected, span)
+  apply-subst(env, expected)
+}
 
 ; ---------------------------------------------------------------------------
 ; Instantiation: fresh unification variables for a scheme's own parameters.
 
-(defn fresh-param-map (env: TypeEnv) (params: (List Str)) -> (Map Str Type)
-  (match params
-    [] (map-new)
-    (Cons p rest) (map-set (fresh-param-map env rest) p (fresh-var env p))))
+let fresh-param-map(env: TypeEnv, params: List Str) -> Map Str Type =
+  match (params)
+    | [] -> map-new()
+    | Cons(p, rest) -> map-set(fresh-param-map(env, rest), p, fresh-var(env, p))
 
-(defn replace-params (t: Type) (m: (Map Str Type)) -> Type
-  (match t
-    (TParam name) (replace-param-lookup t name m)
-    (TList e) (t-list (replace-params e m))
-    (TMap k v) (t-map (replace-params k m) (replace-params v m))
-    (TMaybe e) (t-maybe (replace-params e m))
-    (TResult o e) (t-result (replace-params o m) (replace-params e m))
-    (TRef e) (t-ref (replace-params e m))
-    (TFn ps r) (t-fn (replace-params-list ps m) (replace-params r m))
-    (TNominal n a k) (TNominal n (replace-params-list a m) k)
-    _ t))
+let replace-params(t: Type, m: Map Str Type) -> Type =
+  match (t)
+    | TParam(name) -> replace-param-lookup(t, name, m)
+    | TList(e) -> t-list(replace-params(e, m))
+    | TMap(k, v) -> t-map(replace-params(k, m), replace-params(v, m))
+    | TMaybe(e) -> t-maybe(replace-params(e, m))
+    | TResult(o, e) -> t-result(replace-params(o, m), replace-params(e, m))
+    | TRef(e) -> t-ref(replace-params(e, m))
+    | TFn(ps, r) -> t-fn(replace-params-list(ps, m), replace-params(r, m))
+    | TNominal(n, a, k) -> TNominal(n, replace-params-list(a, m), k)
+    | _ -> t
 
-(defn replace-param-lookup (t: Type) (name: Str) (m: (Map Str Type)) -> Type
-  (match (map-get m name)
-    (Some t2) t2
-    (None) t))
+let replace-param-lookup(t: Type, name: Str, m: Map Str Type) -> Type =
+  match (map-get(m, name))
+    | Some(t2) -> t2
+    | None -> t
 
-(defn replace-params-list (xs: (List Type)) (m: (Map Str Type)) -> (List Type)
-  (match xs
-    [] []
-    (Cons x rest) (Cons (replace-params x m) (replace-params-list rest m))))
+let replace-params-list(xs: List Type, m: Map Str Type) -> List Type =
+  match (xs)
+    | [] -> []
+    | Cons(x, rest) -> Cons(replace-params(x, m), replace-params-list(rest, m))
 
-(defn instantiate-with (env: TypeEnv) (params: (List Str)) (ty: Type) -> Type
-  (match params
-    [] ty
-    _ (replace-params ty (fresh-param-map env params))))
+let instantiate-with(env: TypeEnv, params: List Str, ty: Type) -> Type =
+  match (params)
+    | [] -> ty
+    | _ -> replace-params(ty, fresh-param-map(env, params))
 
-(defn instantiate (env: TypeEnv) (scheme: Scheme) -> Type
-  (match scheme (Scheme params ty) (instantiate-with env params ty)))
+let instantiate(env: TypeEnv, scheme: Scheme) -> Type =
+  match (scheme)
+    | Scheme(params, ty) -> instantiate-with(env, params, ty)
 
 ; ---------------------------------------------------------------------------
 ; Type-expression parsing: `(List T)`, `(Map K V)`, `(Maybe T)`,
 ; `(Result T E)`, `(Ref T)`, `(Fn T1 T2 -> R)`, primitives, declared type
 ; parameters, aliases, and nominal (record/variant) type names.
 
-(defrec ArrowSplit (before: (List Ast)) (after: (List Ast)))
-(defn arrow-split-before (s: ArrowSplit) -> (List Ast) (match s (ArrowSplit b _) b))
-(defn arrow-split-after (s: ArrowSplit) -> (List Ast) (match s (ArrowSplit _ a) a))
+record ArrowSplit {
+  before: List Ast
+  after: List Ast
+}
 
-(defn find-arrow (elems: (List Ast)) -> (Maybe ArrowSplit)
-  (match elems
-    [] (None)
-    (Cons e rest) (find-arrow-cons e rest)))
+let arrow-split-before(s: ArrowSplit) -> List Ast =
+  match (s)
+    | ArrowSplit(b, _) -> b
 
-(defn find-arrow-cons (e: Ast) (rest: (List Ast)) -> (Maybe ArrowSplit)
-  (if (is-sym e "->") (Some (ArrowSplit [] rest))
-    (find-arrow-cons-recurse e rest)))
+let arrow-split-after(s: ArrowSplit) -> List Ast =
+  match (s)
+    | ArrowSplit(_, a) -> a
 
-(defn find-arrow-cons-recurse (e: Ast) (rest: (List Ast)) -> (Maybe ArrowSplit)
-  (match (find-arrow rest)
-    (None) (None)
-    (Some split) (Some (ArrowSplit (Cons e (arrow-split-before split)) (arrow-split-after split)))))
+let find-arrow(elems: List Ast) -> Maybe ArrowSplit =
+  match (elems)
+    | [] -> None()
+    | Cons(e, rest) -> find-arrow-cons(e, rest)
 
-(defn type-def-kind (td: TypeDef) -> Str
-  (match td (RecordDef _ _ _) "record" (VariantDef _ _ _) "variant"))
+let find-arrow-cons(e: Ast, rest: List Ast) -> Maybe ArrowSplit =
+  if is-sym(e, "->") -> Some(ArrowSplit([], rest))
+   | else -> find-arrow-cons-recurse(e, rest)
 
-(defn parse-type-exprs (env: TypeEnv) (asts: (List Ast)) (params: (List Str)) -> (List Type)
-  (match asts
-    [] []
-    (Cons a rest) (Cons (parse-type-expr env a params) (parse-type-exprs env rest params))))
+let find-arrow-cons-recurse(e: Ast, rest: List Ast) -> Maybe ArrowSplit =
+  match (find-arrow(rest))
+    | None -> None()
+    | Some(split) -> Some(ArrowSplit(Cons(e, arrow-split-before(split)), arrow-split-after(split)))
 
-(defn parse-type-expr (env: TypeEnv) (ast: Ast) (params: (List Str)) -> Type
-  (match ast
-    (SymNode name sp) (parse-type-expr-sym env name sp params)
-    (ParenNode elems sp) (parse-type-expr-paren env elems sp params)
-    _ (do (err! env "E_TYPE_EXPR" "invalid type expression" (ast-span ast)) (fresh-var-anon env))))
+let type-def-kind(td: TypeDef) -> Str =
+  match (td)
+    | RecordDef(_, _, _) -> "record"
+    | VariantDef(_, _, _) -> "variant"
 
-(defn parse-type-expr-sym (env: TypeEnv) (name: Str) (sp: Span) (params: (List Str)) -> Type
-  (if (contains params name) (TParam name)
-    (parse-type-expr-sym-prim env name sp)))
+let parse-type-exprs(env: TypeEnv, asts: List Ast, params: List Str) -> List Type =
+  match (asts)
+    | [] -> []
+    | Cons(a, rest) -> Cons(parse-type-expr(env, a, params), parse-type-exprs(env, rest, params))
 
-(defn parse-type-expr-sym-prim (env: TypeEnv) (name: Str) (sp: Span) -> Type
-  (match name
-    "Int"          (t-int)
-    "Float"        (t-float)
-    "Bool"         (t-bool)
-    "Char"         (t-char)
-    "Str"          (t-str)
-    "Sym"          (t-sym)
-    "Unit"         (t-unit)
-    "StringBuffer" (t-string-buffer)
-    _              (parse-type-expr-sym-named env name sp)))
+let parse-type-expr(env: TypeEnv, ast: Ast, params: List Str) -> Type =
+  match (ast)
+    | SymNode(name, sp) -> parse-type-expr-sym(env, name, sp, params)
+    | ParenNode(elems, sp) -> parse-type-expr-paren(env, elems, sp, params)
+    | _ ->
+      {
+        err!(env, "E_TYPE_EXPR", "invalid type expression", ast-span(ast))
+        fresh-var-anon(env)
+      }
 
-(defn parse-type-expr-sym-named (env: TypeEnv) (name: Str) (sp: Span) -> Type
-  (match (alias-get env name)
-    (Some t) t
-    (None) (parse-type-expr-sym-nominal env name sp)))
+let parse-type-expr-sym(env: TypeEnv, name: Str, sp: Span, params: List Str) -> Type =
+  if contains(params, name) -> TParam(name)
+   | else -> parse-type-expr-sym-prim(env, name, sp)
 
-(defn parse-type-expr-sym-nominal (env: TypeEnv) (name: Str) (sp: Span) -> Type
-  (match (type-get env name)
-    (Some td) (t-nominal name [] (type-def-kind td))
-    (None) (do (err! env "E_TYPE_UNKNOWN" (str-concat "unknown type " name) sp) (fresh-var-anon env))))
+let parse-type-expr-sym-prim(env: TypeEnv, name: Str, sp: Span) -> Type =
+  match (name)
+    | "Int" -> t-int()
+    | "Float" -> t-float()
+    | "Bool" -> t-bool()
+    | "Char" -> t-char()
+    | "Str" -> t-str()
+    | "Sym" -> t-sym()
+    | "Unit" -> t-unit()
+    | "StringBuffer" -> t-string-buffer()
+    | _ -> parse-type-expr-sym-named(env, name, sp)
 
-(defn parse-type-expr-paren (env: TypeEnv) (elems: (List Ast)) (sp: Span) (params: (List Str)) -> Type
-  (match elems
-    [] (t-unit)
-    (Cons head args) (parse-type-expr-app env head args sp params)))
+let parse-type-expr-sym-named(env: TypeEnv, name: Str, sp: Span) -> Type =
+  match (alias-get(env, name))
+    | Some(t) -> t
+    | None -> parse-type-expr-sym-nominal(env, name, sp)
 
-(defn parse-type-expr-app (env: TypeEnv) (head: Ast) (args: (List Ast)) (sp: Span) (params: (List Str)) -> Type
-  (match (sym-str head)
-    (None) (do (err! env "E_TYPE_EXPR" "invalid type expression" sp) (fresh-var-anon env))
-    (Some hn) (parse-type-expr-app-named env hn args sp params)))
+let parse-type-expr-sym-nominal(env: TypeEnv, name: Str, sp: Span) -> Type =
+  match (type-get(env, name))
+    | Some(td) -> t-nominal(name, [], type-def-kind(td))
+    | None ->
+      {
+        err!(env, "E_TYPE_UNKNOWN", str-concat("unknown type ", name), sp)
+        fresh-var-anon(env)
+      }
 
-(defn t-list-of (elem: Type) -> Type (t-list elem))
-(defn t-maybe-of (elem: Type) -> Type (t-maybe elem))
-(defn t-ref-of (elem: Type) -> Type (t-ref elem))
+let parse-type-expr-paren(env: TypeEnv, elems: List Ast, sp: Span, params: List Str) -> Type =
+  match (elems)
+    | [] -> t-unit()
+    | Cons(head, args) -> parse-type-expr-app(env, head, args, sp, params)
 
-(defn parse-type-expr-app-named (env: TypeEnv) (hn: Str) (args: (List Ast)) (sp: Span) (params: (List Str)) -> Type
-  (match hn
-    "List"   (parse-type-expr-one env "List" args sp params t-list-of)
-    "Maybe"  (parse-type-expr-one env "Maybe" args sp params t-maybe-of)
-    "Ref"    (parse-type-expr-one env "Ref" args sp params t-ref-of)
-    "Map"    (parse-type-expr-two env "Map" args sp params t-map)
-    "Result" (parse-type-expr-two env "Result" args sp params t-result)
-    "Fn"     (parse-type-expr-fn env args sp params)
-    _        (parse-type-expr-nominal env hn args sp params)))
+let parse-type-expr-app(env: TypeEnv, head: Ast, args: List Ast, sp: Span, params: List Str) -> Type =
+  match (sym-str(head))
+    | None ->
+      {
+        err!(env, "E_TYPE_EXPR", "invalid type expression", sp)
+        fresh-var-anon(env)
+      }
+    | Some(hn) -> parse-type-expr-app-named(env, hn, args, sp, params)
 
-(defn parse-type-expr-one (env: TypeEnv) (name: Str) (args: (List Ast)) (sp: Span) (params: (List Str)) (mk: (Fn Type -> Type)) -> Type
-  (match args
-    [a] (mk (parse-type-expr env a params))
-    _ (do (err! env "E_TYPE_EXPR" (str-concat name " requires exactly one type argument") sp) (fresh-var-anon env))))
+let t-list-of(elem: Type) -> Type =
+  t-list(elem)
 
-(defn parse-type-expr-two (env: TypeEnv) (name: Str) (args: (List Ast)) (sp: Span) (params: (List Str)) (mk: (Fn Type Type -> Type)) -> Type
-  (match args
-    [a b] (mk (parse-type-expr env a params) (parse-type-expr env b params))
-    _ (do (err! env "E_TYPE_EXPR" (str-concat name " requires exactly two type arguments") sp) (fresh-var-anon env))))
+let t-maybe-of(elem: Type) -> Type =
+  t-maybe(elem)
 
-(defn parse-type-expr-fn (env: TypeEnv) (args: (List Ast)) (sp: Span) (params: (List Str)) -> Type
-  (match (find-arrow args)
-    (None) (do (err! env "E_TYPE_FN" "Fn type requires ->" sp) (fresh-var-anon env))
-    (Some split)
-      (t-fn
-        (parse-type-exprs env (arrow-split-before split) params)
-        (parse-type-expr-first env (arrow-split-after split) sp params))))
+let t-ref-of(elem: Type) -> Type =
+  t-ref(elem)
 
-(defn parse-type-expr-first (env: TypeEnv) (after: (List Ast)) (sp: Span) (params: (List Str)) -> Type
-  (match after
-    (Cons r _) (parse-type-expr env r params)
-    [] (do (err! env "E_TYPE_FN" "Fn type requires a return type after ->" sp) (fresh-var-anon env))))
+let parse-type-expr-app-named(env: TypeEnv, hn: Str, args: List Ast, sp: Span, params: List Str) -> Type =
+  match (hn)
+    | "List" -> parse-type-expr-one(env, "List", args, sp, params, t-list-of)
+    | "Maybe" -> parse-type-expr-one(env, "Maybe", args, sp, params, t-maybe-of)
+    | "Ref" -> parse-type-expr-one(env, "Ref", args, sp, params, t-ref-of)
+    | "Map" -> parse-type-expr-two(env, "Map", args, sp, params, t-map)
+    | "Result" -> parse-type-expr-two(env, "Result", args, sp, params, t-result)
+    | "Fn" -> parse-type-expr-fn(env, args, sp, params)
+    | _ -> parse-type-expr-nominal(env, hn, args, sp, params)
 
-(defn parse-type-expr-nominal (env: TypeEnv) (hn: Str) (args: (List Ast)) (sp: Span) (params: (List Str)) -> Type
-  (match (type-get env hn)
-    (Some td) (t-nominal hn (parse-type-exprs env args params) (type-def-kind td))
-    (None) (do (err! env "E_TYPE_EXPR" "invalid type expression" sp) (fresh-var-anon env))))
+let parse-type-expr-one(env: TypeEnv, name: Str, args: List Ast, sp: Span, params: List Str, mk: (Type) -> Type) -> Type =
+  match (args)
+    | [a] -> mk(parse-type-expr(env, a, params))
+    | _ ->
+      {
+        err!(env, "E_TYPE_EXPR", str-concat(name, " requires exactly one type argument"), sp)
+        fresh-var-anon(env)
+      }
+
+let parse-type-expr-two(env: TypeEnv, name: Str, args: List Ast, sp: Span, params: List Str, mk: (Type, Type) -> Type) -> Type =
+  match (args)
+    | [a, b] -> mk(parse-type-expr(env, a, params), parse-type-expr(env, b, params))
+    | _ ->
+      {
+        err!(env, "E_TYPE_EXPR", str-concat(name, " requires exactly two type arguments"), sp)
+        fresh-var-anon(env)
+      }
+
+let parse-type-expr-fn(env: TypeEnv, args: List Ast, sp: Span, params: List Str) -> Type =
+  match (find-arrow(args))
+    | None ->
+      {
+        err!(env, "E_TYPE_FN", "Fn type requires ->", sp)
+        fresh-var-anon(env)
+      }
+    | Some(split) -> t-fn(parse-type-exprs(env, arrow-split-before(split), params), parse-type-expr-first(env, arrow-split-after(split), sp, params))
+
+let parse-type-expr-first(env: TypeEnv, after: List Ast, sp: Span, params: List Str) -> Type =
+  match (after)
+    | Cons(r, _) -> parse-type-expr(env, r, params)
+    | [] ->
+      {
+        err!(env, "E_TYPE_FN", "Fn type requires a return type after ->", sp)
+        fresh-var-anon(env)
+      }
+
+let parse-type-expr-nominal(env: TypeEnv, hn: Str, args: List Ast, sp: Span, params: List Str) -> Type =
+  match (type-get(env, hn))
+    | Some(td) -> t-nominal(hn, parse-type-exprs(env, args, params), type-def-kind(td))
+    | None ->
+      {
+        err!(env, "E_TYPE_EXPR", "invalid type expression", sp)
+        fresh-var-anon(env)
+      }
 
 ; ---------------------------------------------------------------------------
 ; `Name` or `(Name [params…])`, shared by defn/defrec/variant headers.
 
-(defrec NameParams (name: Str) (params: (List Str)))
-(defn name-params-name (np: NameParams) -> Str (match np (NameParams n _) n))
-(defn name-params-params (np: NameParams) -> (List Str) (match np (NameParams _ p) p))
+record NameParams {
+  name: Str
+  params: List Str
+}
 
-(defn syms-of (elems: (List Ast)) -> (List Str)
-  (match elems
-    [] []
-    (Cons e rest) (syms-of-cons e rest)))
+let name-params-name(np: NameParams) -> Str =
+  match (np)
+    | NameParams(n, _) -> n
 
-(defn syms-of-cons (e: Ast) (rest: (List Ast)) -> (List Str)
-  (match (sym-str e)
-    (None) (syms-of rest)
-    (Some n) (Cons n (syms-of rest))))
+let name-params-params(np: NameParams) -> List Str =
+  match (np)
+    | NameParams(_, p) -> p
 
-(defn parse-bracket-syms (ast: Ast) -> (List Str)
-  (match ast
-    (BracketNode elems _) (syms-of elems)
-    _ []))
+let syms-of(elems: List Ast) -> List Str =
+  match (elems)
+    | [] -> []
+    | Cons(e, rest) -> syms-of-cons(e, rest)
 
-(defn parse-type-name-params (more: (List Ast)) -> (List Str)
-  (match more
-    (Cons tp-ast _) (parse-bracket-syms tp-ast)
-    [] []))
+let syms-of-cons(e: Ast, rest: List Ast) -> List Str =
+  match (sym-str(e))
+    | None -> syms-of(rest)
+    | Some(n) -> Cons(n, syms-of(rest))
 
-(defn parse-type-name-paren-named (name-ast: Ast) (more: (List Ast)) -> (Maybe NameParams)
-  (match (sym-str name-ast)
-    (None) (None)
-    (Some name) (Some (NameParams name (parse-type-name-params more)))))
+let parse-bracket-syms(ast: Ast) -> List Str =
+  match (ast)
+    | BracketNode(elems, _) -> syms-of(elems)
+    | _ -> []
 
-(defn parse-type-name-paren (elems: (List Ast)) -> (Maybe NameParams)
-  (match elems
-    (Cons name-ast more) (parse-type-name-paren-named name-ast more)
-    [] (None)))
+let parse-type-name-params(more: List Ast) -> List Str =
+  match (more)
+    | Cons(tp-ast, _) -> parse-bracket-syms(tp-ast)
+    | [] -> []
 
-(defn parse-type-name (ast: Ast) -> (Maybe NameParams)
-  (match ast
-    (SymNode name _) (Some (NameParams name []))
-    (ParenNode elems _) (parse-type-name-paren elems)
-    _ (None)))
+let parse-type-name-paren-named(name-ast: Ast, more: List Ast) -> Maybe NameParams =
+  match (sym-str(name-ast))
+    | None -> None()
+    | Some(name) -> Some(NameParams(name, parse-type-name-params(more)))
 
-(defn params-to-types (params: (List Str)) -> (List Type)
-  (match params
-    [] []
-    (Cons p rest) (Cons (TParam p) (params-to-types rest))))
+let parse-type-name-paren(elems: List Ast) -> Maybe NameParams =
+  match (elems)
+    | Cons(name-ast, more) -> parse-type-name-paren-named(name-ast, more)
+    | [] -> None()
+
+let parse-type-name(ast: Ast) -> Maybe NameParams =
+  match (ast)
+    | SymNode(name, _) -> Some(NameParams(name, []))
+    | ParenNode(elems, _) -> parse-type-name-paren(elems)
+    | _ -> None()
+
+let params-to-types(params: List Str) -> List Type =
+  match (params)
+    | [] -> []
+    | Cons(p, rest) -> Cons(TParam(p), params-to-types(rest))
 
 ; ---------------------------------------------------------------------------
 ; Declaration collection (`collectDef`): alias/defrec/variant. Runs once
@@ -617,226 +705,247 @@
 ; reader/ast.mnd's header comment on `Ast`'s own forward declaration for
 ; why this is a single forward pass, not two-pass like `defn` schemes).
 
-(defn collect-def (env: TypeEnv) (ast: Ast) -> Unit
-  (match ast
-    (ParenNode elems sp) (collect-def-elems env elems sp)
-    _ ()))
+let collect-def(env: TypeEnv, ast: Ast) -> Unit =
+  match (ast)
+    | ParenNode(elems, sp) -> collect-def-elems(env, elems, sp)
+    | _ -> ()
 
-(defn collect-def-elems (env: TypeEnv) (elems: (List Ast)) (sp: Span) -> Unit
-  (match elems
-    [] ()
-    (Cons head rest) (collect-def-head env head rest sp)))
+let collect-def-elems(env: TypeEnv, elems: List Ast, sp: Span) -> Unit =
+  match (elems)
+    | [] -> ()
+    | Cons(head, rest) -> collect-def-head(env, head, rest, sp)
 
-(defn collect-def-head (env: TypeEnv) (head: Ast) (rest: (List Ast)) (sp: Span) -> Unit
-  (match (sym-str head)
-    (None) ()
-    (Some hn) (collect-def-named env hn rest sp)))
+let collect-def-head(env: TypeEnv, head: Ast, rest: List Ast, sp: Span) -> Unit =
+  match (sym-str(head))
+    | None -> ()
+    | Some(hn) -> collect-def-named(env, hn, rest, sp)
 
-(defn collect-def-named (env: TypeEnv) (hn: Str) (rest: (List Ast)) (sp: Span) -> Unit
-  (match hn
-    "pub"     (collect-def-elems env rest sp)
-    "alias"   (collect-alias env rest sp)
-    "defrec"  (collect-defrec env rest sp)
-    "variant" (collect-variant env rest sp)
-    _         ()))
+let collect-def-named(env: TypeEnv, hn: Str, rest: List Ast, sp: Span) -> Unit =
+  match (hn)
+    | "pub" -> collect-def-elems(env, rest, sp)
+    | "alias" -> collect-alias(env, rest, sp)
+    | "defrec" -> collect-defrec(env, rest, sp)
+    | "variant" -> collect-variant(env, rest, sp)
+    | _ -> ()
 
 ; alias
 
-(defn collect-alias (env: TypeEnv) (rest: (List Ast)) (sp: Span) -> Unit
-  (match rest
-    (Cons name-part (Cons type-part _)) (collect-alias-named env name-part type-part)
-    _ ()))
+let collect-alias(env: TypeEnv, rest: List Ast, sp: Span) -> Unit =
+  match (rest)
+    | Cons(name-part, Cons(type-part, _)) -> collect-alias-named(env, name-part, type-part)
+    | _ -> ()
 
-(defn collect-alias-named (env: TypeEnv) (name-part: Ast) (type-part: Ast) -> Unit
-  (match (sym-str name-part)
-    (None) ()
-    (Some name) (alias-set env name (parse-type-expr env type-part []))))
+let collect-alias-named(env: TypeEnv, name-part: Ast, type-part: Ast) -> Unit =
+  match (sym-str(name-part))
+    | None -> ()
+    | Some(name) -> alias-set(env, name, parse-type-expr(env, type-part, []))
 
 ; defrec
 
-(defn record-field-type (f: RecordField) -> Type
-  (match f (RecordField _ t) t))
+let record-field-type(f: RecordField) -> Type =
+  match (f)
+    | RecordField(_, t) -> t
 
-(defn record-field-types (fields: (List RecordField)) -> (List Type)
-  (match fields
-    [] []
-    (Cons f rest) (Cons (record-field-type f) (record-field-types rest))))
+let record-field-types(fields: List RecordField) -> List Type =
+  match (fields)
+    | [] -> []
+    | Cons(f, rest) -> Cons(record-field-type(f), record-field-types(rest))
 
-(defn parse-record-field-named (env: TypeEnv) (name-ast: Ast) (type-ast: Ast) (params: (List Str)) -> (Maybe RecordField)
-  (match (field-name name-ast)
-    (None) (None)
-    (Some name) (Some (RecordField name (parse-type-expr env type-ast params)))))
+let parse-record-field-named(env: TypeEnv, name-ast: Ast, type-ast: Ast, params: List Str) -> Maybe RecordField =
+  match (field-name(name-ast))
+    | None -> None()
+    | Some(name) -> Some(RecordField(name, parse-type-expr(env, type-ast, params)))
 
-(defn parse-record-field-elems (env: TypeEnv) (felems: (List Ast)) (params: (List Str)) -> (Maybe RecordField)
-  (match felems
-    (Cons name-ast (Cons type-ast _)) (parse-record-field-named env name-ast type-ast params)
-    _ (None)))
+let parse-record-field-elems(env: TypeEnv, felems: List Ast, params: List Str) -> Maybe RecordField =
+  match (felems)
+    | Cons(name-ast, Cons(type-ast, _)) -> parse-record-field-named(env, name-ast, type-ast, params)
+    | _ -> None()
 
-(defn parse-record-field (env: TypeEnv) (f: Ast) (params: (List Str)) -> (Maybe RecordField)
-  (match f
-    (ParenNode felems _) (parse-record-field-elems env felems params)
-    _ (None)))
+let parse-record-field(env: TypeEnv, f: Ast, params: List Str) -> Maybe RecordField =
+  match (f)
+    | ParenNode(felems, _) -> parse-record-field-elems(env, felems, params)
+    | _ -> None()
 
-(defn parse-record-fields (env: TypeEnv) (fields: (List Ast)) (params: (List Str)) -> (List RecordField)
-  (match fields
-    [] []
-    (Cons f rest) (parse-record-fields-cons env f rest params)))
+let parse-record-fields(env: TypeEnv, fields: List Ast, params: List Str) -> List RecordField =
+  match (fields)
+    | [] -> []
+    | Cons(f, rest) -> parse-record-fields-cons(env, f, rest, params)
 
-(defn parse-record-fields-cons (env: TypeEnv) (f: Ast) (rest: (List Ast)) (params: (List Str)) -> (List RecordField)
-  (match (parse-record-field env f params)
-    (None) (parse-record-fields env rest params)
-    (Some rf) (Cons rf (parse-record-fields env rest params))))
+let parse-record-fields-cons(env: TypeEnv, f: Ast, rest: List Ast, params: List Str) -> List RecordField =
+  match (parse-record-field(env, f, params))
+    | None -> parse-record-fields(env, rest, params)
+    | Some(rf) -> Cons(rf, parse-record-fields(env, rest, params))
 
-(defn collect-defrec-fields (env: TypeEnv) (np: NameParams) (fields: (List Ast)) -> Unit
-  (do
-    (let name (name-params-name np))
-    (let params (name-params-params np))
-    (let rfields (parse-record-fields env fields params))
-    (let ftypes (record-field-types rfields))
-    (type-set env name (RecordDef name params rfields))
-    (ctor-set env name (CtorInfo name ftypes params))
-    (value-set env name (Scheme params (t-fn ftypes (t-nominal name (params-to-types params) "record"))))))
+let collect-defrec-fields(env: TypeEnv, np: NameParams, fields: List Ast) -> Unit {
+  let name = name-params-name(np)
+  let params = name-params-params(np)
+  let rfields = parse-record-fields(env, fields, params)
+  let ftypes = record-field-types(rfields)
+  type-set(env, name, RecordDef(name, params, rfields))
+  ctor-set(env, name, CtorInfo(name, ftypes, params))
+  value-set(env, name, Scheme(params, t-fn(ftypes, t-nominal(name, params-to-types(params), "record"))))
+}
 
-(defn collect-defrec-named (env: TypeEnv) (name-part: Ast) (fields: (List Ast)) -> Unit
-  (match (parse-type-name name-part)
-    (None) ()
-    (Some np) (collect-defrec-fields env np fields)))
+let collect-defrec-named(env: TypeEnv, name-part: Ast, fields: List Ast) -> Unit =
+  match (parse-type-name(name-part))
+    | None -> ()
+    | Some(np) -> collect-defrec-fields(env, np, fields)
 
-(defn collect-defrec (env: TypeEnv) (rest: (List Ast)) (sp: Span) -> Unit
-  (match rest
-    (Cons name-part fields) (collect-defrec-named env name-part fields)
-    [] ()))
+let collect-defrec(env: TypeEnv, rest: List Ast, sp: Span) -> Unit =
+  match (rest)
+    | Cons(name-part, fields) -> collect-defrec-named(env, name-part, fields)
+    | [] -> ()
 
 ; variant
 
-(defn ctor-owner (c: CtorInfo) -> Str
-  (match c (CtorInfo type-name _ _) type-name))
+let ctor-owner(c: CtorInfo) -> Str =
+  match (c)
+    | CtorInfo(type-name, _, _) -> type-name
 
 ; A constructor already owned by another variant stays there. SpawnError
 ; lists the IoError singletons NotFound and Permission for exhaustiveness
 ; without taking them away from IoError.
-(defn register-variant-ctor-set (env: TypeEnv) (type-name: Str) (params: (List Str)) (cname: Str) (payloads: (List Type)) -> Unit
-  (do
-    (ctor-set env cname (CtorInfo type-name payloads params))
-    (value-set env cname (Scheme params (t-fn payloads (t-nominal type-name (params-to-types params) "variant"))))))
+let register-variant-ctor-set(env: TypeEnv, type-name: Str, params: List Str, cname: Str, payloads: List Type) -> Unit {
+  ctor-set(env, cname, CtorInfo(type-name, payloads, params))
+  value-set(env, cname, Scheme(params, t-fn(payloads, t-nominal(type-name, params-to-types(params), "variant"))))
+}
 
-(defn register-variant-ctor-checked (env: TypeEnv) (type-name: Str) (params: (List Str)) (cname: Str) (payloads: (List Type)) -> Unit
-  (match (ctor-get env cname)
-    (Some info)
-      (if (= (ctor-owner info) type-name)
-        (register-variant-ctor-set env type-name params cname payloads)
-        ())
-    (None) (register-variant-ctor-set env type-name params cname payloads)))
+let register-variant-ctor-checked(env: TypeEnv, type-name: Str, params: List Str, cname: Str, payloads: List Type) -> Unit =
+  match (ctor-get(env, cname))
+    | Some(info) ->
+      if ctor-owner(info) == type-name -> register-variant-ctor-set(env, type-name, params, cname, payloads)
+    | None -> register-variant-ctor-set(env, type-name, params, cname, payloads)
 
-(defn register-variant-ctor (env: TypeEnv) (type-name: Str) (params: (List Str)) (vc: VariantCtor) -> Unit
-  (match vc
-    (VariantCtor cname payloads) (register-variant-ctor-checked env type-name params cname payloads)))
+let register-variant-ctor(env: TypeEnv, type-name: Str, params: List Str, vc: VariantCtor) -> Unit =
+  match (vc)
+    | VariantCtor(cname, payloads) -> register-variant-ctor-checked(env, type-name, params, cname, payloads)
 
-(defn parse-variant-ctor-named (env: TypeEnv) (cname-ast: Ast) (payload-asts: (List Ast)) (params: (List Str)) -> (Maybe VariantCtor)
-  (match (sym-str cname-ast)
-    (None) (None)
-    (Some cname) (Some (VariantCtor cname (parse-type-exprs env payload-asts params)))))
+let parse-variant-ctor-named(env: TypeEnv, cname-ast: Ast, payload-asts: List Ast, params: List Str) -> Maybe VariantCtor =
+  match (sym-str(cname-ast))
+    | None -> None()
+    | Some(cname) -> Some(VariantCtor(cname, parse-type-exprs(env, payload-asts, params)))
 
-(defn parse-variant-ctor-elems (env: TypeEnv) (celems: (List Ast)) (params: (List Str)) -> (Maybe VariantCtor)
-  (match celems
-    (Cons cname-ast payload-asts) (parse-variant-ctor-named env cname-ast payload-asts params)
-    [] (None)))
+let parse-variant-ctor-elems(env: TypeEnv, celems: List Ast, params: List Str) -> Maybe VariantCtor =
+  match (celems)
+    | Cons(cname-ast, payload-asts) -> parse-variant-ctor-named(env, cname-ast, payload-asts, params)
+    | [] -> None()
 
-(defn parse-variant-ctor (env: TypeEnv) (c: Ast) (params: (List Str)) -> (Maybe VariantCtor)
-  (match c
-    (ParenNode celems _) (parse-variant-ctor-elems env celems params)
-    _ (None)))
+let parse-variant-ctor(env: TypeEnv, c: Ast, params: List Str) -> Maybe VariantCtor =
+  match (c)
+    | ParenNode(celems, _) -> parse-variant-ctor-elems(env, celems, params)
+    | _ -> None()
 
-(defn collect-variant-ctor-list (env: TypeEnv) (type-name: Str) (params: (List Str)) (ctor-asts: (List Ast)) -> (List VariantCtor)
-  (match ctor-asts
-    [] []
-    (Cons c rest) (collect-variant-ctor-cons env type-name params c rest)))
+let collect-variant-ctor-list(env: TypeEnv, type-name: Str, params: List Str, ctor-asts: List Ast) -> List VariantCtor =
+  match (ctor-asts)
+    | [] -> []
+    | Cons(c, rest) -> collect-variant-ctor-cons(env, type-name, params, c, rest)
 
-(defn collect-variant-ctor-cons (env: TypeEnv) (type-name: Str) (params: (List Str)) (c: Ast) (rest: (List Ast)) -> (List VariantCtor)
-  (match (parse-variant-ctor env c params)
-    (None) (collect-variant-ctor-list env type-name params rest)
-    (Some vc)
-      (do
-        (register-variant-ctor env type-name params vc)
-        (Cons vc (collect-variant-ctor-list env type-name params rest)))))
+let collect-variant-ctor-cons(env: TypeEnv, type-name: Str, params: List Str, c: Ast, rest: List Ast) -> List VariantCtor =
+  match (parse-variant-ctor(env, c, params))
+    | None -> collect-variant-ctor-list(env, type-name, params, rest)
+    | Some(vc) ->
+      {
+        register-variant-ctor(env, type-name, params, vc)
+        Cons(vc, collect-variant-ctor-list(env, type-name, params, rest))
+      }
 
-(defn collect-variant-ctors (env: TypeEnv) (np: NameParams) (ctor-asts: (List Ast)) -> Unit
-  (do
-    (let name (name-params-name np))
-    (let params (name-params-params np))
-    (let vctors (collect-variant-ctor-list env name params ctor-asts))
-    (type-set env name (VariantDef name params vctors))))
+let collect-variant-ctors(env: TypeEnv, np: NameParams, ctor-asts: List Ast) -> Unit {
+  let name = name-params-name(np)
+  let params = name-params-params(np)
+  type-set(env, name, VariantDef(name, params, []))
+  let vctors = collect-variant-ctor-list(env, name, params, ctor-asts)
+  type-set(env, name, VariantDef(name, params, vctors))
+}
 
-(defn collect-variant-named (env: TypeEnv) (name-part: Ast) (ctors: (List Ast)) -> Unit
-  (match (parse-type-name name-part)
-    (None) ()
-    (Some np) (collect-variant-ctors env np ctors)))
+let collect-variant-named(env: TypeEnv, name-part: Ast, ctors: List Ast) -> Unit =
+  match (parse-type-name(name-part))
+    | None -> ()
+    | Some(np) -> collect-variant-ctors(env, np, ctors)
 
-(defn collect-variant (env: TypeEnv) (rest: (List Ast)) (sp: Span) -> Unit
-  (match rest
-    (Cons name-part ctors) (collect-variant-named env name-part ctors)
-    [] ()))
+let collect-variant(env: TypeEnv, rest: List Ast, sp: Span) -> Unit =
+  match (rest)
+    | Cons(name-part, ctors) -> collect-variant-named(env, name-part, ctors)
+    | [] -> ()
 
 ; ---------------------------------------------------------------------------
 ; defn header parsing, shared by scheme-collection (pass 1) and body
 ; checking (pass 2).
 
-(defrec ParamsSplit (names: (List Str)) (types: (List Type)) (rest: (List Ast)))
+record ParamsSplit {
+  names: List Str
+  types: List Type
+  rest: List Ast
+}
 
-(defn parse-params-field (env: TypeEnv) (name-ast: Ast) (type-ast: Ast) (rest: (List Ast)) (param-set: (List Str)) -> ParamsSplit
-  (match (field-name name-ast)
-    (None) (parse-params env rest param-set)
-    (Some pn)
-      (do
-        (let pt (parse-type-expr env type-ast param-set))
-        (parse-params-cons pn pt (parse-params env rest param-set)))))
+let parse-params-field(env: TypeEnv, name-ast: Ast, type-ast: Ast, rest: List Ast, param-set: List Str) -> ParamsSplit =
+  match (field-name(name-ast))
+    | None -> parse-params(env, rest, param-set)
+    | Some(pn) ->
+      {
+        let pt = parse-type-expr(env, type-ast, param-set)
+        parse-params-cons(pn, pt, parse-params(env, rest, param-set))
+      }
 
-(defn parse-params-cons (name: Str) (t: Type) (tail: ParamsSplit) -> ParamsSplit
-  (match tail (ParamsSplit ns ts rs) (ParamsSplit (Cons name ns) (Cons t ts) rs)))
+let parse-params-cons(name: Str, t: Type, tail: ParamsSplit) -> ParamsSplit =
+  match (tail)
+    | ParamsSplit(ns, ts, rs) -> ParamsSplit(Cons(name, ns), Cons(t, ts), rs)
 
-(defn parse-params-elem (env: TypeEnv) (e: Ast) (rest: (List Ast)) (param-set: (List Str)) -> ParamsSplit
-  (if (is-sym e "->") (ParamsSplit [] [] rest)
-    (parse-params-elem-field env e rest param-set)))
+let parse-params-elem(env: TypeEnv, e: Ast, rest: List Ast, param-set: List Str) -> ParamsSplit =
+  if is-sym(e, "->") -> ParamsSplit([], [], rest)
+   | else -> parse-params-elem-field(env, e, rest, param-set)
 
-(defn parse-params-elem-field (env: TypeEnv) (e: Ast) (rest: (List Ast)) (param-set: (List Str)) -> ParamsSplit
-  (match e
-    (ParenNode (Cons name-ast (Cons type-ast _)) _) (parse-params-field env name-ast type-ast rest param-set)
-    _ (ParamsSplit [] [] (Cons e rest))))
+let parse-params-elem-field(env: TypeEnv, e: Ast, rest: List Ast, param-set: List Str) -> ParamsSplit =
+  match (e)
+    | ParenNode(Cons(name-ast, Cons(type-ast, _)), _) -> parse-params-field(env, name-ast, type-ast, rest, param-set)
+    | _ -> ParamsSplit([], [], Cons(e, rest))
 
-(defn parse-params (env: TypeEnv) (elems: (List Ast)) (param-set: (List Str)) -> ParamsSplit
-  (match elems
-    [] (ParamsSplit [] [] [])
-    (Cons e rest) (parse-params-elem env e rest param-set)))
+let parse-params(env: TypeEnv, elems: List Ast, param-set: List Str) -> ParamsSplit =
+  match (elems)
+    | [] -> ParamsSplit([], [], [])
+    | Cons(e, rest) -> parse-params-elem(env, e, rest, param-set)
 
-(defrec ParsedDefn
-  (name: Str)
-  (type-params: (List Str))
-  (param-names: (List Str))
-  (param-types: (List Type))
-  (ret-type: Type)
-  (body: (List Ast)))
+record ParsedDefn {
+  name: Str
+  type-params: List Str
+  param-names: List Str
+  param-types: List Type
+  ret-type: Type
+  body: List Ast
+}
 
-(defn parse-defn-return (env: TypeEnv) (name: Str) (type-params: (List Str)) (split: ParamsSplit) (whole-span: Span) (report: Bool) -> (Maybe ParsedDefn)
-  (match split
-    (ParamsSplit pnames ptypes rest2) (parse-defn-return-rest env name type-params pnames ptypes rest2 whole-span report)))
+let parse-defn-return(env: TypeEnv, name: Str, type-params: List Str, split: ParamsSplit, whole-span: Span, report: Bool) -> Maybe ParsedDefn =
+  match (split)
+    | ParamsSplit(pnames, ptypes, rest2) -> parse-defn-return-rest(env, name, type-params, pnames, ptypes, rest2, whole-span, report)
 
-(defn parse-defn-return-rest (env: TypeEnv) (name: Str) (type-params: (List Str)) (pnames: (List Str)) (ptypes: (List Type)) (rest2: (List Ast)) (whole-span: Span) (report: Bool) -> (Maybe ParsedDefn)
-  (match rest2
-    (Cons ret-ast body) (Some (ParsedDefn name type-params pnames ptypes (parse-type-expr env ret-ast type-params) body))
-    [] (do (if report (err! env "E_TYPE_DEFN" "defn missing return type" whole-span) ()) (None))))
+let parse-defn-return-rest(env: TypeEnv, name: Str, type-params: List Str, pnames: List Str, ptypes: List Type, rest2: List Ast, whole-span: Span, report: Bool) -> Maybe ParsedDefn =
+  match (rest2)
+    | Cons(ret-ast, body) -> Some(ParsedDefn(name, type-params, pnames, ptypes, parse-type-expr(env, ret-ast, type-params), body))
+    | [] ->
+      {
+        if report -> err!(env, "E_TYPE_DEFN", "defn missing return type", whole-span)
+        None()
+      }
 
-(defn parse-defn-header (env: TypeEnv) (name: Str) (type-params: (List Str)) (rest: (List Ast)) (whole-span: Span) (report: Bool) -> (Maybe ParsedDefn)
-  (parse-defn-return env name type-params (parse-params env rest type-params) whole-span report))
+let parse-defn-header(env: TypeEnv, name: Str, type-params: List Str, rest: List Ast, whole-span: Span, report: Bool) -> Maybe ParsedDefn =
+  parse-defn-return(env, name, type-params, parse-params(env, rest, type-params), whole-span, report)
 
-(defn parse-defn-name (env: TypeEnv) (name-part: Ast) (rest: (List Ast)) (whole-span: Span) (report: Bool) -> (Maybe ParsedDefn)
-  (match (parse-type-name name-part)
-    (None) (do (if report (err! env "E_TYPE_DEFN" "malformed defn name" (ast-span name-part)) ()) (None))
-    (Some np) (parse-defn-header env (name-params-name np) (name-params-params np) rest whole-span report)))
+let parse-defn-name(env: TypeEnv, name-part: Ast, rest: List Ast, whole-span: Span, report: Bool) -> Maybe ParsedDefn =
+  match (parse-type-name(name-part))
+    | None ->
+      {
+        if report -> err!(env, "E_TYPE_DEFN", "malformed defn name", ast-span(name-part))
+        None()
+      }
+    | Some(np) -> parse-defn-header(env, name-params-name(np), name-params-params(np), rest, whole-span, report)
 
-(defn parse-defn (env: TypeEnv) (elems: (List Ast)) (whole-span: Span) (report: Bool) -> (Maybe ParsedDefn)
-  (match elems
-    (Cons _ (Cons name-part rest)) (parse-defn-name env name-part rest whole-span report)
-    _ (do (if report (err! env "E_TYPE_DEFN" "malformed defn" whole-span) ()) (None))))
+let parse-defn(env: TypeEnv, elems: List Ast, whole-span: Span, report: Bool) -> Maybe ParsedDefn =
+  match (elems)
+    | Cons(_, Cons(name-part, rest)) -> parse-defn-name(env, name-part, rest, whole-span, report)
+    | _ ->
+      {
+        if report -> err!(env, "E_TYPE_DEFN", "malformed defn", whole-span)
+        None()
+      }
 
 ; ---------------------------------------------------------------------------
 ; Pass 1: register every defn's scheme (mutual recursion — spec §2.6's
@@ -844,602 +953,752 @@
 ; because both defns' *signatures* are known before either *body* is
 ; checked, exactly like host/src/type/check.ts's collectDefnScheme).
 
-(defn register-parsed-scheme (env: TypeEnv) (p: ParsedDefn) -> Unit
-  (match p (ParsedDefn name tparams _ ptypes ret _) (value-set env name (Scheme tparams (t-fn ptypes ret)))))
+let register-parsed-scheme(env: TypeEnv, p: ParsedDefn) -> Unit =
+  match (p)
+    | ParsedDefn(name, tparams, _, ptypes, ret, _) -> value-set(env, name, Scheme(tparams, t-fn(ptypes, ret)))
 
-(defn register-defn-scheme (env: TypeEnv) (elems: (List Ast)) (sp: Span) -> Unit
-  (match (parse-defn env elems sp false)
-    (None) ()
-    (Some p) (register-parsed-scheme env p)))
+let register-defn-scheme(env: TypeEnv, elems: List Ast, sp: Span) -> Unit =
+  match (parse-defn(env, elems, sp, false))
+    | None -> ()
+    | Some(p) -> register-parsed-scheme(env, p)
 
-(defn collect-defn-scheme-named (env: TypeEnv) (hn: Str) (rest: (List Ast)) (elems: (List Ast)) (sp: Span) -> Unit
-  (match hn
-    "pub"    (collect-defn-scheme-elems env rest sp)
-    "defn"   (register-defn-scheme env elems sp)
-    "extern" (register-defn-scheme env elems sp)
-    _        ()))
+let collect-defn-scheme-named(env: TypeEnv, hn: Str, rest: List Ast, elems: List Ast, sp: Span) -> Unit =
+  match (hn)
+    | "pub" -> collect-defn-scheme-elems(env, rest, sp)
+    | "defn" -> register-defn-scheme(env, elems, sp)
+    | "extern" -> register-defn-scheme(env, elems, sp)
+    | _ -> ()
 
-(defn collect-defn-scheme-head (env: TypeEnv) (head: Ast) (rest: (List Ast)) (elems: (List Ast)) (sp: Span) -> Unit
-  (match (sym-str head)
-    (None) ()
-    (Some hn) (collect-defn-scheme-named env hn rest elems sp)))
+let collect-defn-scheme-head(env: TypeEnv, head: Ast, rest: List Ast, elems: List Ast, sp: Span) -> Unit =
+  match (sym-str(head))
+    | None -> ()
+    | Some(hn) -> collect-defn-scheme-named(env, hn, rest, elems, sp)
 
-(defn collect-defn-scheme-elems (env: TypeEnv) (elems: (List Ast)) (sp: Span) -> Unit
-  (match elems
-    [] ()
-    (Cons head rest) (collect-defn-scheme-head env head rest elems sp)))
+let collect-defn-scheme-elems(env: TypeEnv, elems: List Ast, sp: Span) -> Unit =
+  match (elems)
+    | [] -> ()
+    | Cons(head, rest) -> collect-defn-scheme-head(env, head, rest, elems, sp)
 
-(defn collect-defn-scheme (env: TypeEnv) (ast: Ast) -> Unit
-  (match ast
-    (ParenNode elems sp) (collect-defn-scheme-elems env elems sp)
-    _ ()))
+let collect-defn-scheme(env: TypeEnv, ast: Ast) -> Unit =
+  match (ast)
+    | ParenNode(elems, sp) -> collect-defn-scheme-elems(env, elems, sp)
+    | _ -> ()
 
 ; ---------------------------------------------------------------------------
 ; Pass 2, body checking: `infer` and all its special forms.
 
-(defn build-param-local (names: (List Str)) (types: (List Type)) -> (Map Str Type)
-  (match names
-    [] (map-new)
-    (Cons n nrest)
-      (match types
-        [] (map-new)
-        (Cons t trest) (map-set (build-param-local nrest trest) n t))))
+let build-param-local(names: List Str, types: List Type) -> Map Str Type =
+  match (names)
+    | [] -> map-new()
+    | Cons(n, nrest) ->
+      match (types)
+        | [] -> map-new()
+        | Cons(t, trest) -> map-set(build-param-local(nrest, trest), n, t)
 
-(defn last-of (xs: (List Ast)) -> (Maybe Ast)
-  (match xs
-    [] (None)
-    [x] (Some x)
-    (Cons _ rest) (last-of rest)))
+let last-of(xs: List Ast) -> Maybe Ast =
+  match (xs)
+    | [] -> None()
+    | [x] -> Some(x)
+    | Cons(_, rest) -> last-of(rest)
 
-(defn defn-body-span (body: (List Ast)) (fallback: Span) -> Span
-  (match (last-of body) (Some a) (ast-span a) (None) fallback))
+let defn-body-span(body: List Ast, fallback: Span) -> Span =
+  match (last-of(body))
+    | Some(a) -> ast-span(a)
+    | None -> fallback
 
-(defn typecheck-defn-body-type (env: TypeEnv) (body: (List Ast)) (local: (Map Str Type)) -> Type
-  (match body
-    [] (t-unit)
-    _ (infer-sequence env body local)))
+let typecheck-defn-body-type(env: TypeEnv, body: List Ast, local: Map Str Type) -> Type =
+  match (body)
+    | [] -> t-unit()
+    | _ -> infer-sequence(env, body, local)
 
-(defn typecheck-defn-body (env: TypeEnv) (p: ParsedDefn) (sp: Span) -> Unit
-  (match p
-    (ParsedDefn _ _ pnames ptypes ret body)
-      (do
-        (let local (build-param-local pnames ptypes))
-        (let bt (typecheck-defn-body-type env body local))
-        (expect-type env bt ret (defn-body-span body sp))
-        ())))
+let typecheck-defn-body(env: TypeEnv, p: ParsedDefn, sp: Span) -> Unit =
+  match (p)
+    | ParsedDefn(_, _, pnames, ptypes, ret, body) ->
+      {
+        let local = build-param-local(pnames, ptypes)
+        let bt = typecheck-defn-body-type(env, body, local)
+        expect-type(env, bt, ret, defn-body-span(body, sp))
+        ()
+      }
 
-(defn typecheck-defn (env: TypeEnv) (elems: (List Ast)) (sp: Span) -> Unit
-  (match (parse-defn env elems sp true)
-    (None) ()
-    (Some p) (typecheck-defn-body env p sp)))
+let typecheck-defn(env: TypeEnv, elems: List Ast, sp: Span) -> Unit =
+  match (parse-defn(env, elems, sp, true))
+    | None -> ()
+    | Some(p) -> typecheck-defn-body(env, p, sp)
 
 ; -- expressions --
 
-(defn infer (env: TypeEnv) (ast: Ast) (local: (Map Str Type)) -> Type
-  (match ast
-    (IntNode _ _) (t-int)
-    (FloatNode _ _) (t-float)
-    (BoolNode _ _) (t-bool)
-    (StrNode _ _) (t-str)
-    (SymNode name sp) (infer-sym env name sp local)
-    (BracketNode elems sp) (infer-bracket env elems sp local)
-    (ParenNode elems sp) (infer-paren env elems sp local)))
+let infer(env: TypeEnv, ast: Ast, local: Map Str Type) -> Type =
+  match (ast)
+    | IntNode(_, _) -> t-int()
+    | FloatNode(_, _) -> t-float()
+    | BoolNode(_, _) -> t-bool()
+    | StrNode(_, _) -> t-str()
+    | SymNode(name, sp) -> infer-sym(env, name, sp, local)
+    | BracketNode(elems, sp) -> infer-bracket(env, elems, sp, local)
+    | ParenNode(elems, sp) -> infer-paren(env, elems, sp, local)
 
-(defn infer-sym-global (env: TypeEnv) (name: Str) (sp: Span) -> Type
-  (match (value-get env name)
-    (Some s) (instantiate env s)
-    (None) (do (err! env "E_TYPE_UNBOUND" (str-concat "unbound variable " name) sp) (fresh-var-anon env))))
+let infer-sym-global(env: TypeEnv, name: Str, sp: Span) -> Type =
+  match (value-get(env, name))
+    | Some(s) -> instantiate(env, s)
+    | None ->
+      {
+        err!(env, "E_TYPE_UNBOUND", str-concat("unbound variable ", name), sp)
+        fresh-var-anon(env)
+      }
 
-(defn infer-sym (env: TypeEnv) (name: Str) (sp: Span) (local: (Map Str Type)) -> Type
-  (if (= name "_") (fresh-var-anon env) (infer-sym-lookup env name sp local)))
+let infer-sym(env: TypeEnv, name: Str, sp: Span, local: Map Str Type) -> Type =
+  if name == "_" -> fresh-var-anon(env)
+   | else -> infer-sym-lookup(env, name, sp, local)
 
-(defn infer-sym-lookup (env: TypeEnv) (name: Str) (sp: Span) (local: (Map Str Type)) -> Type
-  (match (map-get local name)
-    (Some t) (apply-subst env t)
-    (None) (infer-sym-global env name sp)))
+let infer-sym-lookup(env: TypeEnv, name: Str, sp: Span, local: Map Str Type) -> Type =
+  match (map-get(local, name))
+    | Some(t) -> apply-subst(env, t)
+    | None -> infer-sym-global(env, name, sp)
 
-(defn check-bracket-rest (env: TypeEnv) (rest: (List Ast)) (et: Type) (local: (Map Str Type)) -> Unit
-  (match rest
-    [] ()
-    (Cons e more)
-      (do
-        (expect-type env (infer env e local) et (ast-span e))
-        (check-bracket-rest env more et local))))
+let check-bracket-rest(env: TypeEnv, rest: List Ast, et: Type, local: Map Str Type) -> Unit =
+  match (rest)
+    | [] -> ()
+    | Cons(e, more) ->
+      {
+        expect-type(env, infer(env, e, local), et, ast-span(e))
+        check-bracket-rest(env, more, et, local)
+      }
 
-(defn infer-bracket-nonempty (env: TypeEnv) (first: Ast) (rest: (List Ast)) (local: (Map Str Type)) -> Type
-  (do
-    (let et (infer env first local))
-    (check-bracket-rest env rest et local)
-    (t-list (apply-subst env et))))
+let infer-bracket-nonempty(env: TypeEnv, first: Ast, rest: List Ast, local: Map Str Type) -> Type {
+  let et = infer(env, first, local)
+  check-bracket-rest(env, rest, et, local)
+  t-list(apply-subst(env, et))
+}
 
-(defn infer-bracket (env: TypeEnv) (elems: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
-  (match elems
-    [] (t-list (fresh-var-anon env))
-    (Cons first rest) (infer-bracket-nonempty env first rest local)))
+let infer-bracket(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) -> Type =
+  match (elems)
+    | [] -> t-list(fresh-var-anon(env))
+    | Cons(first, rest) -> infer-bracket-nonempty(env, first, rest, local)
 
 ; -- if --
 
-(defn infer-if (env: TypeEnv) (elems: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
-  (match elems
-    [_ test then els] (infer-if-checked env test then els local)
-    _ (do (err! env "E_TYPE_ARITY" "if expects test, then, else" sp) (fresh-var-anon env))))
+let infer-if(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) -> Type =
+  match (elems)
+    | [_, test, then, els] -> infer-if-checked(env, test, then, els, local)
+    | _ ->
+      {
+        err!(env, "E_TYPE_ARITY", "if expects test, then, else", sp)
+        fresh-var-anon(env)
+      }
 
-(defn infer-if-checked (env: TypeEnv) (test: Ast) (then: Ast) (els: Ast) (local: (Map Str Type)) -> Type
-  (do
-    (expect-type env (infer env test local) (t-bool) (ast-span test))
-    (let th (infer env then local))
-    (let el (infer env els local))
-    (expect-type env el th (ast-span els))
-    (apply-subst env th)))
+let infer-if-checked(env: TypeEnv, test: Ast, then: Ast, els: Ast, local: Map Str Type) -> Type {
+  expect-type(env, infer(env, test, local), t-bool(), ast-span(test))
+  let th = infer(env, then, local)
+  let el = infer(env, els, local)
+  ; A missing else is lowered to (). () is Unit, so a missing else
+  ; typechecks only when every arm is Unit.
+  expect-type(env, el, th, ast-span(els))
+  apply-subst(env, th)
+}
 
 ; -- let / do / sequences --
 
-(defn infer-let-body (env: TypeEnv) (body: (List Ast)) (bound-type: Type) (next: (Map Str Type)) -> Type
-  (match body
-    [] bound-type
-    _ (infer-sequence env body next)))
+let infer-let-body(env: TypeEnv, body: List Ast, bound-type: Type, next: Map Str Type) -> Type =
+  match (body)
+    | [] -> bound-type
+    | _ -> infer-sequence(env, body, next)
 
-(defn infer-let-named (env: TypeEnv) (name-ast: Ast) (expr-ast: Ast) (body: (List Ast)) (local: (Map Str Type)) -> Type
-  (match (sym-str name-ast)
-    (None) (do (err! env "E_TYPE_LET" "let name must be a symbol" (ast-span name-ast)) (fresh-var-anon env))
-    (Some name)
-      (do
-        (let t (infer env expr-ast local))
-        (infer-let-body env body t (map-set local name t)))))
+let infer-let-named(env: TypeEnv, name-ast: Ast, expr-ast: Ast, body: List Ast, local: Map Str Type) -> Type =
+  match (sym-str(name-ast))
+    | None ->
+      {
+        err!(env, "E_TYPE_LET", "let name must be a symbol", ast-span(name-ast))
+        fresh-var-anon(env)
+      }
+    | Some(name) ->
+      {
+        let t = infer(env, expr-ast, local)
+        infer-let-body(env, body, t, map-set(local, name, t))
+      }
 
-(defn infer-let (env: TypeEnv) (elems: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
-  (match elems
-    (Cons _ (Cons name-ast (Cons expr-ast body))) (infer-let-named env name-ast expr-ast body local)
-    _ (do (err! env "E_TYPE_LET" "let requires name and expression" sp) (fresh-var-anon env))))
+let infer-let(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) -> Type =
+  match (elems)
+    | Cons(_, Cons(name-ast, Cons(expr-ast, body))) -> infer-let-named(env, name-ast, expr-ast, body, local)
+    | _ ->
+      {
+        err!(env, "E_TYPE_LET", "let requires name and expression", sp)
+        fresh-var-anon(env)
+      }
 
-(defrec SimpleLet (name: Str) (expr: Ast))
+record SimpleLet {
+  name: Str
+  expr: Ast
+}
 
-(defn as-simple-let-named (head: Ast) (name-ast: Ast) (expr-ast: Ast) -> (Maybe SimpleLet)
-  (if (is-sym head "let")
-    (match (sym-str name-ast) (Some name) (Some (SimpleLet name expr-ast)) (None) (None))
-    (None)))
+let as-simple-let-named(head: Ast, name-ast: Ast, expr-ast: Ast) -> Maybe SimpleLet =
+  if is-sym(head, "let") ->
+    match (sym-str(name-ast))
+      | Some(name) -> Some(SimpleLet(name, expr-ast))
+      | None -> None()
+   | else -> None()
 
-(defn as-simple-let (f: Ast) -> (Maybe SimpleLet)
-  (match f
-    (ParenNode [head name-ast expr-ast] _) (as-simple-let-named head name-ast expr-ast)
-    _ (None)))
+let as-simple-let(f: Ast) -> Maybe SimpleLet =
+  match (f)
+    | ParenNode([head, name-ast, expr-ast], _) -> as-simple-let-named(head, name-ast, expr-ast)
+    | _ -> None()
 
-(defn infer-sequence-rest (env: TypeEnv) (rest: (List Ast)) (local: (Map Str Type)) (fallback: Type) -> Type
-  (match rest
-    [] fallback
-    _ (infer-sequence env rest local)))
+let infer-sequence-rest(env: TypeEnv, rest: List Ast, local: Map Str Type, fallback: Type) -> Type =
+  match (rest)
+    | [] -> fallback
+    | _ -> infer-sequence(env, rest, local)
 
-(defn infer-sequence-let (env: TypeEnv) (sl: SimpleLet) (rest: (List Ast)) (local: (Map Str Type)) -> Type
-  (match sl
-    (SimpleLet name expr-ast)
-      (do
-        (let t (infer env expr-ast local))
-        (infer-sequence-rest env rest (map-set local name t) t))))
+let infer-sequence-let(env: TypeEnv, sl: SimpleLet, rest: List Ast, local: Map Str Type) -> Type =
+  match (sl)
+    | SimpleLet(name, expr-ast) ->
+      {
+        let t = infer(env, expr-ast, local)
+        infer-sequence-rest(env, rest, map-set(local, name, t), t)
+      }
 
-(defn infer-sequence-plain (env: TypeEnv) (f: Ast) (rest: (List Ast)) (local: (Map Str Type)) -> Type
-  (do
-    (let t (infer env f local))
-    (infer-sequence-rest env rest local t)))
+let infer-sequence-plain(env: TypeEnv, f: Ast, rest: List Ast, local: Map Str Type) -> Type {
+  let t = infer(env, f, local)
+  infer-sequence-rest(env, rest, local, t)
+}
 
-(defn infer-sequence-step (env: TypeEnv) (f: Ast) (rest: (List Ast)) (local: (Map Str Type)) -> Type
-  (match (as-simple-let f)
-    (Some sl) (infer-sequence-let env sl rest local)
-    (None) (infer-sequence-plain env f rest local)))
+let infer-sequence-step(env: TypeEnv, f: Ast, rest: List Ast, local: Map Str Type) -> Type =
+  match (as-simple-let(f))
+    | Some(sl) -> infer-sequence-let(env, sl, rest, local)
+    | None -> infer-sequence-plain(env, f, rest, local)
 
-(defn infer-sequence (env: TypeEnv) (forms: (List Ast)) (local: (Map Str Type)) -> Type
-  (match forms
-    [] (t-unit)
-    (Cons f rest) (infer-sequence-step env f rest local)))
+let infer-sequence(env: TypeEnv, forms: List Ast, local: Map Str Type) -> Type =
+  match (forms)
+    | [] -> t-unit()
+    | Cons(f, rest) -> infer-sequence-step(env, f, rest, local)
 
-(defn infer-do (env: TypeEnv) (rest: (List Ast)) (local: (Map Str Type)) -> Type
-  (infer-sequence env rest local))
+let infer-do(env: TypeEnv, rest: List Ast, local: Map Str Type) -> Type =
+  infer-sequence(env, rest, local)
 
 ; -- loop / recur --
 
-(defrec LoopAcc (local: (Map Str Type)) (types: (List Type)))
+record LoopAcc {
+  local: Map Str Type
+  types: List Type
+}
 
-(defn loop-acc-extend (m: (Map Str Type)) (name-ast: Ast) (t: Type) -> (Map Str Type)
-  (match (sym-str name-ast) (Some n) (map-set m n t) (None) m))
+let loop-acc-extend(m: Map Str Type, name-ast: Ast, t: Type) -> Map Str Type =
+  match (sym-str(name-ast))
+    | Some(n) -> map-set(m, n, t)
+    | None -> m
 
-(defn loop-binding-pairs (env: TypeEnv) (belems: (List Ast)) (outer: (Map Str Type)) -> LoopAcc
-  (match belems
-    [] (LoopAcc outer [])
-    (Cons b rest) (loop-binding-pairs-cons env b rest outer)))
+let loop-binding-pairs(env: TypeEnv, belems: List Ast, outer: Map Str Type) -> LoopAcc =
+  match (belems)
+    | [] -> LoopAcc(outer, [])
+    | Cons(b, rest) -> loop-binding-pairs-cons(env, b, rest, outer)
 
-(defn loop-binding-one (env: TypeEnv) (name-ast: Ast) (init-ast: Ast) (rest: (List Ast)) (outer: (Map Str Type)) -> LoopAcc
-  (do
-    (let t (infer env init-ast outer))
-    (loop-binding-combine env name-ast t (loop-binding-pairs env rest outer))))
+let loop-binding-one(env: TypeEnv, name-ast: Ast, init-ast: Ast, rest: List Ast, outer: Map Str Type) -> LoopAcc {
+  let t = infer(env, init-ast, outer)
+  loop-binding-combine(env, name-ast, t, loop-binding-pairs(env, rest, outer))
+}
 
-(defn loop-binding-combine (env: TypeEnv) (name-ast: Ast) (t: Type) (tail: LoopAcc) -> LoopAcc
-  (match tail (LoopAcc tl tt) (LoopAcc (loop-acc-extend tl name-ast t) (Cons t tt))))
+let loop-binding-combine(env: TypeEnv, name-ast: Ast, t: Type, tail: LoopAcc) -> LoopAcc =
+  match (tail)
+    | LoopAcc(tl, tt) -> LoopAcc(loop-acc-extend(tl, name-ast, t), Cons(t, tt))
 
-(defn loop-binding-pairs-cons (env: TypeEnv) (b: Ast) (rest: (List Ast)) (outer: (Map Str Type)) -> LoopAcc
-  (match b
-    (ParenNode (Cons name-ast (Cons init-ast _)) _) (loop-binding-one env name-ast init-ast rest outer)
-    _ (loop-binding-pairs env rest outer)))
+let loop-binding-pairs-cons(env: TypeEnv, b: Ast, rest: List Ast, outer: Map Str Type) -> LoopAcc =
+  match (b)
+    | ParenNode(Cons(name-ast, Cons(init-ast, _)), _) -> loop-binding-one(env, name-ast, init-ast, rest, outer)
+    | _ -> loop-binding-pairs(env, rest, outer)
 
-(defn infer-loop-run (env: TypeEnv) (acc: LoopAcc) (body-ast: Ast) -> Type
-  (match acc (LoopAcc loc-map binding-types) (infer-loop-run-with env loc-map binding-types body-ast)))
+let infer-loop-run(env: TypeEnv, acc: LoopAcc, body-ast: Ast) -> Type =
+  match (acc)
+    | LoopAcc(loc-map, binding-types) -> infer-loop-run-with(env, loc-map, binding-types, body-ast)
 
-(defn infer-loop-run-with (env: TypeEnv) (loc-map: (Map Str Type)) (binding-types: (List Type)) (body-ast: Ast) -> Type
-  (do
-    (let prev (deref (env-loop-bindings env)))
-    (set! (env-loop-bindings env) (Some binding-types))
-    (let body-type (infer env body-ast loc-map))
-    (set! (env-loop-bindings env) prev)
-    body-type))
+let infer-loop-run-with(env: TypeEnv, loc-map: Map Str Type, binding-types: List Type, body-ast: Ast) -> Type {
+  let prev = deref(env-loop-bindings(env))
+  set!(env-loop-bindings(env), Some(binding-types))
+  let body-type = infer(env, body-ast, loc-map)
+  set!(env-loop-bindings(env), prev)
+  body-type
+}
 
-(defn infer-loop-bindings-of (env: TypeEnv) (bindings-ast: Ast) (body-ast: Ast) (local: (Map Str Type)) -> Type
-  (match bindings-ast
-    (ParenNode belems _) (infer-loop-run env (loop-binding-pairs env belems local) body-ast)
-    _ (infer-loop-run env (LoopAcc local []) body-ast)))
+let infer-loop-bindings-of(env: TypeEnv, bindings-ast: Ast, body-ast: Ast, local: Map Str Type) -> Type =
+  match (bindings-ast)
+    | ParenNode(belems, _) -> infer-loop-run(env, loop-binding-pairs(env, belems, local), body-ast)
+    | _ -> infer-loop-run(env, LoopAcc(local, []), body-ast)
 
-(defn infer-loop (env: TypeEnv) (elems: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
-  (match elems
-    (Cons _ (Cons bindings-ast (Cons body-ast _))) (infer-loop-bindings-of env bindings-ast body-ast local)
-    _ (do (err! env "E_TYPE_LOOP" "loop requires bindings and body" sp) (fresh-var-anon env))))
+let infer-loop(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) -> Type =
+  match (elems)
+    | Cons(_, Cons(bindings-ast, Cons(body-ast, _))) -> infer-loop-bindings-of(env, bindings-ast, body-ast, local)
+    | _ ->
+      {
+        err!(env, "E_TYPE_LOOP", "loop requires bindings and body", sp)
+        fresh-var-anon(env)
+      }
 
-(defn check-recur-args (env: TypeEnv) (args: (List Ast)) (expected: (List Type)) (local: (Map Str Type)) -> Unit
-  (match args
-    [] ()
-    (Cons a arest)
-      (match expected
-        [] ()
-        (Cons e erest)
-          (do (expect-type env (infer env a local) e (ast-span a)) (check-recur-args env arest erest local)))))
+let check-recur-args(env: TypeEnv, args: List Ast, expected: List Type, local: Map Str Type) -> Unit =
+  match (args)
+    | [] -> ()
+    | Cons(a, arest) ->
+      match (expected)
+        | [] -> ()
+        | Cons(e, erest) ->
+          {
+            expect-type(env, infer(env, a, local), e, ast-span(a))
+            check-recur-args(env, arest, erest, local)
+          }
 
-(defn check-recur-arity (env: TypeEnv) (args: (List Ast)) (expected: (List Type)) (sp: Span) -> Unit
-  (if (= (length args) (length expected)) ()
-    (err! env "E_TYPE_ARITY"
-      (str-concat "recur expects "
-                  (show (length expected))
-                  " argument(s), got "
-                  (show (length args)))
-      sp)))
+let check-recur-arity(env: TypeEnv, args: List Ast, expected: List Type, sp: Span) -> Unit =
+  if length(args) == length(expected) -> ()
+   | else -> err!(env, "E_TYPE_ARITY", str-concat("recur expects ", show(length(expected)), " argument(s), got ", show(length(args))), sp)
 
-(defn infer-recur-with (env: TypeEnv) (args: (List Ast)) (expected: (List Type)) (sp: Span) (local: (Map Str Type)) -> Type
-  (do
-    (check-recur-arity env args expected sp)
-    (check-recur-args env args expected local)
-    (fresh-var-anon env)))
+let infer-recur-with(env: TypeEnv, args: List Ast, expected: List Type, sp: Span, local: Map Str Type) -> Type {
+  check-recur-arity(env, args, expected, sp)
+  check-recur-args(env, args, expected, local)
+  fresh-var-anon(env)
+}
 
-(defn infer-recur-args (env: TypeEnv) (args: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
-  (match (deref (env-loop-bindings env))
-    (None) (do (err! env "E_TYPE_RECUR" "recur outside loop" sp) (fresh-var-anon env))
-    (Some expected) (infer-recur-with env args expected sp local)))
+let infer-recur-args(env: TypeEnv, args: List Ast, sp: Span, local: Map Str Type) -> Type =
+  match (deref(env-loop-bindings(env)))
+    | None ->
+      {
+        err!(env, "E_TYPE_RECUR", "recur outside loop", sp)
+        fresh-var-anon(env)
+      }
+    | Some(expected) -> infer-recur-with(env, args, expected, sp, local)
 
-(defn infer-recur (env: TypeEnv) (elems: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
-  (match elems
-    (Cons _ args) (infer-recur-args env args sp local)
-    [] (do (err! env "E_TYPE_RECUR" "recur outside loop" sp) (fresh-var-anon env))))
+let infer-recur(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) -> Type =
+  match (elems)
+    | Cons(_, args) -> infer-recur-args(env, args, sp, local)
+    | [] ->
+      {
+        err!(env, "E_TYPE_RECUR", "recur outside loop", sp)
+        fresh-var-anon(env)
+      }
 
 ; -- panic / return --
 
-(defn infer-panic-arg (env: TypeEnv) (rest: (List Ast)) (local: (Map Str Type)) -> Unit
-  (match rest [] () (Cons a _) (do (infer env a local) ())))
+let infer-panic-arg(env: TypeEnv, rest: List Ast, local: Map Str Type) -> Unit =
+  match (rest)
+    | [] -> ()
+    | Cons(a, _) ->
+      {
+        infer(env, a, local)
+        ()
+      }
 
-(defn infer-panic (env: TypeEnv) (rest: (List Ast)) (local: (Map Str Type)) -> Type
-  (do (infer-panic-arg env rest local) (fresh-var-anon env)))
+let infer-panic(env: TypeEnv, rest: List Ast, local: Map Str Type) -> Type {
+  infer-panic-arg(env, rest, local)
+  fresh-var-anon(env)
+}
 
-(defn infer-return (env: TypeEnv) (rest: (List Ast)) (local: (Map Str Type)) -> Type
-  (match rest [] (t-unit) (Cons a _) (infer env a local)))
+let infer-return(env: TypeEnv, rest: List Ast, local: Map Str Type) -> Type =
+  match (rest)
+    | [] -> t-unit()
+    | Cons(a, _) -> infer(env, a, local)
 
 ; -- quote --
 
-(defn infer-quote (ast: Ast) -> Type
-  (match ast
-    (IntNode _ _) (t-int)
-    (FloatNode _ _) (t-float)
-    (BoolNode _ _) (t-bool)
-    (StrNode _ _) (t-str)
-    (SymNode _ _) (t-sym)
-    (ParenNode _ _) (t-list (t-sym))
-    (BracketNode _ _) (t-list (t-sym))))
+let infer-quote(ast: Ast) -> Type =
+  match (ast)
+    | IntNode(_, _) -> t-int()
+    | FloatNode(_, _) -> t-float()
+    | BoolNode(_, _) -> t-bool()
+    | StrNode(_, _) -> t-str()
+    | SymNode(_, _) -> t-sym()
+    | ParenNode(_, _) -> t-list(t-sym())
+    | BracketNode(_, _) -> t-list(t-sym())
 
-(defn infer-quote-form (rest: (List Ast)) -> Type
-  (match rest (Cons a _) (infer-quote a) [] (t-unit)))
+let infer-quote-form(rest: List Ast) -> Type =
+  match (rest)
+    | Cons(a, _) -> infer-quote(a)
+    | [] -> t-unit()
 
 ; -- set! --
 
-(defn infer-set-bang-checked (env: TypeEnv) (r-ast: Ast) (v-ast: Ast) (local: (Map Str Type)) -> Type
-  (do
-    (let rt (infer env r-ast local))
-    (let vt (infer env v-ast local))
-    (let elem (fresh-var-anon env))
-    (expect-type env rt (t-ref elem) (ast-span r-ast))
-    (expect-type env vt elem (ast-span v-ast))
-    (t-unit)))
+let infer-set-bang-checked(env: TypeEnv, r-ast: Ast, v-ast: Ast, local: Map Str Type) -> Type {
+  let rt = infer(env, r-ast, local)
+  let vt = infer(env, v-ast, local)
+  let elem = fresh-var-anon(env)
+  expect-type(env, rt, t-ref(elem), ast-span(r-ast))
+  expect-type(env, vt, elem, ast-span(v-ast))
+  t-unit()
+}
 
-(defn infer-set-bang (env: TypeEnv) (elems: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
-  (match elems
-    [_ r-ast v-ast] (infer-set-bang-checked env r-ast v-ast local)
-    _ (do (err! env "E_TYPE_ARITY" "set! expects 2 arguments" sp) (t-unit))))
+let infer-set-bang(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) -> Type =
+  match (elems)
+    | [_, r-ast, v-ast] -> infer-set-bang-checked(env, r-ast, v-ast, local)
+    | _ ->
+      {
+        err!(env, "E_TYPE_ARITY", "set! expects 2 arguments", sp)
+        t-unit()
+      }
 
 ; -- fn / lambda --
 
-(defrec LambdaAcc (local: (Map Str Type)) (types: (List Type)))
+record LambdaAcc {
+  local: Map Str Type
+  types: List Type
+}
 
-(defn lambda-acc-extend (local: (Map Str Type)) (p: Ast) (v: Type) -> (Map Str Type)
-  (match (sym-str p) (Some n) (map-set local n v) (None) local))
+let lambda-acc-extend(local: Map Str Type, p: Ast, v: Type) -> Map Str Type =
+  match (sym-str(p))
+    | Some(n) -> map-set(local, n, v)
+    | None -> local
 
-(defn lambda-param-list-cons (env: TypeEnv) (p: Ast) (rest: (List Ast)) (local: (Map Str Type)) -> LambdaAcc
-  (do
-    (let v (fresh-var env (match (sym-str p) (Some n) n (None) "")))
-    (lambda-param-combine (lambda-acc-extend local p v) v (lambda-param-list env rest (lambda-acc-extend local p v)))))
+let lambda-param-list-cons(env: TypeEnv, p: Ast, rest: List Ast, local: Map Str Type) -> LambdaAcc {
+  let v =
+    fresh-var(
+      env,
+      match (sym-str(p))
+        | Some(n) -> n
+        | None -> ""
+    )
+  lambda-param-combine(lambda-acc-extend(local, p, v), v, lambda-param-list(env, rest, lambda-acc-extend(local, p, v)))
+}
 
-(defn lambda-param-combine (extended: (Map Str Type)) (v: Type) (tail: LambdaAcc) -> LambdaAcc
-  (match tail (LambdaAcc tl tt) (LambdaAcc tl (Cons v tt))))
+let lambda-param-combine(extended: Map Str Type, v: Type, tail: LambdaAcc) -> LambdaAcc =
+  match (tail)
+    | LambdaAcc(tl, tt) -> LambdaAcc(tl, Cons(v, tt))
 
-(defn lambda-param-list (env: TypeEnv) (pelems: (List Ast)) (local: (Map Str Type)) -> LambdaAcc
-  (match pelems
-    [] (LambdaAcc local [])
-    (Cons p rest) (lambda-param-list-cons env p rest local)))
+let lambda-param-list(env: TypeEnv, pelems: List Ast, local: Map Str Type) -> LambdaAcc =
+  match (pelems)
+    | [] -> LambdaAcc(local, [])
+    | Cons(p, rest) -> lambda-param-list-cons(env, p, rest, local)
 
-(defn infer-lambda-acc (env: TypeEnv) (params-ast: Ast) (local: (Map Str Type)) -> LambdaAcc
-  (match params-ast
-    (ParenNode pelems _) (lambda-param-list env pelems local)
-    _ (LambdaAcc local [])))
+let infer-lambda-acc(env: TypeEnv, params-ast: Ast, local: Map Str Type) -> LambdaAcc =
+  match (params-ast)
+    | ParenNode(pelems, _) -> lambda-param-list(env, pelems, local)
+    | _ -> LambdaAcc(local, [])
 
-(defn infer-lambda-build (env: TypeEnv) (acc: LambdaAcc) (body-ast: Ast) -> Type
-  (match acc
-    (LambdaAcc loc pts)
-      (do
-        (let body-type (infer env body-ast loc))
-        (t-fn (apply-subst-list env pts) (apply-subst env body-type)))))
+let infer-lambda-build(env: TypeEnv, acc: LambdaAcc, body-ast: Ast) -> Type =
+  match (acc)
+    | LambdaAcc(loc, pts) ->
+      {
+        let body-type = infer(env, body-ast, loc)
+        t-fn(apply-subst-list(env, pts), apply-subst(env, body-type))
+      }
 
-(defn infer-lambda-params (env: TypeEnv) (params-ast: Ast) (body-ast: Ast) (local: (Map Str Type)) -> Type
-  (infer-lambda-build env (infer-lambda-acc env params-ast local) body-ast))
+let infer-lambda-params(env: TypeEnv, params-ast: Ast, body-ast: Ast, local: Map Str Type) -> Type =
+  infer-lambda-build(env, infer-lambda-acc(env, params-ast, local), body-ast)
 
-(defn infer-lambda (env: TypeEnv) (elems: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
-  (match elems
-    (Cons _ (Cons params-ast (Cons body-ast _))) (infer-lambda-params env params-ast body-ast local)
-    _ (do (err! env "E_TYPE_FN" "fn requires params and body" sp) (fresh-var-anon env))))
+let infer-lambda(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) -> Type =
+  match (elems)
+    | Cons(_, Cons(params-ast, Cons(body-ast, _))) -> infer-lambda-params(env, params-ast, body-ast, local)
+    | _ ->
+      {
+        err!(env, "E_TYPE_FN", "fn requires params and body", sp)
+        fresh-var-anon(env)
+      }
 
 ; -- match --
 
-(defn nominal-kind-of (env: TypeEnv) (type-name: Str) -> Str
-  (match (type-get env type-name) (Some td) (type-def-kind td) (None) "variant"))
+let nominal-kind-of(env: TypeEnv, type-name: Str) -> Str =
+  match (type-get(env, type-name))
+    | Some(td) -> type-def-kind(td)
+    | None -> "variant"
 
-(defn nth-or-fresh (xs: (List Type)) (i: Int) (env: TypeEnv) -> Type
-  (match xs [] (fresh-var-anon env) (Cons x rest) (if (= i 0) x (nth-or-fresh rest (- i 1) env))))
+let nth-or-fresh(xs: List Type, i: Int, env: TypeEnv) -> Type =
+  match (xs)
+    | [] -> fresh-var-anon(env)
+    | Cons(x, rest) ->
+      if i == 0 -> x
+       | else -> nth-or-fresh(rest, i - 1, env)
 
-(defn bind-ctor-scrut-specific (env: TypeEnv) (type-name: Str) (arg-vars: (List Type)) (scrut: Type) (sp: Span) -> Unit
-  (match type-name
-    "Maybe"  (do (unify env scrut (t-maybe (nth-or-fresh arg-vars 0 env)) sp) ())
-    "List"   (do (unify env scrut (t-list (nth-or-fresh arg-vars 0 env)) sp) ())
-    "Result" (do (unify env scrut (t-result (nth-or-fresh arg-vars 0 env) (nth-or-fresh arg-vars 1 env)) sp) ())
-    _        (do (unify env scrut (t-nominal type-name arg-vars (nominal-kind-of env type-name)) sp) ())))
+let bind-ctor-scrut-specific(env: TypeEnv, type-name: Str, arg-vars: List Type, scrut: Type, sp: Span) -> Unit =
+  match (type-name)
+    | "Maybe" ->
+      {
+        unify(env, scrut, t-maybe(nth-or-fresh(arg-vars, 0, env)), sp)
+        ()
+      }
+    | "List" ->
+      {
+        unify(env, scrut, t-list(nth-or-fresh(arg-vars, 0, env)), sp)
+        ()
+      }
+    | "Result" ->
+      {
+        unify(env, scrut, t-result(nth-or-fresh(arg-vars, 0, env), nth-or-fresh(arg-vars, 1, env)), sp)
+        ()
+      }
+    | _ ->
+      {
+        unify(env, scrut, t-nominal(type-name, arg-vars, nominal-kind-of(env, type-name)), sp)
+        ()
+      }
 
-(defn zip-param-map (params: (List Str)) (vars: (List Type)) -> (Map Str Type)
-  (match params
-    [] (map-new)
-    (Cons p prest)
-      (match vars
-        [] (map-new)
-        (Cons v vrest) (map-set (zip-param-map prest vrest) p v))))
+let zip-param-map(params: List Str, vars: List Type) -> Map Str Type =
+  match (params)
+    | [] -> map-new()
+    | Cons(p, prest) ->
+      match (vars)
+        | [] -> map-new()
+        | Cons(v, vrest) -> map-set(zip-param-map(prest, vrest), p, v)
 
-(defn fresh-vars-for (params: (List Str)) (env: TypeEnv) -> (List Type)
-  (match params [] [] (Cons _ rest) (Cons (fresh-var-anon env) (fresh-vars-for rest env))))
+let fresh-vars-for(params: List Str, env: TypeEnv) -> List Type =
+  match (params)
+    | [] -> []
+    | Cons(_, rest) -> Cons(fresh-var-anon(env), fresh-vars-for(rest, env))
 
 ; Forward declaration: `bind-pattern` and `bind-pattern-args` recurse into
 ; each other (a ctor pattern's own arguments are themselves patterns).
-(defn bind-pattern (env: TypeEnv) (pat: Ast) (scrut: Type) (loc: (Ref (Map Str Type))) (covered: (Ref (List Str))) -> Unit
-  (match pat
-    (SymNode name sp) (bind-pattern-sym env name sp scrut loc covered)
-    (IntNode _ sp) (do (unify env scrut (t-int) sp) ())
-    (StrNode _ sp) (do (unify env scrut (t-str) sp) ())
-    (BoolNode _ sp) (do (unify env scrut (t-bool) sp) ())
-    (ParenNode pelems psp) (bind-pattern-ctor env pelems psp scrut loc covered)
-    _ ()))
+let bind-pattern(env: TypeEnv, pat: Ast, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
+  match (pat)
+    | SymNode(name, sp) -> bind-pattern-sym(env, name, sp, scrut, loc, covered)
+    | IntNode(_, sp) ->
+      {
+        unify(env, scrut, t-int(), sp)
+        ()
+      }
+    | StrNode(_, sp) ->
+      {
+        unify(env, scrut, t-str(), sp)
+        ()
+      }
+    | BoolNode(_, sp) ->
+      {
+        unify(env, scrut, t-bool(), sp)
+        ()
+      }
+    | ParenNode(pelems, psp) -> bind-pattern-ctor(env, pelems, psp, scrut, loc, covered)
+    | _ -> ()
 
-(defn bind-nullary-ctor (env: TypeEnv) (name: Str) (ctor: CtorInfo) (scrut: Type) (covered: (Ref (List Str))) (sp: Span) -> Unit
-  (do
-    (set! covered (Cons name (deref covered)))
-    (bind-ctor-scrut env ctor scrut sp)))
+let bind-nullary-ctor(env: TypeEnv, name: Str, ctor: CtorInfo, scrut: Type, covered: Ref (List Str), sp: Span) -> Unit {
+  set!(covered, Cons(name, deref(covered)))
+  bind-ctor-scrut(env, ctor, scrut, sp)
+}
 
-(defn bind-ctor-scrut (env: TypeEnv) (ctor: CtorInfo) (scrut: Type) (sp: Span) -> Unit
-  (match ctor (CtorInfo type-name _ params) (bind-ctor-scrut-specific env type-name (fresh-vars-for params env) scrut sp)))
+let bind-ctor-scrut(env: TypeEnv, ctor: CtorInfo, scrut: Type, sp: Span) -> Unit =
+  match (ctor)
+    | CtorInfo(type-name, _, params) -> bind-ctor-scrut-specific(env, type-name, fresh-vars-for(params, env), scrut, sp)
 
-(defn bind-pattern-sym (env: TypeEnv) (name: Str) (sp: Span) (scrut: Type) (loc: (Ref (Map Str Type))) (covered: (Ref (List Str))) -> Unit
-  (if (= name "_") () (bind-pattern-sym-lookup env name sp scrut loc covered)))
+let bind-pattern-sym(env: TypeEnv, name: Str, sp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
+  if name == "_" -> ()
+   | else -> bind-pattern-sym-lookup(env, name, sp, scrut, loc, covered)
 
-(defn bind-pattern-sym-lookup (env: TypeEnv) (name: Str) (sp: Span) (scrut: Type) (loc: (Ref (Map Str Type))) (covered: (Ref (List Str))) -> Unit
-  (match (ctor-get env name)
-    (Some ctor) (bind-nullary-ctor env name ctor scrut covered sp)
-    (None) (set! loc (map-set (deref loc) name (apply-subst env scrut)))))
+let bind-pattern-sym-lookup(env: TypeEnv, name: Str, sp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
+  match (ctor-get(env, name))
+    | Some(ctor) -> bind-nullary-ctor(env, name, ctor, scrut, covered, sp)
+    | None -> set!(loc, map-set(deref(loc), name, apply-subst(env, scrut)))
 
-(defn bind-pattern-args (env: TypeEnv) (arg-pats: (List Ast)) (payloads: (List Type)) (loc: (Ref (Map Str Type))) -> Unit
-  (match payloads
-    [] ()
-    (Cons pt prest)
-      (match arg-pats
-        [] ()
-        (Cons pa parest)
-          (do
-            (bind-pattern env pa pt loc (ref []))
-            (bind-pattern-args env parest prest loc)))))
+let bind-pattern-args(env: TypeEnv, arg-pats: List Ast, payloads: List Type, loc: Ref (Map Str Type)) -> Unit =
+  match (payloads)
+    | [] -> ()
+    | Cons(pt, prest) ->
+      match (arg-pats)
+        | [] -> ()
+        | Cons(pa, parest) ->
+          {
+            bind-pattern(env, pa, pt, loc, ref([]))
+            bind-pattern-args(env, parest, prest, loc)
+          }
 
-(defn bind-pattern-ctor-info (env: TypeEnv) (cname: Str) (ctor: CtorInfo) (arg-pats: (List Ast)) (psp: Span) (scrut: Type) (loc: (Ref (Map Str Type))) (covered: (Ref (List Str))) -> Unit
-  (match ctor
-    (CtorInfo type-name payload-schema params)
-      (do
-        (set! covered (Cons cname (deref covered)))
-        (let arg-vars (fresh-vars-for params env))
-        (let pmap (zip-param-map params arg-vars))
-        (bind-ctor-scrut-specific env type-name arg-vars scrut psp)
-        (bind-pattern-args env arg-pats (replace-params-list payload-schema pmap) loc))))
+let bind-pattern-ctor-info(env: TypeEnv, cname: Str, ctor: CtorInfo, arg-pats: List Ast, psp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
+  match (ctor)
+    | CtorInfo(type-name, payload-schema, params) ->
+      {
+        set!(covered, Cons(cname, deref(covered)))
+        let arg-vars = fresh-vars-for(params, env)
+        let pmap = zip-param-map(params, arg-vars)
+        bind-ctor-scrut-specific(env, type-name, arg-vars, scrut, psp)
+        bind-pattern-args(env, arg-pats, replace-params-list(payload-schema, pmap), loc)
+      }
 
-(defn bind-pattern-ctor-named (env: TypeEnv) (cname-ast: Ast) (arg-pats: (List Ast)) (psp: Span) (scrut: Type) (loc: (Ref (Map Str Type))) (covered: (Ref (List Str))) -> Unit
-  (match (sym-str cname-ast)
-    (None) ()
-    (Some cname)
-      (match (ctor-get env cname)
-        (None) ()
-        (Some ctor) (bind-pattern-ctor-info env cname ctor arg-pats psp scrut loc covered))))
+let bind-pattern-ctor-named(env: TypeEnv, cname-ast: Ast, arg-pats: List Ast, psp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
+  match (sym-str(cname-ast))
+    | None -> ()
+    | Some(cname) ->
+      match (ctor-get(env, cname))
+        | None -> ()
+        | Some(ctor) -> bind-pattern-ctor-info(env, cname, ctor, arg-pats, psp, scrut, loc, covered)
 
-(defn bind-pattern-ctor (env: TypeEnv) (pelems: (List Ast)) (psp: Span) (scrut: Type) (loc: (Ref (Map Str Type))) (covered: (Ref (List Str))) -> Unit
-  (match pelems
-    (Cons cname-ast arg-pats) (bind-pattern-ctor-named env cname-ast arg-pats psp scrut loc covered)
-    [] ()))
+let bind-pattern-ctor(env: TypeEnv, pelems: List Ast, psp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
+  match (pelems)
+    | Cons(cname-ast, arg-pats) -> bind-pattern-ctor-named(env, cname-ast, arg-pats, psp, scrut, loc, covered)
+    | [] -> ()
 
-(defn nominal-type-name-of (t: Type) -> (Maybe Str)
-  (match t
-    (TNominal n _ _) (Some n)
-    (TMaybe _) (Some "Maybe")
-    (TResult _ _) (Some "Result")
-    (TList _) (Some "List")
-    _ (None)))
+let nominal-type-name-of(t: Type) -> Maybe Str =
+  match (t)
+    | TNominal(n, _, _) -> Some(n)
+    | TMaybe(_) -> Some("Maybe")
+    | TResult(_, _) -> Some("Result")
+    | TList(_) -> Some("List")
+    | _ -> None()
 
-(defn check-ctor-covered (env: TypeEnv) (c: VariantCtor) (covered: (List Str)) (sp: Span) -> Unit
-  (match c
-    (VariantCtor name _)
-      (if (contains covered name) ()
-        (err! env "E_TYPE_EXHAUSTIVE" (str-concat "non-exhaustive match: missing " name) sp))))
+let check-ctor-covered(env: TypeEnv, c: VariantCtor, covered: List Str, sp: Span) -> Unit =
+  match (c)
+    | VariantCtor(name, _) ->
+      if contains(covered, name) -> ()
+       | else -> err!(env, "E_TYPE_EXHAUSTIVE", str-concat("non-exhaustive match: missing ", name), sp)
 
-(defn check-ctors-covered (env: TypeEnv) (ctors: (List VariantCtor)) (covered: (List Str)) (sp: Span) -> Unit
-  (match ctors
-    [] ()
-    (Cons c rest) (do (check-ctor-covered env c covered sp) (check-ctors-covered env rest covered sp))))
+let check-ctors-covered(env: TypeEnv, ctors: List VariantCtor, covered: List Str, sp: Span) -> Unit =
+  match (ctors)
+    | [] -> ()
+    | Cons(c, rest) ->
+      {
+        check-ctor-covered(env, c, covered, sp)
+        check-ctors-covered(env, rest, covered, sp)
+      }
 
-(defn check-match-exhaustive-def (env: TypeEnv) (td: TypeDef) (covered: (List Str)) (has-wild: Bool) (sp: Span) -> Unit
-  (match td
-    (RecordDef _ _ _) ()
-    (VariantDef _ _ ctors) (if has-wild () (check-ctors-covered env ctors covered sp))))
+let check-match-exhaustive-def(env: TypeEnv, td: TypeDef, covered: List Str, has-wild: Bool, sp: Span) -> Unit =
+  match (td)
+    | RecordDef(_, _, _) -> ()
+    | VariantDef(_, _, ctors) ->
+      if has-wild -> ()
+       | else -> check-ctors-covered(env, ctors, covered, sp)
 
-(defn check-match-exhaustive-named (env: TypeEnv) (type-name: Str) (covered: (List Str)) (has-wild: Bool) (sp: Span) -> Unit
-  (match (type-get env type-name)
-    (None) ()
-    (Some td) (check-match-exhaustive-def env td covered has-wild sp)))
+let check-match-exhaustive-named(env: TypeEnv, type-name: Str, covered: List Str, has-wild: Bool, sp: Span) -> Unit =
+  match (type-get(env, type-name))
+    | None -> ()
+    | Some(td) -> check-match-exhaustive-def(env, td, covered, has-wild, sp)
 
-(defn check-match-exhaustive (env: TypeEnv) (scrut: Type) (covered: (List Str)) (has-wild: Bool) (sp: Span) -> Unit
-  (match (nominal-type-name-of scrut)
-    (None) ()
-    (Some tn) (check-match-exhaustive-named env tn covered has-wild sp)))
+let check-match-exhaustive(env: TypeEnv, scrut: Type, covered: List Str, has-wild: Bool, sp: Span) -> Unit =
+  match (nominal-type-name-of(scrut))
+    | None -> ()
+    | Some(tn) -> check-match-exhaustive-named(env, tn, covered, has-wild, sp)
 
-(defn combine-match-result (env: TypeEnv) (bt: Type) (result: (Maybe Type)) (sp: Span) -> (Maybe Type)
-  (match result
-    (None) (Some bt)
-    (Some r) (do (expect-type env bt r sp) (Some r))))
+let combine-match-result(env: TypeEnv, bt: Type, result: Maybe Type, sp: Span) -> Maybe Type =
+  match (result)
+    | None -> Some(bt)
+    | Some(r) ->
+      {
+        expect-type(env, bt, r, sp)
+        Some(r)
+      }
 
-(defn run-match-clauses (env: TypeEnv) (clauses: (List Ast)) (scrut: Type) (local: (Map Str Type)) (covered: (Ref (List Str))) (has-wild: (Ref Bool)) (result: (Maybe Type)) -> (Maybe Type)
-  (match clauses
-    (Cons pat (Cons body more)) (run-match-clause env pat body more scrut local covered has-wild result)
-    _ result))
+let run-match-clauses(env: TypeEnv, clauses: List Ast, scrut: Type, local: Map Str Type, covered: Ref (List Str), has-wild: Ref Bool, result: Maybe Type) -> Maybe Type =
+  match (clauses)
+    | Cons(pat, Cons(body, more)) -> run-match-clause(env, pat, body, more, scrut, local, covered, has-wild, result)
+    | _ -> result
 
-(defn run-match-clause (env: TypeEnv) (pat: Ast) (body: Ast) (more: (List Ast)) (scrut: Type) (local: (Map Str Type)) (covered: (Ref (List Str))) (has-wild: (Ref Bool)) (result: (Maybe Type)) -> (Maybe Type)
-  (do
-    (let loc (ref local))
-    (bind-pattern env pat scrut loc covered)
-    (if (is-sym pat "_") (set! has-wild true) ())
-    (let bt (infer env body (deref loc)))
-    (run-match-clauses env more scrut local covered has-wild (combine-match-result env bt result (ast-span body)))))
+let run-match-clause(env: TypeEnv, pat: Ast, body: Ast, more: List Ast, scrut: Type, local: Map Str Type, covered: Ref (List Str), has-wild: Ref Bool, result: Maybe Type) -> Maybe Type {
+  let loc = ref(local)
+  bind-pattern(env, pat, scrut, loc, covered)
+  if is-sym(pat, "_") -> set!(has-wild, true)
+  let bt = infer(env, body, deref(loc))
+  run-match-clauses(env, more, scrut, local, covered, has-wild, combine-match-result(env, bt, result, ast-span(body)))
+}
 
-(defn list-odd-length (xs: (List Ast)) -> Bool
-  (match xs [] false [_] true (Cons _ (Cons _ rest)) (list-odd-length rest)))
+let list-odd-length(xs: List Ast) -> Bool =
+  match (xs)
+    | [] -> false
+    | [_] -> true
+    | Cons(_, Cons(_, rest)) -> list-odd-length(rest)
 
-(defn infer-match-scrut (env: TypeEnv) (scrut-ast: Ast) (clauses: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
-  (do
-    (let scrut (infer env scrut-ast local))
-    (if (list-odd-length clauses) (err! env "E_TYPE_MATCH" "match clauses must be pattern/body pairs" sp) ())
-    (let covered (ref []))
-    (let has-wild (ref false))
-    (let result (run-match-clauses env clauses scrut local covered has-wild (None)))
-    (check-match-exhaustive env scrut (deref covered) (deref has-wild) sp)
-    (match result (Some t) (apply-subst env t) (None) (fresh-var-anon env))))
+let infer-match-scrut(env: TypeEnv, scrut-ast: Ast, clauses: List Ast, sp: Span, local: Map Str Type) -> Type {
+  let scrut = infer(env, scrut-ast, local)
+  if list-odd-length(clauses) -> err!(env, "E_TYPE_MATCH", "match clauses must be pattern/body pairs", sp)
+  let covered = ref([])
+  let has-wild = ref(false)
+  let result = run-match-clauses(env, clauses, scrut, local, covered, has-wild, None())
+  check-match-exhaustive(env, scrut, deref(covered), deref(has-wild), sp)
+  match (result)
+    | Some(t) -> apply-subst(env, t)
+    | None -> fresh-var-anon(env)
+}
 
-(defn infer-match (env: TypeEnv) (elems: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
-  (match elems
-    (Cons _ (Cons scrut-ast clauses)) (infer-match-scrut env scrut-ast clauses sp local)
-    _ (do (err! env "E_TYPE_MATCH" "match requires scrutinee and clauses" sp) (fresh-var-anon env))))
+let infer-match(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) -> Type =
+  match (elems)
+    | Cons(_, Cons(scrut-ast, clauses)) -> infer-match-scrut(env, scrut-ast, clauses, sp, local)
+    | _ ->
+      {
+        err!(env, "E_TYPE_MATCH", "match requires scrutinee and clauses", sp)
+        fresh-var-anon(env)
+      }
 
 ; -- application, incl. print/println/show/compare special typing --
 
-(defn type-is-str (t: Type) -> Bool
-  (match t (TStr) true _ false))
+let type-is-str(t: Type) -> Bool =
+  match (t)
+    | TStr -> true
+    | _ -> false
 
-(defn check-print-arg (env: TypeEnv) (a: Ast) (local: (Map Str Type)) -> Unit
-  (do
-    (let t (apply-subst env (infer env a local)))
-    (if (or (type-is-str t) (is-showable t)) ()
-      (err! env "E_TYPE_SHOWABLE" (str-concat "type " (type-show t) " is not showable") (ast-span a)))))
+let check-print-arg(env: TypeEnv, a: Ast, local: Map Str Type) -> Unit {
+  let t = apply-subst(env, infer(env, a, local))
+  if type-is-str(t) || is-showable(t) -> ()
+   | else -> err!(env, "E_TYPE_SHOWABLE", str-concat("type ", type-show(t), " is not showable"), ast-span(a))
+}
 
-(defn check-print-args (env: TypeEnv) (args: (List Ast)) (local: (Map Str Type)) -> Unit
-  (match args
-    [] ()
-    (Cons a rest) (do (check-print-arg env a local) (check-print-args env rest local))))
+let check-print-args(env: TypeEnv, args: List Ast, local: Map Str Type) -> Unit =
+  match (args)
+    | [] -> ()
+    | Cons(a, rest) ->
+      {
+        check-print-arg(env, a, local)
+        check-print-args(env, rest, local)
+      }
 
-(defn infer-print-args (env: TypeEnv) (args: (List Ast)) (local: (Map Str Type)) -> Type
-  (do (check-print-args env args local) (t-unit)))
+let infer-print-args(env: TypeEnv, args: List Ast, local: Map Str Type) -> Type {
+  check-print-args(env, args, local)
+  t-unit()
+}
 
-(defn infer-args (env: TypeEnv) (args: (List Ast)) (local: (Map Str Type)) -> (List Type)
-  (match args
-    [] []
-    (Cons a rest) (Cons (infer env a local) (infer-args env rest local))))
+let infer-args(env: TypeEnv, args: List Ast, local: Map Str Type) -> List Type =
+  match (args)
+    | [] -> []
+    | Cons(a, rest) -> Cons(infer(env, a, local), infer-args(env, rest, local))
 
-(defn first-type-or-fresh (xs: (List Type)) (env: TypeEnv) -> Type
-  (match xs (Cons x _) x [] (fresh-var-anon env)))
+let first-type-or-fresh(xs: List Type, env: TypeEnv) -> Type =
+  match (xs)
+    | Cons(x, _) -> x
+    | [] -> fresh-var-anon(env)
 
-(defn first-span-or (args: (List Ast)) (fallback: Span) -> Span
-  (match args (Cons a _) (ast-span a) [] fallback))
+let first-span-or(args: List Ast, fallback: Span) -> Span =
+  match (args)
+    | Cons(a, _) -> ast-span(a)
+    | [] -> fallback
 
-(defn check-predicate-arg (env: TypeEnv) (arg-types: (List Type)) (args: (List Ast)) (sp: Span) (pred: (Fn Type -> Bool)) (code: Str) (label: Str) -> Unit
-  (do
-    (let t (apply-subst env (first-type-or-fresh arg-types env)))
-    (if (pred t) ()
-      (err! env code (str-concat "type " (type-show t) " is " label) (first-span-or args sp)))))
+let check-predicate-arg(env: TypeEnv, arg-types: List Type, args: List Ast, sp: Span, pred: (Type) -> Bool, code: Str, label: Str) -> Unit {
+  let t = apply-subst(env, first-type-or-fresh(arg-types, env))
+  if pred(t) -> ()
+   | else -> err!(env, code, str-concat("type ", type-show(t), " is ", label), first-span-or(args, sp))
+}
 
-(defn check-show-compare (env: TypeEnv) (head: Ast) (arg-types: (List Type)) (args: (List Ast)) (sp: Span) -> Unit
-  (if (is-sym head "show") (check-predicate-arg env arg-types args sp is-showable "E_TYPE_SHOWABLE" "not showable")
-    (if (is-sym head "compare") (check-predicate-arg env arg-types args sp is-orderable "E_TYPE_ORDERABLE" "not orderable")
-      ())))
+let check-show-compare(env: TypeEnv, head: Ast, arg-types: List Type, args: List Ast, sp: Span) -> Unit =
+  if is-sym(head, "show") -> check-predicate-arg(env, arg-types, args, sp, is-showable, "E_TYPE_SHOWABLE", "not showable")
+   | is-sym(head, "compare") -> check-predicate-arg(env, arg-types, args, sp, is-orderable, "E_TYPE_ORDERABLE", "not orderable")
 
-(defn infer-app-core (env: TypeEnv) (head: Ast) (args: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
-  (do
-    (let callee (infer env head local))
-    (let arg-types (infer-args env args local))
-    (let ret (fresh-var-anon env))
-    (unify env callee (t-fn arg-types ret) sp)
-    (check-show-compare env head arg-types args sp)
-    (apply-subst env ret)))
+let infer-app-core(env: TypeEnv, head: Ast, args: List Ast, sp: Span, local: Map Str Type) -> Type {
+  let callee = infer(env, head, local)
+  let arg-types = infer-args(env, args, local)
+  let ret = fresh-var-anon(env)
+  unify(env, callee, t-fn(arg-types, ret), sp)
+  check-show-compare(env, head, arg-types, args, sp)
+  apply-subst(env, ret)
+}
 
-(defn infer-app-dispatch (env: TypeEnv) (head: Ast) (args: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
-  (if (or (is-sym head "print") (is-sym head "println"))
-    (infer-print-args env args local)
-    (infer-app-core env head args sp local)))
+let infer-app-dispatch(env: TypeEnv, head: Ast, args: List Ast, sp: Span, local: Map Str Type) -> Type =
+  if is-sym(head, "print") || is-sym(head, "println") -> infer-print-args(env, args, local)
+   | else -> infer-app-core(env, head, args, sp, local)
 
-(defn infer-app (env: TypeEnv) (elems: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
-  (match elems
-    [] (t-unit)
-    (Cons head args) (infer-app-dispatch env head args sp local)))
+let infer-app(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) -> Type =
+  match (elems)
+    | [] -> t-unit()
+    | Cons(head, args) -> infer-app-dispatch(env, head, args, sp, local)
 
 ; -- paren dispatch --
 
-(defn infer-paren-named (env: TypeEnv) (hn: Str) (elems: (List Ast)) (rest: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
-  (match hn
-    "if"     (infer-if env elems sp local)
-    "let"    (infer-let env elems sp local)
-    "do"     (infer-do env rest local)
-    "loop"   (infer-loop env elems sp local)
-    "recur"  (infer-recur env elems sp local)
-    "panic"  (infer-panic env rest local)
-    "return" (infer-return env rest local)
-    "match"  (infer-match env elems sp local)
-    "fn"     (infer-lambda env elems sp local)
-    "lambda" (infer-lambda env elems sp local)
-    "quote"  (infer-quote-form rest)
-    "set!"   (infer-set-bang env elems sp local)
-    _        (infer-app env elems sp local)))
+let infer-paren-named(env: TypeEnv, hn: Str, elems: List Ast, rest: List Ast, sp: Span, local: Map Str Type) -> Type =
+  match (hn)
+    | "if" -> infer-if(env, elems, sp, local)
+    | "let" -> infer-let(env, elems, sp, local)
+    | "do" -> infer-do(env, rest, local)
+    | "loop" -> infer-loop(env, elems, sp, local)
+    | "recur" -> infer-recur(env, elems, sp, local)
+    | "panic" -> infer-panic(env, rest, local)
+    | "return" -> infer-return(env, rest, local)
+    | "match" -> infer-match(env, elems, sp, local)
+    | "fn" -> infer-lambda(env, elems, sp, local)
+    | "lambda" -> infer-lambda(env, elems, sp, local)
+    | "quote" -> infer-quote-form(rest)
+    | "set!" -> infer-set-bang(env, elems, sp, local)
+    | _ -> infer-app(env, elems, sp, local)
 
-(defn infer-paren-head (env: TypeEnv) (head: Ast) (rest: (List Ast)) (elems: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
-  (match (sym-str head)
-    (None) (infer-app env elems sp local)
-    (Some hn) (infer-paren-named env hn elems rest sp local)))
+let infer-paren-head(env: TypeEnv, head: Ast, rest: List Ast, elems: List Ast, sp: Span, local: Map Str Type) -> Type =
+  match (sym-str(head))
+    | None -> infer-app(env, elems, sp, local)
+    | Some(hn) -> infer-paren-named(env, hn, elems, rest, sp, local)
 
-(defn infer-paren (env: TypeEnv) (elems: (List Ast)) (sp: Span) (local: (Map Str Type)) -> Type
-  (match elems
-    [] (t-unit)
-    (Cons head rest) (infer-paren-head env head rest elems sp local)))
+let infer-paren(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) -> Type =
+  match (elems)
+    | [] -> t-unit()
+    | Cons(head, rest) -> infer-paren-head(env, head, rest, elems, sp, local)
 
 ; ---------------------------------------------------------------------------
 ; Top-level driver: dispatches each form to declaration collection (already
@@ -1447,104 +1706,135 @@
 ; sequential top-level `let` (spec §2.4's `let*`-like sequencing, at the
 ; top level exactly as within a `defn` body).
 
-(defn bind-top-let (env: TypeEnv) (n: Str) (t: Type) (top-local: (Ref (Map Str Type))) -> Unit
-  (do
-    (set! top-local (map-set (deref top-local) n t))
-    (value-set env n (Scheme [] t))))
+let bind-top-let(env: TypeEnv, n: Str, t: Type, top-local: Ref (Map Str Type)) -> Unit {
+  set!(top-local, map-set(deref(top-local), n, t))
+  value-set(env, n, Scheme([], t))
+}
 
-(defn typecheck-top-let-named (env: TypeEnv) (name-ast: Ast) (expr-ast: Ast) (top-local: (Ref (Map Str Type))) -> Unit
-  (do
-    (let t (infer env expr-ast (deref top-local)))
-    (match (sym-str name-ast)
-      (Some n) (bind-top-let env n t top-local)
-      (None) ())))
+let typecheck-top-let-named(env: TypeEnv, name-ast: Ast, expr-ast: Ast, top-local: Ref (Map Str Type)) -> Unit {
+  let t = infer(env, expr-ast, deref(top-local))
+  match (sym-str(name-ast))
+    | Some(n) -> bind-top-let(env, n, t, top-local)
+    | None -> ()
+}
 
-(defn typecheck-top-let (env: TypeEnv) (elems: (List Ast)) (sp: Span) (ast: Ast) (top-local: (Ref (Map Str Type))) -> Unit
-  (match elems
-    [_ name-ast expr-ast] (typecheck-top-let-named env name-ast expr-ast top-local)
-    _ (do (infer env ast (deref top-local)) ())))
+let typecheck-top-let(env: TypeEnv, elems: List Ast, sp: Span, ast: Ast, top-local: Ref (Map Str Type)) -> Unit =
+  match (elems)
+    | [_, name-ast, expr-ast] -> typecheck-top-let-named(env, name-ast, expr-ast, top-local)
+    | _ ->
+      {
+        infer(env, ast, deref(top-local))
+        ()
+      }
 
-(defn typecheck-top-named (env: TypeEnv) (hn: Str) (rest: (List Ast)) (elems: (List Ast)) (sp: Span) (ast: Ast) (top-local: (Ref (Map Str Type))) -> Unit
-  (match hn
-    "pub"     (typecheck-top env (ParenNode rest sp) top-local)
-    "alias"   ()
-    "defrec"  ()
-    "variant" ()
-    "extern"  ()
-    "import"  ()
-    "defn"    (typecheck-defn env elems sp)
-    "let"     (typecheck-top-let env elems sp ast top-local)
-    _         (do (infer env ast (deref top-local)) ())))
+let typecheck-top-named(env: TypeEnv, hn: Str, rest: List Ast, elems: List Ast, sp: Span, ast: Ast, top-local: Ref (Map Str Type)) -> Unit =
+  match (hn)
+    | "pub" -> typecheck-top(env, ParenNode(rest, sp), top-local)
+    | "alias" -> ()
+    | "defrec" -> ()
+    | "variant" -> ()
+    | "extern" -> ()
+    | "import" -> ()
+    | "defn" -> typecheck-defn(env, elems, sp)
+    | "let" -> typecheck-top-let(env, elems, sp, ast, top-local)
+    | _ ->
+      {
+        infer(env, ast, deref(top-local))
+        ()
+      }
 
-(defn typecheck-top-dispatch (env: TypeEnv) (head: Ast) (rest: (List Ast)) (elems: (List Ast)) (sp: Span) (ast: Ast) (top-local: (Ref (Map Str Type))) -> Unit
-  (match (sym-str head)
-    (None) (do (infer env ast (deref top-local)) ())
-    (Some hn) (typecheck-top-named env hn rest elems sp ast top-local)))
+let typecheck-top-dispatch(env: TypeEnv, head: Ast, rest: List Ast, elems: List Ast, sp: Span, ast: Ast, top-local: Ref (Map Str Type)) -> Unit =
+  match (sym-str(head))
+    | None ->
+      {
+        infer(env, ast, deref(top-local))
+        ()
+      }
+    | Some(hn) -> typecheck-top-named(env, hn, rest, elems, sp, ast, top-local)
 
-(defn typecheck-top-paren (env: TypeEnv) (elems: (List Ast)) (sp: Span) (ast: Ast) (top-local: (Ref (Map Str Type))) -> Unit
-  (match elems
-    (Cons head rest) (typecheck-top-dispatch env head rest elems sp ast top-local)
-    [] (do (infer env ast (deref top-local)) ())))
+let typecheck-top-paren(env: TypeEnv, elems: List Ast, sp: Span, ast: Ast, top-local: Ref (Map Str Type)) -> Unit =
+  match (elems)
+    | Cons(head, rest) -> typecheck-top-dispatch(env, head, rest, elems, sp, ast, top-local)
+    | [] ->
+      {
+        infer(env, ast, deref(top-local))
+        ()
+      }
 
-(defn typecheck-top (env: TypeEnv) (ast: Ast) (top-local: (Ref (Map Str Type))) -> Unit
-  (match ast
-    (ParenNode elems sp) (typecheck-top-paren env elems sp ast top-local)
-    _ (do (infer env ast (deref top-local)) ())))
+let typecheck-top(env: TypeEnv, ast: Ast, top-local: Ref (Map Str Type)) -> Unit =
+  match (ast)
+    | ParenNode(elems, sp) -> typecheck-top-paren(env, elems, sp, ast, top-local)
+    | _ ->
+      {
+        infer(env, ast, deref(top-local))
+        ()
+      }
 
 ; ---------------------------------------------------------------------------
 ; Entry point.
 
-(defn collect-defs (env: TypeEnv) (forms: (List Ast)) -> Unit
-  (match forms
-    [] ()
-    (Cons f rest) (do (collect-def env f) (collect-defs env rest))))
+let collect-defs(env: TypeEnv, forms: List Ast) -> Unit =
+  match (forms)
+    | [] -> ()
+    | Cons(f, rest) ->
+      {
+        collect-def(env, f)
+        collect-defs(env, rest)
+      }
 
-(defn collect-defn-schemes (env: TypeEnv) (forms: (List Ast)) -> Unit
-  (match forms
-    [] ()
-    (Cons f rest) (do (collect-defn-scheme env f) (collect-defn-schemes env rest))))
+let collect-defn-schemes(env: TypeEnv, forms: List Ast) -> Unit =
+  match (forms)
+    | [] -> ()
+    | Cons(f, rest) ->
+      {
+        collect-defn-scheme(env, f)
+        collect-defn-schemes(env, rest)
+      }
 
-(defn run-typecheck-top (env: TypeEnv) (forms: (List Ast)) (top-local: (Ref (Map Str Type))) -> Unit
-  (match forms
-    [] ()
-    (Cons f rest) (do (typecheck-top env f top-local) (run-typecheck-top env rest top-local))))
+let run-typecheck-top(env: TypeEnv, forms: List Ast, top-local: Ref (Map Str Type)) -> Unit =
+  match (forms)
+    | [] -> ()
+    | Cons(f, rest) ->
+      {
+        typecheck-top(env, f, top-local)
+        run-typecheck-top(env, rest, top-local)
+      }
 
-(defn reverse-errs-onto (xs: (List TypeError)) (acc: (List TypeError)) -> (List TypeError)
-  (match xs
-    [] acc
-    (Cons x rest) (reverse-errs-onto rest (Cons x acc))))
+let reverse-errs-onto(xs: List TypeError, acc: List TypeError) -> List TypeError =
+  match (xs)
+    | [] -> acc
+    | Cons(x, rest) -> reverse-errs-onto(rest, Cons(x, acc))
 
-(defn reverse-errs (xs: (List TypeError)) -> (List TypeError)
-  (reverse-errs-onto xs []))
+let reverse-errs(xs: List TypeError) -> List TypeError =
+  reverse-errs-onto(xs, [])
 
-(defn finish-typecheck (forms: (List Ast)) (errs: (List TypeError)) -> (Result (List Ast) (List TypeError))
-  (match errs
-    [] (Ok forms)
-    _ (Err (reverse-errs errs))))
+let finish-typecheck(forms: List Ast, errs: List TypeError) -> Result (List Ast) (List TypeError) =
+  match (errs)
+    | [] -> Ok(forms)
+    | _ -> Err(reverse-errs(errs))
 
-(defn rest-to-type (es: (List RestError)) -> (List TypeError)
-  (match es
-    [] []
-    (Cons (RestError sp code msg) rest)
-      (Cons (TypeError sp code msg) (rest-to-type rest))))
+let rest-to-type(es: List RestError) -> List TypeError =
+  match (es)
+    | [] -> []
+    | Cons(RestError(sp, code, msg), rest) -> Cons(TypeError(sp, code, msg), rest-to-type(rest))
 
 ; Typecheck a single-file program's top-level forms (post-desugar, post
 ; rest-pack). Two passes: collect every declared type and defn scheme
 ; first (so mutual recursion and forward references between defns
 ; typecheck), then check every body/expression. Rest parameters are
 ; packed first, so the typer sees an ordinary list parameter.
-(defn typecheck-collected (forms: (List Ast)) -> (Result (List Ast) (List TypeError))
-  (do
-    (let env (empty-env))
-    (collect-defs env forms)
-    (collect-defn-schemes env forms)
-    (let top-local (ref (map-new)))
-    (run-typecheck-top env forms top-local)
-    (finish-typecheck forms (deref (env-diags env)))))
+let typecheck-collected(forms: List Ast) -> Result (List Ast) (List TypeError) {
+  let env = empty-env()
+  collect-defs(env, forms)
+  collect-defn-schemes(env, forms)
+  let top-local = ref(map-new())
+  run-typecheck-top(env, forms, top-local)
+  finish-typecheck(forms, deref(env-diags(env)))
+}
 
-(pub defn typecheck-forms (forms: (List Ast)) -> (Result (List Ast) (List TypeError))
-  (match (pack-rest forms)
-    (RestPack packed errs)
-      (match errs
-        [] (typecheck-collected packed)
-        _ (Err (rest-to-type errs)))))
+pub let typecheck-forms(forms: List Ast) -> Result (List Ast) (List TypeError) =
+  match (pack-rest(forms))
+    | RestPack(packed, errs) ->
+      match (errs)
+        | [] -> typecheck-collected(packed)
+        | _ -> Err(rest-to-type(errs))

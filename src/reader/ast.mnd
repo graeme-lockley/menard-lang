@@ -28,23 +28,28 @@
 
 ; `origin` is the module index in the flatten path list. A single file is 0.
 ; `line` is the 1-based source line of `start`, filled before typechecking.
-(pub defrec Span (start: Int) (end: Int) (origin: Int) (line: Int))
+pub record Span {
+  start: Int
+  end: Int
+  origin: Int
+  line: Int
+}
 
-(pub defn span-start (sp: Span) -> Int
-  (match sp
-    (Span s _ _ _) s))
+pub let span-start(sp: Span) -> Int =
+  match (sp)
+    | Span(s, _, _, _) -> s
 
-(pub defn span-end (sp: Span) -> Int
-  (match sp
-    (Span _ e _ _) e))
+pub let span-end(sp: Span) -> Int =
+  match (sp)
+    | Span(_, e, _, _) -> e
 
-(pub defn span-origin (sp: Span) -> Int
-  (match sp
-    (Span _ _ o _) o))
+pub let span-origin(sp: Span) -> Int =
+  match (sp)
+    | Span(_, _, o, _) -> o
 
-(pub defn span-line (sp: Span) -> Int
-  (match sp
-    (Span _ _ _ n) n))
+pub let span-line(sp: Span) -> Int =
+  match (sp)
+    | Span(_, _, _, n) -> n
 
 ; Forward declaration: the current host typer (host/src/type/check.ts,
 ; `collectDef`) resolves each nominal type's own fields/ctors in a single
@@ -55,49 +60,66 @@
 ; constructors registers it in `env.types` first, so the real declaration
 ; right below — which does need to reference `Ast` from within itself, for
 ; `(List Ast)` — resolves. Revisit once the typer pre-registers type names.
-(variant Ast)
+type Ast =
 
-(pub variant Ast
-  (ParenNode (List Ast) Span)
-  (BracketNode (List Ast) Span)
-  (SymNode Str Span)
-  (IntNode Int Span)
-  (FloatNode Str Span)
-  (StrNode Str Span)
-  (BoolNode Bool Span))
+pub type Ast =
+  | ParenNode(List Ast, Span)
+  | BracketNode(List Ast, Span)
+  | SymNode(Str, Span)
+  | IntNode(Int, Span)
+  | FloatNode(Str, Span)
+  | StrNode(Str, Span)
+  | BoolNode(Bool, Span)
 
-(pub defn ast-span (a: Ast) -> Span
-  (match a
-    (ParenNode _ sp) sp
-    (BracketNode _ sp) sp
-    (SymNode _ sp) sp
-    (IntNode _ sp) sp
-    (FloatNode _ sp) sp
-    (StrNode _ sp) sp
-    (BoolNode _ sp) sp))
+pub let ast-span(a: Ast) -> Span =
+  match (a)
+    | ParenNode(_, sp) -> sp
+    | BracketNode(_, sp) -> sp
+    | SymNode(_, sp) -> sp
+    | IntNode(_, sp) -> sp
+    | FloatNode(_, sp) -> sp
+    | StrNode(_, sp) -> sp
+    | BoolNode(_, sp) -> sp
 
-(pub defn ast-list-equal (xs: (List Ast)) (ys: (List Ast)) -> Bool
-  (match xs
-    [] (match ys [] true _ false)
-    (Cons hx tx)
-      (match ys
-        [] false
-        (Cons hy ty) (and (ast-equal hx hy) (ast-list-equal tx ty)))))
+pub let ast-list-equal(xs: List Ast, ys: List Ast) -> Bool =
+  match (xs)
+    | [] ->
+      match (ys)
+        | [] -> true
+        | _ -> false
+    | Cons(hx, tx) ->
+      match (ys)
+        | [] -> false
+        | Cons(hy, ty) -> ast-equal(hx, hy) && ast-list-equal(tx, ty)
 
 ; Structural equality, ignoring spans. Mirrors host astEqual (host/src/reader/ast.ts).
-(pub defn ast-equal (a: Ast) (b: Ast) -> Bool
-  (match a
-    (ParenNode xs _)
-      (match b (ParenNode ys _) (ast-list-equal xs ys) _ false)
-    (BracketNode xs _)
-      (match b (BracketNode ys _) (ast-list-equal xs ys) _ false)
-    (SymNode n _)
-      (match b (SymNode m _) (= n m) _ false)
-    (IntNode n _)
-      (match b (IntNode m _) (= n m) _ false)
-    (FloatNode n _)
-      (match b (FloatNode m _) (= n m) _ false)
-    (StrNode n _)
-      (match b (StrNode m _) (= n m) _ false)
-    (BoolNode n _)
-      (match b (BoolNode m _) (= n m) _ false)))
+pub let ast-equal(a: Ast, b: Ast) -> Bool =
+  match (a)
+    | ParenNode(xs, _) ->
+      match (b)
+        | ParenNode(ys, _) -> ast-list-equal(xs, ys)
+        | _ -> false
+    | BracketNode(xs, _) ->
+      match (b)
+        | BracketNode(ys, _) -> ast-list-equal(xs, ys)
+        | _ -> false
+    | SymNode(n, _) ->
+      match (b)
+        | SymNode(m, _) -> n == m
+        | _ -> false
+    | IntNode(n, _) ->
+      match (b)
+        | IntNode(m, _) -> n == m
+        | _ -> false
+    | FloatNode(n, _) ->
+      match (b)
+        | FloatNode(m, _) -> n == m
+        | _ -> false
+    | StrNode(n, _) ->
+      match (b)
+        | StrNode(m, _) -> n == m
+        | _ -> false
+    | BoolNode(n, _) ->
+      match (b)
+        | BoolNode(m, _) -> n == m
+        | _ -> false

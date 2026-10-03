@@ -1,7 +1,7 @@
 ; Colocated with hello.mnd. `mn test` runs this; `mn run hello.mnd` does not.
 
-(import "./hello.mnd")
+import "./hello.mnd"
 
-(test "one is one" (= 1 1))
+test "one is one" = 1 == 1
 
-(test "adder + 1" (= (adder 10) 11))
+test "adder + 1" = adder(10) == 11

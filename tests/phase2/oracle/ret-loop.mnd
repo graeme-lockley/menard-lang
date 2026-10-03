@@ -1,10 +1,10 @@
 ; Slice 3A oracle: `loop`/`recur` over Int bindings — real SSA back-edge,
 ; not a folded constant. `sum-to 10` is `0 + 1 + … + 10 = 55`.
 
-(defn sum-to (n: Int) -> Int
-  (loop ((i 0) (acc 0))
-    (if (> i n)
-      acc
-      (recur (+ i 1) (+ acc i)))))
+let sum-to(n: Int) -> Int =
+  loop (i = 0, acc = 0)
+    if i > n -> acc
+     | else -> recur(i + 1, acc + i)
 
-(defn main -> Int (sum-to 10))
+let main() -> Int =
+  sum-to(10)

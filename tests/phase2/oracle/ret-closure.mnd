@@ -2,6 +2,7 @@
 ; `src/close/close.mnd` lifts it to `__lam0` + heap env/closure, and
 ; `src/emit/lower.mnd` emits `mn_closure_new` / `mn_apply_1`. Exit 41.
 
-(defn main -> Int
-  (let add (fn (x) (+ x 1)))
-  (add 40))
+let main() -> Int {
+  let add = fn (x) = x + 1
+  add(40)
+}

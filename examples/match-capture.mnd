@@ -2,29 +2,38 @@
 ; Prints: head 10, rest is non-empty, total 11
 ; Run with: `./mn run examples/match-capture.mnd`
 
-(defn first-plus-rest-flag (xs: (List Int)) -> Int
-  (match xs
-    []
-      (do
-        (println "empty list, total 0")
-        0)
-    (Cons h rest)
-      ((fn ()
-         (do
-           (let flag
-             (match rest
-               [] 0
-               _ 1))
-           (let total (+ h flag))
-           (print "head ")
-           (print h)
-           (if (= flag 0)
-             (do (print ", rest is empty") 0)
-             (do (print ", rest is non-empty") 0))
-           (print ", total ")
-           (println total)
-           total)))))
+let first-plus-rest-flag(xs: List Int) -> Int =
+  match (xs)
+    | [] ->
+      {
+        println("empty list, total 0")
+        0
+      }
+    | Cons(h, rest) ->
+      (fn () {
+        let flag =
+          match (rest)
+            | [] -> 0
+            | _ -> 1
+        let total = h + flag
+        print("head ")
+        print(h)
+        if flag == 0 ->
+          {
+            print(", rest is empty")
+            0
+          }
+         | else ->
+          {
+            print(", rest is non-empty")
+            0
+          }
+        print(", total ")
+        println(total)
+        total
+      })()
 
-(defn main -> Int
-  (first-plus-rest-flag [10 1])
-  0)
+let main() -> Int {
+  first-plus-rest-flag([10, 1])
+  0
+}

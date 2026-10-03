@@ -1,2 +1,2 @@
-(defn id (n: Int) -> Int
-  ((fn (xs ...) xs) n))
+let id(n: Int) -> Int =
+  (fn (xs, ...) = xs)(n)

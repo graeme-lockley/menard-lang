@@ -5,40 +5,41 @@
 ; are the IoError singletons; they are listed here so a
 ; SpawnError match is exhaustive, and they stay registered as IoError.
 
-(pub variant SpawnStatus
-  (Exited Int)
-  (Signalled Int))
+pub type SpawnStatus =
+  | Exited(Int)
+  | Signalled(Int)
 
-(pub defrec SpawnOutput
-  (status: SpawnStatus)
-  (stdout: Str)
-  (stderr: Str))
+pub record SpawnOutput {
+  status: SpawnStatus
+  stdout: Str
+  stderr: Str
+}
 
-(pub variant SpawnError
-  (NotFound)
-  (NotExecutable)
-  (Permission)
-  (InvalidArgument)
-  (TooManyArguments)
-  (Unsupported))
+pub type SpawnError =
+  | NotFound
+  | NotExecutable
+  | Permission
+  | InvalidArgument
+  | TooManyArguments
+  | Unsupported
 
-(extern mn_spawn (argv: (List Str)) -> (Result SpawnStatus SpawnError))
+extern mn_spawn(argv: List Str) -> Result SpawnStatus SpawnError
 
 ; Run argv and wait. argv[0] is a path; a bare name means ./name.
-; @test (spawn ["/usr/bin/true"])
-(pub defn spawn (argv: (List Str)) -> (Result SpawnStatus SpawnError)
-  (mn_spawn argv))
+; @test spawn(["/usr/bin/true"])
+pub let spawn(argv: List Str) -> Result SpawnStatus SpawnError =
+  mn_spawn(argv)
 
-(extern mn_spawn_capture (argv: (List Str)) (stdin: Str) -> (Result SpawnOutput SpawnError))
+extern mn_spawn_capture(argv: List Str, stdin: Str) -> Result SpawnOutput SpawnError
 
 ; Run argv, feed stdin, and capture both streams.
-; @test (spawn-capture ["/usr/bin/true"] "")
-(pub defn spawn-capture (argv: (List Str)) (stdin: Str) -> (Result SpawnOutput SpawnError)
-  (mn_spawn_capture argv stdin))
+; @test spawn-capture(["/usr/bin/true"], "")
+pub let spawn-capture(argv: List Str, stdin: Str) -> Result SpawnOutput SpawnError =
+  mn_spawn_capture(argv, stdin)
 
 ; A process status as an exit code, folding signal death the way a shell does.
-; @test (status->exit-code (Exited 3)) => 3
-(pub defn status->exit-code (s: SpawnStatus) -> Int
-  (match s
-    (Exited n) n
-    (Signalled n) (+ 128 n)))
+; @test status-exit-code(Exited(3)) => 3
+pub let status-exit-code(s: SpawnStatus) -> Int =
+  match (s)
+    | Exited(n) -> n
+    | Signalled(n) -> 128 + n

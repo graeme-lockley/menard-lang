@@ -1,4 +1,4 @@
-(import "panic-lib.mnd")
+import "panic-lib.mnd"
 
-(defn main -> Int
-  (boom))
+let main() -> Int =
+  boom()

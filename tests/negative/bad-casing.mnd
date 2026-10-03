@@ -1,1 +1,2 @@
-(defn Foo (x: Int) -> Int x)
+let Foo(x: Int) -> Int =
+  x

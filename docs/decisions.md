@@ -32,7 +32,7 @@ bearing choices; everything in the specification follows from them.
 
 | # | Decision | Reason | Cost if wrong |
 |---|---|---|---|
-| 1 | S-expressions, no sugar | Cheapest reader; no ambiguity | Ugly for outsiders; sugar costs double |
+| 1 | Infix surface, layout for arms, closed syntax | Readable declarations and operators; one reader shared by both front ends | Sugar lowers into a second form the compiler must keep |
 | 2 | Statically typed | Types drive the showable/orderable/equatable checks and exhaustive matching | Larger typer |
 | 3 | `Int` = 63-bit tagged, **one integer type** | The tag bit makes uniform one-word values possible, and is load-bearing for the collector too (§2.2, §4.3); narrow buys no speed, wide costs boxing; a second type doubles the ways the interpreter and the backend can disagree | Range limit; boxed `BigInt` eventually |
 | 4 | `Float` boxed in a **`bytes` payload**, **no unboxed fields** | The payload is arbitrary bits, so it must never be scanned as slots; NaN-boxing would *narrow* `Int`; unboxing would break the collector's invariants (§4.3) | Allocation churn on float-heavy code |
@@ -70,8 +70,22 @@ bearing choices; everything in the specification follows from them.
 | 36 | **Menard has no `null`; the empty word is an allocator sentinel, not a value — kept, and paired with an *asserted* no-partial-publication discipline** | Filling an object's fields may allocate, so the collector can run mid-construction; without a distinguished word an unwritten slot holds a stale pointer or an even non-pointer, traced silently in every native build. The word converts that into a wasted read; the discipline — and its heap-verify assertion — is what stops the collector *depending* on it | One extra test in the marking loop; one `memset` per recycled object; one non-value word in the representation that must be kept out of the language, out of output, and out of the debug printer |
 | 37 | **Process spawning is admitted, in argv-vector form only; shell strings and `fork` are refused permanently** | The build driver must be Menard, or the language's own integration test lives in a shell script; argv is data the compiler can see and check, whereas a shell string is unbounded ambient state in one string; and `fork` copies a GC's heap and collector state | ~310 lines implemented twice; a `SpawnError` taxonomy to keep aligned; a non-hermetic test tier; one more way for a path to reach the artifact |
 | 38 | **Literals and nullary constructors are static objects; layout and location are separate axes** | A literal or a nullary constructor is a constant of the program, so allocating it at each evaluation is pure waste — and for `Str`, which is not interned, "each evaluation" means each loop iteration. Making the pool static deletes the allocation rather than optimising it; splitting location from layout is what lets a `bytes` object be static and lets a nullary variant be header-only | ~60 lines of compiler for the pool; two new determinism obligations (dedup and emission order); a layout/location pair to keep straight; and the invariance rules of §2.2.1 must hold |
-| 39 | **`print` / `println` are variadic stdout emitters: `Str` raw, other showables via `show`; no auto-newline on `print`** | Quoting every `Str` through `show` made hello-world and IR-shaped stdout unusable via `print`; bare `Str` bytes plus explicit `(print (show x))` when quotes are wanted keeps `show` injective and `write` as the arbitrary-fd primitive | Special variadic typing; six intrinsics; callers who wanted the old always-show behaviour must wrap with `show` |
+| 39 | **`print` / `println` are variadic stdout emitters: `Str` raw, other showables via `show`; no auto-newline on `print`** | Quoting every `Str` through `show` made hello-world and IR-shaped stdout unusable via `print`; bare `Str` bytes plus explicit `print(show(x))` when quotes are wanted keeps `show` injective and `write` as the arbitrary-fd primitive | Special variadic typing; six intrinsics; callers who wanted the old always-show behaviour must wrap with `show` |
 | 40 | **The compiler emits LLVM bitcode (`.bc`), never textual `.ll` as the product** | Textual IR is a second spelling of the same module and invites non-determinism (whitespace, type printing); bitcode is the binary artifact the gate and the driver consume; `llvm-dis` stays a debug aid only | A Menard bitcode writer (~subset of LLVM encoding) must stay deterministic and in sync with the pinned LLVM/clang |
+---
+
+## 2026-10-03 — Infix surface (ADR 1)
+
+### The decision
+
+Source is the surface in `docs/syntax.md`: `let` for declarations, `{ }` for
+blocks, infix operators with whitespace on both sides, and layout for `if`,
+`match`, and `type`. Both front ends lower that surface into the same core
+heads. There is no second reader for an older spelling.
+
+ADR 1 in the index is this decision. It replaces the earlier choice of a
+parenthesized surface with no operators.
+
 ---
 
 ## 2026-09-25 — Compiler product is LLVM bitcode (ADR 40)
@@ -109,9 +123,9 @@ output as golden unless encoding variance forces it.
 `print` and `println` take **zero or more** arguments and write to fd 1:
 
 - each `Str` is emitted as **raw bytes** (no quotes);
-- every other argument must be **showable**; its `(show …)` bytes are written;
+- every other argument must be **showable**; its `show(…)` bytes are written;
 - `print` adds **no** newline; `println` appends one `0x0a` after the args
-  (`(println)` alone writes just that newline).
+  (`println()` alone writes just that newline).
 
 `show` is unchanged (still quotes `Str`). `write` remains raw bytes to an
 arbitrary fd. Adds ADR 39; amends the §2.8.1 intrinsic set to **six**.
@@ -120,13 +134,13 @@ arbitrary fd. Adds ADR 39; amends the §2.8.1 intrinsic set to **six**.
 
 The previous rule — `print` = always `show` then write — made ordinary messages
 and any stdout that must be byte-exact (including the shape of IR) wrong by
-default: `(print "Hello, world!")` produced `"Hello, world!"` with quotes. The
+default: `print("Hello, world!")` produced `"Hello, world!"` with quotes. The
 fix needed was already named in §2.15 as `write`; elevating bare `Str` emission
 onto `print` / `println` for **stdout only** keeps the common path short without
 collapsing `show`'s injectivity.
 
 Rejected alternative: `Str`-only print (option A). Accepted: option B — non-`Str`
-showables still go through `show`, so `(print 42)` and `(print "x=" 1)` work.
+showables still go through `show`, so `print(42)` and `print("x=", 1)` work.
 
 ### Propagated
 
@@ -149,7 +163,7 @@ He is correct that this is good for the collector. But the gain is not collector
 throughput — it is **allocation deletion**, and the two are not the same shape:
 
 > `Str` is not interned, so without this **every evaluation** of a literal
-> allocates. `(str-concat "foo" x)` in a loop allocates `"foo"` on every
+> allocates. `str-concat("foo", x)` in a loop allocates `"foo"` on every
 > iteration.
 
 A literal is a constant, and a constant that is rebuilt on every evaluation is
@@ -614,7 +628,7 @@ was true of **one form of exec and not the other**.
 | Form | The caller writes | Verdict |
 |---|---|---|
 | Shell string | `"cc -O2 -o out out.ll"` | **Refused, permanently** |
-| **argv vector** | `(list cc "-O2" "-o" out ir)` | **Admitted** |
+| **argv vector** | `["cc", "-O2", "-o", out, ir]` | **Admitted** |
 
 **Shell strings are refused forever**, and the reasoning is not squeamishness: a
 command string is unbounded ambient state in one string. The shell performs word
@@ -791,7 +805,7 @@ and §2.10 says plainly that there is no `null`, no operation returns one, and n
 
 It is load-bearing for allocator hygiene, and the mechanism is unavoidable:
 **a freshly allocated object is filled field by field, and filling a field may
-itself allocate.** `(cons (leaf 1) (leaf 2))` allocates the two leaves before it
+itself allocate.** `Cons(Leaf(1), Leaf(2))` allocates the two leaves before it
 has finished the cons. So the collector can run while an object has unwritten
 slots.
 
@@ -902,8 +916,8 @@ checking.
 
 Three routes existed even then, none needing a language change:
 
-- `(write! 1 (sb-to-str! sb))` — contents, byte-exact, stdout;
-- `(show (sb-to-str! sb))` — quoted form, for a message;
+- `write!(1, sb-to-str!(sb))` — contents, byte-exact, stdout;
+- `show(sb-to-str!(sb))` — quoted form, for a message;
 - `sb-length` / `str-byte` — raw inspection.
 
 So the *need* was already met. What was missing was a printer for the cases where
@@ -937,8 +951,8 @@ identity discipline would leak by composition. Those are the real objections.
 
 ### The design: isolation by type, not by convention
 
-```lisp
-(defn (dump! [a]) (v: a) -> Unit    ; loose structural text to fd 2
+```
+let dump![a](v: a) -> Unit    ; loose structural text to fd 2
 ```
 
 **The isolation rule, and it is the whole design:**
@@ -1084,9 +1098,9 @@ My first instinct — a consuming `sb-finish` — was worse, and the operator's
 prompt produced a better shape. Consuming means **use-after-finish**, an affine
 discipline the language has no machinery for. Instead:
 
-```lisp
-(sb-to-str! ...)   ; non-destructive, cached      → sb-to-str   since v0.5.6
-(sb-take-str!)     ; transfers storage; buffer becomes empty
+```
+sb-to-str!(...)   ; non-destructive, cached      → sb-to-str   since v0.5.6
+sb-take-str!()    ; transfers storage; buffer becomes empty
 ```
 
 `sb-take-str!` transfers and leaves the buffer **empty and valid** — no hazard,
@@ -1170,7 +1184,7 @@ mutation — and the "names the §2.11.B boundary" justification, which was the
 whole reason it was extended to I/O in the first place, is withdrawn: the
 boundary is now marked by the confinement of `extern`.
 
-**Mechanical catch from the same revision.** `(extern mn_sb_append! …)` cannot
+**Mechanical catch from the same revision.** `extern mn_sb_append!(…)` cannot
 work: in `extern` **the name *is* the C symbol**, and `!` is illegal in C
 identifiers. Externs keep C-legal names; any `!` lives on the Menard wrapper —
 needed anyway for `Result` mapping and `EINTR` retry.
@@ -1217,9 +1231,12 @@ runtime and interpreter must agree exactly.
 
 ### Ratified: type parameters on user nominal types (§2.3, ADR 23)
 
-```lisp
-(defrec (Pair [a b]) (fst: a) (snd: b))
-(variant (Tree [a]) (Leaf a) (Node (Tree a) (Tree a)) (Empty))
+```
+record Pair[a, b] { fst: a, snd: b }
+type Tree[a] =
+  | Leaf(a)
+  | Node(Tree a, Tree a)
+  | Empty
 ```
 
 **The catch, and why it decided the collector.** Polymorphic bodies compile once
@@ -1245,7 +1262,7 @@ classes; no subtyping or row polymorphism; aliases nullary.
 
 All representation work is genuinely free, but two moving parts disqualify it:
 the **value restriction** (`Ref` + let-generalization is unsound, so
-`(let r (ref (list)))` would generalise to `∀a. (Ref (List a))`), and
+`let r = ref([])` would generalise to `∀a. Ref (List a)`), and
 **diagnostics** (unification failures reported far from the cause). Explicit
 parameters are **additive** with later inference, which decides it.
 

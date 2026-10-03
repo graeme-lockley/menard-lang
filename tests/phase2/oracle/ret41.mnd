@@ -6,4 +6,5 @@
 ; (this file, and its siblings) for the emit -> clang -> run smoke this
 ; proves.
 
-(defn main -> Int 41)
+let main() -> Int =
+  41

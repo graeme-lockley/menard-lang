@@ -109,7 +109,7 @@ describe("src/mn.mnd check", () => {
 // `src/emit/bitcode.mnd`'s `emit-program-bc` calls the real bit-level
 // encoder in `src/emit/bc-writer.mnd` (slice 2A) through `src/emit/
 // lower.mnd`'s real instruction selector (this slice): `hello.mnd`'s
-// `(defn main -> Int 0)` now lowers to a real `lshr`/`trunc`/`ret`
+// `let main() -> Int = 0` now lowers to a real `lshr`/`trunc`/`ret`
 // sequence (untagging the tagged-`Int` literal `0`), not a single
 // folded `ret i32 0` — so there is no more one-and-only byte-exact
 // golden module every input necessarily produces (see this module's own

@@ -2,13 +2,13 @@
 ; argument is a nullary constructor of a user-declared `variant` — checks
 ; the plan resolves a locally declared type, not only builtins.
 
-(variant Color
-  (Red)
-  (Green)
-  (Blue))
+type Color =
+  | Red
+  | Green
+  | Blue
 
-(defn use-show -> Str
-  (show (Red)))
+let use-show() -> Str =
+  show(Red())
 
-(defn main -> Int
-  0)
+let main() -> Int =
+  0

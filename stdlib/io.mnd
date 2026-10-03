@@ -2,42 +2,47 @@
 ; @module std/io
 
 ; Standard input, the file descriptor `write` takes as 0.
-(pub let stdin 0)
+; @test stdin => 0
+pub let stdin = 0
 
 ; Standard output, the file descriptor `write` takes as 1.
-(pub let stdout 1)
+; @test stdout => 1
+pub let stdout = 1
 
 ; Standard error, the file descriptor `write` takes as 2.
-(pub let stderr 2)
+; @test stderr => 2
+pub let stderr = 2
 
 ; IoError is the closed taxonomy the runtime and the interpreter both
 ; return. Tags are the C statics: 20–26 nullary, 27 (Other Int).
 
-(pub variant IoError
-  (NotFound)
-  (Permission)
-  (Exists)
-  (IsADirectory)
-  (NotADirectory)
-  (InvalidPath)
-  (TooLarge)
-  (Other Int))
+pub type IoError =
+  | NotFound
+  | Permission
+  | Exists
+  | IsADirectory
+  | NotADirectory
+  | InvalidPath
+  | TooLarge
+  | Other(Int)
 
-(extern mn_write (fd: Int) (data: Str) -> (Result Unit IoError))
-(extern mn_read_file (path: Str) -> (Result Str IoError))
-(extern mn_write_file (path: Str) (data: Str) -> (Result Unit IoError))
+extern mn_write(fd: Int, data: Str) -> Result Unit IoError
+
+extern mn_read_file(path: Str) -> Result Str IoError
+
+extern mn_write_file(path: Str, data: Str) -> Result Unit IoError
 
 ; Write data to fd. A stream is not a value, so this carries no !.
-; @test (write stdout "hi")
-(pub defn write (fd: Int) (data: Str) -> (Result Unit IoError)
-  (mn_write fd data))
+; @test write(stdout, "hi")
+pub let write(fd: Int, data: Str) -> Result Unit IoError =
+  mn_write(fd, data)
 
 ; The bytes of the file at path, or an IoError.
-; @test (read-file "no-such-file")
-(pub defn read-file (path: Str) -> (Result Str IoError)
-  (mn_read_file path))
+; @test read-file("no-such-file")
+pub let read-file(path: Str) -> Result Str IoError =
+  mn_read_file(path)
 
 ; Replace the file at path with data, or an IoError.
-; @test (write-file "out.txt" "hi")
-(pub defn write-file (path: Str) (data: Str) -> (Result Unit IoError)
-  (mn_write_file path data))
+; @test write-file("out.txt", "hi")
+pub let write-file(path: Str, data: Str) -> Result Unit IoError =
+  mn_write_file(path, data)

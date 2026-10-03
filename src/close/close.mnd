@@ -47,659 +47,687 @@
 ; - **Shadowing / nested lets inside fn bodies** use the same naive
 ;   free-var scan as before.
 
-(import "../reader/ast.mnd")
-(import std/list)
+import "../reader/ast.mnd"
 
-(pub alias Ast Ast)
+import std/list
+
+pub alias Ast = Ast
 
 ; ---------------------------------------------------------------------------
 ; Small Ast helpers (no prelude import — see emit/lower.mnd).
 
-(defn sym-str (ast: Ast) -> (Maybe Str)
-  (match ast (SymNode n _) (Some n) _ (None)))
+let sym-str(ast: Ast) -> Maybe Str =
+  match (ast)
+    | SymNode(n, _) -> Some(n)
+    | _ -> None()
 
-(defn is-sym (ast: Ast) (name: Str) -> Bool
-  (match (sym-str ast) (Some n) (= n name) (None) false))
+let is-sym(ast: Ast, name: Str) -> Bool =
+  match (sym-str(ast))
+    | Some(n) -> n == name
+    | None -> false
 
-(defn strip-trailing-colon (raw: Str) -> Str
-  (let n (str-byte-length raw))
-  (if (and (> n 0) (= (str-byte raw (- n 1)) 58)) (str-slice raw 0 (- n 1)) raw))
+let strip-trailing-colon(raw: Str) -> Str {
+  let n = str-byte-length(raw)
+  if n > 0 && str-byte(raw, n - 1) == 58 -> str-slice(raw, 0, n - 1)
+   | else -> raw
+}
 
-(defn dummy-span -> Span (Span 0 0 0 1))
+let dummy-span() -> Span =
+  Span(0, 0, 0, 1)
 
-(defn append-list (xs: (List Ast)) (ys: (List Ast)) -> (List Ast)
-  (match xs
-    [] ys
-    (Cons x rest) (Cons x (append-list rest ys))))
+let append-list(xs: List Ast, ys: List Ast) -> List Ast =
+  match (xs)
+    | [] -> ys
+    | Cons(x, rest) -> Cons(x, append-list(rest, ys))
 
-(defn append-str-list (xs: (List Str)) (ys: (List Str)) -> (List Str)
-  (match xs
-    [] ys
-    (Cons x rest) (Cons x (append-str-list rest ys))))
+let append-str-list(xs: List Str, ys: List Str) -> List Str =
+  match (xs)
+    | [] -> ys
+    | Cons(x, rest) -> Cons(x, append-str-list(rest, ys))
 
 ; ---------------------------------------------------------------------------
 ; Free-symbol collection (naive over-approximation).
 
-(defn collect-symbols (ast: Ast) -> (List Str)
-  (match ast
-    (SymNode n _) [n]
-    (ParenNode elems _) (collect-symbols-list elems)
-    (BracketNode elems _) (collect-symbols-list elems)
-    _ []))
+let collect-symbols(ast: Ast) -> List Str =
+  match (ast)
+    | SymNode(n, _) -> [n]
+    | ParenNode(elems, _) -> collect-symbols-list(elems)
+    | BracketNode(elems, _) -> collect-symbols-list(elems)
+    | _ -> []
 
-(defn collect-symbols-list (elems: (List Ast)) -> (List Str)
-  (match elems
-    [] []
-    (Cons e rest) (append-str-list (collect-symbols e) (collect-symbols-list rest))))
+let collect-symbols-list(elems: List Ast) -> List Str =
+  match (elems)
+    | [] -> []
+    | Cons(e, rest) -> append-str-list(collect-symbols(e), collect-symbols-list(rest))
 
 ; ---------------------------------------------------------------------------
 ; Parameter name helpers.
 
-(defn defn-param-name (ast: Ast) -> (Maybe Str)
-  (match ast
-    (ParenNode (Cons name-ast _) _) (defn-param-name-sym name-ast)
-    _ (None)))
+let defn-param-name(ast: Ast) -> Maybe Str =
+  match (ast)
+    | ParenNode(Cons(name-ast, _), _) -> defn-param-name-sym(name-ast)
+    | _ -> None()
 
-(defn defn-param-name-sym (name-ast: Ast) -> (Maybe Str)
-  (match (sym-str name-ast) (Some n) (Some (strip-trailing-colon n)) (None) (None)))
+let defn-param-name-sym(name-ast: Ast) -> Maybe Str =
+  match (sym-str(name-ast))
+    | Some(n) -> Some(strip-trailing-colon(n))
+    | None -> None()
 
-(defn defn-param-names (elems: (List Ast)) -> (List Str)
-  (match elems
-    [] []
-    (Cons e rest) (defn-param-names-cons e rest)))
+let defn-param-names(elems: List Ast) -> List Str =
+  match (elems)
+    | [] -> []
+    | Cons(e, rest) -> defn-param-names-cons(e, rest)
 
-(defn defn-param-names-cons (e: Ast) (rest: (List Ast)) -> (List Str)
-  (match (defn-param-name e)
-    (Some n) (Cons n (defn-param-names rest))
-    (None) (defn-param-names rest)))
+let defn-param-names-cons(e: Ast, rest: List Ast) -> List Str =
+  match (defn-param-name(e))
+    | Some(n) -> Cons(n, defn-param-names(rest))
+    | None -> defn-param-names(rest)
 
-(defn fn-param-names (elems: (List Ast)) -> (List Str)
-  (match elems
-    [] []
-    (Cons e rest) (fn-param-names-cons e rest)))
+let fn-param-names(elems: List Ast) -> List Str =
+  match (elems)
+    | [] -> []
+    | Cons(e, rest) -> fn-param-names-cons(e, rest)
 
-(defn fn-param-names-cons (e: Ast) (rest: (List Ast)) -> (List Str)
-  (match (sym-str e)
-    (Some n) (Cons n (fn-param-names rest))
-    (None) (fn-param-names rest)))
+let fn-param-names-cons(e: Ast, rest: List Ast) -> List Str =
+  match (sym-str(e))
+    | Some(n) -> Cons(n, fn-param-names(rest))
+    | None -> fn-param-names(rest)
 
-(defn fn-param-elems (params-ast: Ast) -> (List Ast)
-  (match params-ast (ParenNode elems _) elems _ []))
+let fn-param-elems(params-ast: Ast) -> List Ast =
+  match (params-ast)
+    | ParenNode(elems, _) -> elems
+    | _ -> []
 
-(defn int-param-for (name: Str) -> Ast
-  (ParenNode [(SymNode (str-concat name ":") (dummy-span)) (SymNode "Int" (dummy-span))] (dummy-span)))
+let int-param-for(name: Str) -> Ast =
+  ParenNode([SymNode(str-concat(name, ":"), dummy-span()), SymNode("Int", dummy-span())], dummy-span())
 
-(defn int-params-for (names: (List Str)) -> (List Ast)
-  (match names
-    [] []
-    (Cons n rest) (Cons (int-param-for n) (int-params-for rest))))
+let int-params-for(names: List Str) -> List Ast =
+  match (names)
+    | [] -> []
+    | Cons(n, rest) -> Cons(int-param-for(n), int-params-for(rest))
 
 ; ---------------------------------------------------------------------------
 ; `(defn name params… -> Ret body…)` header/body split.
 
-(defrec ArrowSplit (header: (List Ast)) (arrow: Ast) (ret: Ast) (body: (List Ast)))
+record ArrowSplit {
+  header: List Ast
+  arrow: Ast
+  ret: Ast
+  body: List Ast
+}
 
-(defn arrow-split-header (s: ArrowSplit) -> (List Ast) (match s (ArrowSplit h _ _ _) h))
-(defn arrow-split-arrow (s: ArrowSplit) -> Ast (match s (ArrowSplit _ a _ _) a))
-(defn arrow-split-ret (s: ArrowSplit) -> Ast (match s (ArrowSplit _ _ r _) r))
-(defn arrow-split-body (s: ArrowSplit) -> (List Ast) (match s (ArrowSplit _ _ _ b) b))
+let arrow-split-header(s: ArrowSplit) -> List Ast =
+  match (s)
+    | ArrowSplit(h, _, _, _) -> h
 
-(defn find-arrow (elems: (List Ast)) -> (Maybe ArrowSplit)
-  (match elems
-    [] (None)
-    (Cons e rest) (find-arrow-step e rest)))
+let arrow-split-arrow(s: ArrowSplit) -> Ast =
+  match (s)
+    | ArrowSplit(_, a, _, _) -> a
 
-(defn find-arrow-step (e: Ast) (rest: (List Ast)) -> (Maybe ArrowSplit)
-  (if (is-sym e "->") (find-arrow-tail e rest) (find-arrow-prepend e rest)))
+let arrow-split-ret(s: ArrowSplit) -> Ast =
+  match (s)
+    | ArrowSplit(_, _, r, _) -> r
 
-(defn find-arrow-tail (arrow: Ast) (rest: (List Ast)) -> (Maybe ArrowSplit)
-  (match rest
-    (Cons ret body) (Some (ArrowSplit [] arrow ret body))
-    [] (None)))
+let arrow-split-body(s: ArrowSplit) -> List Ast =
+  match (s)
+    | ArrowSplit(_, _, _, b) -> b
 
-(defn find-arrow-prepend (e: Ast) (rest: (List Ast)) -> (Maybe ArrowSplit)
-  (match (find-arrow rest)
-    (None) (None)
-    (Some s) (Some (ArrowSplit (Cons e (arrow-split-header s)) (arrow-split-arrow s) (arrow-split-ret s) (arrow-split-body s)))))
+let find-arrow(elems: List Ast) -> Maybe ArrowSplit =
+  match (elems)
+    | [] -> None()
+    | Cons(e, rest) -> find-arrow-step(e, rest)
 
-(defn defn-scope-of (header: (List Ast)) -> (List Str)
-  (match header
-    (Cons _ (Cons _ params)) (defn-param-names params)
-    _ []))
+let find-arrow-step(e: Ast, rest: List Ast) -> Maybe ArrowSplit =
+  if is-sym(e, "->") -> find-arrow-tail(e, rest)
+   | else -> find-arrow-prepend(e, rest)
+
+let find-arrow-tail(arrow: Ast, rest: List Ast) -> Maybe ArrowSplit =
+  match (rest)
+    | Cons(ret, body) -> Some(ArrowSplit([], arrow, ret, body))
+    | [] -> None()
+
+let find-arrow-prepend(e: Ast, rest: List Ast) -> Maybe ArrowSplit =
+  match (find-arrow(rest))
+    | None -> None()
+    | Some(s) -> Some(ArrowSplit(Cons(e, arrow-split-header(s)), arrow-split-arrow(s), arrow-split-ret(s), arrow-split-body(s)))
+
+let defn-scope-of(header: List Ast) -> List Str =
+  match (header)
+    | Cons(_, Cons(_, params)) -> defn-param-names(params)
+    | _ -> []
 
 ; ---------------------------------------------------------------------------
 ; Substitution: let-bound closure name -> lifted info (for mn-apply-1 rewrite).
 
-(defrec LiftedInfo (lifted-name: Str) (free-vars: (List Str)))
+record LiftedInfo {
+  lifted-name: Str
+  free-vars: List Str
+}
 
-(defn apply-subst-ast (ast: Ast) (subst: (Map Str LiftedInfo)) -> Ast
-  (match ast
-    (ParenNode elems sp) (apply-subst-paren elems sp subst)
-    (BracketNode elems sp) (BracketNode (apply-subst-list elems subst) sp)
-    _ ast))
+let apply-subst-ast(ast: Ast, subst: Map Str LiftedInfo) -> Ast =
+  match (ast)
+    | ParenNode(elems, sp) -> apply-subst-paren(elems, sp, subst)
+    | BracketNode(elems, sp) -> BracketNode(apply-subst-list(elems, subst), sp)
+    | _ -> ast
 
-(defn apply-subst-list (elems: (List Ast)) (subst: (Map Str LiftedInfo)) -> (List Ast)
-  (match elems
-    [] []
-    (Cons e rest) (Cons (apply-subst-ast e subst) (apply-subst-list rest subst))))
+let apply-subst-list(elems: List Ast, subst: Map Str LiftedInfo) -> List Ast =
+  match (elems)
+    | [] -> []
+    | Cons(e, rest) -> Cons(apply-subst-ast(e, subst), apply-subst-list(rest, subst))
 
-(defn apply-subst-paren (elems: (List Ast)) (sp: Span) (subst: (Map Str LiftedInfo)) -> Ast
-  (match elems
-    [] (ParenNode [] sp)
-    (Cons head args) (apply-subst-paren-head head args sp subst)))
+let apply-subst-paren(elems: List Ast, sp: Span, subst: Map Str LiftedInfo) -> Ast =
+  match (elems)
+    | [] -> ParenNode([], sp)
+    | Cons(head, args) -> apply-subst-paren-head(head, args, sp, subst)
 
-(defn apply-subst-paren-head (head: Ast) (args: (List Ast)) (sp: Span) (subst: (Map Str LiftedInfo)) -> Ast
-  (match (sym-str head)
-    (None) (ParenNode (Cons (apply-subst-ast head subst) (apply-subst-list args subst)) sp)
-    (Some name) (apply-subst-paren-named name head args sp subst)))
+let apply-subst-paren-head(head: Ast, args: List Ast, sp: Span, subst: Map Str LiftedInfo) -> Ast =
+  match (sym-str(head))
+    | None -> ParenNode(Cons(apply-subst-ast(head, subst), apply-subst-list(args, subst)), sp)
+    | Some(name) -> apply-subst-paren-named(name, head, args, sp, subst)
 
-(defn apply-subst-paren-named (name: Str) (head: Ast) (args: (List Ast)) (sp: Span) (subst: (Map Str LiftedInfo)) -> Ast
-  (match (map-get subst name)
-    (None) (ParenNode (Cons head (apply-subst-list args subst)) sp)
-    (Some _) (rewrite-call name args sp subst)))
+let apply-subst-paren-named(name: Str, head: Ast, args: List Ast, sp: Span, subst: Map Str LiftedInfo) -> Ast =
+  match (map-get(subst, name))
+    | None -> ParenNode(Cons(head, apply-subst-list(args, subst)), sp)
+    | Some(_) -> rewrite-call(name, args, sp, subst)
 
 ; `(name arg…)` for a known let-bound closure → `mn-apply-0/1/2`.
-(defn rewrite-call (name: Str) (args: (List Ast)) (sp: Span) (subst: (Map Str LiftedInfo)) -> Ast
-  (match args
-    []
-      (ParenNode
-        [(SymNode "mn-apply-0" sp) (SymNode name sp)]
-        sp)
-    [a0]
-      (ParenNode
-        [(SymNode "mn-apply-1" sp) (SymNode name sp) (apply-subst-ast a0 subst)]
-        sp)
-    [a0 a1]
-      (ParenNode
-        [(SymNode "mn-apply-2" sp) (SymNode name sp) (apply-subst-ast a0 subst) (apply-subst-ast a1 subst)]
-        sp)
-    _ (ParenNode (Cons (SymNode name sp) (apply-subst-list args subst)) sp)))
+let rewrite-call(name: Str, args: List Ast, sp: Span, subst: Map Str LiftedInfo) -> Ast =
+  match (args)
+    | [] -> ParenNode([SymNode("mn-apply-0", sp), SymNode(name, sp)], sp)
+    | [a0] -> ParenNode([SymNode("mn-apply-1", sp), SymNode(name, sp), apply-subst-ast(a0, subst)], sp)
+    | [a0, a1] -> ParenNode([SymNode("mn-apply-2", sp), SymNode(name, sp), apply-subst-ast(a0, subst), apply-subst-ast(a1, subst)], sp)
+    | _ -> ParenNode(Cons(SymNode(name, sp), apply-subst-list(args, subst)), sp)
 
 ; ---------------------------------------------------------------------------
 ; `(let name (fn (params…) body-expr))`
 
-(defrec LetFn (name: Str) (params-ast: Ast) (body-expr: Ast))
+record LetFn {
+  name: Str
+  params-ast: Ast
+  body-expr: Ast
+}
 
-(defn as-let-fn (f: Ast) -> (Maybe LetFn)
-  (match f
-    (ParenNode [head name-ast val-ast] _) (as-let-fn-check head name-ast val-ast)
-    _ (None)))
+let as-let-fn(f: Ast) -> Maybe LetFn =
+  match (f)
+    | ParenNode([head, name-ast, val-ast], _) -> as-let-fn-check(head, name-ast, val-ast)
+    | _ -> None()
 
-(defn as-let-fn-check (head: Ast) (name-ast: Ast) (val-ast: Ast) -> (Maybe LetFn)
-  (if (is-sym head "let") (as-let-fn-named name-ast val-ast) (None)))
+let as-let-fn-check(head: Ast, name-ast: Ast, val-ast: Ast) -> Maybe LetFn =
+  if is-sym(head, "let") -> as-let-fn-named(name-ast, val-ast)
+   | else -> None()
 
-(defn as-let-fn-named (name-ast: Ast) (val-ast: Ast) -> (Maybe LetFn)
-  (match (sym-str name-ast)
-    (None) (None)
-    (Some n) (as-fn-value n val-ast)))
+let as-let-fn-named(name-ast: Ast, val-ast: Ast) -> Maybe LetFn =
+  match (sym-str(name-ast))
+    | None -> None()
+    | Some(n) -> as-fn-value(n, val-ast)
 
-(defn as-fn-value (name: Str) (val-ast: Ast) -> (Maybe LetFn)
-  (match val-ast
-    (ParenNode [fn-head params-ast body-expr] _) (as-fn-value-check name fn-head params-ast body-expr)
-    _ (None)))
+let as-fn-value(name: Str, val-ast: Ast) -> Maybe LetFn =
+  match (val-ast)
+    | ParenNode([fn-head, params-ast, body-expr], _) -> as-fn-value-check(name, fn-head, params-ast, body-expr)
+    | _ -> None()
 
-(defn as-fn-value-check (name: Str) (fn-head: Ast) (params-ast: Ast) (body-expr: Ast) -> (Maybe LetFn)
-  (if (or (is-sym fn-head "fn") (is-sym fn-head "lambda")) (Some (LetFn name params-ast body-expr)) (None)))
+let as-fn-value-check(name: Str, fn-head: Ast, params-ast: Ast, body-expr: Ast) -> Maybe LetFn =
+  if is-sym(fn-head, "fn") || is-sym(fn-head, "lambda") -> Some(LetFn(name, params-ast, body-expr))
+   | else -> None()
 
-(defrec SimpleLet (name: Str) (expr: Ast))
+record SimpleLet {
+  name: Str
+  expr: Ast
+}
 
-(defn as-simple-let (f: Ast) -> (Maybe SimpleLet)
-  (match f
-    (ParenNode [head name-ast expr-ast] _) (as-simple-let-check head name-ast expr-ast)
-    _ (None)))
+let as-simple-let(f: Ast) -> Maybe SimpleLet =
+  match (f)
+    | ParenNode([head, name-ast, expr-ast], _) -> as-simple-let-check(head, name-ast, expr-ast)
+    | _ -> None()
 
-(defn as-simple-let-check (head: Ast) (name-ast: Ast) (expr-ast: Ast) -> (Maybe SimpleLet)
-  (if (is-sym head "let") (as-simple-let-named name-ast expr-ast) (None)))
+let as-simple-let-check(head: Ast, name-ast: Ast, expr-ast: Ast) -> Maybe SimpleLet =
+  if is-sym(head, "let") -> as-simple-let-named(name-ast, expr-ast)
+   | else -> None()
 
-(defn as-simple-let-named (name-ast: Ast) (expr-ast: Ast) -> (Maybe SimpleLet)
-  (match (sym-str name-ast) (Some n) (Some (SimpleLet n expr-ast)) (None) (None)))
+let as-simple-let-named(name-ast: Ast, expr-ast: Ast) -> Maybe SimpleLet =
+  match (sym-str(name-ast))
+    | Some(n) -> Some(SimpleLet(n, expr-ast))
+    | None -> None()
 
-(defn rebuild-simple-let (new-expr: Ast) (orig: Ast) -> Ast
-  (match orig
-    (ParenNode (Cons head (Cons name-ast _)) sp) (ParenNode [head name-ast new-expr] sp)
-    _ orig))
+let rebuild-simple-let(new-expr: Ast, orig: Ast) -> Ast =
+  match (orig)
+    | ParenNode(Cons(head, Cons(name-ast, _)), sp) -> ParenNode([head, name-ast, new-expr], sp)
+    | _ -> orig
 
-(defn make-simple-let (name: Str) (expr: Ast) -> Ast
-  (ParenNode
-    [(SymNode "let" (dummy-span)) (SymNode name (dummy-span)) expr]
-    (dummy-span)))
+let make-simple-let(name: Str, expr: Ast) -> Ast =
+  ParenNode([SymNode("let", dummy-span()), SymNode(name, dummy-span()), expr], dummy-span())
 
 ; ---------------------------------------------------------------------------
 ; Env / closure AST builders.
 
-(defn str-list-len (xs: (List Str)) -> Int
-  (match xs
-    [] 0
-    (Cons _ rest) (+ 1 (str-list-len rest))))
+let str-list-len(xs: List Str) -> Int =
+  match (xs)
+    | [] -> 0
+    | Cons(_, rest) -> 1 + str-list-len(rest)
 
-(defn make-env-new (n: Int) -> Ast
-  (ParenNode
-    [(SymNode "mn-env-new" (dummy-span)) (IntNode n (dummy-span))]
-    (dummy-span)))
+let make-env-new(n: Int) -> Ast =
+  ParenNode([SymNode("mn-env-new", dummy-span()), IntNode(n, dummy-span())], dummy-span())
 
-(defn make-env-set (i: Int) (name: Str) -> Ast
-  (ParenNode
-    [
-  (SymNode "mn-env-set" (dummy-span))
-  (SymNode "__menv" (dummy-span))
-  (IntNode i (dummy-span))
-  (SymNode name (dummy-span))]
-    (dummy-span)))
+let make-env-set(i: Int, name: Str) -> Ast =
+  ParenNode([SymNode("mn-env-set", dummy-span()), SymNode("__menv", dummy-span()), IntNode(i, dummy-span()), SymNode(name, dummy-span())], dummy-span())
 
-(defn env-set-lets (free-vars: (List Str)) (i: Int) -> (List Ast)
-  (match free-vars
-    [] []
-    (Cons name rest)
-      (Cons (make-simple-let "__menv" (make-env-set i name)) (env-set-lets rest (+ i 1)))))
+let env-set-lets(free-vars: List Str, i: Int) -> List Ast =
+  match (free-vars)
+    | [] -> []
+    | Cons(name, rest) -> Cons(make-simple-let("__menv", make-env-set(i, name)), env-set-lets(rest, i + 1))
 
 ; Zero captures stay the static empty env. One or more captures allocate an
 ; N-slot record and store each free var. The `do` is an expression, so it can
 ; sit in the env argument of `mn-closure-new`.
-(defn make-env-expr (free-vars: (List Str)) -> Ast
-  (match free-vars
-    [] (ParenNode [(SymNode "mn-env-0" (dummy-span))] (dummy-span))
-    _ (ParenNode
-        (Cons (SymNode "do" (dummy-span))
-          (Cons (make-simple-let "__menv" (make-env-new (str-list-len free-vars)))
-            (append-list (env-set-lets free-vars 0)
-              [(SymNode "__menv" (dummy-span))])))
-        (dummy-span))))
+let make-env-expr(free-vars: List Str) -> Ast =
+  match (free-vars)
+    | [] -> ParenNode([SymNode("mn-env-0", dummy-span())], dummy-span())
+    | _ -> ParenNode(Cons(SymNode("do", dummy-span()), Cons(make-simple-let("__menv", make-env-new(str-list-len(free-vars))), append-list(env-set-lets(free-vars, 0), [SymNode("__menv", dummy-span())]))), dummy-span())
 
-(defn make-closure-create (lam-name: Str) (free-vars: (List Str)) -> Ast
-  (ParenNode
-    [(SymNode "mn-closure-new" (dummy-span)) (SymNode lam-name (dummy-span)) (make-env-expr free-vars)]
-    (dummy-span)))
+let make-closure-create(lam-name: Str, free-vars: List Str) -> Ast =
+  ParenNode([SymNode("mn-closure-new", dummy-span()), SymNode(lam-name, dummy-span()), make-env-expr(free-vars)], dummy-span())
 
-(defn make-env-get (env-name: Str) (i: Int) -> Ast
-  (ParenNode
-    [(SymNode "mn-env-get" (dummy-span)) (SymNode env-name (dummy-span)) (IntNode i (dummy-span))]
-    (dummy-span)))
+let make-env-get(env-name: Str, i: Int) -> Ast =
+  ParenNode([SymNode("mn-env-get", dummy-span()), SymNode(env-name, dummy-span()), IntNode(i, dummy-span())], dummy-span())
 
 ; `(do (let c0 (mn-env-get __menv 0)) … body)` — or just `body` when no frees.
-(defn wrap-env-binds (free-vars: (List Str)) (body: Ast) -> Ast
-  (match free-vars
-    [] body
-    _ (ParenNode (Cons (SymNode "do" (dummy-span)) (append-list (env-bind-lets free-vars 0) [body])) (dummy-span))))
+let wrap-env-binds(free-vars: List Str, body: Ast) -> Ast =
+  match (free-vars)
+    | [] -> body
+    | _ -> ParenNode(Cons(SymNode("do", dummy-span()), append-list(env-bind-lets(free-vars, 0), [body])), dummy-span())
 
-(defn env-bind-lets (free-vars: (List Str)) (i: Int) -> (List Ast)
-  (match free-vars
-    [] []
-    (Cons name rest)
-      (Cons (make-simple-let name (make-env-get "__menv" i)) (env-bind-lets rest (+ i 1)))))
+let env-bind-lets(free-vars: List Str, i: Int) -> List Ast =
+  match (free-vars)
+    | [] -> []
+    | Cons(name, rest) -> Cons(make-simple-let(name, make-env-get("__menv", i)), env-bind-lets(rest, i + 1))
 
 ; ---------------------------------------------------------------------------
 ; Lifting.
 
-(defn free-vars-in-scope-order (scope: (List Str)) (used: (List Str)) (exclude: (List Str)) -> (List Str)
-  (match scope
-    [] []
-    (Cons s rest) (free-vars-in-scope-order-cons s rest used exclude)))
+let free-vars-in-scope-order(scope: List Str, used: List Str, exclude: List Str) -> List Str =
+  match (scope)
+    | [] -> []
+    | Cons(s, rest) -> free-vars-in-scope-order-cons(s, rest, used, exclude)
 
-(defn free-vars-in-scope-order-cons (s: Str) (rest: (List Str)) (used: (List Str)) (exclude: (List Str)) -> (List Str)
-  (if (and (contains used s) (not (contains exclude s)))
-    (Cons s (free-vars-in-scope-order rest used exclude))
-    (free-vars-in-scope-order rest used exclude)))
+let free-vars-in-scope-order-cons(s: Str, rest: List Str, used: List Str, exclude: List Str) -> List Str =
+  if contains(used, s) && not(contains(exclude, s)) -> Cons(s, free-vars-in-scope-order(rest, used, exclude))
+   | else -> free-vars-in-scope-order(rest, used, exclude)
 
-(defn fresh-lam-name (counter: (Ref Int)) -> Str
-  (do
-    (let n (deref counter))
-    (set! counter (+ n 1))
-    (str-concat "__lam" (show n))))
+let fresh-lam-name(counter: Ref Int) -> Str {
+  let n = deref(counter)
+  set!(counter, n + 1)
+  str-concat("__lam", show(n))
+}
 
-(defrec LiftOut (extra: (List Ast)) (subst: (Map Str LiftedInfo)) (lam-name: Str) (free-vars: (List Str)))
-(defn lift-out-extra (r: LiftOut) -> (List Ast) (match r (LiftOut e _ _ _) e))
-(defn lift-out-subst (r: LiftOut) -> (Map Str LiftedInfo) (match r (LiftOut _ s _ _) s))
-(defn lift-out-lam-name (r: LiftOut) -> Str (match r (LiftOut _ _ n _) n))
-(defn lift-out-free-vars (r: LiftOut) -> (List Str) (match r (LiftOut _ _ _ f) f))
+record LiftOut {
+  extra: List Ast
+  subst: Map Str LiftedInfo
+  lam-name: Str
+  free-vars: List Str
+}
+
+let lift-out-extra(r: LiftOut) -> List Ast =
+  match (r)
+    | LiftOut(e, _, _, _) -> e
+
+let lift-out-subst(r: LiftOut) -> Map Str LiftedInfo =
+  match (r)
+    | LiftOut(_, s, _, _) -> s
+
+let lift-out-lam-name(r: LiftOut) -> Str =
+  match (r)
+    | LiftOut(_, _, n, _) -> n
+
+let lift-out-free-vars(r: LiftOut) -> List Str =
+  match (r)
+    | LiftOut(_, _, _, f) -> f
 
 ; Build the lifted `defn __lamN (__menv: Int) (params…) -> Int body`.
 ; If `bind-name` is Some, record it in subst for mn-apply-1 rewriting.
-(defn lift-lambda (bind-name: (Maybe Str)) (params-ast: Ast) (body-expr: Ast) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> LiftOut
-  (do
-    (let fn-params (fn-param-elems params-ast))
-    (let param-names (fn-param-names fn-params))
-    (let used (collect-symbols body-expr))
-    (let free-vars (free-vars-in-scope-order scope used param-names))
-    (let inner-scope (append-str-list free-vars param-names))
-    (let converted (close-expr body-expr inner-scope subst counter))
-    (let lam-name (fresh-lam-name counter))
-    (let new-params (Cons (int-param-for "__menv") (int-params-for param-names)))
-    (let wrapped-body (wrap-env-binds free-vars (expr-result-ast converted)))
-    (let defn-form
-      (ParenNode
-        (Cons (SymNode "defn" (dummy-span))
-          (Cons (SymNode lam-name (dummy-span))
-            (append-list new-params
-              [(SymNode "->" (dummy-span)) (SymNode "Int" (dummy-span)) wrapped-body])))
-        (dummy-span)))
-    (let new-subst (lift-bind-subst subst bind-name lam-name free-vars))
-    (LiftOut (Cons defn-form (expr-result-extra converted)) new-subst lam-name free-vars)))
+let lift-lambda(bind-name: Maybe Str, params-ast: Ast, body-expr: Ast, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> LiftOut {
+  let fn-params = fn-param-elems(params-ast)
+  let param-names = fn-param-names(fn-params)
+  let used = collect-symbols(body-expr)
+  let free-vars = free-vars-in-scope-order(scope, used, param-names)
+  let inner-scope = append-str-list(free-vars, param-names)
+  let converted = close-expr(body-expr, inner-scope, subst, counter)
+  let lam-name = fresh-lam-name(counter)
+  let new-params = Cons(int-param-for("__menv"), int-params-for(param-names))
+  let wrapped-body = wrap-env-binds(free-vars, expr-result-ast(converted))
+  let defn-form = ParenNode(Cons(SymNode("defn", dummy-span()), Cons(SymNode(lam-name, dummy-span()), append-list(new-params, [SymNode("->", dummy-span()), SymNode("Int", dummy-span()), wrapped-body]))), dummy-span())
+  let new-subst = lift-bind-subst(subst, bind-name, lam-name, free-vars)
+  LiftOut(Cons(defn-form, expr-result-extra(converted)), new-subst, lam-name, free-vars)
+}
 
-(defn lift-bind-subst (subst: (Map Str LiftedInfo)) (bind-name: (Maybe Str)) (lam-name: Str) (free-vars: (List Str)) -> (Map Str LiftedInfo)
-  (match bind-name
-    (None) subst
-    (Some name) (map-set subst name (LiftedInfo lam-name free-vars))))
+let lift-bind-subst(subst: Map Str LiftedInfo, bind-name: Maybe Str, lam-name: Str, free-vars: List Str) -> Map Str LiftedInfo =
+  match (bind-name)
+    | None -> subst
+    | Some(name) -> map-set(subst, name, LiftedInfo(lam-name, free-vars))
 
 ; ---------------------------------------------------------------------------
 ; close-expr / close-body
 
-(defrec ExprResult (ast: Ast) (extra: (List Ast)))
-(defn expr-result-ast (r: ExprResult) -> Ast (match r (ExprResult a _) a))
-(defn expr-result-extra (r: ExprResult) -> (List Ast) (match r (ExprResult _ e) e))
+record ExprResult {
+  ast: Ast
+  extra: List Ast
+}
 
-(defn close-expr (ast: Ast) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprResult
-  (match ast
-    (ParenNode (Cons head rest) sp) (close-expr-head head rest sp ast scope subst counter)
-    _ (ExprResult (apply-subst-ast ast subst) [])))
+let expr-result-ast(r: ExprResult) -> Ast =
+  match (r)
+    | ExprResult(a, _) -> a
 
-(defn close-expr-head (head: Ast) (rest: (List Ast)) (sp: Span) (orig: Ast) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprResult
-  (cond
-    ((is-sym head "do") (close-expr-do rest sp scope subst counter))
-    ((or (is-sym head "fn") (is-sym head "lambda")) (close-expr-lambda rest scope subst counter))
-    ((is-sym head "match") (close-expr-match rest sp scope subst counter))
-    ((is-sym head "let") (close-expr-let rest sp orig scope subst counter))
-    ((is-sym head "loop") (close-expr-loop rest sp scope subst counter))
-    (else (close-expr-app head rest sp scope subst counter))))
+let expr-result-extra(r: ExprResult) -> List Ast =
+  match (r)
+    | ExprResult(_, e) -> e
 
-(defn close-expr-lambda (rest: (List Ast)) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprResult
-  (match rest
-    (Cons params-ast (Cons body-expr _))
-      (do
-        (let lifted (lift-lambda (None) params-ast body-expr scope subst counter))
-        (ExprResult
-          (make-closure-create (lift-out-lam-name lifted) (lift-out-free-vars lifted))
-          (lift-out-extra lifted)))
-    _ (ExprResult (ParenNode (Cons (SymNode "fn" (dummy-span)) rest) (dummy-span)) [])))
+let close-expr(ast: Ast, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> ExprResult =
+  match (ast)
+    | ParenNode(Cons(head, rest), sp) -> close-expr-head(head, rest, sp, ast, scope, subst, counter)
+    | _ -> ExprResult(apply-subst-ast(ast, subst), [])
 
-(defn close-expr-do (rest: (List Ast)) (sp: Span) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprResult
-  (do
-    (let result (close-body rest scope subst counter))
-    (ExprResult (ParenNode (Cons (SymNode "do" sp) (body-result-forms result)) sp) (body-result-extra result))))
+let close-expr-head(head: Ast, rest: List Ast, sp: Span, orig: Ast, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> ExprResult =
+  if is-sym(head, "do") -> close-expr-do(rest, sp, scope, subst, counter)
+   | is-sym(head, "fn") || is-sym(head, "lambda") -> close-expr-lambda(rest, scope, subst, counter)
+   | is-sym(head, "match") -> close-expr-match(rest, sp, scope, subst, counter)
+   | is-sym(head, "let") -> close-expr-let(rest, sp, orig, scope, subst, counter)
+   | is-sym(head, "loop") -> close-expr-loop(rest, sp, scope, subst, counter)
+   | else -> close-expr-app(head, rest, sp, scope, subst, counter)
 
-(defrec ExprListResult (asts: (List Ast)) (extra: (List Ast)))
-(defn expr-list-asts (r: ExprListResult) -> (List Ast) (match r (ExprListResult a _) a))
-(defn expr-list-extra (r: ExprListResult) -> (List Ast) (match r (ExprListResult _ e) e))
+let close-expr-lambda(rest: List Ast, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> ExprResult =
+  match (rest)
+    | Cons(params-ast, Cons(body-expr, _)) ->
+      {
+        let lifted = lift-lambda(None(), params-ast, body-expr, scope, subst, counter)
+        ExprResult(make-closure-create(lift-out-lam-name(lifted), lift-out-free-vars(lifted)), lift-out-extra(lifted))
+      }
+    | _ -> ExprResult(ParenNode(Cons(SymNode("fn", dummy-span()), rest), dummy-span()), [])
+
+let close-expr-do(rest: List Ast, sp: Span, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> ExprResult {
+  let result = close-body(rest, scope, subst, counter)
+  ExprResult(ParenNode(Cons(SymNode("do", sp), body-result-forms(result)), sp), body-result-extra(result))
+}
+
+record ExprListResult {
+  asts: List Ast
+  extra: List Ast
+}
+
+let expr-list-asts(r: ExprListResult) -> List Ast =
+  match (r)
+    | ExprListResult(a, _) -> a
+
+let expr-list-extra(r: ExprListResult) -> List Ast =
+  match (r)
+    | ExprListResult(_, e) -> e
 
 ; Pattern binders that a lambda inside the clause must capture.
 ; `_` and uppercase constructors bind nothing; a lowercase symbol binds;
 ; `(Ctor p …)` recurses into payloads. Patterns are not closed as expressions.
-(defn is-upper-name (s: Str) -> Bool
-  (let b (str-byte s 0))
-  (and (>= b 65) (<= b 90)))
+let is-upper-name(s: Str) -> Bool {
+  let b = str-byte(s, 0)
+  b >= 65 && b <= 90
+}
 
-(defn pat-binders (pat: Ast) -> (List Str)
-  (match pat
-    (SymNode n _)
-      (if (or (= n "_") (is-upper-name n)) [] [n])
-    (ParenNode (Cons _ payloads) _) (pat-binders-list payloads)
-    (BracketNode (Cons _ payloads) _) (pat-binders-list payloads)
-    _ []))
+let pat-binders(pat: Ast) -> List Str =
+  match (pat)
+    | SymNode(n, _) ->
+      if n == "_" || is-upper-name(n) -> []
+       | else -> [n]
+    | ParenNode(Cons(_, payloads), _) -> pat-binders-list(payloads)
+    | BracketNode(Cons(_, payloads), _) -> pat-binders-list(payloads)
+    | _ -> []
 
-(defn pat-binders-list (ps: (List Ast)) -> (List Str)
-  (match ps
-    [] []
-    (Cons p rest) (append-str-list (pat-binders p) (pat-binders-list rest))))
+let pat-binders-list(ps: List Ast) -> List Str =
+  match (ps)
+    | [] -> []
+    | Cons(p, rest) -> append-str-list(pat-binders(p), pat-binders-list(rest))
 
-(defrec ClosedClauses (asts: (List Ast)) (extra: (List Ast)))
-(defn closed-clause-asts (c: ClosedClauses) -> (List Ast) (match c (ClosedClauses a _) a))
-(defn closed-clause-extra (c: ClosedClauses) -> (List Ast) (match c (ClosedClauses _ e) e))
+record ClosedClauses {
+  asts: List Ast
+  extra: List Ast
+}
 
-(defn close-match-clauses (clauses: (List Ast)) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ClosedClauses
-  (match clauses
-    [] (ClosedClauses [] [])
-    (Cons pat (Cons body rest))
-      (do
-        (let binders (pat-binders pat))
-        (let br (close-expr body (append-str-list binders scope) subst counter))
-        (let rr (close-match-clauses rest scope subst counter))
-        (ClosedClauses
-          (Cons pat (Cons (expr-result-ast br) (closed-clause-asts rr)))
-          (append-list (expr-result-extra br) (closed-clause-extra rr))))
-    [lone]
-      (do
-        (let er (close-expr lone scope subst counter))
-        (ClosedClauses [(expr-result-ast er)] (expr-result-extra er)))))
+let closed-clause-asts(c: ClosedClauses) -> List Ast =
+  match (c)
+    | ClosedClauses(a, _) -> a
 
-(defn close-expr-match (rest: (List Ast)) (sp: Span) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprResult
-  (match rest
-    (Cons scrut clauses)
-      (do
-        (let sr (close-expr scrut scope subst counter))
-        (let cr (close-match-clauses clauses scope subst counter))
-        (ExprResult
-          (ParenNode
-            (Cons (SymNode "match" sp)
-              (Cons (expr-result-ast sr) (closed-clause-asts cr)))
-            sp)
-          (append-list (expr-result-extra sr) (closed-clause-extra cr))))
-    [] (ExprResult (ParenNode [(SymNode "match" sp)] sp) [])))
+let closed-clause-extra(c: ClosedClauses) -> List Ast =
+  match (c)
+    | ClosedClauses(_, e) -> e
+
+let close-match-clauses(clauses: List Ast, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> ClosedClauses =
+  match (clauses)
+    | [] -> ClosedClauses([], [])
+    | Cons(pat, Cons(body, rest)) ->
+      {
+        let binders = pat-binders(pat)
+        let br = close-expr(body, append-str-list(binders, scope), subst, counter)
+        let rr = close-match-clauses(rest, scope, subst, counter)
+        ClosedClauses(Cons(pat, Cons(expr-result-ast(br), closed-clause-asts(rr))), append-list(expr-result-extra(br), closed-clause-extra(rr)))
+      }
+    | [lone] ->
+      {
+        let er = close-expr(lone, scope, subst, counter)
+        ClosedClauses([expr-result-ast(er)], expr-result-extra(er))
+      }
+
+let close-expr-match(rest: List Ast, sp: Span, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> ExprResult =
+  match (rest)
+    | Cons(scrut, clauses) ->
+      {
+        let sr = close-expr(scrut, scope, subst, counter)
+        let cr = close-match-clauses(clauses, scope, subst, counter)
+        ExprResult(ParenNode(Cons(SymNode("match", sp), Cons(expr-result-ast(sr), closed-clause-asts(cr))), sp), append-list(expr-result-extra(sr), closed-clause-extra(cr)))
+      }
+    | [] -> ExprResult(ParenNode([SymNode("match", sp)], sp), [])
 
 ; `(let name expr body…)` — `name` is in scope for the body, including
 ; lambdas nested there. The binding expression itself stays in the outer scope.
-(defn close-expr-let (rest: (List Ast)) (sp: Span) (orig: Ast) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprResult
-  (match rest
-    (Cons name-ast (Cons expr-ast body))
-      (match (sym-str name-ast)
-        (Some n) (close-expr-let-named n name-ast expr-ast body sp scope subst counter)
-        (None) (close-expr-app (SymNode "let" sp) rest sp scope subst counter))
-    _ (close-expr-app (SymNode "let" sp) rest sp scope subst counter)))
+let close-expr-let(rest: List Ast, sp: Span, orig: Ast, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> ExprResult =
+  match (rest)
+    | Cons(name-ast, Cons(expr-ast, body)) ->
+      match (sym-str(name-ast))
+        | Some(n) -> close-expr-let-named(n, name-ast, expr-ast, body, sp, scope, subst, counter)
+        | None -> close-expr-app(SymNode("let", sp), rest, sp, scope, subst, counter)
+    | _ -> close-expr-app(SymNode("let", sp), rest, sp, scope, subst, counter)
 
-(defn close-expr-let-named (n: Str) (name-ast: Ast) (expr-ast: Ast) (body: (List Ast)) (sp: Span) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprResult
-  (do
-    (let er (close-expr expr-ast scope subst counter))
-    (let br (close-expr-list body (Cons n scope) subst counter))
-    (ExprResult
-      (ParenNode
-        (Cons (SymNode "let" sp)
-          (Cons name-ast
-            (Cons (expr-result-ast er) (expr-list-asts br))))
-        sp)
-      (append-list (expr-result-extra er) (expr-list-extra br)))))
+let close-expr-let-named(n: Str, name-ast: Ast, expr-ast: Ast, body: List Ast, sp: Span, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> ExprResult {
+  let er = close-expr(expr-ast, scope, subst, counter)
+  let br = close-expr-list(body, Cons(n, scope), subst, counter)
+  ExprResult(ParenNode(Cons(SymNode("let", sp), Cons(name-ast, Cons(expr-result-ast(er), expr-list-asts(br)))), sp), append-list(expr-result-extra(er), expr-list-extra(br)))
+}
 
-(defn binding-list-elems-close (ast: Ast) -> (Maybe (List Ast))
-  (match ast
-    (ParenNode elems _) (Some elems)
-    (BracketNode elems _) (Some elems)
-    _ (None)))
+let binding-list-elems-close(ast: Ast) -> Maybe (List Ast) =
+  match (ast)
+    | ParenNode(elems, _) -> Some(elems)
+    | BracketNode(elems, _) -> Some(elems)
+    | _ -> None()
 
-(defn loop-binding-names (pairs: (List Ast)) -> (List Str)
-  (match pairs
-    [] []
-    (Cons pair rest)
-      (match pair
-        (ParenNode (Cons name-ast _) _)
-          (match (sym-str name-ast)
-            (Some n) (Cons n (loop-binding-names rest))
-            (None) (loop-binding-names rest))
-        (BracketNode (Cons name-ast _) _)
-          (match (sym-str name-ast)
-            (Some n) (Cons n (loop-binding-names rest))
-            (None) (loop-binding-names rest))
-        _ (loop-binding-names rest))))
+let loop-binding-names(pairs: List Ast) -> List Str =
+  match (pairs)
+    | [] -> []
+    | Cons(pair, rest) ->
+      match (pair)
+        | ParenNode(Cons(name-ast, _), _) ->
+          match (sym-str(name-ast))
+            | Some(n) -> Cons(n, loop-binding-names(rest))
+            | None -> loop-binding-names(rest)
+        | BracketNode(Cons(name-ast, _), _) ->
+          match (sym-str(name-ast))
+            | Some(n) -> Cons(n, loop-binding-names(rest))
+            | None -> loop-binding-names(rest)
+        | _ -> loop-binding-names(rest)
 
-(defn close-loop-pairs (pairs: (List Ast)) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprListResult
-  (match pairs
-    [] (ExprListResult [] [])
-    (Cons pair rest) (close-loop-pair pair rest scope subst counter)))
+let close-loop-pairs(pairs: List Ast, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> ExprListResult =
+  match (pairs)
+    | [] -> ExprListResult([], [])
+    | Cons(pair, rest) -> close-loop-pair(pair, rest, scope, subst, counter)
 
-(defn close-loop-pair (pair: Ast) (rest: (List Ast)) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprListResult
-  (match pair
-    (ParenNode [name-ast init] psp)
-      (close-loop-pair-rebuild name-ast init psp true rest scope subst counter)
-    (BracketNode [name-ast init] psp)
-      (close-loop-pair-rebuild name-ast init psp false rest scope subst counter)
-    _ (do
-        (let rr (close-loop-pairs rest scope subst counter))
-        (ExprListResult (Cons pair (expr-list-asts rr)) (expr-list-extra rr)))))
+let close-loop-pair(pair: Ast, rest: List Ast, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> ExprListResult =
+  match (pair)
+    | ParenNode([name-ast, init], psp) -> close-loop-pair-rebuild(name-ast, init, psp, true, rest, scope, subst, counter)
+    | BracketNode([name-ast, init], psp) -> close-loop-pair-rebuild(name-ast, init, psp, false, rest, scope, subst, counter)
+    | _ ->
+      {
+        let rr = close-loop-pairs(rest, scope, subst, counter)
+        ExprListResult(Cons(pair, expr-list-asts(rr)), expr-list-extra(rr))
+      }
 
-(defn close-loop-pair-rebuild (name-ast: Ast) (init: Ast) (psp: Span) (as-paren: Bool) (rest: (List Ast)) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprListResult
-  (do
-    (let ir (close-expr init scope subst counter))
-    (let rebuilt
-      (if as-paren
-        (ParenNode [name-ast (expr-result-ast ir)] psp)
-        (BracketNode [name-ast (expr-result-ast ir)] psp)))
-    (let rr (close-loop-pairs rest scope subst counter))
-    (ExprListResult
-      (Cons rebuilt (expr-list-asts rr))
-      (append-list (expr-result-extra ir) (expr-list-extra rr)))))
+let close-loop-pair-rebuild(name-ast: Ast, init: Ast, psp: Span, as-paren: Bool, rest: List Ast, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> ExprListResult {
+  let ir = close-expr(init, scope, subst, counter)
+  let rebuilt =
+    if as-paren -> ParenNode([name-ast, expr-result-ast(ir)], psp)
+     | else -> BracketNode([name-ast, expr-result-ast(ir)], psp)
+  let rr = close-loop-pairs(rest, scope, subst, counter)
+  ExprListResult(Cons(rebuilt, expr-list-asts(rr)), append-list(expr-result-extra(ir), expr-list-extra(rr)))
+}
 
-(defn rebuild-binding-list (orig: Ast) (pairs: (List Ast)) -> Ast
-  (match orig
-    (BracketNode _ sp) (BracketNode pairs sp)
-    (ParenNode _ sp) (ParenNode pairs sp)
-    _ orig))
+let rebuild-binding-list(orig: Ast, pairs: List Ast) -> Ast =
+  match (orig)
+    | BracketNode(_, sp) -> BracketNode(pairs, sp)
+    | ParenNode(_, sp) -> ParenNode(pairs, sp)
+    | _ -> orig
 
 ; Inits are closed in the outer scope (parallel assignment). The body sees
 ; every loop name, so a lambda inside the body can capture them.
-(defn close-expr-loop (rest: (List Ast)) (sp: Span) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprResult
-  (match rest
-    [bindings-ast body]
-      (match (binding-list-elems-close bindings-ast)
-        (Some pairs) (close-expr-loop-pairs bindings-ast pairs body sp scope subst counter)
-        (None) (close-expr-app (SymNode "loop" sp) rest sp scope subst counter))
-    _ (close-expr-app (SymNode "loop" sp) rest sp scope subst counter)))
+let close-expr-loop(rest: List Ast, sp: Span, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> ExprResult =
+  match (rest)
+    | [bindings-ast, body] ->
+      match (binding-list-elems-close(bindings-ast))
+        | Some(pairs) -> close-expr-loop-pairs(bindings-ast, pairs, body, sp, scope, subst, counter)
+        | None -> close-expr-app(SymNode("loop", sp), rest, sp, scope, subst, counter)
+    | _ -> close-expr-app(SymNode("loop", sp), rest, sp, scope, subst, counter)
 
-(defn close-expr-loop-pairs (bindings-ast: Ast) (pairs: (List Ast)) (body: Ast) (sp: Span) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprResult
-  (do
-    (let names (loop-binding-names pairs))
-    (let inits (close-loop-pairs pairs scope subst counter))
-    (let br (close-expr body (append-str-list names scope) subst counter))
-    (ExprResult
-      (ParenNode
-        [
-  (SymNode "loop" sp)
-  (rebuild-binding-list bindings-ast (expr-list-asts inits))
-  (expr-result-ast br)]
-        sp)
-      (append-list (expr-list-extra inits) (expr-result-extra br)))))
+let close-expr-loop-pairs(bindings-ast: Ast, pairs: List Ast, body: Ast, sp: Span, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> ExprResult {
+  let names = loop-binding-names(pairs)
+  let inits = close-loop-pairs(pairs, scope, subst, counter)
+  let br = close-expr(body, append-str-list(names, scope), subst, counter)
+  ExprResult(ParenNode([SymNode("loop", sp), rebuild-binding-list(bindings-ast, expr-list-asts(inits)), expr-result-ast(br)], sp), append-list(expr-list-extra(inits), expr-result-extra(br)))
+}
 
 ; Recurse into application head/args, then apply subst (for mn-apply-1).
-(defn close-expr-app (head: Ast) (rest: (List Ast)) (sp: Span) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprResult
-  (do
-    (let head-r (close-expr head scope subst counter))
-    (let args-r (close-expr-list rest scope subst counter))
-    (let rebuilt (ParenNode (Cons (expr-result-ast head-r) (expr-list-asts args-r)) sp))
-    (ExprResult
-      (apply-subst-ast rebuilt subst)
-      (append-list (expr-result-extra head-r) (expr-list-extra args-r)))))
+let close-expr-app(head: Ast, rest: List Ast, sp: Span, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> ExprResult {
+  let head-r = close-expr(head, scope, subst, counter)
+  let args-r = close-expr-list(rest, scope, subst, counter)
+  let rebuilt = ParenNode(Cons(expr-result-ast(head-r), expr-list-asts(args-r)), sp)
+  ExprResult(apply-subst-ast(rebuilt, subst), append-list(expr-result-extra(head-r), expr-list-extra(args-r)))
+}
 
-(defn close-expr-list (elems: (List Ast)) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprListResult
-  (match elems
-    [] (ExprListResult [] [])
-    (Cons e rest)
-      (do
-        (let er (close-expr e scope subst counter))
-        (let rr (close-expr-list rest scope subst counter))
-        (ExprListResult
-          (Cons (expr-result-ast er) (expr-list-asts rr))
-          (append-list (expr-result-extra er) (expr-list-extra rr))))))
+let close-expr-list(elems: List Ast, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> ExprListResult =
+  match (elems)
+    | [] -> ExprListResult([], [])
+    | Cons(e, rest) ->
+      {
+        let er = close-expr(e, scope, subst, counter)
+        let rr = close-expr-list(rest, scope, subst, counter)
+        ExprListResult(Cons(expr-result-ast(er), expr-list-asts(rr)), append-list(expr-result-extra(er), expr-list-extra(rr)))
+      }
 
-(defrec BodyResult (forms: (List Ast)) (extra: (List Ast)))
-(defn body-result-forms (r: BodyResult) -> (List Ast) (match r (BodyResult f _) f))
-(defn body-result-extra (r: BodyResult) -> (List Ast) (match r (BodyResult _ e) e))
+record BodyResult {
+  forms: List Ast
+  extra: List Ast
+}
 
-(defn close-body (forms: (List Ast)) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> BodyResult
-  (match forms
-    [] (BodyResult [] [])
-    (Cons f rest) (close-body-step f rest scope subst counter)))
+let body-result-forms(r: BodyResult) -> List Ast =
+  match (r)
+    | BodyResult(f, _) -> f
 
-(defn close-body-step (f: Ast) (rest: (List Ast)) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> BodyResult
-  (match (as-let-fn f)
-    (Some lf) (close-body-liftfn lf rest scope subst counter)
-    (None) (close-body-plain f rest scope subst counter)))
+let body-result-extra(r: BodyResult) -> List Ast =
+  match (r)
+    | BodyResult(_, e) -> e
 
-(defn close-body-liftfn (lf: LetFn) (rest: (List Ast)) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> BodyResult
-  (match lf
-    (LetFn name params-ast body-expr) (close-body-liftfn-do name params-ast body-expr rest scope subst counter)))
+let close-body(forms: List Ast, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> BodyResult =
+  match (forms)
+    | [] -> BodyResult([], [])
+    | Cons(f, rest) -> close-body-step(f, rest, scope, subst, counter)
+
+let close-body-step(f: Ast, rest: List Ast, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> BodyResult =
+  match (as-let-fn(f))
+    | Some(lf) -> close-body-liftfn(lf, rest, scope, subst, counter)
+    | None -> close-body-plain(f, rest, scope, subst, counter)
+
+let close-body-liftfn(lf: LetFn, rest: List Ast, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> BodyResult =
+  match (lf)
+    | LetFn(name, params-ast, body-expr) -> close-body-liftfn-do(name, params-ast, body-expr, rest, scope, subst, counter)
 
 ; Keep `(let name (mn-closure-new …))` and rewrite later call sites.
-(defn close-body-liftfn-do (name: Str) (params-ast: Ast) (body-expr: Ast) (rest: (List Ast)) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> BodyResult
-  (do
-    (let lifted (lift-lambda (Some name) params-ast body-expr scope subst counter))
-    (let create (make-closure-create (lift-out-lam-name lifted) (lift-out-free-vars lifted)))
-    (let new-scope (Cons name scope))
-    (let rest-result (close-body rest new-scope (lift-out-subst lifted) counter))
-    (BodyResult
-      (Cons (make-simple-let name create) (body-result-forms rest-result))
-      (append-list (lift-out-extra lifted) (body-result-extra rest-result)))))
+let close-body-liftfn-do(name: Str, params-ast: Ast, body-expr: Ast, rest: List Ast, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> BodyResult {
+  let lifted = lift-lambda(Some(name), params-ast, body-expr, scope, subst, counter)
+  let create = make-closure-create(lift-out-lam-name(lifted), lift-out-free-vars(lifted))
+  let new-scope = Cons(name, scope)
+  let rest-result = close-body(rest, new-scope, lift-out-subst(lifted), counter)
+  BodyResult(Cons(make-simple-let(name, create), body-result-forms(rest-result)), append-list(lift-out-extra(lifted), body-result-extra(rest-result)))
+}
 
-(defn close-body-plain (f: Ast) (rest: (List Ast)) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> BodyResult
-  (match (as-simple-let f)
-    (Some sl) (close-body-simple-let sl f rest scope subst counter)
-    (None) (close-body-other f rest scope subst counter)))
+let close-body-plain(f: Ast, rest: List Ast, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> BodyResult =
+  match (as-simple-let(f))
+    | Some(sl) -> close-body-simple-let(sl, f, rest, scope, subst, counter)
+    | None -> close-body-other(f, rest, scope, subst, counter)
 
-(defn close-body-simple-let (sl: SimpleLet) (f: Ast) (rest: (List Ast)) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> BodyResult
-  (match sl
-    (SimpleLet name expr) (close-body-simple-let-do name expr f rest scope subst counter)))
+let close-body-simple-let(sl: SimpleLet, f: Ast, rest: List Ast, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> BodyResult =
+  match (sl)
+    | SimpleLet(name, expr) -> close-body-simple-let-do(name, expr, f, rest, scope, subst, counter)
 
-(defn close-body-simple-let-do (name: Str) (expr: Ast) (f: Ast) (rest: (List Ast)) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> BodyResult
-  (do
-    (let converted (close-expr expr scope subst counter))
-    (let new-scope (Cons name scope))
-    (let rest-result (close-body rest new-scope subst counter))
-    (BodyResult
-      (Cons (rebuild-simple-let (expr-result-ast converted) f) (body-result-forms rest-result))
-      (append-list (expr-result-extra converted) (body-result-extra rest-result)))))
+let close-body-simple-let-do(name: Str, expr: Ast, f: Ast, rest: List Ast, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> BodyResult {
+  let converted = close-expr(expr, scope, subst, counter)
+  let new-scope = Cons(name, scope)
+  let rest-result = close-body(rest, new-scope, subst, counter)
+  BodyResult(Cons(rebuild-simple-let(expr-result-ast(converted), f), body-result-forms(rest-result)), append-list(expr-result-extra(converted), body-result-extra(rest-result)))
+}
 
-(defn close-body-other (f: Ast) (rest: (List Ast)) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> BodyResult
-  (do
-    (let converted (close-expr f scope subst counter))
-    (let rest-result (close-body rest scope subst counter))
-    (BodyResult
-      (Cons (expr-result-ast converted) (body-result-forms rest-result))
-      (append-list (expr-result-extra converted) (body-result-extra rest-result)))))
+let close-body-other(f: Ast, rest: List Ast, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> BodyResult {
+  let converted = close-expr(f, scope, subst, counter)
+  let rest-result = close-body(rest, scope, subst, counter)
+  BodyResult(Cons(expr-result-ast(converted), body-result-forms(rest-result)), append-list(expr-result-extra(converted), body-result-extra(rest-result)))
+}
 
 ; ---------------------------------------------------------------------------
 ; Top-level driver.
 
-(defrec CloseResult (form: Ast) (extra: (List Ast)))
+record CloseResult {
+  form: Ast
+  extra: List Ast
+}
 
-(defn close-top-level (ast: Ast) (counter: (Ref Int)) -> CloseResult
-  (match ast
-    (ParenNode (Cons head rest) sp) (close-top-level-head head rest sp ast counter)
-    _ (CloseResult ast [])))
+let close-top-level(ast: Ast, counter: Ref Int) -> CloseResult =
+  match (ast)
+    | ParenNode(Cons(head, rest), sp) -> close-top-level-head(head, rest, sp, ast, counter)
+    | _ -> CloseResult(ast, [])
 
-(defn close-top-level-head (head: Ast) (rest: (List Ast)) (sp: Span) (orig: Ast) (counter: (Ref Int)) -> CloseResult
-  (if (is-sym head "pub")
-    (close-top-level-pub rest sp counter)
-    (if (is-sym head "defn")
-      (close-defn-form (Cons head rest) sp counter)
-      (CloseResult orig []))))
+let close-top-level-head(head: Ast, rest: List Ast, sp: Span, orig: Ast, counter: Ref Int) -> CloseResult =
+  if is-sym(head, "pub") -> close-top-level-pub(rest, sp, counter)
+   | is-sym(head, "defn") -> close-defn-form(Cons(head, rest), sp, counter)
+   | else -> CloseResult(orig, [])
 
-(defn close-top-level-pub (rest: (List Ast)) (sp: Span) (counter: (Ref Int)) -> CloseResult
-  (match (close-top-level (ParenNode rest sp) counter)
-    (CloseResult inner extra) (CloseResult (prepend-pub inner sp) extra)))
+let close-top-level-pub(rest: List Ast, sp: Span, counter: Ref Int) -> CloseResult =
+  match (close-top-level(ParenNode(rest, sp), counter))
+    | CloseResult(inner, extra) -> CloseResult(prepend-pub(inner, sp), extra)
 
-(defn prepend-pub (inner: Ast) (sp: Span) -> Ast
-  (match inner
-    (ParenNode elems isp) (ParenNode (Cons (SymNode "pub" sp) elems) isp)
-    _ inner))
+let prepend-pub(inner: Ast, sp: Span) -> Ast =
+  match (inner)
+    | ParenNode(elems, isp) -> ParenNode(Cons(SymNode("pub", sp), elems), isp)
+    | _ -> inner
 
-(defn close-defn-form (elems: (List Ast)) (sp: Span) (counter: (Ref Int)) -> CloseResult
-  (match (find-arrow elems)
-    (None) (CloseResult (ParenNode elems sp) [])
-    (Some split) (close-defn-split split sp counter)))
+let close-defn-form(elems: List Ast, sp: Span, counter: Ref Int) -> CloseResult =
+  match (find-arrow(elems))
+    | None -> CloseResult(ParenNode(elems, sp), [])
+    | Some(split) -> close-defn-split(split, sp, counter)
 
-(defn close-defn-split (split: ArrowSplit) (sp: Span) (counter: (Ref Int)) -> CloseResult
-  (do
-    (let header (arrow-split-header split))
-    (let scope (defn-scope-of header))
-    (let result (close-body (arrow-split-body split) scope (map-new) counter))
-    (CloseResult
-      (ParenNode
-        (append-list header (Cons (arrow-split-arrow split) (Cons (arrow-split-ret split) (body-result-forms result))))
-        sp)
-      (body-result-extra result))))
+let close-defn-split(split: ArrowSplit, sp: Span, counter: Ref Int) -> CloseResult {
+  let header = arrow-split-header(split)
+  let scope = defn-scope-of(header)
+  let result = close-body(arrow-split-body(split), scope, map-new(), counter)
+  CloseResult(ParenNode(append-list(header, Cons(arrow-split-arrow(split), Cons(arrow-split-ret(split), body-result-forms(result)))), sp), body-result-extra(result))
+}
 
-(defn close-all (forms: (List Ast)) (counter: (Ref Int)) -> (List Ast)
-  (match forms
-    [] []
-    (Cons f rest) (close-all-cons f rest counter)))
+let close-all(forms: List Ast, counter: Ref Int) -> List Ast =
+  match (forms)
+    | [] -> []
+    | Cons(f, rest) -> close-all-cons(f, rest, counter)
 
-(defn close-all-cons (f: Ast) (rest: (List Ast)) (counter: (Ref Int)) -> (List Ast)
-  (match (close-top-level f counter)
-    (CloseResult form extra) (append-list (Cons form extra) (close-all rest counter))))
+let close-all-cons(f: Ast, rest: List Ast, counter: Ref Int) -> List Ast =
+  match (close-top-level(f, counter))
+    | CloseResult(form, extra) -> append-list(Cons(form, extra), close-all(rest, counter))
 
-(pub defn closure-convert (forms: (List Ast)) -> (List Ast)
-  (close-all forms (ref 0)))
+pub let closure-convert(forms: List Ast) -> List Ast =
+  close-all(forms, ref(0))

@@ -2,17 +2,19 @@
 ; Prints a label, then the fixture text.
 ; Run with: `./mn run examples/echo-file.mnd` (cwd = repo root).
 
-(import std/io)
+import std/io
 
-(defn main -> Int
-  (match (read-file "examples/fixtures/echo-input.txt")
-    (Ok s)
-      (do
-        (println "read examples/fixtures/echo-input.txt:")
-        (write stdout s)
-        (println)
-        0)
-    (Err _)
-      (do
-        (println "could not read examples/fixtures/echo-input.txt")
-        1)))
+let main() -> Int =
+  match (read-file("examples/fixtures/echo-input.txt"))
+    | Ok(s) ->
+      {
+        println("read examples/fixtures/echo-input.txt:")
+        write(stdout, s)
+        println()
+        0
+      }
+    | Err(_) ->
+      {
+        println("could not read examples/fixtures/echo-input.txt")
+        1
+      }

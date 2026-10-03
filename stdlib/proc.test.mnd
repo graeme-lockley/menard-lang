@@ -1,7 +1,7 @@
 ; Process status.
 
-(import std/proc)
+import std/proc
 
-(test "an exit status is that code" (= (status->exit-code (Exited 3)) 3))
+test "an exit status is that code" = status-exit-code(Exited(3)) == 3
 
-(test "a signal status is 128 plus the signal" (= (status->exit-code (Signalled 9)) 137))
+test "a signal status is 128 plus the signal" = status-exit-code(Signalled(9)) == 137

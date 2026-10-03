@@ -1,1 +1,3 @@
-(cond (else 1) (true 2))
+let f(n: Int) -> Int =
+  if n > 0 -> 1
+| else -> 0

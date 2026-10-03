@@ -40,7 +40,7 @@ describe("read/print round-trip", () => {
   });
 
   test("nested empty lists", () => {
-    roundTrip("(())");
-    roundTrip("(() ())");
+    roundTrip("()");
+    roundTrip("[(), ()]");
   });
 });

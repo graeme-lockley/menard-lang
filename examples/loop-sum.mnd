@@ -2,14 +2,14 @@
 ; Prints: sum of 0 through 10 is 55
 ; Run with: `./mn run examples/loop-sum.mnd`
 
-(defn sum-to (n: Int) -> Int
-  (loop ((i 0) (acc 0))
-    (if (> i n)
-      acc
-      (recur (+ i 1) (+ acc i)))))
+let sum-to(n: Int) -> Int =
+  loop (i = 0, acc = 0)
+    if i > n -> acc
+     | else -> recur(i + 1, acc + i)
 
-(defn main -> Int
-  (let n 10)
-  (let s (sum-to n))
-  (println "sum of 0 through " n " is " s)
-  0)
+let main() -> Int {
+  let n = 10
+  let s = sum-to(n)
+  println("sum of 0 through ", n, " is ", s)
+  0
+}

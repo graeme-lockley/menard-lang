@@ -73,8 +73,8 @@ function hermeticPrograms(): string[] {
       if (!name.endsWith(".mnd")) continue;
       const rel = `${dir}/${name}`;
       const text = codeOf(rel);
-      if (!/\(defn main -> (Int|Unit)\b/.test(text)) continue;
-      if (/\(spawn(-capture)?(\s|\))/.test(text)) continue;
+      if (!/let main\(\) -> (Int|Unit)\b/.test(text)) continue;
+      if (/\bspawn(?:-capture)?\(/.test(text)) continue;
       out.push(rel);
     }
   }

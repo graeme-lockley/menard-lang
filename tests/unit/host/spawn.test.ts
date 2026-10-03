@@ -3,9 +3,9 @@ import { diagnose, run } from "../../../host/src/interp/pipeline.ts";
 import { createHost, resolveSpawnCmd, validateSpawnArgv } from "../../../host/src/host/index.ts";
 
 function listStr(...xs: string[]): string {
-  let acc = "(Nil)";
+  let acc = "Nil()";
   for (let i = xs.length - 1; i >= 0; i--) {
-    acc = `(Cons "${xs[i]!.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}" ${acc})`;
+    acc = `Cons("${xs[i]!.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}", ${acc})`;
   }
   return acc;
 }
@@ -29,7 +29,7 @@ describe("spawn helpers", () => {
 describe("spawn", () => {
   test("disabled host returns Unsupported", () => {
     const host = createHost({ spawnEnabled: false });
-    const src = `(import std/proc)\n(spawn ${listStr("/bin/true")})`;
+    const src = `import std/proc\nspawn(${listStr("/bin/true")})`;
     host.writeFile("/main.mnd", new TextEncoder().encode(src));
     const r = run(src, { path: "/main.mnd", host });
     expect(r.ok).toBe(true);
@@ -43,9 +43,11 @@ describe("spawn", () => {
 
   test("spawn and spawn-capture typecheck", () => {
     const host = createHost();
-    const src = `(import std/proc)\n(do
-  (spawn (Cons "x" (Nil)))
-  (spawn-capture (Cons "x" (Nil)) ""))`;
+    const src = `import std/proc
+{
+  spawn(Cons("x", Nil()))
+  spawn-capture(Cons("x", Nil()), "")
+}`;
     host.writeFile("/main.mnd", new TextEncoder().encode(src));
     const diags = diagnose(src, { path: "/main.mnd", host });
     expect(diags).toEqual([]);

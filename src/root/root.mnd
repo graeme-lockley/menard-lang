@@ -62,150 +62,165 @@
 ;   it cannot mis-handle whatever the body contains — but it also cannot
 ;   be "smarter" about where pushes/pops would ideally go.
 
-(import "../reader/ast.mnd")
+import "../reader/ast.mnd"
 
 ; Re-export shim: a `pub` signature may not mention a private nominal
 ; type (ADR 27), even one imported `pub` from elsewhere — see
 ; src/reader/read.mnd's header comment for why.
-(pub alias Ast Ast)
+pub alias Ast = Ast
 
 ; ---------------------------------------------------------------------------
 ; Small Ast helpers, restated locally per src/'s "no prelude import" rule
 ; (see e.g. `close/close.mnd`'s equivalent header note).
 
-(defn sym-str (ast: Ast) -> (Maybe Str)
-  (match ast (SymNode n _) (Some n) _ (None)))
+let sym-str(ast: Ast) -> Maybe Str =
+  match (ast)
+    | SymNode(n, _) -> Some(n)
+    | _ -> None()
 
-(defn is-sym (ast: Ast) (name: Str) -> Bool
-  (match (sym-str ast) (Some n) (= n name) (None) false))
+let is-sym(ast: Ast, name: Str) -> Bool =
+  match (sym-str(ast))
+    | Some(n) -> n == name
+    | None -> false
 
-(defn dummy-span -> Span (Span 0 0 0 1))
+let dummy-span() -> Span =
+  Span(0, 0, 0, 1)
 
-(defn append-list (xs: (List Ast)) (ys: (List Ast)) -> (List Ast)
-  (match xs
-    [] ys
-    (Cons x rest) (Cons x (append-list rest ys))))
+let append-list(xs: List Ast, ys: List Ast) -> List Ast =
+  match (xs)
+    | [] -> ys
+    | Cons(x, rest) -> Cons(x, append-list(rest, ys))
 
 ; ---------------------------------------------------------------------------
 ; `(defn name params… -> Ret body…)` header/body split — see
 ; `close/close.mnd`'s `ArrowSplit` for the identical shape (restated
 ; locally here too, same "no prelude import" rule).
 
-(defrec ArrowSplit (header: (List Ast)) (arrow: Ast) (ret: Ast) (body: (List Ast)))
+record ArrowSplit {
+  header: List Ast
+  arrow: Ast
+  ret: Ast
+  body: List Ast
+}
 
-(defn arrow-split-header (s: ArrowSplit) -> (List Ast) (match s (ArrowSplit h _ _ _) h))
-(defn arrow-split-arrow (s: ArrowSplit) -> Ast (match s (ArrowSplit _ a _ _) a))
-(defn arrow-split-ret (s: ArrowSplit) -> Ast (match s (ArrowSplit _ _ r _) r))
-(defn arrow-split-body (s: ArrowSplit) -> (List Ast) (match s (ArrowSplit _ _ _ b) b))
+let arrow-split-header(s: ArrowSplit) -> List Ast =
+  match (s)
+    | ArrowSplit(h, _, _, _) -> h
 
-(defn find-arrow (elems: (List Ast)) -> (Maybe ArrowSplit)
-  (match elems
-    [] (None)
-    (Cons e rest) (find-arrow-step e rest)))
+let arrow-split-arrow(s: ArrowSplit) -> Ast =
+  match (s)
+    | ArrowSplit(_, a, _, _) -> a
 
-(defn find-arrow-step (e: Ast) (rest: (List Ast)) -> (Maybe ArrowSplit)
-  (if (is-sym e "->") (find-arrow-tail e rest) (find-arrow-prepend e rest)))
+let arrow-split-ret(s: ArrowSplit) -> Ast =
+  match (s)
+    | ArrowSplit(_, _, r, _) -> r
 
-(defn find-arrow-tail (arrow: Ast) (rest: (List Ast)) -> (Maybe ArrowSplit)
-  (match rest
-    (Cons ret body) (Some (ArrowSplit [] arrow ret body))
-    [] (None)))
+let arrow-split-body(s: ArrowSplit) -> List Ast =
+  match (s)
+    | ArrowSplit(_, _, _, b) -> b
 
-(defn find-arrow-prepend (e: Ast) (rest: (List Ast)) -> (Maybe ArrowSplit)
-  (match (find-arrow rest)
-    (None) (None)
-    (Some s) (Some (ArrowSplit (Cons e (arrow-split-header s)) (arrow-split-arrow s) (arrow-split-ret s) (arrow-split-body s)))))
+let find-arrow(elems: List Ast) -> Maybe ArrowSplit =
+  match (elems)
+    | [] -> None()
+    | Cons(e, rest) -> find-arrow-step(e, rest)
+
+let find-arrow-step(e: Ast, rest: List Ast) -> Maybe ArrowSplit =
+  if is-sym(e, "->") -> find-arrow-tail(e, rest)
+   | else -> find-arrow-prepend(e, rest)
+
+let find-arrow-tail(arrow: Ast, rest: List Ast) -> Maybe ArrowSplit =
+  match (rest)
+    | Cons(ret, body) -> Some(ArrowSplit([], arrow, ret, body))
+    | [] -> None()
+
+let find-arrow-prepend(e: Ast, rest: List Ast) -> Maybe ArrowSplit =
+  match (find-arrow(rest))
+    | None -> None()
+    | Some(s) -> Some(ArrowSplit(Cons(e, arrow-split-header(s)), arrow-split-arrow(s), arrow-split-ret(s), arrow-split-body(s)))
 
 ; ---------------------------------------------------------------------------
 ; Splitting a body into "everything but the last form" and "the last
 ; form" — see header comment's "The wrapping shape" for why.
 
-(defrec SplitLast (init: (List Ast)) (last: Ast))
+record SplitLast {
+  init: List Ast
+  last: Ast
+}
 
-(defn split-last (xs: (List Ast)) -> (Maybe SplitLast)
-  (match xs
-    [] (None)
-    [x] (Some (SplitLast [] x))
-    (Cons x rest) (split-last-cons x rest)))
+let split-last(xs: List Ast) -> Maybe SplitLast =
+  match (xs)
+    | [] -> None()
+    | [x] -> Some(SplitLast([], x))
+    | Cons(x, rest) -> split-last-cons(x, rest)
 
-(defn split-last-cons (x: Ast) (rest: (List Ast)) -> (Maybe SplitLast)
-  (match (split-last rest)
-    (None) (Some (SplitLast [] x))
-    (Some sl) (Some (SplitLast (Cons x (split-last-init sl)) (split-last-last sl)))))
+let split-last-cons(x: Ast, rest: List Ast) -> Maybe SplitLast =
+  match (split-last(rest))
+    | None -> Some(SplitLast([], x))
+    | Some(sl) -> Some(SplitLast(Cons(x, split-last-init(sl)), split-last-last(sl)))
 
-(defn split-last-init (sl: SplitLast) -> (List Ast) (match sl (SplitLast i _) i))
-(defn split-last-last (sl: SplitLast) -> Ast (match sl (SplitLast _ l) l))
+let split-last-init(sl: SplitLast) -> List Ast =
+  match (sl)
+    | SplitLast(i, _) -> i
+
+let split-last-last(sl: SplitLast) -> Ast =
+  match (sl)
+    | SplitLast(_, l) -> l
 
 ; ---------------------------------------------------------------------------
 ; `(shadow-push)` / `(shadow-pop)` call sites, and the wrapping itself.
 
-(defn shadow-call (name: Str) -> Ast
-  (ParenNode [(SymNode name (dummy-span))] (dummy-span)))
+let shadow-call(name: Str) -> Ast =
+  ParenNode([SymNode(name, dummy-span())], dummy-span())
 
-(defn wrap-defn-body (body: (List Ast)) -> (List Ast)
-  (match (split-last body)
-    (None) body
-    (Some sl) (wrap-defn-body-split sl)))
+let wrap-defn-body(body: List Ast) -> List Ast =
+  match (split-last(body))
+    | None -> body
+    | Some(sl) -> wrap-defn-body-split(sl)
 
-(defn wrap-defn-body-split (sl: SplitLast) -> (List Ast)
-  (append-list
-    (Cons (shadow-call "shadow-push") (split-last-init sl))
-    [(shadow-call "shadow-pop") (split-last-last sl)]))
+let wrap-defn-body-split(sl: SplitLast) -> List Ast =
+  append-list(Cons(shadow-call("shadow-push"), split-last-init(sl)), [shadow-call("shadow-pop"), split-last-last(sl)])
 
 ; ---------------------------------------------------------------------------
 ; Top-level driver: every `defn` (through an optional `pub` wrapper) has
 ; its body wrapped; every other top-level form (another declaration, or
 ; a bare top-level expression) passes through unchanged.
 
-(defn root-top-level (ast: Ast) -> Ast
-  (match ast
-    (ParenNode (Cons head rest) sp) (root-top-level-head head rest sp ast)
-    _ ast))
+let root-top-level(ast: Ast) -> Ast =
+  match (ast)
+    | ParenNode(Cons(head, rest), sp) -> root-top-level-head(head, rest, sp, ast)
+    | _ -> ast
 
-(defn root-top-level-head (head: Ast) (rest: (List Ast)) (sp: Span) (orig: Ast) -> Ast
-  (if (is-sym head "pub")
-    (prepend-pub (root-top-level (ParenNode rest sp)) sp)
-    (if (is-sym head "defn")
-      (root-defn-form (Cons head rest) sp)
-      orig)))
+let root-top-level-head(head: Ast, rest: List Ast, sp: Span, orig: Ast) -> Ast =
+  if is-sym(head, "pub") -> prepend-pub(root-top-level(ParenNode(rest, sp)), sp)
+   | is-sym(head, "defn") -> root-defn-form(Cons(head, rest), sp)
+   | else -> orig
 
-(defn prepend-pub (inner: Ast) (sp: Span) -> Ast
-  (match inner
-    (ParenNode elems isp) (ParenNode (Cons (SymNode "pub" sp) elems) isp)
-    _ inner))
+let prepend-pub(inner: Ast, sp: Span) -> Ast =
+  match (inner)
+    | ParenNode(elems, isp) -> ParenNode(Cons(SymNode("pub", sp), elems), isp)
+    | _ -> inner
 
-(defn root-defn-form (elems: (List Ast)) (sp: Span) -> Ast
-  (match (find-arrow elems)
-    (None) (ParenNode elems sp)
-    (Some split) (rebuild-defn split sp)))
+let root-defn-form(elems: List Ast, sp: Span) -> Ast =
+  match (find-arrow(elems))
+    | None -> ParenNode(elems, sp)
+    | Some(split) -> rebuild-defn(split, sp)
 
-(defn rebuild-defn (split: ArrowSplit) (sp: Span) -> Ast
-  (ParenNode
-    (append-list
-      (arrow-split-header split)
-      (Cons (arrow-split-arrow split) (Cons (arrow-split-ret split) (wrap-defn-body (arrow-split-body split)))))
-    sp))
+let rebuild-defn(split: ArrowSplit, sp: Span) -> Ast =
+  ParenNode(append-list(arrow-split-header(split), Cons(arrow-split-arrow(split), Cons(arrow-split-ret(split), wrap-defn-body(arrow-split-body(split))))), sp)
 
-(defn root-all (forms: (List Ast)) -> (List Ast)
-  (match forms
-    [] []
-    (Cons f rest) (Cons (root-top-level f) (root-all rest))))
+let root-all(forms: List Ast) -> List Ast =
+  match (forms)
+    | [] -> []
+    | Cons(f, rest) -> Cons(root-top-level(f), root-all(rest))
 
 ; The two Unit no-op `defn`s every wrapped body now calls — see header
 ; comment for why they are added here, unwrapped, rather than being
 ; subject to `root-top-level` themselves.
-(defn shadow-helper-defn (name: Str) -> Ast
-  (ParenNode
-    [
-  (SymNode "defn" (dummy-span))
-  (SymNode name (dummy-span))
-  (SymNode "->" (dummy-span))
-  (SymNode "Unit" (dummy-span))
-  (ParenNode (Nil) (dummy-span))]
-    (dummy-span)))
+let shadow-helper-defn(name: Str) -> Ast =
+  ParenNode([SymNode("defn", dummy-span()), SymNode(name, dummy-span()), SymNode("->", dummy-span()), SymNode("Unit", dummy-span()), ParenNode(Nil(), dummy-span())], dummy-span())
 
-(defn shadow-helper-defns -> (List Ast)
-  [(shadow-helper-defn "shadow-push") (shadow-helper-defn "shadow-pop")])
+let shadow-helper-defns() -> List Ast =
+  [shadow-helper-defn("shadow-push"), shadow-helper-defn("shadow-pop")]
 
-(pub defn rooting-analyze (forms: (List Ast)) -> (List Ast)
-  (append-list (root-all forms) (shadow-helper-defns)))
+pub let rooting-analyze(forms: List Ast) -> List Ast =
+  append-list(root-all(forms), shadow-helper-defns())

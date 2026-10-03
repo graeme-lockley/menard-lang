@@ -17,8 +17,10 @@ function timed(fn: () => void): number {
 
 describe("build-host bench", () => {
   test("deep non-tail recursion ≥ 100k frames", () => {
-    const src = `(defn mk (n: Int) -> Int (if (= n 0) 0 (+ 1 (mk (- n 1)))))
-(mk 100000)`;
+    const src = `let mk(n: Int) -> Int =
+  if n == 0 -> 0
+   | else -> 1 + mk(n - 1)
+mk(100000)`;
     const ms = timed(() => {
       const r = run(src);
       expect(r.ok).toBe(true);
@@ -28,10 +30,11 @@ describe("build-host bench", () => {
   }, 30_000);
 
   test("loop/recur walks 100k steps", () => {
-    const src = `(defn sum-to (n: Int) -> Int
-  (loop ((i 0) (acc 0))
-    (if (> i n) acc (recur (+ i 1) (+ acc i)))))
-(sum-to 100000)`;
+    const src = `let sum-to(n: Int) -> Int =
+  loop (i = 0, acc = 0)
+    if i > n -> acc
+     | else -> recur(i + 1, acc + i)
+sum-to(100000)`;
     const ms = timed(() => {
       const r = run(src);
       expect(r.ok).toBe(true);
@@ -68,13 +71,16 @@ describe("build-host bench", () => {
   test("multi-module file read/write via Host", () => {
     const host = createHost({
       fs: createVirtualFs({
-        "/lib.mnd": `(pub defn twice (n: Int) -> Int (* n 2))\n`,
-        "/main.mnd": `(import "./lib.mnd")
-(import std/io)
-(let data (read-file "/in.txt"))
-(match data
-  (Ok s) (do (write-file "/out.txt" s) (twice 21))
-  (Err _) 0)
+        "/lib.mnd": `pub let twice(n: Int) -> Int =\n  n * 2\n`,
+        "/main.mnd": `import "./lib.mnd"
+import std/io
+let data = read-file("/in.txt")
+match (data)
+  | Ok(s) -> {
+    write-file("/out.txt", s)
+    twice(21)
+  }
+  | Err(_) -> 0
 `,
         "/in.txt": "payload",
       }),
@@ -93,14 +99,16 @@ describe("build-host bench", () => {
   }, 20_000);
 
   test("while 1M iterations within build-host floor", () => {
-    const src = `(defn run (n: Int) -> Int
-  (let i (ref 0))
-  (let acc (ref 0))
-  (while (< (deref i) n)
-    (set! acc (+ (deref acc) (deref i)))
-    (set! i (+ (deref i) 1)))
-  (deref acc))
-(run 1000000)`;
+    const src = `let run(n: Int) -> Int = {
+  let i = ref(0)
+  let acc = ref(0)
+  while (deref(i) < n) {
+    set!(acc, deref(acc) + deref(i))
+    set!(i, deref(i) + 1)
+  }
+  deref(acc)
+}
+run(1000000)`;
     const ms = timed(() => {
       const r = run(src);
       expect(r.ok).toBe(true);

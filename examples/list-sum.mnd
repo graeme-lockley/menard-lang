@@ -2,27 +2,30 @@
 ; Prints: 10 + 20 + 30 = 60
 ; Run with: `./mn run examples/list-sum.mnd`
 
-(defn list-sum (xs: (List Int)) -> Int
-  (match xs
-    [] 0
-    (Cons h t) (+ h (list-sum t))))
+let list-sum(xs: List Int) -> Int =
+  match (xs)
+    | [] -> 0
+    | Cons(h, t) -> h + list-sum(t)
 
-(defn print-summands (xs: (List Int)) -> Int
-  (match xs
-    [] 0
-    (Cons h t)
-      (do
-        (print h)
-        (match t
-          [] 0
-          _
-            (do
-              (print " + ")
-              (print-summands t))))))
+let print-summands(xs: List Int) -> Int =
+  match (xs)
+    | [] -> 0
+    | Cons(h, t) ->
+      {
+        print(h)
+        match (t)
+          | [] -> 0
+          | _ ->
+            {
+              print(" + ")
+              print-summands(t)
+            }
+      }
 
-(defn main -> Int
-  (let xs [10 20 30])
-  (print-summands xs)
-  (print " = ")
-  (println (list-sum xs))
-  0)
+let main() -> Int {
+  let xs = [10, 20, 30]
+  print-summands(xs)
+  print(" = ")
+  println(list-sum(xs))
+  0
+}

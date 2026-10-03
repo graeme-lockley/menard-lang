@@ -2,29 +2,29 @@
 ; match. Paths are relative to the process cwd, which `./mn test` leaves
 ; as the repo root. `check` / `emit` stay in tests/phase2/reader-roundtrip.test.ts.
 
-(import "./ast.mnd")
-(import "./read.mnd")
-(import "./print.mnd")
-(import std/io)
+import "./ast.mnd"
 
-(defn roundtrip (path: Str) -> Bool
-  (match (read-file path)
-    (Err _) false
-    (Ok src)
-      (match (read-all src)
-        (Err _) false
-        (Ok forms)
-          (match (read-all (print-form-all forms))
-            (Err _) false
-            (Ok forms2) (ast-list-equal forms forms2)))))
+import "./read.mnd"
 
-(test "round-trips hello.mnd" (roundtrip "hello.mnd"))
+import "./print.mnd"
 
-(test "round-trips comments-and-bools.mnd"
-  (roundtrip "tests/corpus/comments-and-bools.mnd"))
+import std/io
 
-(test "round-trips spec-examples.mnd"
-  (roundtrip "tests/corpus/spec-examples.mnd"))
+let roundtrip(path: Str) -> Bool =
+  match (read-file(path))
+    | Err(_) -> false
+    | Ok(src) ->
+      match (read-all(src))
+        | Err(_) -> false
+        | Ok(forms) ->
+          match (read-all(print-form-all(forms)))
+            | Err(_) -> false
+            | Ok(forms2) -> ast-list-equal(forms, forms2)
 
-(test "round-trips invalid-utf8.mnd"
-  (roundtrip "tests/corpus/invalid-utf8.mnd"))
+test "round-trips hello.mnd" = roundtrip("hello.mnd")
+
+test "round-trips comments-and-bools.mnd" = roundtrip("tests/corpus/comments-and-bools.mnd")
+
+test "round-trips spec-examples.mnd" = roundtrip("tests/corpus/spec-examples.mnd")
+
+test "round-trips invalid-utf8.mnd" = roundtrip("tests/corpus/invalid-utf8.mnd")

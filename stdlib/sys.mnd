@@ -1,27 +1,30 @@
 ; Process arguments, the environment, and exit.
 ; @module std/sys
 
-(extern mn_exit (code: Int) -> Unit)
-(extern mn_arg_count -> Int)
-(extern mn_arg (i: Int) -> Str)
-(extern mn_getenv (name: Str) -> (Maybe Str))
+extern mn_exit(code: Int) -> Unit
+
+extern mn_arg_count() -> Int
+
+extern mn_arg(i: Int) -> Str
+
+extern mn_getenv(name: Str) -> Maybe Str
 
 ; Stop the process with code, truncated to 8 bits by the runtime.
-; @test (exit 0)
-(pub defn exit (code: Int) -> Unit
-  (mn_exit code))
+; @test exit(0)
+pub let exit(code: Int) -> Unit =
+  mn_exit(code)
 
 ; How many arguments the process received.
-; @test (arg-count)
-(pub defn arg-count -> Int
-  (mn_arg_count))
+; @test arg-count()
+pub let arg-count() -> Int =
+  mn_arg_count()
 
 ; Argument i. The program name is not included.
-; @test (arg 0)
-(pub defn arg (i: Int) -> Str
-  (mn_arg i))
+; @test arg(0)
+pub let arg(i: Int) -> Str =
+  mn_arg(i)
 
 ; The environment value named name, or None when it is unset.
-; @test (getenv "PATH")
-(pub defn getenv (name: Str) -> (Maybe Str)
-  (mn_getenv name))
+; @test getenv("PATH")
+pub let getenv(name: Str) -> Maybe Str =
+  mn_getenv(name)

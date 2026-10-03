@@ -1,16 +1,16 @@
 ; Hello, world
 
-(import "./fred.mnd")
+import "./fred.mnd"
 
-(println "Hello, world!")
+println("Hello, world!")
 
-(pub defn adder (n: Int) -> Int (+ n 1))
+pub let adder(n: Int) -> Int =
+  n + 1
 
 ; The file named on the command line is the entry. Its `main` is the
 ; process entry. `fred.mnd`'s `main` runs only for `./mn run ./fred.mnd`.
 ; Top-level forms in both files still run.
-(defn main -> Int
-  (println "Main: Hello")
+let main() -> Int {
+  println("Main: Hello")
   0
-)
-    
+}

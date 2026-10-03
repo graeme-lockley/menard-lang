@@ -3,13 +3,13 @@
 ; substitute for monadic bind: thread a fallible step into a continuation
 ; without writing out `(match r (Ok v) … (Err e) (Err e))` at every call site.
 
-(pub defn (result-bind [a b e]) (r: (Result a e)) (k: (Fn a -> (Result b e))) -> (Result b e)
-  (match r
-    (Ok v) (k v)
-    (Err err) (Err err)))
+pub let result-bind[a, b, e](r: Result a e, k: (a) -> Result b e) -> Result b e =
+  match (r)
+    | Ok(v) -> k(v)
+    | Err(err) -> Err(err)
 
 ; Sequence a fallible step whose success value is not needed by the next step.
-(pub defn (result-then [a e]) (r: (Result Unit e)) (k: (Fn -> (Result a e))) -> (Result a e)
-  (match r
-    (Ok _) (k)
-    (Err err) (Err err)))
+pub let result-then[a, e](r: Result Unit e, k: () -> Result a e) -> Result a e =
+  match (r)
+    | Ok(_) -> k()
+    | Err(err) -> Err(err)

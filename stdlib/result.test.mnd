@@ -1,11 +1,11 @@
 ; Result helpers.
 
-(import std/result)
+import std/result
 
-(test "map changes an ok value" (= (map (fn (n) (+ n 1)) (Ok 1)) (Ok 2)))
+test "map changes an ok value" = map(fn (n) = n + 1, Ok(1)) == Ok(2)
 
-(test "map leaves an err" (= (map (fn (n) (+ n 1)) (Err "x")) (Err "x")))
+test "map leaves an err" = map(fn (n) = n + 1, Err("x")) == Err("x")
 
-(test "and-then chains ok" (= (and-then (fn (n) (Ok (+ n 1))) (Ok 1)) (Ok 2)))
+test "and-then chains ok" = and-then(fn (n) = Ok(n + 1), Ok(1)) == Ok(2)
 
-(test "unwrap-or returns the default" (= (unwrap-or (Err "x") 0) 0))
+test "unwrap-or returns the default" = unwrap-or(Err("x"), 0) == 0

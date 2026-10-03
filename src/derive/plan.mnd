@@ -54,47 +54,53 @@
 ; types, memoisation so `(Tree Int)` derives once — spec §2.8.4) is real
 ; work, deferred rather than half-done here.
 
-(import "../reader/ast.mnd")
-(import std/list)
+import "../reader/ast.mnd"
+
+import std/list
 
 ; Re-export shim — see `reader/casing.mnd`'s header comment for why this
 ; is needed: a `pub` signature (`describe-derives`, below) may not mention
 ; a private nominal type, even one imported `pub` from elsewhere.
-(pub alias Ast Ast)
+pub alias Ast = Ast
 
 ; ---------------------------------------------------------------------------
 ; Small Ast helpers, restated locally per `src/`'s "no prelude import"
 ; rule (see `type/check.mnd`'s equivalent header note).
 
-(defn sym-str (ast: Ast) -> (Maybe Str)
-  (match ast (SymNode n _) (Some n) _ (None)))
+let sym-str(ast: Ast) -> Maybe Str =
+  match (ast)
+    | SymNode(n, _) -> Some(n)
+    | _ -> None()
 
-(defn is-sym (ast: Ast) (name: Str) -> Bool
-  (match (sym-str ast) (Some n) (= n name) (None) false))
+let is-sym(ast: Ast, name: Str) -> Bool =
+  match (sym-str(ast))
+    | Some(n) -> n == name
+    | None -> false
 
-(defn last-of (xs: (List Ast)) -> (Maybe Ast)
-  (match xs
-    [] (None)
-    [x] (Some x)
-    (Cons _ rest) (last-of rest)))
+let last-of(xs: List Ast) -> Maybe Ast =
+  match (xs)
+    | [] -> None()
+    | [x] -> Some(x)
+    | Cons(_, rest) -> last-of(rest)
 
 ; `main` or `(f [a])` — the type-parameter list (if any) is irrelevant
 ; here, only the bare declared name is.
-(defn decl-name-of (name-part: Ast) -> (Maybe Str)
-  (match name-part
-    (SymNode n _) (Some n)
-    (ParenNode (Cons n-ast _) _) (sym-str n-ast)
-    _ (None)))
+let decl-name-of(name-part: Ast) -> Maybe Str =
+  match (name-part)
+    | SymNode(n, _) -> Some(n)
+    | ParenNode(Cons(n-ast, _), _) -> sym-str(n-ast)
+    | _ -> None()
 
 ; `(pub defn …)`/`(pub variant …)`/`(pub defrec …)` — strip the `pub`
 ; wrapper, exactly as `emit/lower.mnd`'s `unwrap-pub` does.
-(defn unwrap-pub (ast: Ast) -> Ast
-  (match ast
-    (ParenNode (Cons head rest) sp) (unwrap-pub-head head rest sp ast)
-    _ ast))
+let unwrap-pub(ast: Ast) -> Ast =
+  match (ast)
+    | ParenNode(Cons(head, rest), sp) -> unwrap-pub-head(head, rest, sp, ast)
+    | _ -> ast
 
-(defn unwrap-pub-head (head: Ast) (rest: (List Ast)) (sp: Span) (ast: Ast) -> Ast
-  (if (is-sym head "pub") (unwrap-pub (ParenNode rest sp)) ast))
+let unwrap-pub-head(head: Ast, rest: List Ast, sp: Span, ast: Ast) -> Ast =
+  if is-sym(head, "pub") -> unwrap-pub(ParenNode(rest, sp))
+   | else -> ast
 
 ; ---------------------------------------------------------------------------
 ; Constructor metadata: name -> (owning type, declared arity). Builtins
@@ -103,160 +109,172 @@
 ; same "last write wins" `map-set` behaviour `type/check.mnd`'s own
 ; `ctor-set` has).
 
-(defrec CtorMeta (type-name: Str) (arity: Int))
-(defn ctor-meta-type (c: CtorMeta) -> Str (match c (CtorMeta t _) t))
-(defn ctor-meta-arity (c: CtorMeta) -> Int (match c (CtorMeta _ a) a))
+record CtorMeta {
+  type-name: Str
+  arity: Int
+}
 
-(defn builtin-ctor-metas -> (Map Str CtorMeta)
-  (do
-    (let m0 (map-new))
-    (let m1 (map-set m0 "None" (CtorMeta "Maybe" 0)))
-    (let m2 (map-set m1 "Some" (CtorMeta "Maybe" 1)))
-    (let m3 (map-set m2 "Ok" (CtorMeta "Result" 1)))
-    (let m4 (map-set m3 "Err" (CtorMeta "Result" 1)))
-    (let m5 (map-set m4 "Nil" (CtorMeta "List" 0)))
-    (let m6 (map-set m5 "Cons" (CtorMeta "List" 2)))
-    (let m7 (map-set m6 "NotFound" (CtorMeta "IoError" 0)))
-    (let m8 (map-set m7 "Permission" (CtorMeta "IoError" 0)))
-    (let m9 (map-set m8 "Exists" (CtorMeta "IoError" 0)))
-    (let m10 (map-set m9 "IsADirectory" (CtorMeta "IoError" 0)))
-    (let m11 (map-set m10 "NotADirectory" (CtorMeta "IoError" 0)))
-    (let m12 (map-set m11 "InvalidPath" (CtorMeta "IoError" 0)))
-    (let m13 (map-set m12 "TooLarge" (CtorMeta "IoError" 0)))
-    (map-set m13 "Other" (CtorMeta "IoError" 1))))
+let ctor-meta-type(c: CtorMeta) -> Str =
+  match (c)
+    | CtorMeta(t, _) -> t
 
-(defn register-one-variant-ctor (type-name: Str) (c: Ast) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
-  (match c
-    (ParenNode (Cons cname-ast payload-asts) _) (register-ctor-named type-name cname-ast (length payload-asts) acc)
-    _ acc))
+let ctor-meta-arity(c: CtorMeta) -> Int =
+  match (c)
+    | CtorMeta(_, a) -> a
 
-(defn register-ctor-named (type-name: Str) (cname-ast: Ast) (arity: Int) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
-  (match (sym-str cname-ast)
-    (None) acc
-    (Some cname) (map-set acc cname (CtorMeta type-name arity))))
+let builtin-ctor-metas() -> Map Str CtorMeta {
+  let m0 = map-new()
+  let m1 = map-set(m0, "None", CtorMeta("Maybe", 0))
+  let m2 = map-set(m1, "Some", CtorMeta("Maybe", 1))
+  let m3 = map-set(m2, "Ok", CtorMeta("Result", 1))
+  let m4 = map-set(m3, "Err", CtorMeta("Result", 1))
+  let m5 = map-set(m4, "Nil", CtorMeta("List", 0))
+  let m6 = map-set(m5, "Cons", CtorMeta("List", 2))
+  let m7 = map-set(m6, "NotFound", CtorMeta("IoError", 0))
+  let m8 = map-set(m7, "Permission", CtorMeta("IoError", 0))
+  let m9 = map-set(m8, "Exists", CtorMeta("IoError", 0))
+  let m10 = map-set(m9, "IsADirectory", CtorMeta("IoError", 0))
+  let m11 = map-set(m10, "NotADirectory", CtorMeta("IoError", 0))
+  let m12 = map-set(m11, "InvalidPath", CtorMeta("IoError", 0))
+  let m13 = map-set(m12, "TooLarge", CtorMeta("IoError", 0))
+  map-set(m13, "Other", CtorMeta("IoError", 1))
+}
 
-(defn register-variant-ctors (type-name: Str) (ctor-asts: (List Ast)) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
-  (match ctor-asts
-    [] acc
-    (Cons c rest) (register-variant-ctors type-name rest (register-one-variant-ctor type-name c acc))))
+let register-one-variant-ctor(type-name: Str, c: Ast, acc: Map Str CtorMeta) -> Map Str CtorMeta =
+  match (c)
+    | ParenNode(Cons(cname-ast, payload-asts), _) -> register-ctor-named(type-name, cname-ast, length(payload-asts), acc)
+    | _ -> acc
 
-(defn collect-variant-decl (rest: (List Ast)) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
-  (match rest
-    (Cons name-part ctors) (collect-variant-decl-named name-part ctors acc)
-    [] acc))
+let register-ctor-named(type-name: Str, cname-ast: Ast, arity: Int, acc: Map Str CtorMeta) -> Map Str CtorMeta =
+  match (sym-str(cname-ast))
+    | None -> acc
+    | Some(cname) -> map-set(acc, cname, CtorMeta(type-name, arity))
 
-(defn collect-variant-decl-named (name-part: Ast) (ctors: (List Ast)) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
-  (match (decl-name-of name-part)
-    (None) acc
-    (Some type-name) (register-variant-ctors type-name ctors acc)))
+let register-variant-ctors(type-name: Str, ctor-asts: List Ast, acc: Map Str CtorMeta) -> Map Str CtorMeta =
+  match (ctor-asts)
+    | [] -> acc
+    | Cons(c, rest) -> register-variant-ctors(type-name, rest, register-one-variant-ctor(type-name, c, acc))
 
-(defn collect-defrec-decl (rest: (List Ast)) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
-  (match rest
-    (Cons name-part fields) (collect-defrec-decl-named name-part fields acc)
-    [] acc))
+let collect-variant-decl(rest: List Ast, acc: Map Str CtorMeta) -> Map Str CtorMeta =
+  match (rest)
+    | Cons(name-part, ctors) -> collect-variant-decl-named(name-part, ctors, acc)
+    | [] -> acc
 
-(defn collect-defrec-decl-named (name-part: Ast) (fields: (List Ast)) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
-  (match (decl-name-of name-part)
-    (None) acc
-    (Some type-name) (map-set acc type-name (CtorMeta type-name (length fields)))))
+let collect-variant-decl-named(name-part: Ast, ctors: List Ast, acc: Map Str CtorMeta) -> Map Str CtorMeta =
+  match (decl-name-of(name-part))
+    | None -> acc
+    | Some(type-name) -> register-variant-ctors(type-name, ctors, acc)
 
-(defn collect-ctors-named (hn: Str) (rest: (List Ast)) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
-  (if (= hn "variant") (collect-variant-decl rest acc)
-    (if (= hn "defrec") (collect-defrec-decl rest acc)
-      acc)))
+let collect-defrec-decl(rest: List Ast, acc: Map Str CtorMeta) -> Map Str CtorMeta =
+  match (rest)
+    | Cons(name-part, fields) -> collect-defrec-decl-named(name-part, fields, acc)
+    | [] -> acc
 
-(defn collect-ctors-form (ast: Ast) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
-  (collect-ctors-form-checked (unwrap-pub ast) acc))
+let collect-defrec-decl-named(name-part: Ast, fields: List Ast, acc: Map Str CtorMeta) -> Map Str CtorMeta =
+  match (decl-name-of(name-part))
+    | None -> acc
+    | Some(type-name) -> map-set(acc, type-name, CtorMeta(type-name, length(fields)))
 
-(defn collect-ctors-form-checked (ast: Ast) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
-  (match ast
-    (ParenNode (Cons head rest) _) (collect-ctors-form-head head rest acc)
-    _ acc))
+let collect-ctors-named(hn: Str, rest: List Ast, acc: Map Str CtorMeta) -> Map Str CtorMeta =
+  if hn == "variant" -> collect-variant-decl(rest, acc)
+   | hn == "defrec" -> collect-defrec-decl(rest, acc)
+   | else -> acc
 
-(defn collect-ctors-form-head (head: Ast) (rest: (List Ast)) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
-  (match (sym-str head)
-    (None) acc
-    (Some hn) (collect-ctors-named hn rest acc)))
+let collect-ctors-form(ast: Ast, acc: Map Str CtorMeta) -> Map Str CtorMeta =
+  collect-ctors-form-checked(unwrap-pub(ast), acc)
 
-(defn collect-ctors (forms: (List Ast)) (acc: (Map Str CtorMeta)) -> (Map Str CtorMeta)
-  (match forms
-    [] acc
-    (Cons f rest) (collect-ctors rest (collect-ctors-form f acc))))
+let collect-ctors-form-checked(ast: Ast, acc: Map Str CtorMeta) -> Map Str CtorMeta =
+  match (ast)
+    | ParenNode(Cons(head, rest), _) -> collect-ctors-form-head(head, rest, acc)
+    | _ -> acc
 
-(defn all-ctor-metas (forms: (List Ast)) -> (Map Str CtorMeta)
-  (collect-ctors forms (builtin-ctor-metas)))
+let collect-ctors-form-head(head: Ast, rest: List Ast, acc: Map Str CtorMeta) -> Map Str CtorMeta =
+  match (sym-str(head))
+    | None -> acc
+    | Some(hn) -> collect-ctors-named(hn, rest, acc)
+
+let collect-ctors(forms: List Ast, acc: Map Str CtorMeta) -> Map Str CtorMeta =
+  match (forms)
+    | [] -> acc
+    | Cons(f, rest) -> collect-ctors(rest, collect-ctors-form(f, acc))
+
+let all-ctor-metas(forms: List Ast) -> Map Str CtorMeta =
+  collect-ctors(forms, builtin-ctor-metas())
 
 ; ---------------------------------------------------------------------------
 ; `classify-expr-type`: the syntactic, no-typer type guess described in
 ; the header comment above. `(None)` on any expression this cannot
 ; classify — never a wrong guess, only a missing one.
 
-(defn is-int-op (name: Str) -> Bool
-  (or (= name "+") (= name "-") (= name "*") (= name "/") (= name "%")))
+let is-int-op(name: Str) -> Bool =
+  name == "+" || name == "-" || name == "*" || name == "/" || name == "%"
 
-(defn is-bool-op (name: Str) -> Bool
-  (or (= name "<") (= name ">") (= name "<=") (= name ">=") (= name "=")))
+let is-bool-op(name: Str) -> Bool =
+  name == "<" || name == ">" || name == "<=" || name == ">=" || name == "="
 
-(defn classify-sym (name: Str) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
-  (match (map-get ctors name)
-    (None) (None)
-    (Some meta) (if (= (ctor-meta-arity meta) 0) (Some (ctor-meta-type meta)) (None))))
+let classify-sym(name: Str, ctors: Map Str CtorMeta) -> Maybe Str =
+  match (map-get(ctors, name))
+    | None -> None()
+    | Some(meta) ->
+      if ctor-meta-arity(meta) == 0 -> Some(ctor-meta-type(meta))
+       | else -> None()
 
-(defn classify-ctor-call (hn: Str) (args: (List Ast)) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
-  (match (map-get ctors hn)
-    (None) (None)
-    (Some meta) (if (= (ctor-meta-arity meta) (length args)) (Some (ctor-meta-type meta)) (None))))
+let classify-ctor-call(hn: Str, args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
+  match (map-get(ctors, hn))
+    | None -> None()
+    | Some(meta) ->
+      if ctor-meta-arity(meta) == length(args) -> Some(ctor-meta-type(meta))
+       | else -> None()
 
-(defn classify-expr-type (ast: Ast) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
-  (match ast
-    (IntNode _ _) (Some "Int")
-    (FloatNode _ _) (Some "Float")
-    (BoolNode _ _) (Some "Bool")
-    (StrNode _ _) (Some "Str")
-    (SymNode name _) (classify-sym name ctors)
-    (ParenNode elems _) (classify-paren elems ctors)
-    (BracketNode _ _) (None)))
+let classify-expr-type(ast: Ast, ctors: Map Str CtorMeta) -> Maybe Str =
+  match (ast)
+    | IntNode(_, _) -> Some("Int")
+    | FloatNode(_, _) -> Some("Float")
+    | BoolNode(_, _) -> Some("Bool")
+    | StrNode(_, _) -> Some("Str")
+    | SymNode(name, _) -> classify-sym(name, ctors)
+    | ParenNode(elems, _) -> classify-paren(elems, ctors)
+    | BracketNode(_, _) -> None()
 
-(defn classify-paren (elems: (List Ast)) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
-  (match elems
-    [] (None)
-    (Cons head args) (classify-paren-head head args ctors)))
+let classify-paren(elems: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
+  match (elems)
+    | [] -> None()
+    | Cons(head, args) -> classify-paren-head(head, args, ctors)
 
-(defn classify-paren-head (head: Ast) (args: (List Ast)) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
-  (match (sym-str head)
-    (None) (None)
-    (Some hn) (classify-named hn args ctors)))
+let classify-paren-head(head: Ast, args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
+  match (sym-str(head))
+    | None -> None()
+    | Some(hn) -> classify-named(hn, args, ctors)
 
-(defn classify-named (hn: Str) (args: (List Ast)) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
-  (cond
-    ((is-int-op hn) (Some "Int"))
-    ((is-bool-op hn) (Some "Bool"))
-    ((= hn "str-concat") (Some "Str"))
-    ((= hn "char->str") (Some "Str"))
-    ((= hn "if") (classify-if args ctors))
-    ((= hn "let") (classify-let args ctors))
-    ((= hn "do") (classify-do args ctors))
-    (else (classify-ctor-call hn args ctors))))
+let classify-named(hn: Str, args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
+  if is-int-op(hn) -> Some("Int")
+   | is-bool-op(hn) -> Some("Bool")
+   | hn == "str-concat" -> Some("Str")
+   | hn == "char->str" -> Some("Str")
+   | hn == "if" -> classify-if(args, ctors)
+   | hn == "let" -> classify-let(args, ctors)
+   | hn == "do" -> classify-do(args, ctors)
+   | else -> classify-ctor-call(hn, args, ctors)
 
-(defn classify-if (args: (List Ast)) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
-  (match args
-    (Cons _ (Cons then-ast _)) (classify-expr-type then-ast ctors)
-    _ (None)))
+let classify-if(args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
+  match (args)
+    | Cons(_, Cons(then-ast, _)) -> classify-expr-type(then-ast, ctors)
+    | _ -> None()
 
-(defn classify-let (args: (List Ast)) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
-  (match args
-    (Cons _ (Cons expr-ast body)) (classify-let-body expr-ast body ctors)
-    _ (None)))
+let classify-let(args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
+  match (args)
+    | Cons(_, Cons(expr-ast, body)) -> classify-let-body(expr-ast, body, ctors)
+    | _ -> None()
 
-(defn classify-let-body (expr-ast: Ast) (body: (List Ast)) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
-  (match body
-    [] (classify-expr-type expr-ast ctors)
-    _ (classify-do body ctors)))
+let classify-let-body(expr-ast: Ast, body: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
+  match (body)
+    | [] -> classify-expr-type(expr-ast, ctors)
+    | _ -> classify-do(body, ctors)
 
-(defn classify-do (args: (List Ast)) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
-  (match (last-of args)
-    (None) (None)
-    (Some tail) (classify-expr-type tail ctors)))
+let classify-do(args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
+  match (last-of(args))
+    | None -> None()
+    | Some(tail) -> classify-expr-type(tail, ctors)
 
 ; ---------------------------------------------------------------------------
 ; Usage collection: walk every real-code form (skipping type/module
@@ -266,85 +284,100 @@
 ; same way `type/check.mnd`'s `infer-quote-form` treats it specially
 ; rather than recursing.
 
-(defrec Usage (type-name: Str) (op: Str))
-(defn usage-type-name (u: Usage) -> Str (match u (Usage t _) t))
-(defn usage-op (u: Usage) -> Str (match u (Usage _ o) o))
+record Usage {
+  type-name: Str
+  op: Str
+}
 
-(defn record-usage! (usages: (Ref (List Usage))) (type-name: Str) (op: Str) -> Unit
-  (set! usages (Cons (Usage type-name op) (deref usages))))
+let usage-type-name(u: Usage) -> Str =
+  match (u)
+    | Usage(t, _) -> t
 
-(defn is-derive-op (name: Str) -> Bool
-  (or (= name "show") (= name "compare") (= name "dump") (= name "=")))
+let usage-op(u: Usage) -> Str =
+  match (u)
+    | Usage(_, o) -> o
 
-(defn maybe-record-classified (op: Str) (a: Ast) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
-  (match (classify-expr-type a ctors)
-    (None) ()
-    (Some t) (record-usage! usages t op)))
+let record-usage!(usages: Ref (List Usage), type-name: Str, op: Str) -> Unit =
+  set!(usages, Cons(Usage(type-name, op), deref(usages)))
 
-(defn maybe-record-op (hn: Str) (args: (List Ast)) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
-  (if (is-derive-op hn)
-    (maybe-record-op-args hn args ctors usages)
-    ()))
+let is-derive-op(name: Str) -> Bool =
+  name == "show" || name == "compare" || name == "dump" || name == "="
 
-(defn maybe-record-op-args (hn: Str) (args: (List Ast)) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
-  (match args
-    (Cons a _) (maybe-record-classified hn a ctors usages)
-    [] ()))
+let maybe-record-classified(op: Str, a: Ast, ctors: Map Str CtorMeta, usages: Ref (List Usage)) -> Unit =
+  match (classify-expr-type(a, ctors))
+    | None -> ()
+    | Some(t) -> record-usage!(usages, t, op)
 
-(defn walk-list (xs: (List Ast)) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
-  (match xs
-    [] ()
-    (Cons x rest) (do (walk-expr x ctors usages) (walk-list rest ctors usages))))
+let maybe-record-op(hn: Str, args: List Ast, ctors: Map Str CtorMeta, usages: Ref (List Usage)) -> Unit =
+  if is-derive-op(hn) -> maybe-record-op-args(hn, args, ctors, usages)
 
-(defn walk-expr (ast: Ast) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
-  (match ast
-    (ParenNode elems _) (walk-paren elems ctors usages)
-    (BracketNode elems _) (walk-list elems ctors usages)
-    _ ()))
+let maybe-record-op-args(hn: Str, args: List Ast, ctors: Map Str CtorMeta, usages: Ref (List Usage)) -> Unit =
+  match (args)
+    | Cons(a, _) -> maybe-record-classified(hn, a, ctors, usages)
+    | [] -> ()
 
-(defn walk-paren (elems: (List Ast)) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
-  (match elems
-    [] ()
-    (Cons head rest) (walk-paren-head head rest ctors usages)))
+let walk-list(xs: List Ast, ctors: Map Str CtorMeta, usages: Ref (List Usage)) -> Unit =
+  match (xs)
+    | [] -> ()
+    | Cons(x, rest) ->
+      {
+        walk-expr(x, ctors, usages)
+        walk-list(rest, ctors, usages)
+      }
 
-(defn walk-paren-head (head: Ast) (rest: (List Ast)) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
-  (if (is-sym head "quote") ()
-    (walk-paren-nonquote head rest ctors usages)))
+let walk-expr(ast: Ast, ctors: Map Str CtorMeta, usages: Ref (List Usage)) -> Unit =
+  match (ast)
+    | ParenNode(elems, _) -> walk-paren(elems, ctors, usages)
+    | BracketNode(elems, _) -> walk-list(elems, ctors, usages)
+    | _ -> ()
 
-(defn walk-paren-nonquote (head: Ast) (rest: (List Ast)) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
-  (do
-    (match (sym-str head) (Some hn) (maybe-record-op hn rest ctors usages) (None) ())
-    (walk-list rest ctors usages)))
+let walk-paren(elems: List Ast, ctors: Map Str CtorMeta, usages: Ref (List Usage)) -> Unit =
+  match (elems)
+    | [] -> ()
+    | Cons(head, rest) -> walk-paren-head(head, rest, ctors, usages)
+
+let walk-paren-head(head: Ast, rest: List Ast, ctors: Map Str CtorMeta, usages: Ref (List Usage)) -> Unit =
+  if is-sym(head, "quote") -> ()
+   | else -> walk-paren-nonquote(head, rest, ctors, usages)
+
+let walk-paren-nonquote(head: Ast, rest: List Ast, ctors: Map Str CtorMeta, usages: Ref (List Usage)) -> Unit {
+  match (sym-str(head))
+    | Some(hn) -> maybe-record-op(hn, rest, ctors, usages)
+    | None -> ()
+  walk-list(rest, ctors, usages)
+}
 
 ; Top-level dispatch: skip `alias`/`defrec`/`variant`/`extern`/`import`
 ; (never contain a runtime use site), walk everything else — `defn`
 ; bodies, top-level `let`s, bare top-level expressions — as ordinary code,
 ; exactly like `type/check.mnd`'s `typecheck-top-named` does for typing.
 
-(defn is-decl-head (name: Str) -> Bool
-  (or (= name "alias")
-      (= name "defrec")
-      (= name "variant")
-      (= name "extern")
-      (= name "import")))
+let is-decl-head(name: Str) -> Bool =
+  name == "alias" || name == "defrec" || name == "variant" || name == "extern" || name == "import"
 
-(defn walk-top-form (ast: Ast) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
-  (walk-top-form-checked (unwrap-pub ast) ctors usages))
+let walk-top-form(ast: Ast, ctors: Map Str CtorMeta, usages: Ref (List Usage)) -> Unit =
+  walk-top-form-checked(unwrap-pub(ast), ctors, usages)
 
-(defn walk-top-form-checked (ast: Ast) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
-  (match ast
-    (ParenNode (Cons head _) _) (walk-top-form-head head ast ctors usages)
-    _ (walk-expr ast ctors usages)))
+let walk-top-form-checked(ast: Ast, ctors: Map Str CtorMeta, usages: Ref (List Usage)) -> Unit =
+  match (ast)
+    | ParenNode(Cons(head, _), _) -> walk-top-form-head(head, ast, ctors, usages)
+    | _ -> walk-expr(ast, ctors, usages)
 
-(defn walk-top-form-head (head: Ast) (whole: Ast) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
-  (match (sym-str head)
-    (Some hn) (if (is-decl-head hn) () (walk-expr whole ctors usages))
-    (None) (walk-expr whole ctors usages)))
+let walk-top-form-head(head: Ast, whole: Ast, ctors: Map Str CtorMeta, usages: Ref (List Usage)) -> Unit =
+  match (sym-str(head))
+    | Some(hn) ->
+      if is-decl-head(hn) -> ()
+       | else -> walk-expr(whole, ctors, usages)
+    | None -> walk-expr(whole, ctors, usages)
 
-(defn walk-top-forms (forms: (List Ast)) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
-  (match forms
-    [] ()
-    (Cons f rest) (do (walk-top-form f ctors usages) (walk-top-forms rest ctors usages))))
+let walk-top-forms(forms: List Ast, ctors: Map Str CtorMeta, usages: Ref (List Usage)) -> Unit =
+  match (forms)
+    | [] -> ()
+    | Cons(f, rest) ->
+      {
+        walk-top-form(f, ctors, usages)
+        walk-top-forms(rest, ctors, usages)
+      }
 
 ; ---------------------------------------------------------------------------
 ; Rendering: one line per type name that needs at least one derived
@@ -353,77 +386,82 @@
 ; plan's text is deterministic (spec §2.11) rather than dependent on
 ; `Map`/traversal order.
 
-(let nl
-  (do
-    (let sb (sb-new))
-    (sb-append-byte! sb 10)
-    (sb-take-str! sb)))
+let nl =
+  {
+    let sb = sb-new()
+    sb-append-byte!(sb, 10)
+    sb-take-str!(sb)
+  }
 
-(defn str-insert-sorted (x: Str) (xs: (List Str)) -> (List Str)
-  (match xs
-    [] [x]
-    (Cons h rest) (if (<= (compare x h) 0) (Cons x (Cons h rest)) (Cons h (str-insert-sorted x rest)))))
+let str-insert-sorted(x: Str, xs: List Str) -> List Str =
+  match (xs)
+    | [] -> [x]
+    | Cons(h, rest) ->
+      if compare(x, h) <= 0 -> Cons(x, Cons(h, rest))
+       | else -> Cons(h, str-insert-sorted(x, rest))
 
-(defn sort-strs (xs: (List Str)) -> (List Str)
-  (match xs
-    [] []
-    (Cons h rest) (str-insert-sorted h (sort-strs rest))))
+let sort-strs(xs: List Str) -> List Str =
+  match (xs)
+    | [] -> []
+    | Cons(h, rest) -> str-insert-sorted(h, sort-strs(rest))
 
-(defn insert-distinct (x: Str) (xs: (List Str)) -> (List Str)
-  (if (contains xs x) xs (Cons x xs)))
+let insert-distinct(x: Str, xs: List Str) -> List Str =
+  if contains(xs, x) -> xs
+   | else -> Cons(x, xs)
 
-(defn collect-type-names (usages: (List Usage)) -> (List Str)
-  (match usages
-    [] []
-    (Cons u rest) (insert-distinct (usage-type-name u) (collect-type-names rest))))
+let collect-type-names(usages: List Usage) -> List Str =
+  match (usages)
+    | [] -> []
+    | Cons(u, rest) -> insert-distinct(usage-type-name(u), collect-type-names(rest))
 
-(defn usages-has (usages: (List Usage)) (t: Str) (op: Str) -> Bool
-  (match usages
-    [] false
-    (Cons u rest) (if (and (= (usage-type-name u) t) (= (usage-op u) op)) true (usages-has rest t op))))
+let usages-has(usages: List Usage, t: Str, op: Str) -> Bool =
+  match (usages)
+    | [] -> false
+    | Cons(u, rest) ->
+      if usage-type-name(u) == t && usage-op(u) == op -> true
+       | else -> usages-has(rest, t, op)
 
-(defn derive-op-order -> (List Str)
-  ["show" "=" "compare" "dump"])
+let derive-op-order() -> List Str =
+  ["show", "=", "compare", "dump"]
 
-(defn filter-present (ops: (List Str)) (usages: (List Usage)) (t: Str) -> (List Str)
-  (match ops
-    [] []
-    (Cons op rest) (filter-present-cons op rest usages t)))
+let filter-present(ops: List Str, usages: List Usage, t: Str) -> List Str =
+  match (ops)
+    | [] -> []
+    | Cons(op, rest) -> filter-present-cons(op, rest, usages, t)
 
-(defn filter-present-cons (op: Str) (rest: (List Str)) (usages: (List Usage)) (t: Str) -> (List Str)
-  (if (usages-has usages t op)
-    (Cons op (filter-present rest usages t))
-    (filter-present rest usages t)))
+let filter-present-cons(op: Str, rest: List Str, usages: List Usage, t: Str) -> List Str =
+  if usages-has(usages, t, op) -> Cons(op, filter-present(rest, usages, t))
+   | else -> filter-present(rest, usages, t)
 
-(defn ops-for-type (usages: (List Usage)) (t: Str) -> (List Str)
-  (filter-present (derive-op-order) usages t))
+let ops-for-type(usages: List Usage, t: Str) -> List Str =
+  filter-present(derive-op-order(), usages, t)
 
-(defn join-with-commas (xs: (List Str)) -> Str
-  (match xs
-    [] ""
-    [x] x
-    (Cons x rest) (str-concat x ", " (join-with-commas rest))))
+let join-with-commas(xs: List Str) -> Str =
+  match (xs)
+    | [] -> ""
+    | [x] -> x
+    | Cons(x, rest) -> str-concat(x, ", ", join-with-commas(rest))
 
-(defn render-line (t: Str) (usages: (List Usage)) -> Str
-  (str-concat t ": " (join-with-commas (ops-for-type usages t))))
+let render-line(t: Str, usages: List Usage) -> Str =
+  str-concat(t, ": ", join-with-commas(ops-for-type(usages, t)))
 
-(defn render-lines (type-names: (List Str)) (usages: (List Usage)) -> Str
-  (match type-names
-    [] ""
-    [t] (render-line t usages)
-    (Cons t rest) (str-concat (render-line t usages) nl (render-lines rest usages))))
+let render-lines(type-names: List Str, usages: List Usage) -> Str =
+  match (type-names)
+    | [] -> ""
+    | [t] -> render-line(t, usages)
+    | Cons(t, rest) -> str-concat(render-line(t, usages), nl, render-lines(rest, usages))
 
-(defn render-usages (usages: (List Usage)) -> Str
-  (render-lines (sort-strs (collect-type-names usages)) usages))
+let render-usages(usages: List Usage) -> Str =
+  render-lines(sort-strs(collect-type-names(usages)), usages)
 
 ; List every type this program's `show`/`=`/`compare`/`dump` use sites
 ; need, one per line, `"<TypeName>: <op>, …"`, sorted for determinism.
 ; Empty (`""`) if the program has no classifiable use site of any of the
 ; four — see this module's header comment for exactly what "classifiable"
 ; covers and does not yet cover.
-(pub defn describe-derives (forms: (List Ast)) -> Str
-  (do
-    (let ctors (all-ctor-metas forms))
-    (let usages (ref []))
-    (walk-top-forms forms ctors usages)
-    (render-usages (deref usages))))
+pub let describe-derives(forms: List Ast) -> Str {
+  let ctors = all-ctor-metas(forms)
+  let usages = ref([])
+  walk-top-forms(forms, ctors, usages)
+  render-usages(deref(usages))
+}

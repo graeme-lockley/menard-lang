@@ -1,3 +1,3 @@
-(import "./docs.mnd")
+import "./docs.mnd"
 
-(test "stdlib doc comments are complete" (library-docs-ok "stdlib"))
+test "stdlib doc comments are complete" = library-docs-ok("stdlib")

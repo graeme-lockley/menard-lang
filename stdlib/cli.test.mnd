@@ -1,20 +1,15 @@
-(import std/cli)
+import std/cli
 
-(test "a bare flag is present" (has-flag ["run" "--clean" "a.mnd"] "--clean"))
+test "a bare flag is present" = has-flag(["run", "--clean", "a.mnd"], "--clean")
 
-(test "a flag after -- is not present" (not (has-flag ["run" "--" "--clean"] "--clean")))
+test "a flag after -- is not present" = not(has-flag(["run", "--", "--clean"], "--clean"))
 
-(test "a valued flag returns the next word" (= (flag-value ["-o" "out" "a.mnd"] "-o") "out"))
+test "a valued flag returns the next word" = flag-value(["-o", "out", "a.mnd"], "-o") == "out"
 
-(test "a missing flag value is empty" (= (flag-value ["run"] "-o") ""))
+test "a missing flag value is empty" = flag-value(["run"], "-o") == ""
 
-(test "positionals skip flags and stop at --"
-  (= (positionals ["check" "--clean" "-o" "out" "a.mnd" "--" "x"]
-       [(Flag "--clean" false) (Flag "-o" true)])
-     ["check" "a.mnd"]))
+test "positionals skip flags and stop at --" = positionals(["check", "--clean", "-o", "out", "a.mnd", "--", "x"], [Flag("--clean", false), Flag("-o", true)]) == ["check", "a.mnd"]
 
-(test "positional indexes the remaining words"
-  (= (positional ["check" "a.mnd"] [] 1) "a.mnd"))
+test "positional indexes the remaining words" = positional(["check", "a.mnd"], [], 1) == "a.mnd"
 
-(test "args-after keeps the words past --"
-  (= (args-after ["run" "a.mnd" "--" "-n" "1"]) ["-n" "1"]))
+test "args-after keeps the words past --" = args-after(["run", "a.mnd", "--", "-n", "1"]) == ["-n", "1"]

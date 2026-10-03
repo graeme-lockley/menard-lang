@@ -1,92 +1,77 @@
 ; Desugar pass. Paths are relative to the process cwd, which `./mn test`
 ; leaves as the repo root. CLI dump flags stay in tests/phase2/desugar.test.ts.
 
-(import "../reader/read.mnd")
-(import "../reader/print.mnd")
-(import "./desugar.mnd")
-(import std/io)
-(import std/string)
+import "../reader/read.mnd"
 
-(defn has-head (text: Str) (name: Str) -> Bool
-  (or (has text (str-concat "(" name " "))
-    (has text (str-concat "(" name ")"))))
+import "../reader/print.mnd"
 
-(defn read-forms (path: Str) -> (Maybe (List Ast))
-  (match (read-file path)
-    (Err _) (None)
-    (Ok src)
-      (match (read-all src)
-        (Err _) (None)
-        (Ok forms) (Some forms))))
+import "./desugar.mnd"
 
-(defn desugared-text (path: Str) -> (Maybe Str)
-  (match (read-forms path)
-    (None) (None)
-    (Some forms)
-      (match (desugar-all forms)
-        (Err _) (None)
-        (Ok out) (Some (print-form-all out)))))
+import std/io
 
-(defn no-sugar (text: Str) -> Bool
-  (and (not (has-head text "and"))
-    (and (not (has-head text "or"))
-      (and (not (has-head text "cond"))
-        (and (not (has-head text "when"))
-          (not (has-head text "while")))))))
+import std/string
 
-(defn codes-have (es: (List DesugarError)) (code: Str) -> Bool
-  (match es
-    [] false
-    (Cons (DesugarError _ c _) rest)
-      (if (= c code) true (codes-have rest code))))
+let has-head(text: Str, name: Str) -> Bool =
+  has(text, str-concat("(", name, " ")) || has(text, str-concat("(", name, ")"))
 
-(defn desugar-has-code (path: Str) (code: Str) -> Bool
-  (match (read-forms path)
-    (None) false
-    (Some forms)
-      (match (desugar-all forms)
-        (Ok _) false
-        (Err es) (codes-have es code))))
+let read-forms(path: Str) -> Maybe (List Ast) =
+  match (read-file(path))
+    | Err(_) -> None()
+    | Ok(src) ->
+      match (read-all(src))
+        | Err(_) -> None()
+        | Ok(forms) -> Some(forms)
 
-(test "and/or/cond/when/while expand to if and loop"
-  (match (desugared-text "tests/phase2/fixtures/desugar-ok.mnd")
-    (None) false
-    (Some text)
-      (and (has text "(if ")
-        (and (has text "(loop ")
-          (no-sugar text)))))
+let desugared-text(path: Str) -> Maybe Str =
+  match (read-forms(path))
+    | None -> None()
+    | Some(forms) ->
+      match (desugar-all(forms))
+        | Err(_) -> None()
+        | Ok(out) -> Some(print-form-all(out))
 
-(test "while expands to loop"
-  (match (desugared-text "tests/phase2/fixtures/desugar-while.mnd")
-    (None) false
-    (Some text)
-      (and (has text "(loop ")
-        (not (has-head text "while")))))
+let no-sugar(text: Str) -> Bool =
+  not(has-head(text, "and")) && not(has-head(text, "or")) && not(has-head(text, "cond")) && not(has-head(text, "when")) && not(has-head(text, "while"))
 
-(test "bracket lists become Cons/Nil and a type-parameter list stays"
-  (match (desugared-text "tests/phase2/fixtures/list-sugar.mnd")
-    (None) false
-    (Some text)
-      (and (has text "[a]")
-        (and (has text "Cons")
-          (and (has text "(Nil)")
-            (and (not (has text "[h"))
-              (not (has text "[10"))))))))
+let codes-have(es: List DesugarError, code: Str) -> Bool =
+  match (es)
+    | [] -> false
+    | Cons(DesugarError(_, c, _), rest) ->
+      if c == code -> true
+       | else -> codes-have(rest, code)
 
-(test "empty cond is E_DESUGAR_COND_EMPTY"
-  (desugar-has-code "tests/negative/bad-desugar-cond-empty.mnd" "E_DESUGAR_COND_EMPTY"))
+let is-none-forms(path: Str) -> Bool =
+  match (read-forms(path))
+    | None -> true
+    | Some(_) -> false
 
-(test "a non-list cond clause is E_DESUGAR_COND_CLAUSE"
-  (desugar-has-code "tests/negative/bad-desugar-cond-clause.mnd" "E_DESUGAR_COND_CLAUSE"))
+let desugar-has-code(path: Str, code: Str) -> Bool =
+  match (read-forms(path))
+    | None -> false
+    | Some(forms) ->
+      match (desugar-all(forms))
+        | Ok(_) -> false
+        | Err(es) -> codes-have(es, code)
 
-(test "else before a clause is E_DESUGAR_COND_ELSE"
-  (desugar-has-code "tests/negative/bad-desugar-cond-else.mnd" "E_DESUGAR_COND_ELSE"))
+test "and/or/while expand to if and loop" =
+  match (desugared-text("tests/phase2/fixtures/desugar-ok.mnd"))
+    | None -> false
+    | Some(text) -> has(text, "if ") && has(text, "loop (") && not(has(text, "while")) && not(has(text, "&&")) && not(has(text, "||"))
 
-(test "when without a test is E_DESUGAR_WHEN"
-  (desugar-has-code "tests/negative/bad-desugar-when.mnd" "E_DESUGAR_WHEN"))
+test "while expands to loop" =
+  match (desugared-text("tests/phase2/fixtures/desugar-while.mnd"))
+    | None -> false
+    | Some(text) -> has(text, "loop (") && not(has(text, "while"))
 
-(test "while without a test is E_DESUGAR_WHILE"
-  (desugar-has-code "tests/negative/bad-desugar-while.mnd" "E_DESUGAR_WHILE"))
+test "bracket lists become Cons/Nil and a type-parameter list stays" =
+  match (desugared-text("tests/phase2/fixtures/list-sugar.mnd"))
+    | None -> false
+    | Some(text) -> has(text, "[a]") && has(text, "Cons") && has(text, "Nil") && not(has(text, "[h")) && not(has(text, "[10"))
 
-(test "a bare + is E_DESUGAR_ARITY"
-  (desugar-has-code "tests/negative/bad-desugar-arity.mnd" "E_DESUGAR_ARITY"))
+test "an unclosed declaration does not parse" = is-none-forms("tests/negative/bad-parse.mnd")
+
+test "a bar at the wrong column does not parse" = is-none-forms("tests/negative/bad-desugar-cond-else.mnd")
+
+test "an operator without whitespace does not parse" = is-none-forms("tests/negative/bad-desugar-arity.mnd")
+
+test "a nested parameter-list let does not parse" = is-none-forms("tests/negative/bad-desugar-while.mnd")

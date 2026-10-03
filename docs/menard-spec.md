@@ -24,7 +24,7 @@ finish express its own compiler, compile to LLVM bitcode, and still have closure
 a real collector?*
 
 Every decision below trades features for finishability. The design keeps the
-**frontend trivial** (s-expressions), the **type system plain** (explicit type
+**frontend small** (the surface in [`syntax.md`](syntax.md)), the **type system plain** (explicit type
 parameters, declared never inferred), the **syntax closed** (no macros, ever),
 the **numeric model narrow** (one integer type, one float type), and the
 **backend boring** (emit naive IR, let LLVM do the work). The two hard parts —
@@ -138,12 +138,15 @@ projects like this.
 
 ### 2.1 Lexical syntax
 
-S-expressions throughout. `;` begins a line comment. Nothing else: no infix, no
-indentation rules, no significant whitespace.
+Lexical syntax, layout, and the concrete forms of declarations and expressions
+are specified in [`syntax.md`](syntax.md). `;` begins a line comment. Binary
+operators require whitespace on both sides, so `a-b` stays one identifier.
+Indentation is significant for `if` continuations and for `match` and `type`
+arms. There are no macros.
 
-Rationale: a ~250-line reader, zero grammar ambiguity, and a format that is
-trivial to generate and parse. S-expressions are **not** chosen for
-homoiconicity — see §2.9; that rationale does not hold here.
+The surface lowers into the core forms in [syntax.md §8](syntax.md#8-lowering)
+before desugaring. That lowering is the contract this specification's later
+sections describe.
 
 Source files use the extension **`.mnd`**.
 
@@ -224,7 +227,7 @@ It exists for one reason, which has nothing to do with language semantics:
 **partially-initialised and recycled memory must be safe to trace.**
 
 The mechanism is unavoidable. A freshly allocated object is filled **field by
-field**, and filling a field may itself allocate — `(cons (leaf 1) (leaf 2))`
+field**, and filling a field may itself allocate — `Cons(Leaf(1), Leaf(2))`
 allocates the two leaves before it has finished the cons. So the collector can
 run while an object has unwritten slots. Without a distinguished word, those
 slots hold whatever was in that memory before: a **stale pointer** into a freed
@@ -299,13 +302,13 @@ is exactly what makes this safe, and it is the same rule that already covers
   constructor such as `(Empty)`, `(NotFound)`, `(Permission)`.
 
 The last entry is worth stating generally. Because every value is one word and no
-operation consults per-type metadata — types are erased — `(Maybe Int)` and
-`(Maybe Str)` have identical layout, so **one static `None` serves every
+operation consults per-type metadata — types are erased — `Maybe Int` and
+`Maybe Str` have identical layout, so **one static `None` serves every
 instantiation**. No specialisation, no per-instantiation singletons.
 
 **What the static pool buys is allocation deletion, not GC throughput.** `Str` is
 not interned, so without this every *evaluation* of a literal allocates:
-`(str-concat "foo" x)` in a loop allocates `"foo"` on every iteration, and a
+`str-concat("foo", x)` in a loop allocates `"foo"` on every iteration, and a
 constructor constant is reallocated every time it is returned — which for `None`
 is every failed lookup in `map-get` and `arr-nth`. A compiler's most frequent
 allocations are its constants, and static objects remove them entirely.
@@ -453,29 +456,36 @@ language, not a systems language.
 
 Primitives: `Int Float Bool Char Str Sym Unit`.
 
-Built-in compounds: `(List T)` `(Map K V)` `(Maybe T)` `(Result T E)` `(Ref T)`
-`(Arr T n)`.
+Built-in compounds: `List T`, `Map K V`, `Maybe T`, `Result T E`, `Ref T`,
+`Arr T n`.
 
 Built-in reference type: `StringBuffer` (§2.8.2).
 
 Nominal types, **with explicit type parameters**:
 
-```lisp
-(defrec (Pair [a b]) (fst: a) (snd: b))
+```
+record Pair[a, b] {
+  fst: a
+  snd: b
+}
 
-(variant (Tree [a])
-  (Leaf a)
-  (Node (Tree a) (Tree a))
-  (Empty))
+type Tree[a] =
+  | Leaf(a)
+  | Node(Tree a, Tree a)
+  | Empty
 
-(defrec (Env [v]) (parent: (Maybe (Env v))) (bindings: (Map Str v)))
+record Env[v] {
+  parent: Maybe (Env v)
+  bindings: Map Str v
+}
 ```
 
 Rules:
 
-- **Type parameters are declared with `[a]` in the declaration and applied with
-  `(Name T …)`. Square brackets declare; round brackets apply.** This keeps the
-  two readable at a glance and avoids the ambiguity of `(Tree a)` meaning both.
+- **Type parameters are declared with `[a]` and applied by juxtaposition
+  (`Tree a`). A nested application is parenthesized (`List (Pair a b)`).**
+  Square brackets declare; juxtaposition applies. This keeps the two readable
+  at a glance.
 - **Parameters are declared, never inferred.** No let-generalization, no
   Hindley–Milner. A definition states its parameters; a *use site* needs no
   annotation and is solved by unification against the declared scheme.
@@ -546,7 +556,7 @@ Three clarifications that make byte-level I/O well defined:
 - **There is no `Byte` type.** Bytes are `Int`s in a documented `0..255` range,
   reached through `str-byte`. The compiler's byte-critical paths — reader,
   hashing, I/O — are exactly the paths where a range assertion is a test. If
-  readability is wanted, `(alias Byte Int)` is free: nullary and transparent, so
+  readability is wanted, `alias Byte = Int` is free: nullary and transparent, so
   it guarantees nothing, but the display view (§2.3) will show `Byte` in
   diagnostics.
 - **The reader is byte-oriented and never uses `Char`.** A `Char`-oriented
@@ -565,10 +575,10 @@ the one place where the runtime must do real data-structure work.
 
 `map-set` cannot mutate in place. If it did, then
 
-```lisp
-(let a (map-new))
-(let b a)
-(map-set a "k" 1)     ; b would also change
+```
+let a = map-new()
+let b = a
+map-set(a, "k", 1)     ; b would also change
 ```
 
 would silently alias, and the language's central promise would be false for
@@ -590,19 +600,19 @@ while aliasing its own symbol tables.
 
 #### Type aliases
 
-```lisp
-(alias Ints (List Int))
-(alias Env  (Map Str Binding))
-(alias Pass (Fn (Ast Env) -> Ast))
+```
+alias Ints = List Int
+alias Env = Map Str Binding
+alias Pass = (Ast, Env) -> Ast
 ```
 
 An alias introduces **no new type** — only a spelling for an existing one.
 
 | Rule | Why |
 |---|---|
-| **Fully transparent.** `(alias A B)` is exactly `B`. | Otherwise it would be a nominal type, and user nominal types are declared only via `defrec`/`variant`. |
-| **Nullary — no parameters.** | An alias with parameters is a type-level lambda, and that is a type-level function, which is out. `(alias IntTree (Tree Int))` is fine. |
-| **Cycles are errors.** `(alias T T)` is rejected. Recursion through a nominal type is fine. | Eager expansion would diverge otherwise. |
+| **Fully transparent.** `alias A = B` is exactly `B`. | Otherwise it would be a nominal type, and user nominal types are declared only via `record` and `type`. |
+| **Nullary — no parameters.** | An alias with parameters is a type-level lambda, and that is a type-level function, which is out. `alias IntTree = Tree Int` is fine. |
+| **Cycles are errors.** `alias T = T` is rejected. Recursion through a nominal type is fine. | Eager expansion would diverge otherwise. |
 | **Expanded before every semantic check**, including the showable/orderable/equatable predicates (§2.12) and type identity. | A predicate must not be able to disagree with itself depending on how a type was spelled. |
 | **Never affects `show` output** (§2.13), which prints the underlying nominal name. | If an alias changed printed output, `show` would depend on how a type was spelled — and the interpreter, which prints runtime values with no record of that spelling, would disagree with the compiled program: a fixed-point failure caused by a *convenience* feature. |
 | **Mangling uses the expanded type** (§2.7). | Two identical types under different aliases must mangle identically, or symbols duplicate or go missing. |
@@ -629,43 +639,46 @@ choice.
 
 ### 2.4 Control flow
 
-**Everything is an expression.** `if`, `match` and `loop` yield values; only
-`while` and `do` exist purely for effect.
+**Everything is an expression.** `if`, `match` and `loop` yield values; a
+block and `while` exist for effect and yield the last expression, or `Unit`
+for `while`.
 
-```lisp
-(defn sign (n: Int) -> Str
-  (if (< n 0) "negative"
-    (if (= n 0) "zero" "positive")))
+```
+let sign(n: Int) -> Str =
+  if n < 0 -> "negative"
+   | n == 0 -> "zero"
+   | else -> "positive"
 
-(defn sum-to (n: Int) -> Int
-  (loop ((i 0) (acc 0))
-    (if (> i n)
-      acc
-      (recur (+ i 1) (+ acc i)))))
+let sum-to(n: Int) -> Int =
+  loop (i = 0, acc = 0)
+    if i > n -> acc
+     | else -> recur(i + 1, acc + i)
 
-(defn (tree-size [a]) (t: (Tree a)) -> Int
-  (match t
-    (Empty)       0
-    (Leaf _)      1
-    (Node l r)    (+ 1 (tree-size l) (tree-size r))))
+let tree-size[a](t: Tree a) -> Int =
+  match (t)
+    | Empty -> 0
+    | Leaf(_) -> 1
+    | Node(l, r) -> 1 + tree-size(l) + tree-size(r)
 
-(defn count-down (n: Int) -> Unit
-  (let i (ref n))
-  (while (> (deref i) 0)
-    (print (deref i))
-    (set! i (- (deref i) 1))))
+let count-down(n: Int) -> Unit = {
+  let i = ref(n)
+  while (deref(i) > 0) {
+    print(deref(i))
+    set!(i, deref(i) - 1)
+  }
+}
 
-(match (parse src)                      ; no exceptions: this is the error path
-  (Ok ast) (emit ast)
-  (Err e)  (print-error e)))
+match (parse(src))
+  | Ok(ast) -> emit(ast)
+  | Err(e) -> print-error(e)
 ```
 
 | Construct | Semantics | LLVM lowering |
 |---|---|---|
-| `let` | sequential bindings (`let*`-like) | `alloca` + `mem2reg` |
-| `do` | sequence, yields last | straight-line stores |
+| `let` | sequential bindings | `alloca` + `mem2reg` |
+| block | sequence, yields last | straight-line stores |
 | `if` | expression, `Bool` only | `br` + alloca, promoted to `phi` |
-| `and` / `or` | short-circuit | `br` per operand |
+| `&&` / `\|\|` | short-circuit | `br` per operand |
 | `loop` / `recur` | tail iteration, guaranteed TCO | basic blocks + `musttail` |
 | `while` | `Ref`-based sugar, yields `Unit` | same as `loop` |
 | `match` | decision tree, exhaustive | `switch` on the descriptor's constructor tag; pointer compares for nullary cases; compares for `Str` |
@@ -684,54 +697,53 @@ wildcard, nested, or-patterns, and `when` guards.
 ### 2.5 The complete special-form set
 
 Because there are no macros (§2.9), **every piece of sugar lives in the
-compiler**. This list is the whole language, and it is closed:
+compiler**. The surface is the closed set in [`syntax.md`](syntax.md). After
+lowering, the compiler sees this closed set of core heads:
 
 ```
 defn  defrec  variant  alias  import  pub  extern
-let   do      if       and     or      cond    when
+let   do      if       and     or
 loop  recur   while    match   return  panic
-ref   deref   set!     quote
+ref   deref   set!     quote   fn
 ```
 
-`cond`, `when`, `while` and `and`/`or` are sugar over `if` and `loop`, expanded
-during desugaring (before typing). `[e1 e2 …]` and `[]` are sugar for a
-`Cons`/`Nil` chain, in expression position and in `match` patterns. A bracket
-list in a `defn`, `defrec`, or `variant` name form is a type-parameter list
-and is not expanded. `(Cons h t)` remains the open list pattern.
+`while` and `&&` / `||` (lowered to `and` / `or`) are sugar over `if` and
+`loop`, expanded during desugaring (before typing). `[e1, e2, …]` and `[]`
+are sugar for a `Cons` / `Nil` chain, in expression position and in `match`
+patterns. A bracket list on a `let`, `record`, or `type` name is a
+type-parameter list and is not expanded. `Cons(h, t)` remains the open list
+pattern.
 
-`+`, `*`, `f+`, `f*`, and `str-concat` accept one or more arguments. One
-argument is that argument; two or more are a left fold into the binary
-intrinsic, so `(+ a b c)` is `(+ (+ a b) c)`. `-` and `f-` are the same fold,
-and a single argument is negation: `(- x)` is `(- 0 x)`, `(f- x)` is
-`(f- 0.0 x)`. `/` and `f/` are that left fold and require at least two
-arguments, so `(/ 8 4 2)` is `(/ (/ 8 4) 2)`. `<`, `>`, `<=`, `>=`, and `=`
-require at least two arguments and chain, so `(< a b c)` is
-`(and (< a b) (< b c))` and each middle operand is evaluated twice. A call
-with too few arguments is a desugar error (`E_DESUGAR_ARITY`). A two-argument
-call is left as the binary intrinsic, which is all the typer and the backend
-see.
+Infix `+`, `*`, `-`, `/`, and the calls `f+`, `f*`, `f-`, `f/`, and
+`str-concat` lower to binary intrinsics, left-associative, so `a + b + c`
+is the same as `(a + b) + c`. A one-argument call `f-(x)` is negation
+(`f-(0.0, x)`); prefix `-` on a non-literal is the same negation for `Int`.
+`/` and `f/` require at least two arguments. Comparisons of the same
+operator chain, so `a < b < c` is `a < b && b < c` and each middle operand
+is evaluated twice. A two-argument call is left as the binary intrinsic,
+which is all the typer and the backend see.
 
-A top-level `defn` or `extern` may end its parameter list with one rest
-parameter. `...` is the last element of that parameter form, the parameter
-is last, and the type is written as a `List`:
+A top-level `let` or an `extern` may end its parameter list with one rest
+parameter. The parameter is last, and the type is a `List`:
 
 ```
-(defn sum (xs: (List Int) ...) -> Int body)
-(defn join (sep: Str) (parts: (List Str) ...) -> Str body)
+let sum(...xs: List Int) -> Int =
+  body
+let join(sep: Str, ...parts: List Str) -> Str =
+  body
 ```
 
 Packing runs after desugaring and before typing, and the parameter inside
-the body is an ordinary list. `(sum 1 2 3)` is
-`(sum (Cons 1 (Cons 2 (Cons 3 (Nil)))))`. `(sum)` is `(sum (Nil))`.
-`(sum xs)` is still a one-element call, so a value that is already a list
-is wrapped in another list. `...` before an argument splices that list,
-and the spliced expression is evaluated once:
+the body is an ordinary list. `sum(1, 2, 3)` packs `Cons(1, Cons(2, Cons(3, Nil())))`.
+`sum()` packs `Nil()`. `sum(xs)` is still a one-element call, so a value
+that is already a list is wrapped in another list. `...` before an argument
+splices that list, and the spliced expression is evaluated once:
 
 ```
-(sum ... xs)       ; the elements of xs
-(sum 1 ... xs)     ; 1, then the elements of xs
-(sum ... xs 1)     ; the elements of xs, then 1
-(sum ... xs ... ys)
+sum(...xs)           ; the elements of xs
+sum(1, ...xs)        ; 1, then the elements of xs
+sum(...xs, 1)        ; the elements of xs, then 1
+sum(...xs, ...ys)
 ```
 
 A splice that is not a suffix of the rest arguments is appended. A lambda
@@ -757,9 +769,9 @@ Standard closure conversion: every `fn` becomes a top-level function taking a
 hidden environment pointer; free variables are copied into a heap environment
 record at closure creation.
 
-```lisp
-(defn adder (n: Int) -> (Fn (Int) -> Int)
-  (fn (m) (+ n m)))
+```
+let adder(n: Int) -> (Int) -> Int =
+  fn (m) = n + m
 ```
 
 lowers to roughly:
@@ -793,7 +805,7 @@ No currying. Functions take a flat argument list.
 
 **A polymorphic function is compiled once.** Because every value is one word
 (§2.2) and the collector does not consult static per-type metadata (§4.3), a
-`(defn (length [a]) …)` has **one** compiled body, shared by every
+`let length[a](…)` has **one** compiled body, shared by every
 instantiation. Instantiation is a typechecker concern only — see §3.3 and §7.
 
 ### 2.7 Modules, exports and foreign functions
@@ -802,10 +814,10 @@ instantiation. Instantiation is a typechecker concern only — see §3.3 and §7
   identifier characters, so a bare import spec is one symbol. A string is still a
   path. There are three forms:
 
-```lisp
-(import std/list)                         ; stdlib/list.mnd, cwd-relative
-(import "./lexer.mnd")                    ; beside the importing file
-(import github:owner/repo@v1.2.0/console) ; ~/.menard/deps/owner/repo/v1.2.0/console.mnd
+```
+import std/list                         ; stdlib/list.mnd, cwd-relative
+import "./lexer.mnd"                    ; beside the importing file
+import github:owner/repo@v1.2.0/console ; ~/.menard/deps/owner/repo/v1.2.0/console.mnd
 ```
 
   - `std/name` maps to `stdlib/name.mnd`. The path does not depend on the
@@ -823,10 +835,10 @@ instantiation. Instantiation is a typechecker concern only — see §3.3 and §7
   it must be a legal C identifier: no `!`, no `-`. Higher-level names live on
   ordinary Menard wrappers (§2.15):
 
-```lisp
-(extern mn_exists (path: Str) -> Bool)
-(pub defn exists (path: Str) -> Bool
-  (mn_exists path))
+```
+extern mn_exists(path: Str) -> Bool
+pub let exists(path: Str) -> Bool =
+  mn_exists(path)
 ```
 
 - Mangled symbol names: `mn_<modulehash>_<name>`, with a stable hash of the
@@ -839,7 +851,7 @@ instantiation. Instantiation is a typechecker concern only — see §3.3 and §7
 
 | Declaration | Exportable? | Notes |
 |---|---|---|
-| `defn`, `defrec`, `variant` | yes, with `pub` | The module's interface |
+| `let`, `record`, `type` | yes, with `pub` | The module's interface |
 | `alias` | yes, with `pub` | See below |
 | `extern` | **no** | C symbols are an implementation detail; wrap them |
 | Derived functions (`show`, `=`, `compare`, `dump`) | **n/a — always internal** | Compiler-generated, not module API; always linkable so they work across modules |
@@ -897,27 +909,27 @@ The set is **six operations**. Membership is decided by needing either the
 a per-argument showable check). Neither class can be reified honestly in the
 language.
 
-```lisp
-(defn (show    [a]) (v: a) -> Str              ; requires showable a  (§2.12)
-(defn  print        (a: …) -> Unit             ; variadic; see below
-(defn  println      (a: …) -> Unit             ; print, then one 0x0a
-(defn (=       [a]) (x: a) (y: a) -> Bool      ; total (§2.12); identity for Ref/Fn/buffers
-(defn (compare [a]) (x: a) (y: a) -> Int       ; requires orderable a; <0, 0, >0
-(defn (dump    [a]) (v: a) -> Unit             ; loose debug text, fd 2 only (§2.16); no predicate
+```
+let show[a](v: a) -> Str          ; requires showable a  (§2.12)
+let print(a: …) -> Unit           ; variadic; see below
+let println(a: …) -> Unit         ; print, then one 0x0a
+let eq[a](x: a, y: a) -> Bool     ; written ==; total (§2.12); identity for Ref/Fn/buffers
+let compare[a](x: a, y: a) -> Int ; requires orderable a; <0, 0, >0
+let dump[a](v: a) -> Unit         ; loose debug text, fd 2 only (§2.16); no predicate
 ```
 
 **`print` and `println`.** Zero or more arguments, left to right, written to
 fd 1 as **raw bytes** — no automatic quoting, and `print` adds **no** newline:
 
-- a `Str` argument is emitted **as its bytes** (so `(print "hi")` writes `hi`);
-- any other argument must be **showable** (§2.12); the bytes of `(show a)` are
-  written instead (so `(print 42)` writes `42`, and `(print "x=" 1)` writes `x=1`).
+- a `Str` argument is emitted **as its bytes** (so `print("hi")` writes `hi`);
+- any other argument must be **showable** (§2.12); the bytes of `show(a)` are
+  written instead (so `print(42)` writes `42`, and `print("x=", 1)` writes `x=1`).
 
-`(println a…)` is identical, then one `\n` (`0x0a`). `(println)` alone writes
+`println(a, …)` is identical, then one `\n` (`0x0a`). `println()` alone writes
 just that newline. Both return `Unit`.
 
-`show` itself is unchanged: `(show "hi")` is still the quoted spelling `"hi"`.
-Use `(print (show s))` when the quoted form is what should reach stdout.
+`show` itself is unchanged: `show("hi")` is still the quoted spelling `"hi"`.
+Use `print(show(s))` when the quoted form is what should reach stdout.
 
 `show`, `=`, `compare` and `dump` are **derived per type**: records
 field-by-field in declaration order, variants by tag then payload, lists in index
@@ -948,37 +960,37 @@ These need either in-place mutation or an opaque representation, so they cannot
 be written in Menard at acceptable cost. They are **declared** to the typer as
 built-in nominal types with fixed operations, and implemented in the runtime:
 
-```lisp
+```
 ; Str and Char — byte-level and scalar-level access (§2.3)
-(str-byte-length) (s: Str) -> Int
-(str-byte)        (s: Str) (i: Int) -> Int          ; 0..255
-(str-slice)       (s: Str) (start: Int) (len: Int) -> Str
-(str-concat)      (a: Str) (b: Str) -> Str
-(char->str)       (c: Char) -> Str                  ; total; implemented
-(str-chars)       (s: Str) -> (Result (List Char) Int)  ; not in this version (§1.4)
+str-byte-length(s: Str) -> Int
+str-byte(s: Str, i: Int) -> Int                 ; 0..255
+str-slice(s: Str, start: Int, len: Int) -> Str
+str-concat(a: Str, b: Str) -> Str
+char->str(c: Char) -> Str                       ; total; implemented
+str-chars(s: Str) -> Result (List Char) Int     ; not in this version (§1.4)
 
 ; Arr — specified, not in this version (§1.4)
-(arr-new)    [a]    (n: Int) (v: a) -> (Arr a n)
-(arr-length) [a n]  (xs: (Arr a n)) -> Int
-(arr-nth)    [a n]  (xs: (Arr a n)) (i: Int) -> (Maybe a)
+arr-new[a](n: Int, v: a) -> Arr a n
+arr-length[a, n](xs: Arr a n) -> Int
+arr-nth[a, n](xs: Arr a n, i: Int) -> Maybe a
 
 ; Map — persistent, value semantics, keys orderable (§2.3)
-(map-new)     [k v] () -> (Map k v)
-(map-get)     [k v] (m: (Map k v)) (k2: k) -> (Maybe v)
-(map-set)     [k v] (m: (Map k v)) (k2: k) (v2: v) -> (Map k v)
-(map-has)     [k v] (m: (Map k v)) (k2: k) -> Bool
-(map-size)    [k v] (m: (Map k v)) -> Int
-(map-keys)    [k v] (m: (Map k v)) -> (List k)          ; interpreter and typers only; no native runtime (§1.4)
-(map-entries) [k v] (m: (Map k v)) -> (List k) (List v) ; not in this version (§1.4)
+map-new[k, v]() -> Map k v
+map-get[k, v](m: Map k v, k2: k) -> Maybe v
+map-set[k, v](m: Map k v, k2: k, v2: v) -> Map k v
+map-has[k, v](m: Map k v, k2: k) -> Bool
+map-size[k, v](m: Map k v) -> Int
+map-keys[k, v](m: Map k v) -> List k            ; interpreter and typers only; no native runtime (§1.4)
+map-entries[k, v](m: Map k v) -> List k, List v ; not in this version (§1.4)
 
 ; StringBuffer — a reference type with in-place append (§2.3)
-(sb-new)          () -> StringBuffer
-(sb-append!)      (sb: StringBuffer) (s: Str) -> Unit      ; ! — visible mutation
-(sb-append-byte!) (sb: StringBuffer) (b: Int) -> Unit      ; ! — 0..255
-(sb-length)       (sb: StringBuffer) -> Int                ; bytes
-(sb-clear!)       (sb: StringBuffer) -> Unit               ; ! — visible mutation
-(sb-to-str)       (sb: StringBuffer) -> Str                ; non-destructive, cached
-(sb-take-str!)    (sb: StringBuffer) -> Str                ; ! — transfers storage; buffer becomes empty
+sb-new() -> StringBuffer
+sb-append!(sb: StringBuffer, s: Str) -> Unit       ; ! — visible mutation
+sb-append-byte!(sb: StringBuffer, b: Int) -> Unit  ; ! — 0..255
+sb-length(sb: StringBuffer) -> Int                 ; bytes
+sb-clear!(sb: StringBuffer) -> Unit                ; ! — visible mutation
+sb-to-str(sb: StringBuffer) -> Str                 ; non-destructive, cached
+sb-take-str!(sb: StringBuffer) -> Str             ; ! — transfers storage; buffer becomes empty
 ```
 
 **Note which of these carry `!`,** because it is the cleanest illustration of the
@@ -1054,8 +1066,8 @@ the same verdict here.
 - **Not showable, not orderable, equatable by identity** (§2.12). A mutable
   value has no stable spelling, so showing one is banned; and that ban is a
   compile error, which is what keeps a buffer out of emitted bytes (§2.11.I).
-  Its contents remain inspectable while debugging: `(dump sb)` and
-  `(sb-to-str sb)`, §2.16.
+  Its contents remain inspectable while debugging: `dump(sb)` and
+  `sb-to-str(sb)`, §2.16.
 
 **Why not a general `MutBytes` instead** — a mutable byte array as the built-in,
 with `StringBuffer`, growth and `to-str` all in the prelude on top? It is a
@@ -1100,29 +1112,29 @@ the same name in three modules; a program imports one of them.
 `compare` if a Menard-level comparator is wanted internally, but there is no
 caller-supplied predicate anywhere in an output path (§2.11.O).
 
-```lisp
+```
 ; expressible, so a library function rather than a built-in. Carries ! because it mutates its argument.
-(defn (sb-append-show! [a]) (sb: StringBuffer) (v: a) -> Unit
-  (sb-append! sb (show v)))                ; requires showable a
+let sb-append-show![a](sb: StringBuffer, v: a) -> Unit =
+  sb-append!(sb, show(v))                ; requires showable a
 ```
 
 Two more library functions earn a mention because §2.15 depends on them:
 
-```lisp
-;; Specified, not in this version (§1.4).
-;; The driver's own search in src/mn.mnd is not this function.
-(defn (find-on-path) (name: Str) -> (Maybe Str)
-  ... reads (getenv "PATH") and probes candidate paths ...)
+```
+; Specified, not in this version (§1.4).
+; The driver's own search in src/mn.mnd is not this function.
+let find-on-path(name: Str) -> Maybe Str =
+  ... reads getenv("PATH") and probes candidate paths ...
 
-;; std/proc. A process status as an exit code, folding signal death the way a shell does.
-(defn (status->exit-code) (s: SpawnStatus) -> Int
-  (match s
-    (Exited n)    n
-    (Signalled n) (+ 128 n)))
+; std/proc. A process status as an exit code, folding signal death the way a shell does.
+let status-exit-code(s: SpawnStatus) -> Int =
+  match (s)
+    | Exited(n) -> n
+    | Signalled(n) -> 128 + n
 ```
 
 Neither carries a `!`: `find-on-path` reads the environment and returns a value
-without changing anything a caller holds, and `status->exit-code` is pure.
+without changing anything a caller holds, and `status-exit-code` is pure.
 `find-on-path` is the honest form of a rule this specification holds elsewhere:
 the ambient lookup lives **in the program** where it can be read, tested and
 diffed — not inside a runtime primitive where it is invisible.
@@ -1130,8 +1142,8 @@ diffed — not inside a runtime primitive where it is invisible.
 #### 2.8.4 Instantiation and the derive engine
 
 **Instantiation.** "Declared, not inferred" removes *inference*. It does not
-remove instantiation: to type `(map f xs)` where
-`map : (Fn (Fn (a) -> b)) -> (List a) -> (List b)`, the checker must solve for
+remove instantiation: to type `map(f, xs)` where
+`map : ((a) -> b) -> (List a) -> List b`, the checker must solve for
 `a` and `b` at the use site. This is unification of a declared scheme against
 argument types — finite, local, and needing no generalization step. Crucially it
 is a **typer-only** cost: the backend compiles each polymorphic body **once**
@@ -1150,8 +1162,8 @@ has the runtime value in hand, and walks it — but its value-directed `show`, `
 the two must agree byte for byte. Two consequences:
 
 - The **showable**, **orderable** and **equatable** predicates (§2.12) are
-  checked at *instantiation sites*: `(Tree Int)` may be showable while
-  `(Tree (Ref Int))` is not. `dump` has **no predicate** (§2.16).
+  checked at *instantiation sites*: `Tree Int` may be showable while
+  `Tree (Ref Int)` is not. `dump` has **no predicate** (§2.16).
 - Derived functions are generated code, and generated code may be specialised
   per instantiation for free — they call `show_Int` directly rather than routing
   through a runtime type check. This is where the small per-instantiation code
@@ -1191,10 +1203,9 @@ Consequences, all accepted:
 
 - **The special-form list (§2.5) is the extension mechanism.** Adding sugar
   means changing the interpreter and the compiler, and re-bootstrapping.
-- **Homoiconicity is absent.** S-expressions are retained because they give a
-  cheap, unambiguous reader and a trivial printer — not for code-as-data
-  manipulation. Nothing in the design depends on quoted code. `quote` survives
-  only for data literals.
+- **Homoiconicity is absent.** The surface is a closed concrete syntax with a
+  small reader — not code-as-data. Nothing in the design depends on quoted
+  code. `quote` survives only for data literals (`'red`).
 - **The prelude cannot add syntax**, so library code is more repetitive (§2.8.3).
 - **Diagnostics are generic.** A fixed form set funnels every error through the
   same machinery; there is no macro layer in which to give a construct a bespoke
@@ -1701,32 +1712,32 @@ types, and `write` / `exit` / `read-file` exist only by importing the module
 that publishes them. The interpreter still implements the `mn_*` symbols behind
 the wrappers.
 
-```lisp
+```
 ; std/sys
-(exit)      (code: Int) -> Unit
-(arg-count) () -> Int
-(arg)       (i: Int) -> Str
-(getenv)    (name: Str) -> (Maybe Str)
+exit(code: Int) -> Unit
+arg-count() -> Int
+arg(i: Int) -> Str
+getenv(name: Str) -> Maybe Str
 
 ; std/io — named streams, not the raw descriptor numbers
-(pub let stdin 0)
-(pub let stdout 1)
-(pub let stderr 2)
-(write)      (fd: Int) (s: Str) -> (Result Unit IoError)   ; raw bytes to any fd
-(read-file)  (path: Str) -> (Result Str IoError)
-(write-file) (path: Str) (data: Str) -> (Result Unit IoError)
+pub let stdin = 0
+pub let stdout = 1
+pub let stderr = 2
+write(fd: Int, s: Str) -> Result Unit IoError          ; raw bytes to any fd
+read-file(path: Str) -> Result Str IoError
+write-file(path: Str, data: Str) -> Result Unit IoError
 ```
 
 **Tier 1 — the utility surface.**
 
-```lisp
-(getenv)      (name: Str) -> (Maybe Str)                  ; §2.11.B: may not reach output
-(read-stdin)  () -> (Result Str IoError)
-(list-dir)    (path: Str) -> (Result (List Str) IoError)  ; canonical order (§2.11.O)
-(exists)      (path: Str) -> Bool
-(append-file) (path: Str) (data: Str) -> (Result Unit IoError)
-(remove)      (path: Str) -> (Result Unit IoError)
-(rename)      (from: Str) (to: Str) -> (Result Unit IoError)
+```
+getenv(name: Str) -> Maybe Str                         ; §2.11.B: may not reach output
+read-stdin() -> Result Str IoError
+list-dir(path: Str) -> Result (List Str) IoError       ; canonical order (§2.11.O)
+exists(path: Str) -> Bool
+append-file(path: Str, data: Str) -> Result Unit IoError
+remove(path: Str) -> Result Unit IoError
+rename(from: Str, to: Str) -> Result Unit IoError
 ```
 
 **Tier 1½ — process spawning.** Two functions, specified in the next
@@ -1754,7 +1765,7 @@ The distinction that matters is not *whether* a child process starts. It is
 | Form | The caller writes | Verdict |
 |---|---|---|
 | Shell string | `"cc -O2 -o out out.bc"` | **Refused, permanently** |
-| **argv vector** | `(list cc "-O2" "-o" out ir)` | **Admitted** |
+| **argv vector** | `["cc", "-O2", "-o", out, ir]` | **Admitted** |
 
 A shell string is unbounded ambient state in one string: the shell does word
 splitting, quoting, globbing, variable expansion, command substitution and `PATH`
@@ -1765,25 +1776,33 @@ for a build it is *the safer design*, because the argument list is data the
 compiler can see, type-check, print and diff. The strongest argument against
 exec-ing is an argument against the **string** form.
 
-```lisp
+```
 ; std/proc
-(spawn)         (argv: (List Str)) -> (Result SpawnStatus SpawnError)
-(spawn-capture) (argv: (List Str)) (stdin: Str) -> (Result SpawnOutput SpawnError)
+spawn(argv: List Str) -> Result SpawnStatus SpawnError
+spawn-capture(argv: List Str, stdin: Str) -> Result SpawnOutput SpawnError
 
-(variant SpawnStatus
-  (Exited Int))       ; the child's own exit code, 0..255 on POSIX
-  (Signalled Int))    ; v1 reports signal death; it never acts on it
+type SpawnStatus =
+  | Exited(Int)       ; the child's own exit code, 0..255 on POSIX
+  | Signalled(Int)    ; v1 reports signal death; it never acts on it
 
-(defrec SpawnOutput (status: SpawnStatus) (stdout: Str) (stderr: Str))
+record SpawnOutput {
+  status: SpawnStatus
+  stdout: Str
+  stderr: Str
+}
 
-(variant SpawnError
-  (NotFound) (NotExecutable) (Permission)
-  (InvalidArgument) (TooManyArguments) (Unsupported))
+type SpawnError =
+  | NotFound
+  | NotExecutable
+  | Permission
+  | InvalidArgument
+  | TooManyArguments
+  | Unsupported
 ```
 
 Two forms, and that is the whole surface: one that lets the child use our stdio,
 one that pipes it and feeds it a `Str` on stdin. Everything a build needs is
-here; everything else is v2. Note that `(NotFound)` and `(Permission)` are
+here; everything else is v2. Note that `NotFound` and `Permission` are
 nullary, so they are static singletons (§2.2.1) — the child's failure path
 allocates nothing.
 
@@ -1825,7 +1844,7 @@ rest are the ones that keep this from becoming a process-control library.
    different: a build that treats `SIGSEGV` as "exit 11" reports a crash as a
    status. The shell's `128 + n` folding is **not** adopted by the primitive; a
    driver that wants that convention applies it itself, in Menard, where it is
-   visible (`status->exit-code`, §2.8.3). `(exit)` takes its code **truncated to
+   visible (`status-exit-code`, §2.8.3). `exit` takes its code **truncated to
    8 bits**, identically in the runtime and the interpreter.
 7. **No `fork`.** This is a garbage-collected runtime, and `fork` copies the heap
    *and the collector's and allocator's state* into the child: a half-filled
@@ -1897,7 +1916,7 @@ Its rules, all of which fall out of the subsections above:
   default is a path, not a name, and `mn --print-toolchain` prints what it will
   use — which is the auditability rule 2 exists to make possible.
 - **Intermediates go beside the output, never in `TMPDIR`.** `out.bc` and the
-  linker's output are built at temporary paths next to `-o`, then `(rename)`d
+  linker's output are built at temporary paths next to `-o`, then `rename`d
   into place. `rename` is atomic, so an interrupted or failed build **never
   leaves a stale artifact** — which is what makes it safe to interrupt
   `make bootstrap`, and what stops a later gate run from comparing a half-written
@@ -1905,7 +1924,7 @@ Its rules, all of which fall out of the subsections above:
 - **`mn emit` spawns nothing**, so no child can inherit the descriptor carrying
   the artifact.
 - **`mn run` maps the child's status to its own exit code** via
-  `(status->exit-code)` (§2.8.3), and then `(exit)`s with it. `Signalled n`
+  `status-exit-code` (§2.8.3), and then `exit`s with it. `Signalled n`
   becomes `128 + n` — the shell convention, adopted *at the driver layer only*,
   in a named prelude function, and never in the primitive.
 - **The driver is inside the coupled surface.** If the gate's artifacts are
@@ -1916,10 +1935,16 @@ Its rules, all of which fall out of the subsections above:
 
 #### `IoError`: a closed Menard variant, never `strerror`
 
-```lisp
-(variant IoError
-  (NotFound) (Permission) (Exists) (IsADirectory) (NotADirectory)
-  (InvalidPath) (TooLarge) (Other Int))     ; Int is a Menard code, never errno
+```
+type IoError =
+  | NotFound
+  | Permission
+  | Exists
+  | IsADirectory
+  | NotADirectory
+  | InvalidPath
+  | TooLarge
+  | Other(Int)     ; Int is a Menard code, never errno
 ```
 
 Two rules, both load-bearing:
@@ -1933,17 +1958,17 @@ Two rules, both load-bearing:
   *same* case for the same failure. Interrupted reads are retried rather than
   surfaced; partial writes are looped. Neither host's detail may reach behaviour.
 
-The six nullary cases are static singletons (§2.2.1); `(Other n)` is not, since
+The six nullary cases are static singletons (§2.2.1); `Other(n)` is not, since
 it carries a code.
 
 #### Six rules
 
 1. **`print` / `println` emit; `write` targets a fd; `show` spells.** A `Str`
    passed to `print` or `println` is written as **raw bytes** (no quotes). Any
-   other argument must be showable and is emitted as the bytes of `(show a)`.
+   other argument must be showable and is emitted as the bytes of `show(a)`.
    Neither form adds a newline except `println`, which appends one `0x0a`.
    `write` remains the host-seam primitive for raw bytes to an **arbitrary** fd
-   (so IR goes out with `(write stdout ir)`, not through `show`). `show` alone never
+   (so IR goes out with `write(stdout, ir)`, not through `show`). `show` alone never
    touches a stream — it only builds the unique spelling (§2.13).
 2. **stdout and stderr are byte streams.** No newline translation, no encoding
    conversion, no locale — otherwise the gate breaks across platforms. Files are
@@ -1991,8 +2016,8 @@ operation rather than a weakened `show`.
 
 #### The operation
 
-```lisp
-(defn (dump [a]) (v: a) -> Unit    ; loose structural text to fd 2 (stderr)
+```
+let dump[a](v: a) -> Unit    ; loose structural text to fd 2 (stderr)
 ```
 
 - **Compiler-known intrinsic** (§2.8.1), because it must inspect values the type
@@ -2001,8 +2026,8 @@ operation rather than a weakened `show`.
 - **It is the same traversal as `show`, with a loose policy.** One derive engine,
   one memoisation table, one termination argument; the policy differs. So the cost
   is small (§7), and the two printers cannot drift in the parts they share.
-- **No predicate.** Any type is dumpable, including `(Tree (Ref Int))` and
-  `(Fn …)`. There is nothing to check because nothing is promised.
+- **No predicate.** Any type is dumpable, including `Tree (Ref Int)` and
+  function types. There is nothing to check because nothing is promised.
 - **No `!`,** under the rule in §2.15: it touches a stream, which is not a value
   you hold, so it is not mutation.
 
@@ -2956,7 +2981,7 @@ The failure modes this design is most exposed to, and what holds each one off.
 | **Static pool**: literal collection, dedup by bytes, canonical order, descriptors | Menard | 60 |
 | Driver, CLI, diagnostics (incl. the display view, §2.3) | Menard | 350 |
 | `mn`: emit / check / build / run, argv construction, temp + rename (§2.15) | Menard | 350 |
-| Prelude: list ops, strings, `parse`, combinators, `find-on-path`, `status->exit-code` | Menard | 1,560 |
+| Prelude: list ops, strings, `parse`, combinators, `find-on-path`, `status-exit-code` | Menard | 1,560 |
 | Standard library wrappers: `sys`, `io`, `fs`, `proc`, `IoError`/`SpawnError` mapping, retry | Menard | 430 |
 | Runtime: allocator, GC, shadow stack, interning | C11 | 1,220 |
 | Runtime: collector, layout-kind + location scanning, heap-verify (incl. the no-partial-publication assertion) | C11 | 570 |

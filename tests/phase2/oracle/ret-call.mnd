@@ -5,6 +5,8 @@
 ; parameter — not a compile-time inlined `ret i32 42`. See
 ; `tests/phase2/oracle.test.ts`.
 
-(defn answer (n: Int) -> Int (+ n 2))
+let answer(n: Int) -> Int =
+  n + 2
 
-(defn main -> Int (answer 40))
+let main() -> Int =
+  answer(40)

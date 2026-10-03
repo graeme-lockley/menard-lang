@@ -1,2 +1,2 @@
-(defn bad (xs: Int ...) -> Int
-  xs)
+let bad(...xs: Int) -> Int =
+  xs

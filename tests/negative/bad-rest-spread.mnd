@@ -1,5 +1,5 @@
-(defn id (n: Int) -> Int
-  n)
+let id(n: Int) -> Int =
+  n
 
-(defn use (n: Int) -> Int
-  (id ... n))
+let use(n: Int) -> Int =
+  id(...n)

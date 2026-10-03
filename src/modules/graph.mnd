@@ -19,869 +19,965 @@
 ; `(defn main -> Int …)` that calls those inits in dependency order and then
 ; the entry module's mangled main. That bootstrap is the only C `main`.
 
-(import "../reader/ast.mnd")
-(import "../reader/read.mnd")
-(import "../reader/casing.mnd")
-(import "../desugar/desugar.mnd")
-(import "../util/result.mnd")
-(import std/fs)
-(import std/io)
-(import std/list)
-(import std/proc)
-(import std/string)
-(import std/sys)
+import "../reader/ast.mnd"
+
+import "../reader/read.mnd"
+
+import "../reader/casing.mnd"
+
+import "../desugar/desugar.mnd"
+
+import "../util/result.mnd"
+
+import std/fs
+
+import std/io
+
+import std/list
+
+import std/proc
+
+import std/string
+
+import std/sys
 
 ; Re-export shim — see `emit/bitcode.mnd` / `reader/casing.mnd`.
-(pub alias Ast Ast)
+pub alias Ast = Ast
 
 ; Zero-width on purpose. `lower.mnd` skips panic frames for a call with no
 ; source extent, so these bootstrap calls do not show up as `file:1`.
-(defn dummy-span -> Span (Span 0 0 0 1))
+let dummy-span() -> Span =
+  Span(0, 0, 0, 1)
 
-(pub defrec Flat (forms: (List Ast)) (paths: (List Str)))
+pub record Flat {
+  forms: List Ast
+  paths: List Str
+}
 
 ; `present` is false when the entry module has no `main`. `unit-ret` means
 ; that `main` is declared `-> Unit`, so the bootstrap returns 0 after calling it.
-(defrec EntryMain (sym: Str) (unit-ret: Bool) (present: Bool))
+record EntryMain {
+  sym: Str
+  unit-ret: Bool
+  present: Bool
+}
 
-(defn snoc-str (xs: (List Str)) (s: Str) -> (List Str)
-  (match xs
-    [] [s]
-    (Cons h t) (Cons h (snoc-str t s))))
+let snoc-str(xs: List Str, s: Str) -> List Str =
+  match (xs)
+    | [] -> [s]
+    | Cons(h, t) -> Cons(h, snoc-str(t, s))
 
-(defn reverse-ints (xs: (List Int)) (acc: (List Int)) -> (List Int)
-  (match xs [] acc (Cons x rest) (reverse-ints rest (Cons x acc))))
+let reverse-ints(xs: List Int, acc: List Int) -> List Int =
+  match (xs)
+    | [] -> acc
+    | Cons(x, rest) -> reverse-ints(rest, Cons(x, acc))
 
 ; Byte offset of each line, line 1 at 0. Newline is byte 10.
 ; A call per byte overflows the C stack on `lower.mnd` (~140KB). `recur`
 ; is a jump, so the scan stays one frame.
-(defn collect-line-starts (src: Str) (i: Int) (n: Int) (acc: (List Int)) -> (List Int)
-  (loop ((j i) (out acc))
-    (if (>= j n) out
-      (if (= (str-byte src j) 10)
-        (recur (+ j 1) (Cons (+ j 1) out))
-        (recur (+ j 1) out)))))
+let collect-line-starts(src: Str, i: Int, n: Int, acc: List Int) -> List Int =
+  loop (j = i, out = acc)
+    if j >= n -> out
+     | str-byte(src, j) == 10 -> recur(j + 1, Cons(j + 1, out))
+     | else -> recur(j + 1, out)
 
-(defn line-starts (src: Str) -> (List Int)
-  (reverse-ints (collect-line-starts src 0 (str-byte-length src) [0]) []))
+let line-starts(src: Str) -> List Int =
+  reverse-ints(collect-line-starts(src, 0, str-byte-length(src), [0]), [])
 
 ; Index → offset, so a span's line is a binary search instead of a scan
 ; from the first line. One scan per AST node was quadratic in a file
 ; the size of `lower.mnd`.
-(defn index-line-starts (starts: (List Int)) (i: Int) (m: (Map Int Int)) -> (Map Int Int)
-  (match starts
-    [] m
-    (Cons s rest) (index-line-starts rest (+ i 1) (map-set m i s))))
+let index-line-starts(starts: List Int, i: Int, m: Map Int Int) -> Map Int Int =
+  match (starts)
+    | [] -> m
+    | Cons(s, rest) -> index-line-starts(rest, i + 1, map-set(m, i, s))
 
-(defn line-start-count (starts: (List Int)) -> Int
-  (match starts
-    [] 0
-    (Cons _ rest) (+ 1 (line-start-count rest))))
+let line-start-count(starts: List Int) -> Int =
+  match (starts)
+    | [] -> 0
+    | Cons(_, rest) -> 1 + line-start-count(rest)
 
 ; Smallest index whose start is past `offset`: the count of starts at or
 ; before it. That is the 1-based line, since index 0 is byte 0.
-(defn line-search (m: (Map Int Int)) (lo: Int) (hi: Int) (offset: Int) -> Int
-  (if (>= lo hi) lo
-    (line-search-mid m lo hi offset (/ (+ lo hi) 2))))
+let line-search(m: Map Int Int, lo: Int, hi: Int, offset: Int) -> Int =
+  if lo >= hi -> lo
+   | else -> line-search-mid(m, lo, hi, offset, (lo + hi) / 2)
 
-(defn line-search-mid (m: (Map Int Int)) (lo: Int) (hi: Int) (offset: Int) (mid: Int) -> Int
-  (match (map-get m mid)
-    (None) lo
-    (Some s)
-      (if (> s offset)
-        (line-search m lo mid offset)
-        (line-search m (+ mid 1) hi offset))))
+let line-search-mid(m: Map Int Int, lo: Int, hi: Int, offset: Int, mid: Int) -> Int =
+  match (map-get(m, mid))
+    | None -> lo
+    | Some(s) ->
+      if s > offset -> line-search(m, lo, mid, offset)
+       | else -> line-search(m, mid + 1, hi, offset)
 
-(defn span-at (sp: Span) (origin: Int) (m: (Map Int Int)) (n: Int) -> Span
-  (let line (line-search m 0 n (span-start sp)))
-  (Span (span-start sp) (span-end sp) origin (if (< line 1) 1 line)))
+let span-at(sp: Span, origin: Int, m: Map Int Int, n: Int) -> Span {
+  let line = line-search(m, 0, n, span-start(sp))
+  Span(
+    span-start(sp),
+    span-end(sp),
+    origin,
+    if line < 1 -> 1
+     | else -> line
+  )
+}
 
-(defn stamp-forms (forms: (List Ast)) (src: Str) (origin: Int) -> (List Ast)
-  (do
-    (let starts (line-starts src))
-    (stamp-form-list forms origin (index-line-starts starts 0 (map-new)) (line-start-count starts))))
+let stamp-forms(forms: List Ast, src: Str, origin: Int) -> List Ast {
+  let starts = line-starts(src)
+  stamp-form-list(forms, origin, index-line-starts(starts, 0, map-new()), line-start-count(starts))
+}
 
-(defn stamp-form-list (forms: (List Ast)) (origin: Int) (m: (Map Int Int)) (n: Int) -> (List Ast)
-  (match forms
-    [] []
-    (Cons a rest) (Cons (stamp-ast a origin m n) (stamp-form-list rest origin m n))))
+let stamp-form-list(forms: List Ast, origin: Int, m: Map Int Int, n: Int) -> List Ast =
+  match (forms)
+    | [] -> []
+    | Cons(a, rest) -> Cons(stamp-ast(a, origin, m, n), stamp-form-list(rest, origin, m, n))
 
-(defn stamp-ast (a: Ast) (origin: Int) (m: (Map Int Int)) (n: Int) -> Ast
-  (match a
-    (ParenNode xs sp) (ParenNode (stamp-form-list xs origin m n) (span-at sp origin m n))
-    (BracketNode xs sp) (BracketNode (stamp-form-list xs origin m n) (span-at sp origin m n))
-    (SymNode nsp sp) (SymNode nsp (span-at sp origin m n))
-    (IntNode k sp) (IntNode k (span-at sp origin m n))
-    (FloatNode f sp) (FloatNode f (span-at sp origin m n))
-    (StrNode s sp) (StrNode s (span-at sp origin m n))
-    (BoolNode b sp) (BoolNode b (span-at sp origin m n))))
+let stamp-ast(a: Ast, origin: Int, m: Map Int Int, n: Int) -> Ast =
+  match (a)
+    | ParenNode(xs, sp) -> ParenNode(stamp-form-list(xs, origin, m, n), span-at(sp, origin, m, n))
+    | BracketNode(xs, sp) -> BracketNode(stamp-form-list(xs, origin, m, n), span-at(sp, origin, m, n))
+    | SymNode(nsp, sp) -> SymNode(nsp, span-at(sp, origin, m, n))
+    | IntNode(k, sp) -> IntNode(k, span-at(sp, origin, m, n))
+    | FloatNode(f, sp) -> FloatNode(f, span-at(sp, origin, m, n))
+    | StrNode(s, sp) -> StrNode(s, span-at(sp, origin, m, n))
+    | BoolNode(b, sp) -> BoolNode(b, span-at(sp, origin, m, n))
 
-(pub defn stamp-spans (forms: (List Ast)) (src: Str) (origin: Int) -> (List Ast)
-  (stamp-forms forms src origin))
+pub let stamp-spans(forms: List Ast, src: Str, origin: Int) -> List Ast =
+  stamp-forms(forms, src, origin)
 
-(defn sym-str (a: Ast) -> (Maybe Str)
-  (match a (SymNode n _) (Some n) _ (None)))
+let sym-str(a: Ast) -> Maybe Str =
+  match (a)
+    | SymNode(n, _) -> Some(n)
+    | _ -> None()
 
-(defn is-sym (a: Ast) (name: Str) -> Bool
-  (match (sym-str a) (Some n) (= n name) (None) false))
+let is-sym(a: Ast, name: Str) -> Bool =
+  match (sym-str(a))
+    | Some(n) -> n == name
+    | None -> false
 
-(defn append-asts (xs: (List Ast)) (ys: (List Ast)) -> (List Ast)
-  (match xs [] ys (Cons x rest) (Cons x (append-asts rest ys))))
+let append-asts(xs: List Ast, ys: List Ast) -> List Ast =
+  match (xs)
+    | [] -> ys
+    | Cons(x, rest) -> Cons(x, append-asts(rest, ys))
 
-(defn str-byte-at (s: Str) (i: Int) -> Int
-  (str-byte s i))
+let str-byte-at(s: Str, i: Int) -> Int =
+  str-byte(s, i)
 
 ; Last `/` index, or -1 if none.
-(defn last-slash-from (s: Str) (i: Int) (acc: Int) -> Int
-  (if (< i 0)
-    acc
-    (if (= (str-byte-at s i) 47)
-      i
-      (last-slash-from s (- i 1) acc))))
+let last-slash-from(s: Str, i: Int, acc: Int) -> Int =
+  if i < 0 -> acc
+   | str-byte-at(s, i) == 47 -> i
+   | else -> last-slash-from(s, i - 1, acc)
 
-(defn path-dirname (path: Str) -> Str
-  (do
-    (let n (str-byte-length path))
-    (let slash (last-slash-from path (- n 1) -1))
-    (if (< slash 0)
-      "."
-      (if (= slash 0) "/" (str-slice path 0 slash)))))
+let path-dirname(path: Str) -> Str {
+  let n = str-byte-length(path)
+  let slash = last-slash-from(path, n - 1, -1)
+  if slash < 0 -> "."
+   | slash == 0 -> "/"
+   | else -> str-slice(path, 0, slash)
+}
 
-(defn path-is-abs (spec: Str) -> Bool
-  (and (> (str-byte-length spec) 0) (= (str-byte-at spec 0) 47)))
+let path-is-abs(spec: Str) -> Bool =
+  str-byte-length(spec) > 0 && str-byte-at(spec, 0) == 47
 
-(defn path-join (dir: Str) (spec: Str) -> Str
-  (if (path-is-abs spec)
-    spec
-    (if (or (= dir ".") (= dir ""))
-      spec
-      (str-concat dir "/" spec))))
+let path-join(dir: Str, spec: Str) -> Str =
+  if path-is-abs(spec) -> spec
+   | dir == "." || dir == "" -> spec
+   | else -> str-concat(dir, "/", spec)
 
 ; Normalize `.` / `..` segments (no symlink resolution).
-(defn normalize-push (acc: (List Str)) (seg: Str) -> (List Str)
-  (if (= seg ".")
-    acc
-    (if (= seg "..")
-      (match acc [] [] (Cons _ rest) rest)
-      (Cons seg acc))))
+let normalize-push(acc: List Str, seg: Str) -> List Str =
+  if seg == "." -> acc
+   | seg == ".." ->
+    match (acc)
+      | [] -> []
+      | Cons(_, rest) -> rest
+   | else -> Cons(seg, acc)
 
-(defn split-segments-from (s: Str) (i: Int) (n: Int) (start: Int) (acc: (List Str)) -> (List Str)
-  (if (>= i n)
-    (if (= start n) acc (Cons (str-slice s start (- n start)) acc))
-    (if (= (str-byte-at s i) 47)
-      (split-segments-from s (+ i 1) n (+ i 1)
-        (if (= start i) acc (normalize-push acc (str-slice s start (- i start)))))
-      (split-segments-from s (+ i 1) n start acc))))
+let split-segments-from(s: Str, i: Int, n: Int, start: Int, acc: List Str) -> List Str =
+  if i >= n ->
+    if start == n -> acc
+     | else -> Cons(str-slice(s, start, n - start), acc)
+   | str-byte-at(s, i) == 47 ->
+    split-segments-from(
+      s,
+      i + 1,
+      n,
+      i + 1,
+      if start == i -> acc
+       | else -> normalize-push(acc, str-slice(s, start, i - start))
+    )
+   | else -> split-segments-from(s, i + 1, n, start, acc)
 
-(defn join-segments (xs: (List Str)) (abs: Bool) -> Str
-  (match xs
-    [] (if abs "/" ".")
-    (Cons h rest) (join-segments-cons h rest abs)))
+let join-segments(xs: List Str, abs: Bool) -> Str =
+  match (xs)
+    | [] ->
+      if abs -> "/"
+       | else -> "."
+    | Cons(h, rest) -> join-segments-cons(h, rest, abs)
 
-(defn join-segments-cons (h: Str) (rest: (List Str)) (abs: Bool) -> Str
-  (match rest
-    [] (if abs (str-concat "/" h) h)
-    (Cons n more)
-      (str-concat (if abs (str-concat "/" h) h) "/" (join-segments-cons n more false))))
+let join-segments-cons(h: Str, rest: List Str, abs: Bool) -> Str =
+  match (rest)
+    | [] ->
+      if abs -> str-concat("/", h)
+       | else -> h
+    | Cons(n, more) ->
+      str-concat(
+        if abs -> str-concat("/", h)
+         | else -> h,
+        "/",
+        join-segments-cons(n, more, false)
+      )
 
-(defn path-normalize (path: Str) -> Str
-  (do
-    (let abs (path-is-abs path))
-    (let n (str-byte-length path))
-    (let segs-rev (split-segments-from path 0 n 0 []))
-    (let segs (reverse segs-rev))
-    (join-segments segs abs)))
+let path-normalize(path: Str) -> Str {
+  let abs = path-is-abs(path)
+  let n = str-byte-length(path)
+  let segs-rev = split-segments-from(path, 0, n, 0, [])
+  let segs = reverse(segs-rev)
+  join-segments(segs, abs)
+}
 
 ; s without a leading prefix. The caller has already checked the prefix.
-(defn drop-prefix (s: Str) (n: Int) -> Str
-  (str-slice s n (- (str-byte-length s) n)))
+let drop-prefix(s: Str, n: Int) -> Str =
+  str-slice(s, n, str-byte-length(s) - n)
 
 ; Index of byte b at or after i, or -1.
-(defn index-of-byte (s: Str) (b: Int) (i: Int) -> Int
-  (if (>= i (str-byte-length s)) (- 1)
-    (if (= (str-byte s i) b) i
-      (index-of-byte s b (+ i 1)))))
+let index-of-byte(s: Str, b: Int, i: Int) -> Int =
+  if i >= str-byte-length(s) -> -1
+   | str-byte(s, i) == b -> i
+   | else -> index-of-byte(s, b, i + 1)
 
 ; name.mnd when name does not already end in .mnd.
-(defn ensure-mnd (name: Str) -> Str
-  (if (ends-with name ".mnd") name (str-concat name ".mnd")))
+let ensure-mnd(name: Str) -> Str =
+  if ends-with(name, ".mnd") -> name
+   | else -> str-concat(name, ".mnd")
 
 ; `std/list` → `stdlib/list.mnd`, independent of the importing file.
-(defn std-path (spec: Str) -> Str
-  (str-concat "stdlib/" (ensure-mnd (drop-prefix spec 4))))
+let std-path(spec: Str) -> Str =
+  str-concat("stdlib/", ensure-mnd(drop-prefix(spec, 4)))
 
 ; Cache root for github: imports. HOME/.menard/deps, or .menard/deps.
-(defn deps-root -> Str
-  (match (getenv "HOME")
-    (Some h) (if (> (str-byte-length h) 0) (str-concat h "/.menard/deps") ".menard/deps")
-    (None) ".menard/deps"))
+let deps-root() -> Str =
+  match (getenv("HOME"))
+    | Some(h) ->
+      if str-byte-length(h) > 0 -> str-concat(h, "/.menard/deps")
+       | else -> ".menard/deps"
+    | None -> ".menard/deps"
 
 ; `github:owner/repo@version/module` → the cached file, or spec when it
 ; does not parse. module may contain slashes.
-(defn github-cache-path (spec: Str) -> Str
-  (do
-    (let rest (drop-prefix spec 7))
-    (let at (index-of-byte rest 64 0))
-    (if (< at 1) spec
-      (do
-        (let owner-repo (str-slice rest 0 at))
-        (let slash (index-of-byte owner-repo 47 0))
-        (let after (drop-prefix rest (+ at 1)))
-        (let vslash (index-of-byte after 47 0))
-        (if (or (< slash 1) (< vslash 1)) spec
-          (do
-            (let owner (str-slice owner-repo 0 slash))
-            (let repo (drop-prefix owner-repo (+ slash 1)))
-            (let version (str-slice after 0 vslash))
-            (let module (drop-prefix after (+ vslash 1)))
-            (str-concat (deps-root) "/" owner "/" repo "/" version "/" (ensure-mnd module))))))))
+let github-cache-path(spec: Str) -> Str {
+  let rest = drop-prefix(spec, 7)
+  let at = index-of-byte(rest, 64, 0)
+  if at < 1 -> spec
+   | else ->
+    {
+      let owner-repo = str-slice(rest, 0, at)
+      let slash = index-of-byte(owner-repo, 47, 0)
+      let after = drop-prefix(rest, at + 1)
+      let vslash = index-of-byte(after, 47, 0)
+      if slash < 1 || vslash < 1 -> spec
+       | else ->
+        {
+          let owner = str-slice(owner-repo, 0, slash)
+          let repo = drop-prefix(owner-repo, slash + 1)
+          let version = str-slice(after, 0, vslash)
+          let module = drop-prefix(after, vslash + 1)
+          str-concat(deps-root(), "/", owner, "/", repo, "/", version, "/", ensure-mnd(module))
+        }
+    }
+}
 
-(defn resolve-import-path (from-path: Str) (spec: Str) -> Str
-  (if (starts-with spec "std/")
-    (std-path spec)
-    (if (starts-with spec "github:")
-      (github-cache-path spec)
-      (path-normalize (path-join (path-dirname from-path) spec)))))
+let resolve-import-path(from-path: Str, spec: Str) -> Str =
+  if starts-with(spec, "std/") -> std-path(spec)
+   | starts-with(spec, "github:") -> github-cache-path(spec)
+   | else -> path-normalize(path-join(path-dirname(from-path), spec))
 
 ; True when path is inside the github dependency cache.
-(defn in-deps (path: Str) -> Bool
-  (or (starts-with path ".menard/deps")
-      (starts-with path "/.menard/deps")
-      (>= (index-of-from path "/.menard/deps/") 0)))
+let in-deps(path: Str) -> Bool =
+  starts-with(path, ".menard/deps") || starts-with(path, "/.menard/deps") || index-of-from(path, "/.menard/deps/") >= 0
 
-(defn index-of-from (s: Str) (needle: Str) -> Int
-  (index-of-from-at s needle 0))
+let index-of-from(s: Str, needle: Str) -> Int =
+  index-of-from-at(s, needle, 0)
 
-(defn index-of-from-at (s: Str) (needle: Str) (i: Int) -> Int
-  (do
-    (let n (str-byte-length needle))
-    (let sn (str-byte-length s))
-    (if (> (+ i n) sn) (- 1)
-      (if (= (str-slice s i n) needle) i
-        (index-of-from-at s needle (+ i 1))))))
+let index-of-from-at(s: Str, needle: Str, i: Int) -> Int {
+  let n = str-byte-length(needle)
+  let sn = str-byte-length(s)
+  if i + n > sn -> -1
+   | str-slice(s, i, n) == needle -> i
+   | else -> index-of-from-at(s, needle, i + 1)
+}
 
-(defn spawn-ok (st: SpawnStatus) -> Bool
-  (match st (Exited n) (= n 0) (Signalled _) false))
+let spawn-ok(st: SpawnStatus) -> Bool =
+  match (st)
+    | Exited(n) -> n == 0
+    | Signalled(_) -> false
 
 ; owner, repo, and version parsed out of a cache path.
-(defrec DepSpec (owner: Str) (repo: Str) (version: Str))
+record DepSpec {
+  owner: Str
+  repo: Str
+  version: Str
+}
 
 ; The three segments after `/.menard/deps/` or `.menard/deps/`.
-(defn dep-spec-of (path: Str) -> (Maybe DepSpec)
-  (do
-    (let mark "/.menard/deps/")
-    (let rel (if (starts-with path ".menard/deps/") (drop-prefix path 13)
-              (do
-                (let i (index-of-from path mark))
-                (if (< i 0) "" (drop-prefix path (+ i (str-byte-length mark)))))))
-    (let s1 (index-of-byte rel 47 0))
-    (if (< s1 1) (None)
-      (do
-        (let s2 (index-of-byte rel 47 (+ s1 1)))
-        (if (< s2 0) (None)
-          (do
-            (let s3 (index-of-byte rel 47 (+ s2 1)))
-            (if (< s3 0) (None)
-              (Some (DepSpec
-                (str-slice rel 0 s1)
-                (str-slice rel (+ s1 1) (- s2 s1 1))
-                (str-slice rel (+ s2 1) (- s3 s2 1)))))))))))
+let dep-spec-of(path: Str) -> Maybe DepSpec {
+  let mark = "/.menard/deps/"
+  let rel =
+    if starts-with(path, ".menard/deps/") -> drop-prefix(path, 13)
+     | else ->
+      {
+        let i = index-of-from(path, mark)
+        if i < 0 -> ""
+         | else -> drop-prefix(path, i + str-byte-length(mark))
+      }
+  let s1 = index-of-byte(rel, 47, 0)
+  if s1 < 1 -> None()
+   | else ->
+    {
+      let s2 = index-of-byte(rel, 47, s1 + 1)
+      if s2 < 0 -> None()
+       | else ->
+        {
+          let s3 = index-of-byte(rel, 47, s2 + 1)
+          if s3 < 0 -> None()
+           | else -> Some(DepSpec(str-slice(rel, 0, s1), str-slice(rel, s1 + 1, s2 - s1 - 1), str-slice(rel, s2 + 1, s3 - s2 - 1)))
+        }
+    }
+}
 
 ; Download the tag archive into the cache directory when the module file
 ; is not already there. Tests seed the cache and do not reach this.
-(defn fetch-dep (spec: DepSpec) -> (Result Unit Str)
-  (match spec
-    (DepSpec owner repo version)
-      (do
-        (let dir (str-concat (deps-root) "/" owner "/" repo "/" version))
-        (if (ensure-dir dir)
-          (do
-            (let tgz (str-concat dir "/.src.tgz"))
-            (let url
-              (str-concat "https://codeload.github.com/"
-                owner "/" repo "/tar.gz/refs/tags/" version))
-            (match (spawn ["/usr/bin/curl" "-fsSL" "-o" tgz url])
-              (Err _) (Err (str-concat "cannot fetch " url))
-              (Ok st)
-                (if (spawn-ok st)
-                  (match (spawn ["/usr/bin/tar" "-xzf" tgz "-C" dir "--strip-components=1"])
-                    (Err _) (Err (str-concat "cannot extract " url))
-                    (Ok st2)
-                      (if (spawn-ok st2)
-                        (do (remove tgz) (Ok ()))
-                        (Err (str-concat "cannot extract " url))))
-                  (Err (str-concat "cannot fetch " url)))))
-          (Err (str-concat "cannot create " dir))))))
+let fetch-dep(spec: DepSpec) -> Result Unit Str =
+  match (spec)
+    | DepSpec(owner, repo, version) ->
+      {
+        let dir = str-concat(deps-root(), "/", owner, "/", repo, "/", version)
+        if ensure-dir(dir) ->
+          {
+            let tgz = str-concat(dir, "/.src.tgz")
+            let url = str-concat("https://codeload.github.com/", owner, "/", repo, "/tar.gz/refs/tags/", version)
+            match (spawn(["/usr/bin/curl", "-fsSL", "-o", tgz, url]))
+              | Err(_) -> Err(str-concat("cannot fetch ", url))
+              | Ok(st) ->
+                if spawn-ok(st) ->
+                  match (spawn(["/usr/bin/tar", "-xzf", tgz, "-C", dir, "--strip-components=1"]))
+                    | Err(_) -> Err(str-concat("cannot extract ", url))
+                    | Ok(st2) ->
+                      if spawn-ok(st2) ->
+                        {
+                          remove(tgz)
+                          Ok(())
+                        }
+                       | else -> Err(str-concat("cannot extract ", url))
+                 | else -> Err(str-concat("cannot fetch ", url))
+          }
+         | else -> Err(str-concat("cannot create ", dir))
+      }
 
 ; Make a github cache path exist. Other paths are left for read-file.
-(pub defn ensure-module-file (path: Str) -> (Result Unit Str)
-  (if (exists path) (Ok ())
-    (if (in-deps path)
-      (match (dep-spec-of path)
-        (None) (Err (str-concat "bad dependency path: " path))
-        (Some spec) (fetch-dep spec))
-      (Ok ()))))
+pub let ensure-module-file(path: Str) -> Result Unit Str =
+  if exists(path) -> Ok(())
+   | in-deps(path) ->
+    match (dep-spec-of(path))
+      | None -> Err(str-concat("bad dependency path: ", path))
+      | Some(spec) -> fetch-dep(spec)
+   | else -> Ok(())
 
 ; `owner/repo` and the version, from a github: specifier.
-(defrec GithubVer (key: Str) (version: Str))
+record GithubVer {
+  key: Str
+  version: Str
+}
 
-(defn github-ver (spec: Str) -> (Maybe GithubVer)
-  (if (starts-with spec "github:")
-    (do
-      (let rest (drop-prefix spec 7))
-      (let at (index-of-byte rest 64 0))
-      (if (< at 1) (None)
-        (do
-          (let owner-repo (str-slice rest 0 at))
-          (let after (drop-prefix rest (+ at 1)))
-          (let vslash (index-of-byte after 47 0))
-          (if (< vslash 1) (None)
-            (Some (GithubVer owner-repo (str-slice after 0 vslash)))))))
-    (None)))
+let github-ver(spec: Str) -> Maybe GithubVer =
+  if starts-with(spec, "github:") ->
+    {
+      let rest = drop-prefix(spec, 7)
+      let at = index-of-byte(rest, 64, 0)
+      if at < 1 -> None()
+       | else ->
+        {
+          let owner-repo = str-slice(rest, 0, at)
+          let after = drop-prefix(rest, at + 1)
+          let vslash = index-of-byte(after, 47, 0)
+          if vslash < 1 -> None()
+           | else -> Some(GithubVer(owner-repo, str-slice(after, 0, vslash)))
+        }
+    }
+   | else -> None()
 
 ; Record owner/repo → version. A second version is an error.
-(defn note-version (versions: (Ref (Map Str Str))) (spec: Str) -> (Result Unit Str)
-  (match (github-ver spec)
-    (None) (Ok ())
-    (Some (GithubVer key version))
-      (match (map-get (deref versions) key)
-        (None)
-          (do
-            (set! versions (map-set (deref versions) key version))
-            (Ok ()))
-        (Some prev)
-          (if (= prev version) (Ok ())
-            (Err (str-concat "two versions of " key ": " prev " and " version))))))
+let note-version(versions: Ref (Map Str Str), spec: Str) -> Result Unit Str =
+  match (github-ver(spec))
+    | None -> Ok(())
+    | Some(GithubVer(key, version)) ->
+      match (map-get(deref(versions), key))
+        | None ->
+          {
+            set!(versions, map-set(deref(versions), key, version))
+            Ok(())
+          }
+        | Some(prev) ->
+          if prev == version -> Ok(())
+           | else -> Err(str-concat("two versions of ", key, ": ", prev, " and ", version))
 
-(pub defn note-versions (versions: (Ref (Map Str Str))) (specs: (List Str)) -> (Result Unit Str)
-  (match specs
-    [] (Ok ())
-    (Cons spec rest)
-      (result-bind (note-version versions spec)
-        (fn (_) (note-versions versions rest)))))
+pub let note-versions(versions: Ref (Map Str Str), specs: List Str) -> Result Unit Str =
+  match (specs)
+    | [] -> Ok(())
+    | Cons(spec, rest) -> result-bind(note-version(versions, spec), fn (_) = note-versions(versions, rest))
 
-(defn is-basics-path (path: Str) -> Bool
-  (or (= path "stdlib/basics.mnd") (ends-with path "/stdlib/basics.mnd")))
+let is-basics-path(path: Str) -> Bool =
+  path == "stdlib/basics.mnd" || ends-with(path, "/stdlib/basics.mnd")
 
-(defn is-basics-spec (spec: Str) -> Bool
-  (or (= spec "std/basics") (= spec "std/basics.mnd")))
+let is-basics-spec(spec: Str) -> Bool =
+  spec == "std/basics" || spec == "std/basics.mnd"
 
-(defn specs-have-basics (specs: (List Str)) -> Bool
-  (match specs
-    [] false
-    (Cons s rest) (if (is-basics-spec s) true (specs-have-basics rest))))
+let specs-have-basics(specs: List Str) -> Bool =
+  match (specs)
+    | [] -> false
+    | Cons(s, rest) ->
+      if is-basics-spec(s) -> true
+       | else -> specs-have-basics(rest)
 
 ; Every module except basics itself imports std/basics.
-(pub defn specs-with-basics (path: Str) (specs: (List Str)) -> (List Str)
-  (if (or (is-basics-path path) (specs-have-basics specs))
-    specs
-    (Cons "std/basics" specs)))
+pub let specs-with-basics(path: Str, specs: List Str) -> List Str =
+  if is-basics-path(path) || specs-have-basics(specs) -> specs
+   | else -> Cons("std/basics", specs)
 
-(defn spec-text (spec: Ast) -> (Maybe Str)
-  (match spec
-    (StrNode s _) (Some s)
-    (SymNode s _) (Some s)
-    _ (None)))
+let spec-text(spec: Ast) -> Maybe Str =
+  match (spec)
+    | StrNode(s, _) -> Some(s)
+    | SymNode(s, _) -> Some(s)
+    | _ -> None()
 
-(defn parse-import-spec (form: Ast) -> (Maybe Str)
-  (match form
-    (ParenNode (Cons head rest) sp)
-      (if (is-sym head "pub")
-        (parse-import-spec (ParenNode rest sp))
-        (if (is-sym head "import")
-          (match rest (Cons spec _) (spec-text spec) [] (None))
-          (None)))
-    _ (None)))
+let parse-import-spec(form: Ast) -> Maybe Str =
+  match (form)
+    | ParenNode(Cons(head, rest), sp) ->
+      if is-sym(head, "pub") -> parse-import-spec(ParenNode(rest, sp))
+       | is-sym(head, "import") ->
+        match (rest)
+          | Cons(spec, _) -> spec-text(spec)
+          | [] -> None()
+       | else -> None()
+    | _ -> None()
 
-(defn unwrap-pub-form (form: Ast) -> Ast
-  (match form
-    (ParenNode (Cons head rest) sp)
-      (if (is-sym head "pub")
-        (ParenNode rest sp)
-        form)
-    _ form))
+let unwrap-pub-form(form: Ast) -> Ast =
+  match (form)
+    | ParenNode(Cons(head, rest), sp) ->
+      if is-sym(head, "pub") -> ParenNode(rest, sp)
+       | else -> form
+    | _ -> form
 
-(defn strip-imports-and-pub (forms: (List Ast)) (acc: (List Ast)) -> (List Ast)
-  (match forms
-    [] (reverse acc)
-    (Cons f rest)
-      (match (parse-import-spec f)
-        (Some _) (strip-imports-and-pub rest acc)
-        (None) (strip-imports-and-pub rest (Cons (unwrap-pub-form f) acc)))))
+let strip-imports-and-pub(forms: List Ast, acc: List Ast) -> List Ast =
+  match (forms)
+    | [] -> reverse(acc)
+    | Cons(f, rest) ->
+      match (parse-import-spec(f))
+        | Some(_) -> strip-imports-and-pub(rest, acc)
+        | None -> strip-imports-and-pub(rest, Cons(unwrap-pub-form(f), acc))
 
-(defn collect-import-specs (forms: (List Ast)) (acc: (List Str)) -> (List Str)
-  (match forms
-    [] (reverse acc)
-    (Cons f rest)
-      (match (parse-import-spec f)
-        (Some spec) (collect-import-specs rest (Cons spec acc))
-        (None) (collect-import-specs rest acc))))
+let collect-import-specs(forms: List Ast, acc: List Str) -> List Str =
+  match (forms)
+    | [] -> reverse(acc)
+    | Cons(f, rest) ->
+      match (parse-import-spec(f))
+        | Some(spec) -> collect-import-specs(rest, Cons(spec, acc))
+        | None -> collect-import-specs(rest, acc)
 
 ; ---------------------------------------------------------------------------
 ; Private-symbol uniquification (slice H)
 
-(defn decl-name-of (name-part: Ast) -> (Maybe Str)
-  (match name-part
-    (SymNode n _) (Some n)
-    (ParenNode (Cons n-ast _) _) (sym-str n-ast)
-    _ (None)))
+let decl-name-of(name-part: Ast) -> Maybe Str =
+  match (name-part)
+    | SymNode(n, _) -> Some(n)
+    | ParenNode(Cons(n-ast, _), _) -> sym-str(n-ast)
+    | _ -> None()
 
-(defn push-unique (xs: (List Str)) (x: Str) -> (List Str)
-  (match xs
-    [] [x]
-    (Cons h rest) (if (= h x) xs (Cons h (push-unique rest x)))))
+let push-unique(xs: List Str, x: Str) -> List Str =
+  match (xs)
+    | [] -> [x]
+    | Cons(h, rest) ->
+      if h == x -> xs
+       | else -> Cons(h, push-unique(rest, x))
 
-(defn gather-ctor-names (ctors: (List Ast)) (acc: (List Str)) -> (List Str)
-  (match ctors
-    [] acc
-    (Cons c rest)
-      (match c
-        (ParenNode (Cons cname-ast _) _)
-          (match (sym-str cname-ast)
-            (Some n) (gather-ctor-names rest (push-unique acc n))
-            (None) (gather-ctor-names rest acc))
-        _ (gather-ctor-names rest acc))))
+let gather-ctor-names(ctors: List Ast, acc: List Str) -> List Str =
+  match (ctors)
+    | [] -> acc
+    | Cons(c, rest) ->
+      match (c)
+        | ParenNode(Cons(cname-ast, _), _) ->
+          match (sym-str(cname-ast))
+            | Some(n) -> gather-ctor-names(rest, push-unique(acc, n))
+            | None -> gather-ctor-names(rest, acc)
+        | _ -> gather-ctor-names(rest, acc)
 
-(defn gather-variant-names (name-part: Ast) (ctors: (List Ast)) (acc: (List Str)) -> (List Str)
-  (do
-    (let acc1
-      (match (decl-name-of name-part) (Some n) (push-unique acc n) (None) acc))
-    (gather-ctor-names ctors acc1)))
+let gather-variant-names(name-part: Ast, ctors: List Ast, acc: List Str) -> List Str {
+  let acc1 =
+    match (decl-name-of(name-part))
+      | Some(n) -> push-unique(acc, n)
+      | None -> acc
+  gather-ctor-names(ctors, acc1)
+}
 
-(defn gather-decl-name-list (head: Str) (rest: (List Ast)) (acc: (List Str)) -> (List Str)
-  (cond
-    ((= head "let")
-      (match rest
-        (Cons name-part _) (match (sym-str name-part) (Some n) (push-unique acc n) (None) acc)
-        [] acc))
-    ((= head "defn")
-      (match rest
-        (Cons name-part _) (match (decl-name-of name-part) (Some n) (push-unique acc n) (None) acc)
-        [] acc))
-    ((= head "alias")
-      (match rest
-        (Cons name-part _) (match (sym-str name-part) (Some n) (push-unique acc n) (None) acc)
-        [] acc))
-    ((= head "defrec")
-      (match rest
-        (Cons name-part _) (match (decl-name-of name-part) (Some n) (push-unique acc n) (None) acc)
-        [] acc))
-    ((= head "variant")
-      (match rest
-        (Cons name-part ctors) (gather-variant-names name-part ctors acc)
-        [] acc))
-    (else acc)))
+let gather-decl-name-list(head: Str, rest: List Ast, acc: List Str) -> List Str =
+  if head == "let" ->
+    match (rest)
+      | Cons(name-part, _) ->
+        match (sym-str(name-part))
+          | Some(n) -> push-unique(acc, n)
+          | None -> acc
+      | [] -> acc
+   | head == "defn" ->
+    match (rest)
+      | Cons(name-part, _) ->
+        match (decl-name-of(name-part))
+          | Some(n) -> push-unique(acc, n)
+          | None -> acc
+      | [] -> acc
+   | head == "alias" ->
+    match (rest)
+      | Cons(name-part, _) ->
+        match (sym-str(name-part))
+          | Some(n) -> push-unique(acc, n)
+          | None -> acc
+      | [] -> acc
+   | head == "defrec" ->
+    match (rest)
+      | Cons(name-part, _) ->
+        match (decl-name-of(name-part))
+          | Some(n) -> push-unique(acc, n)
+          | None -> acc
+      | [] -> acc
+   | head == "variant" ->
+    match (rest)
+      | Cons(name-part, ctors) -> gather-variant-names(name-part, ctors, acc)
+      | [] -> acc
+   | else -> acc
 
-(defn gather-form-names (form: Ast) (acc: (List Str)) -> (List Str)
-  (match form
-    (ParenNode (Cons head rest) sp)
-      (if (is-sym head "pub")
-        (gather-form-names (ParenNode rest sp) acc)
-        (if (is-sym head "import")
-          acc
-          (match (sym-str head)
-            (None) acc
-            (Some hn) (gather-decl-name-list hn rest acc))))
-    _ acc))
+let gather-form-names(form: Ast, acc: List Str) -> List Str =
+  match (form)
+    | ParenNode(Cons(head, rest), sp) ->
+      if is-sym(head, "pub") -> gather-form-names(ParenNode(rest, sp), acc)
+       | is-sym(head, "import") -> acc
+       | else ->
+        match (sym-str(head))
+          | None -> acc
+          | Some(hn) -> gather-decl-name-list(hn, rest, acc)
+    | _ -> acc
 
-(defn gather-forms-names (forms: (List Ast)) (acc: (List Str)) -> (List Str)
-  (match forms
-    [] acc
-    (Cons f rest) (gather-forms-names rest (gather-form-names f acc))))
+let gather-forms-names(forms: List Ast, acc: List Str) -> List Str =
+  match (forms)
+    | [] -> acc
+    | Cons(f, rest) -> gather-forms-names(rest, gather-form-names(f, acc))
 
 ; Only names introduced by `(pub …)` forms.
-(defn gather-pub-form-names (form: Ast) (acc: (List Str)) -> (List Str)
-  (match form
-    (ParenNode (Cons head rest) sp)
-      (if (is-sym head "pub")
-        (gather-form-names (ParenNode rest sp) acc)
-        acc)
-    _ acc))
+let gather-pub-form-names(form: Ast, acc: List Str) -> List Str =
+  match (form)
+    | ParenNode(Cons(head, rest), sp) ->
+      if is-sym(head, "pub") -> gather-form-names(ParenNode(rest, sp), acc)
+       | else -> acc
+    | _ -> acc
 
-(defn gather-pub-forms-names (forms: (List Ast)) (acc: (List Str)) -> (List Str)
-  (match forms
-    [] acc
-    (Cons f rest) (gather-pub-forms-names rest (gather-pub-form-names f acc))))
+let gather-pub-forms-names(forms: List Ast, acc: List Str) -> List Str =
+  match (forms)
+    | [] -> acc
+    | Cons(f, rest) -> gather-pub-forms-names(rest, gather-pub-form-names(f, acc))
 
-(defn list-to-bool-map (xs: (List Str)) (acc: (Map Str Bool)) -> (Map Str Bool)
-  (match xs
-    [] acc
-    (Cons n rest) (list-to-bool-map rest (map-set acc n true))))
+let list-to-bool-map(xs: List Str, acc: Map Str Bool) -> Map Str Bool =
+  match (xs)
+    | [] -> acc
+    | Cons(n, rest) -> list-to-bool-map(rest, map-set(acc, n, true))
 
-(defn name-is-pub (pub-names: (Map Str Bool)) (name: Str) -> Bool
-  (match (map-get pub-names name) (Some _) true (None) false))
+let name-is-pub(pub-names: Map Str Bool, name: Str) -> Bool =
+  match (map-get(pub-names, name))
+    | Some(_) -> true
+    | None -> false
 
-(defn module-prefix (mid: Int) -> Str
-  (str-concat "__m" (show mid) "_"))
+let module-prefix(mid: Int) -> Str =
+  str-concat("__m", show(mid), "_")
 
-(defn add-rename (renames: (Map Str Str)) (prefix: Str) (name: Str) -> (Map Str Str)
-  (map-set renames name (str-concat prefix name)))
+let add-rename(renames: Map Str Str, prefix: Str, name: Str) -> Map Str Str =
+  map-set(renames, name, str-concat(prefix, name))
 
 ; Polynomial hash of the path bytes. The modulus keeps every step inside a
 ; 63-bit Int. The same path always yields the same symbol.
-(defn hash-mix (h: Int) (b: Int) -> Int
-  (% (+ (* h 131) b) 2147483647))
+let hash-mix(h: Int, b: Int) -> Int =
+  (h * 131 + b) % 2147483647
 
-(defn hash-bytes (s: Str) (i: Int) (n: Int) (h: Int) -> Int
-  (loop ((j i) (acc h))
-    (if (>= j n) acc
-      (recur (+ j 1) (hash-mix acc (str-byte s j))))))
+let hash-bytes(s: Str, i: Int, n: Int, h: Int) -> Int =
+  loop (j = i, acc = h)
+    if j >= n -> acc
+     | else -> recur(j + 1, hash-mix(acc, str-byte(s, j)))
 
-(defn path-hash (path: Str) -> Int
-  (hash-bytes path 0 (str-byte-length path) 0))
+let path-hash(path: Str) -> Int =
+  hash-bytes(path, 0, str-byte-length(path), 0)
 
-(defn main-symbol (path: Str) -> Str
-  (str-concat "mn_" (show (path-hash path)) "_main"))
+let main-symbol(path: Str) -> Str =
+  str-concat("mn_", show(path-hash(path)), "_main")
 
-(defn init-symbol (path: Str) -> Str
-  (str-concat "mn_" (show (path-hash path)) "_init"))
+let init-symbol(path: Str) -> Str =
+  str-concat("mn_", show(path-hash(path)), "_init")
 
-(defn build-renames-from-list (names: (List Str)) (pub-names: (Map Str Bool)) (prefix: Str) (main-sym: Str) (acc: (Map Str Str)) -> (Map Str Str)
-  (match names
-    [] acc
-    (Cons n rest)
-      (if (= n "main")
-        (build-renames-from-list rest pub-names prefix main-sym (map-set acc n main-sym))
-        (if (name-is-pub pub-names n)
-          (build-renames-from-list rest pub-names prefix main-sym acc)
-          (build-renames-from-list rest pub-names prefix main-sym (add-rename acc prefix n))))))
+let build-renames-from-list(names: List Str, pub-names: Map Str Bool, prefix: Str, main-sym: Str, acc: Map Str Str) -> Map Str Str =
+  match (names)
+    | [] -> acc
+    | Cons(n, rest) ->
+      if n == "main" -> build-renames-from-list(rest, pub-names, prefix, main-sym, map-set(acc, n, main-sym))
+       | name-is-pub(pub-names, n) -> build-renames-from-list(rest, pub-names, prefix, main-sym, acc)
+       | else -> build-renames-from-list(rest, pub-names, prefix, main-sym, add-rename(acc, prefix, n))
 
-(defn build-renames (forms: (List Ast)) (mid: Int) (main-sym: Str) -> (Map Str Str)
-  (do
-    (let pub-list (gather-pub-forms-names forms []))
-    (let all-list (gather-forms-names forms []))
-    (let pub-names (list-to-bool-map pub-list (map-new)))
-    (build-renames-from-list all-list pub-names (module-prefix mid) main-sym (map-new))))
+let build-renames(forms: List Ast, mid: Int, main-sym: Str) -> Map Str Str {
+  let pub-list = gather-pub-forms-names(forms, [])
+  let all-list = gather-forms-names(forms, [])
+  let pub-names = list-to-bool-map(pub-list, map-new())
+  build-renames-from-list(all-list, pub-names, module-prefix(mid), main-sym, map-new())
+}
 
-(defn rename-lookup (renames: (Map Str Str)) (name: Str) -> Str
-  (match (map-get renames name) (Some n) n (None) name))
+let rename-lookup(renames: Map Str Str, name: Str) -> Str =
+  match (map-get(renames, name))
+    | Some(n) -> n
+    | None -> name
 
 ; Leave `(quote …)` bodies untouched (symbols are data, not refs).
-(defn rename-paren (xs: (List Ast)) (sp: Span) (renames: (Map Str Str)) -> Ast
-  (match xs
-    (Cons head rest)
-      (if (is-sym head "quote")
-        (ParenNode xs sp)
-        (ParenNode (rename-ast-list xs renames) sp))
-    [] (ParenNode xs sp)))
+let rename-paren(xs: List Ast, sp: Span, renames: Map Str Str) -> Ast =
+  match (xs)
+    | Cons(head, rest) ->
+      if is-sym(head, "quote") -> ParenNode(xs, sp)
+       | else -> ParenNode(rename-ast-list(xs, renames), sp)
+    | [] -> ParenNode(xs, sp)
 
-(defn rename-ast (a: Ast) (renames: (Map Str Str)) -> Ast
-  (match a
-    (SymNode n sp) (SymNode (rename-lookup renames n) sp)
-    (ParenNode xs sp) (rename-paren xs sp renames)
-    (BracketNode xs sp) (BracketNode (rename-ast-list xs renames) sp)
-    _ a))
+let rename-ast(a: Ast, renames: Map Str Str) -> Ast =
+  match (a)
+    | SymNode(n, sp) -> SymNode(rename-lookup(renames, n), sp)
+    | ParenNode(xs, sp) -> rename-paren(xs, sp, renames)
+    | BracketNode(xs, sp) -> BracketNode(rename-ast-list(xs, renames), sp)
+    | _ -> a
 
-(defn rename-ast-list (xs: (List Ast)) (renames: (Map Str Str)) -> (List Ast)
-  (match xs
-    [] []
-    (Cons x rest) (Cons (rename-ast x renames) (rename-ast-list rest renames))))
+let rename-ast-list(xs: List Ast, renames: Map Str Str) -> List Ast =
+  match (xs)
+    | [] -> []
+    | Cons(x, rest) -> Cons(rename-ast(x, renames), rename-ast-list(rest, renames))
 
-(defn rename-forms (forms: (List Ast)) (renames: (Map Str Str)) -> (List Ast)
-  (rename-ast-list forms renames))
+let rename-forms(forms: List Ast, renames: Map Str Str) -> List Ast =
+  rename-ast-list(forms, renames)
 
 ; Decl head of a top-level form after pub unwrap (`alias` / `defn` / …).
-(defn form-decl-kind (form: Ast) -> Str
-  (match (unwrap-pub-form form)
-    (ParenNode (Cons head _) _)
-      (match (sym-str head) (Some hn) hn (None) "")
-    _ ""))
+let form-decl-kind(form: Ast) -> Str =
+  match (unwrap-pub-form(form))
+    | ParenNode(Cons(head, _), _) ->
+      match (sym-str(head))
+        | Some(hn) -> hn
+        | None -> ""
+    | _ -> ""
 
 ; NotFound and Permission are the IoError singletons. SpawnError lists them
 ; so a match is exhaustive; they are not a second export.
-(defn shared-io-ctor (name: Str) -> Bool
-  (or (= name "NotFound") (= name "Permission")))
+let shared-io-ctor(name: Str) -> Bool =
+  name == "NotFound" || name == "Permission"
 
-(defn register-one-export! (exports: (Ref (Map Str Str))) (path: Str) (name: Str) (kind: Str) -> (Result Unit Str)
-  (match (map-get (deref exports) name)
-    (None)
-      (do
-        (set! exports (map-set (deref exports) name path))
-        (Ok ()))
-    (Some prev)
-      (if (or (= kind "alias") (shared-io-ctor name))
-        (Ok ())
-        (if (= prev path)
-          (Ok ())
-          (Err
-            (str-concat "duplicate pub export `"
-                        name
-                        "` from "
-                        path
-                        " (already exported by "
-                        prev
-                        ")"))))))
+let register-one-export!(exports: Ref (Map Str Str), path: Str, name: Str, kind: Str) -> Result Unit Str =
+  match (map-get(deref(exports), name))
+    | None ->
+      {
+        set!(exports, map-set(deref(exports), name, path))
+        Ok(())
+      }
+    | Some(prev) ->
+      if kind == "alias" || shared-io-ctor(name) -> Ok(())
+       | prev == path -> Ok(())
+       | else -> Err(str-concat("duplicate pub export `", name, "` from ", path, " (already exported by ", prev, ")"))
 
-(defn register-export-names! (exports: (Ref (Map Str Str))) (path: Str) (names: (List Str)) (kind: Str) -> (Result Unit Str)
-  (match names
-    [] (Ok ())
-    (Cons n rest)
-      (if (= n "main")
-        (register-export-names! exports path rest kind)
-        (result-bind (register-one-export! exports path n kind)
-          (fn (_) (register-export-names! exports path rest kind))))))
+let register-export-names!(exports: Ref (Map Str Str), path: Str, names: List Str, kind: Str) -> Result Unit Str =
+  match (names)
+    | [] -> Ok(())
+    | Cons(n, rest) ->
+      if n == "main" -> register-export-names!(exports, path, rest, kind)
+       | else -> result-bind(register-one-export!(exports, path, n, kind), fn (_) = register-export-names!(exports, path, rest, kind))
 
-(defn register-form-exports! (exports: (Ref (Map Str Str))) (path: Str) (form: Ast) -> (Result Unit Str)
-  (match form
-    (ParenNode (Cons head rest) sp)
-      (if (is-sym head "pub")
-        (do
-          (let inner (ParenNode rest sp))
-          (let kind (form-decl-kind inner))
-          (let names (gather-form-names inner []))
-          (register-export-names! exports path names kind))
-        (Ok ()))
-    _ (Ok ())))
+let register-form-exports!(exports: Ref (Map Str Str), path: Str, form: Ast) -> Result Unit Str =
+  match (form)
+    | ParenNode(Cons(head, rest), sp) ->
+      if is-sym(head, "pub") ->
+        {
+          let inner = ParenNode(rest, sp)
+          let kind = form-decl-kind(inner)
+          let names = gather-form-names(inner, [])
+          register-export-names!(exports, path, names, kind)
+        }
+       | else -> Ok(())
+    | _ -> Ok(())
 
-(defn register-forms-exports! (exports: (Ref (Map Str Str))) (path: Str) (forms: (List Ast)) -> (Result Unit Str)
-  (match forms
-    [] (Ok ())
-    (Cons f rest)
-      (result-bind (register-form-exports! exports path f)
-        (fn (_) (register-forms-exports! exports path rest)))))
+let register-forms-exports!(exports: Ref (Map Str Str), path: Str, forms: List Ast) -> Result Unit Str =
+  match (forms)
+    | [] -> Ok(())
+    | Cons(f, rest) -> result-bind(register-form-exports!(exports, path, f), fn (_) = register-forms-exports!(exports, path, rest))
 
 ; ---------------------------------------------------------------------------
 ; Per-module init and the program bootstrap
 
-(defn sym-node (n: Str) -> Ast (SymNode n (dummy-span)))
+let sym-node(n: Str) -> Ast =
+  SymNode(n, dummy-span())
 
-(defn call-form (name: Str) -> Ast
-  (ParenNode [(sym-node name)] (dummy-span)))
+let call-form(name: Str) -> Ast =
+  ParenNode([sym-node(name)], dummy-span())
 
-(defn int-form (n: Int) -> Ast (IntNode n (dummy-span)))
+let int-form(n: Int) -> Ast =
+  IntNode(n, dummy-span())
 
-(defn unit-form -> Ast (ParenNode [] (dummy-span)))
+let unit-form() -> Ast =
+  ParenNode([], dummy-span())
 
-(defn defn-form (name: Str) (ret: Str) (body: (List Ast)) -> Ast
-  (ParenNode
-    (append-asts [(sym-node "defn") (sym-node name) (sym-node "->") (sym-node ret)] body)
-    (dummy-span)))
+let defn-form(name: Str, ret: Str, body: List Ast) -> Ast =
+  ParenNode(append-asts([sym-node("defn"), sym-node(name), sym-node("->"), sym-node(ret)], body), dummy-span())
 
-(defn is-kept-decl (form: Ast) -> Bool
-  (let k (form-decl-kind form))
-  (or (= k "defn") (= k "defrec") (= k "variant") (= k "alias") (= k "extern")))
+let is-kept-decl(form: Ast) -> Bool {
+  let k = form-decl-kind(form)
+  k == "defn" || k == "defrec" || k == "variant" || k == "alias" || k == "extern"
+}
 
 ; Integer `(let name N)` stays at module scope so constant substitution
 ; still sees it. A non-integer `(let name expr)` stays there too, so
 ; typechecking still binds the name for later `defn`s, and is copied into
 ; the module init so it runs once. Every other top-level expression runs
 ; from the init only.
-(defn is-int-let (form: Ast) -> Bool
-  (match form
-    (ParenNode [head _ expr] _)
-      (if (is-sym head "let")
-        (match expr (IntNode _ _) true _ false)
-        false)
-    _ false))
+let is-int-let(form: Ast) -> Bool =
+  match (form)
+    | ParenNode([head, _, expr], _) ->
+      if is-sym(head, "let") ->
+        match (expr)
+          | IntNode(_, _) -> true
+          | _ -> false
+       | else -> false
+    | _ -> false
 
-(defn is-value-let (form: Ast) -> Bool
-  (match form
-    (ParenNode [head _ expr] _)
-      (if (is-sym head "let")
-        (match expr (IntNode _ _) false _ true)
-        false)
-    _ false))
+let is-value-let(form: Ast) -> Bool =
+  match (form)
+    | ParenNode([head, _, expr], _) ->
+      if is-sym(head, "let") ->
+        match (expr)
+          | IntNode(_, _) -> false
+          | _ -> true
+       | else -> false
+    | _ -> false
 
-(defrec SplitBody (kept: (List Ast)) (init: (List Ast)))
+record SplitBody {
+  kept: List Ast
+  init: List Ast
+}
 
-(defn partition-body (forms: (List Ast)) (kept: (List Ast)) (init: (List Ast)) -> SplitBody
-  (match forms
-    [] (SplitBody (reverse kept) (reverse init))
-    (Cons f rest)
-      (if (or (is-kept-decl f) (is-int-let f))
-        (partition-body rest (Cons f kept) init)
-        (if (is-value-let f)
-          (partition-body rest (Cons f kept) (Cons f init))
-          (partition-body rest kept (Cons f init))))))
+let partition-body(forms: List Ast, kept: List Ast, init: List Ast) -> SplitBody =
+  match (forms)
+    | [] -> SplitBody(reverse(kept), reverse(init))
+    | Cons(f, rest) ->
+      if is-kept-decl(f) || is-int-let(f) -> partition-body(rest, Cons(f, kept), init)
+       | is-value-let(f) -> partition-body(rest, Cons(f, kept), Cons(f, init))
+       | else -> partition-body(rest, kept, Cons(f, init))
 
-(defn init-defn (name: Str) (body: (List Ast)) -> Ast
-  (defn-form name "Unit" (append-asts body [(unit-form)])))
+let init-defn(name: Str, body: List Ast) -> Ast =
+  defn-form(name, "Unit", append-asts(body, [unit-form()]))
 
-(defn with-module-init (path: Str) (forms: (List Ast)) (inits: (Ref (List Str))) -> (List Ast)
-  (match (partition-body forms [] [])
-    (SplitBody kept init)
-      (match init
-        [] kept
-        _
-          (do
-            (let sym (init-symbol path))
-            (set! inits (snoc-str (deref inits) sym))
-            (append-asts kept [(init-defn sym init)])))))
+let with-module-init(path: Str, forms: List Ast, inits: Ref (List Str)) -> List Ast =
+  match (partition-body(forms, [], []))
+    | SplitBody(kept, init) ->
+      match (init)
+        | [] -> kept
+        | _ ->
+          {
+            let sym = init-symbol(path)
+            set!(inits, snoc-str(deref(inits), sym))
+            append-asts(kept, [init-defn(sym, init)])
+          }
 
-(defn return-after-arrow (xs: (List Ast)) -> (Maybe Str)
-  (match xs
-    [] (None)
-    (Cons x rest)
-      (if (is-sym x "->")
-        (match rest
-          (Cons ret _)
-            (match (sym-str ret) (Some n) (Some n) (None) (Some ""))
-          [] (None))
-        (return-after-arrow rest))))
+let return-after-arrow(xs: List Ast) -> Maybe Str =
+  match (xs)
+    | [] -> None()
+    | Cons(x, rest) ->
+      if is-sym(x, "->") ->
+        match (rest)
+          | Cons(ret, _) ->
+            match (sym-str(ret))
+              | Some(n) -> Some(n)
+              | None -> Some("")
+          | [] -> None()
+       | else -> return-after-arrow(rest)
 
-(defn defn-return-rest (rest: (List Ast)) (want: Str) -> (Maybe Str)
-  (match rest
-    (Cons name-ast after)
-      (match (sym-str name-ast)
-        (Some n) (if (= n want) (return-after-arrow after) (None))
-        (None) (None))
-    [] (None)))
+let defn-return-rest(rest: List Ast, want: Str) -> Maybe Str =
+  match (rest)
+    | Cons(name-ast, after) ->
+      match (sym-str(name-ast))
+        | Some(n) ->
+          if n == want -> return-after-arrow(after)
+           | else -> None()
+        | None -> None()
+    | [] -> None()
 
-(defn defn-return-named (form: Ast) (want: Str) -> (Maybe Str)
-  (match form
-    (ParenNode (Cons head rest) _)
-      (if (is-sym head "defn") (defn-return-rest rest want) (None))
-    _ (None)))
+let defn-return-named(form: Ast, want: Str) -> Maybe Str =
+  match (form)
+    | ParenNode(Cons(head, rest), _) ->
+      if is-sym(head, "defn") -> defn-return-rest(rest, want)
+       | else -> None()
+    | _ -> None()
 
-(defn find-main-return (forms: (List Ast)) (want: Str) -> (Maybe Str)
-  (match forms
-    [] (None)
-    (Cons f rest)
-      (match (defn-return-named f want)
-        (Some r) (Some r)
-        (None) (find-main-return rest want))))
+let find-main-return(forms: List Ast, want: Str) -> Maybe Str =
+  match (forms)
+    | [] -> None()
+    | Cons(f, rest) ->
+      match (defn-return-named(f, want))
+        | Some(r) -> Some(r)
+        | None -> find-main-return(rest, want)
 
-(defn note-entry! (path: Str) (entry-path: Str) (forms: (List Ast)) (entry: (Ref EntryMain)) -> Unit
-  (if (= path entry-path)
-    (match (find-main-return forms (main-symbol path))
-      (Some ret) (set! entry (EntryMain (main-symbol path) (= ret "Unit") true))
-      (None) ())
-    ()))
+let note-entry!(path: Str, entry-path: Str, forms: List Ast, entry: Ref EntryMain) -> Unit =
+  if path == entry-path ->
+    match (find-main-return(forms, main-symbol(path)))
+      | Some(ret) -> set!(entry, EntryMain(main-symbol(path), ret == "Unit", true))
+      | None -> ()
 
-(defn calls-of (names: (List Str)) -> (List Ast)
-  (match names
-    [] []
-    (Cons n rest) (Cons (call-form n) (calls-of rest))))
+let calls-of(names: List Str) -> List Ast =
+  match (names)
+    | [] -> []
+    | Cons(n, rest) -> Cons(call-form(n), calls-of(rest))
 
-(defn bootstrap-body (inits: (List Str)) (main-sym: Str) (unit-ret: Bool) -> (List Ast)
-  (let calls (append-asts (calls-of inits) [(call-form main-sym)]))
-  (if unit-ret (append-asts calls [(int-form 0)]) calls))
+let bootstrap-body(inits: List Str, main-sym: Str, unit-ret: Bool) -> List Ast {
+  let calls = append-asts(calls-of(inits), [call-form(main-sym)])
+  if unit-ret -> append-asts(calls, [int-form(0)])
+   | else -> calls
+}
 
-(defn bootstrap-defn (inits: (List Str)) (main-sym: Str) (unit-ret: Bool) -> Ast
-  (defn-form "main" "Int" (bootstrap-body inits main-sym unit-ret)))
+let bootstrap-defn(inits: List Str, main-sym: Str, unit-ret: Bool) -> Ast =
+  defn-form("main", "Int", bootstrap-body(inits, main-sym, unit-ret))
 
-(defn forms-with-bootstrap (forms: (List Ast)) (inits: (List Str)) (entry: EntryMain) -> (List Ast)
-  (match entry
-    (EntryMain sym unit present)
-      (if present
-        (append-asts forms [(bootstrap-defn inits sym unit)])
-        forms)))
+let forms-with-bootstrap(forms: List Ast, inits: List Str, entry: EntryMain) -> List Ast =
+  match (entry)
+    | EntryMain(sym, unit, present) ->
+      if present -> append-asts(forms, [bootstrap-defn(inits, sym, unit)])
+       | else -> forms
 
 ; Strip imports/pub, uniquify privates, rename `main`, lift top-level
 ; expressions into this module's init.
-(defn uniquify-module-body (path: Str) (entry-path: Str) (mid: Int) (forms: (List Ast)) (exports: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) -> (Result (List Ast) Str)
-  (result-bind (register-forms-exports! exports path forms)
-    (fn (_)
-      (do
-        (let renames (build-renames forms mid (main-symbol path)))
-        (let stripped (strip-imports-and-pub forms []))
-        (let renamed (rename-forms stripped renames))
-        (let body (with-module-init path renamed inits))
-        (note-entry! path entry-path body entry)
-        (Ok body)))))
+let uniquify-module-body(path: Str, entry-path: Str, mid: Int, forms: List Ast, exports: Ref (Map Str Str), inits: Ref (List Str), entry: Ref EntryMain) -> Result (List Ast) Str =
+  result-bind(
+    register-forms-exports!(exports, path, forms),
+    fn (_) {
+      let renames = build-renames(forms, mid, main-symbol(path))
+      let stripped = strip-imports-and-pub(forms, [])
+      let renamed = rename-forms(stripped, renames)
+      let body = with-module-init(path, renamed, inits)
+      note-entry!(path, entry-path, body, entry)
+      Ok(body)
+    }
+  )
 
 ; ---------------------------------------------------------------------------
 ; Module graph load
 
-(defn load-module-into (path: Str) (entry-path: Str) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) (paths: (Ref (List Str))) (sources: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) (versions: (Ref (Map Str Str))) -> (Result Unit Str)
-  (match (map-get (deref visited) path)
-    (Some _) (Ok ())
-    (None)
-      (do
-        (set! visited (map-set (deref visited) path true))
-        (result-bind (ensure-module-file path)
-          (fn (_)
-            (match (read-file path)
-              (Err _) (Err (str-concat "module not found: " path))
-              (Ok src) (load-module-source path entry-path src visited acc mid exports paths sources inits entry versions)))))))
+let load-module-into(path: Str, entry-path: Str, visited: Ref (Map Str Bool), acc: Ref (List Ast), mid: Ref Int, exports: Ref (Map Str Str), paths: Ref (List Str), sources: Ref (Map Str Str), inits: Ref (List Str), entry: Ref EntryMain, versions: Ref (Map Str Str)) -> Result Unit Str =
+  match (map-get(deref(visited), path))
+    | Some(_) -> Ok(())
+    | None ->
+      {
+        set!(visited, map-set(deref(visited), path, true))
+        result-bind(
+          ensure-module-file(path),
+          fn (_) =
+            match (read-file(path))
+              | Err(_) -> Err(str-concat("module not found: ", path))
+              | Ok(src) -> load-module-source(path, entry-path, src, visited, acc, mid, exports, paths, sources, inits, entry, versions)
+        )
+      }
 
-(defn load-module-source (path: Str) (entry-path: Str) (src: Str) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) (paths: (Ref (List Str))) (sources: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) (versions: (Ref (Map Str Str))) -> (Result Unit Str)
-  (do
-    (set! sources (map-set (deref sources) path src))
-    (match (read-all src)
-      (Err e) (Err (str-concat "parse error in " path))
-      (Ok forms) (load-module-casing path entry-path forms visited acc mid exports paths sources inits entry versions))))
+let load-module-source(path: Str, entry-path: Str, src: Str, visited: Ref (Map Str Bool), acc: Ref (List Ast), mid: Ref Int, exports: Ref (Map Str Str), paths: Ref (List Str), sources: Ref (Map Str Str), inits: Ref (List Str), entry: Ref EntryMain, versions: Ref (Map Str Str)) -> Result Unit Str {
+  set!(sources, map-set(deref(sources), path, src))
+  match (read-all(src))
+    | Err(e) -> Err(str-concat("parse error in ", path))
+    | Ok(forms) -> load-module-casing(path, entry-path, forms, visited, acc, mid, exports, paths, sources, inits, entry, versions)
+}
 
-(defn load-module-casing (path: Str) (entry-path: Str) (forms: (List Ast)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) (paths: (Ref (List Str))) (sources: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) (versions: (Ref (Map Str Str))) -> (Result Unit Str)
-  (match (check-casing-all forms)
-    (Err _) (Err (str-concat "casing error in " path))
-    (Ok _) (load-module-desugar path entry-path forms visited acc mid exports paths sources inits entry versions)))
+let load-module-casing(path: Str, entry-path: Str, forms: List Ast, visited: Ref (Map Str Bool), acc: Ref (List Ast), mid: Ref Int, exports: Ref (Map Str Str), paths: Ref (List Str), sources: Ref (Map Str Str), inits: Ref (List Str), entry: Ref EntryMain, versions: Ref (Map Str Str)) -> Result Unit Str =
+  match (check-casing-all(forms))
+    | Err(_) -> Err(str-concat("casing error in ", path))
+    | Ok(_) -> load-module-desugar(path, entry-path, forms, visited, acc, mid, exports, paths, sources, inits, entry, versions)
 
-(defn load-module-desugar (path: Str) (entry-path: Str) (forms: (List Ast)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) (paths: (Ref (List Str))) (sources: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) (versions: (Ref (Map Str Str))) -> (Result Unit Str)
-  (match (desugar-all forms)
-    (Err _) (Err (str-concat "desugar error in " path))
-    (Ok desugared) (load-module-deps path entry-path desugared visited acc mid exports paths sources inits entry versions)))
+let load-module-desugar(path: Str, entry-path: Str, forms: List Ast, visited: Ref (Map Str Bool), acc: Ref (List Ast), mid: Ref Int, exports: Ref (Map Str Str), paths: Ref (List Str), sources: Ref (Map Str Str), inits: Ref (List Str), entry: Ref EntryMain, versions: Ref (Map Str Str)) -> Result Unit Str =
+  match (desugar-all(forms))
+    | Err(_) -> Err(str-concat("desugar error in ", path))
+    | Ok(desugared) -> load-module-deps(path, entry-path, desugared, visited, acc, mid, exports, paths, sources, inits, entry, versions)
 
-(defn load-module-deps (path: Str) (entry-path: Str) (forms: (List Ast)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) (paths: (Ref (List Str))) (sources: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) (versions: (Ref (Map Str Str))) -> (Result Unit Str)
-  (do
-    (let specs (specs-with-basics path (collect-import-specs forms [])))
-    (result-bind (note-versions versions specs)
-      (fn (_)
-        (result-bind (load-deps-list path entry-path specs visited acc mid exports paths sources inits entry versions)
-          (fn (_)
-            (do
-              (let id (deref mid))
-              (set! mid (+ id 1))
-              (set! paths (snoc-str (deref paths) path))
-              (let src (match (map-get (deref sources) path) (Some s) s (None) ""))
-              (let stamped (stamp-forms forms src id))
-              (result-bind (uniquify-module-body path entry-path id stamped exports inits entry)
-                (fn (body)
-                  (do
-                    (set! acc (append-asts (deref acc) body))
-                    (Ok ())))))))))))
+let load-module-deps(path: Str, entry-path: Str, forms: List Ast, visited: Ref (Map Str Bool), acc: Ref (List Ast), mid: Ref Int, exports: Ref (Map Str Str), paths: Ref (List Str), sources: Ref (Map Str Str), inits: Ref (List Str), entry: Ref EntryMain, versions: Ref (Map Str Str)) -> Result Unit Str {
+  let specs = specs-with-basics(path, collect-import-specs(forms, []))
+  result-bind(
+    note-versions(versions, specs),
+    fn (_) =
+      result-bind(
+        load-deps-list(path, entry-path, specs, visited, acc, mid, exports, paths, sources, inits, entry, versions),
+        fn (_) {
+          let id = deref(mid)
+          set!(mid, id + 1)
+          set!(paths, snoc-str(deref(paths), path))
+          let src =
+            match (map-get(deref(sources), path))
+              | Some(s) -> s
+              | None -> ""
+          let stamped = stamp-forms(forms, src, id)
+          result-bind(
+            uniquify-module-body(path, entry-path, id, stamped, exports, inits, entry),
+            fn (body) {
+              set!(acc, append-asts(deref(acc), body))
+              Ok(())
+            }
+          )
+        }
+      )
+  )
+}
 
-(defn load-deps-list (from: Str) (entry-path: Str) (specs: (List Str)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) (paths: (Ref (List Str))) (sources: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) (versions: (Ref (Map Str Str))) -> (Result Unit Str)
-  (match specs
-    [] (Ok ())
-    (Cons spec rest)
-      (result-bind (load-module-into (resolve-import-path from spec) entry-path visited acc mid exports paths sources inits entry versions)
-        (fn (_) (load-deps-list from entry-path rest visited acc mid exports paths sources inits entry versions)))))
+let load-deps-list(from: Str, entry-path: Str, specs: List Str, visited: Ref (Map Str Bool), acc: Ref (List Ast), mid: Ref Int, exports: Ref (Map Str Str), paths: Ref (List Str), sources: Ref (Map Str Str), inits: Ref (List Str), entry: Ref EntryMain, versions: Ref (Map Str Str)) -> Result Unit Str =
+  match (specs)
+    | [] -> Ok(())
+    | Cons(spec, rest) -> result-bind(load-module-into(resolve-import-path(from, spec), entry-path, visited, acc, mid, exports, paths, sources, inits, entry, versions), fn (_) = load-deps-list(from, entry-path, rest, visited, acc, mid, exports, paths, sources, inits, entry, versions))
 
 ; Public entry: flatten `entry-path` (already read as `src`) into forms plus
 ; the path of each module id, dependency-first. When the entry defines
 ; `main`, the flat list ends with the bootstrap that calls it.
-(pub defn flatten-module-graph (entry-path: Str) (src: Str) -> (Result Flat Str)
-  (do
-    (let visited (ref (map-new)))
-    (let acc (ref []))
-    (let mid (ref 0))
-    (let exports (ref (map-new)))
-    (let paths (ref []))
-    (let sources (ref (map-new)))
-    (let inits (ref []))
-    (let entry (ref (EntryMain "" false false)))
-    (let versions (ref (map-new)))
-    (set! visited (map-set (deref visited) entry-path true))
-    (result-bind (load-module-source entry-path entry-path src visited acc mid exports paths sources inits entry versions)
-      (fn (_) (Ok (Flat (forms-with-bootstrap (deref acc) (deref inits) (deref entry)) (deref paths)))))))
+pub let flatten-module-graph(entry-path: Str, src: Str) -> Result Flat Str {
+  let visited = ref(map-new())
+  let acc = ref([])
+  let mid = ref(0)
+  let exports = ref(map-new())
+  let paths = ref([])
+  let sources = ref(map-new())
+  let inits = ref([])
+  let entry = ref(EntryMain("", false, false))
+  let versions = ref(map-new())
+  set!(visited, map-set(deref(visited), entry-path, true))
+  result-bind(load-module-source(entry-path, entry-path, src, visited, acc, mid, exports, paths, sources, inits, entry, versions), fn (_) = Ok(Flat(forms-with-bootstrap(deref(acc), deref(inits), deref(entry)), deref(paths))))
+}
 
 ; Separate compilation uses the same path hash and rename walk. The
 ; hash is of whatever string the caller passes; the driver canonicalizes
 ; first so `./fred.mnd` and `fred.mnd` are one module.
-(pub defn bytes-hash (s: Str) -> Int
-  (path-hash s))
+pub let bytes-hash(s: Str) -> Int =
+  path-hash(s)
 
-(pub defn link-of (path: Str) (name: Str) -> Str
-  (str-concat "mn_" (show (path-hash path)) "_" name))
+pub let link-of(path: Str, name: Str) -> Str =
+  str-concat("mn_", show(path-hash(path)), "_", name)
 
-(pub defn rename-module-forms (forms: (List Ast)) (renames: (Map Str Str)) -> (List Ast)
-  (rename-forms forms renames))
+pub let rename-module-forms(forms: List Ast, renames: Map Str Str) -> List Ast =
+  rename-forms(forms, renames)
 
-(pub defn strip-module-forms (forms: (List Ast)) -> (List Ast)
-  (strip-imports-and-pub forms []))
+pub let strip-module-forms(forms: List Ast) -> List Ast =
+  strip-imports-and-pub(forms, [])
 
-(pub defn import-specs (forms: (List Ast)) -> (List Str)
-  (collect-import-specs forms []))
+pub let import-specs(forms: List Ast) -> List Str =
+  collect-import-specs(forms, [])
 
-(pub defn resolve-import (from-path: Str) (spec: Str) -> Str
-  (resolve-import-path from-path spec))
+pub let resolve-import(from-path: Str, spec: Str) -> Str =
+  resolve-import-path(from-path, spec)
 
-(pub defn normalize-path (path: Str) -> Str
-  (path-normalize path))
+pub let normalize-path(path: Str) -> Str =
+  path-normalize(path)
 
-(pub defn module-init-forms (path: Str) (forms: (List Ast)) (inits: (Ref (List Str))) -> (List Ast)
-  (with-module-init path forms inits))
+pub let module-init-forms(path: Str, forms: List Ast, inits: Ref (List Str)) -> List Ast =
+  with-module-init(path, forms, inits)
 
-(pub defn defn-return-type (forms: (List Ast)) (name: Str) -> (Maybe Str)
-  (find-main-return forms name))
+pub let defn-return-type(forms: List Ast, name: Str) -> Maybe Str =
+  find-main-return(forms, name)

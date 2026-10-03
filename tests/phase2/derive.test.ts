@@ -54,13 +54,13 @@ function runMenard(entryRelPath: string, argv: string[]): RunOut {
 }
 
 describe("src/mn.mnd check — derive planning wired after rooting", () => {
-  test("accepts a program using (show 1) with no --dump-after flag", () => {
+  test("accepts a program using show(1) with no --dump-after flag", () => {
     const out = runMenard("src/mn.mnd", ["check", abs("tests/phase2/fixtures/derive-show-int.mnd")]);
     expect(out.stderr).toBe("");
     expect(out.exitCode).toBe(0);
   });
 
-  test("--dump-after=derive reports Int as needing show for (show 1)", () => {
+  test("--dump-after=derive reports Int as needing show for show(1)", () => {
     const out = runMenard("src/mn.mnd", [
       "check",
       abs("tests/phase2/fixtures/derive-show-int.mnd"),

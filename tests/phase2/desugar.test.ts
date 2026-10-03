@@ -53,7 +53,7 @@ function runMenard(entryRelPath: string, argv: string[]): RunOut {
   return { exitCode: 2, stdout, stderr: stderr + "\n[panic] " + r.message };
 }
 
-const DESUGAR_HEADS = ["and", "or", "cond", "when", "while"];
+const DESUGAR_HEADS = ["and", "or", "while"];
 
 describe("src/mn.mnd check — desugar wired after casing", () => {
   test("accepts and/or/cond/when/while sugar", () => {

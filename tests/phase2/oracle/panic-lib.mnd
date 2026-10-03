@@ -1,2 +1,2 @@
-(pub defn boom -> Int
-  (/ 1 0))
+pub let boom() -> Int =
+  1 / 0

@@ -14,131 +14,232 @@
 ; itself (function parameter lists, List/Map/Maybe/Result/Ref element
 ; types) — see reader/ast.mnd's header comment for why a self-referential
 ; variant must be declared once, empty, before its real definition.
-(variant Type)
+type Type =
 
-(pub variant Type
-  (TInt)
-  (TFloat)
-  (TBool)
-  (TChar)
-  (TStr)
-  (TSym)
-  (TUnit)
-  (TStringBuffer)
-  (TVar Int Str)                  ; unification variable id, display name ("" = none)
-  (TParam Str)                    ; declared type parameter, e.g. the [a] in (defn (f [a]) ...)
-  (TList Type)
-  (TMap Type Type)
-  (TMaybe Type)
-  (TResult Type Type)
-  (TRef Type)
-  (TFn (List Type) Type)
-  (TNominal Str (List Type) Str)) ; name, type args, kind ("record" | "variant")
+pub type Type =
+  | TInt
+  | TFloat
+  | TBool
+  | TChar
+  | TStr
+  | TSym
+  | TUnit
+  | TStringBuffer
+  | TVar(Int, Str)
+  | TParam(Str)
+  | TList(Type)
+  | TMap(Type, Type)
+  | TMaybe(Type)
+  | TResult(Type, Type)
+  | TRef(Type)
+  | TFn(List Type, Type)
+  | TNominal(Str, List Type, Str)
+
+ ; name, type args, kind ("record" | "variant")
 
 ; A declared name's own scheme: how many type parameters it binds, plus the
 ; (possibly parameter-mentioning) type itself. Instantiated with fresh
 ; unification variables at each use site (§2.8.4).
-(pub defrec Scheme (params: (List Str)) (type: Type))
+pub record Scheme {
+  params: List Str
+  type: Type
+}
 
-(pub defrec RecordField (name: Str) (type: Type))
-(pub defrec VariantCtor (name: Str) (payloads: (List Type)))
+pub record RecordField {
+  name: Str
+  type: Type
+}
 
-(pub variant TypeDef
-  (RecordDef Str (List Str) (List RecordField))
-  (VariantDef Str (List Str) (List VariantCtor)))
+pub record VariantCtor {
+  name: Str
+  payloads: List Type
+}
+
+pub type TypeDef =
+  | RecordDef(Str, List Str, List RecordField)
+  | VariantDef(Str, List Str, List VariantCtor)
 
 ; A constructor's own signature, independent of which TypeDef it belongs
 ; to: the nominal type it builds, its payload types (may mention that
 ; type's own parameters) and the parameter list itself (for instantiating
 ; a pattern's payload types against fresh variables).
-(pub defrec CtorInfo (type-name: Str) (payloads: (List Type)) (params: (List Str)))
+pub record CtorInfo {
+  type-name: Str
+  payloads: List Type
+  params: List Str
+}
 
 ; ---------------------------------------------------------------------------
 ; Constructors — small wrappers so callers read as "the List type of T"
 ; rather than a bare variant application.
 
-(pub defn t-int -> Type (TInt))
-(pub defn t-float -> Type (TFloat))
-(pub defn t-bool -> Type (TBool))
-(pub defn t-char -> Type (TChar))
-(pub defn t-str -> Type (TStr))
-(pub defn t-sym -> Type (TSym))
-(pub defn t-unit -> Type (TUnit))
-(pub defn t-string-buffer -> Type (TStringBuffer))
-(pub defn t-list (elem: Type) -> Type (TList elem))
-(pub defn t-map (key: Type) (val: Type) -> Type (TMap key val))
-(pub defn t-maybe (elem: Type) -> Type (TMaybe elem))
-(pub defn t-result (ok: Type) (err: Type) -> Type (TResult ok err))
-(pub defn t-ref (elem: Type) -> Type (TRef elem))
-(pub defn t-fn (params: (List Type)) (ret: Type) -> Type (TFn params ret))
-(pub defn t-nominal (name: Str) (args: (List Type)) (kind: Str) -> Type (TNominal name args kind))
+pub let t-int() -> Type =
+  TInt()
+
+pub let t-float() -> Type =
+  TFloat()
+
+pub let t-bool() -> Type =
+  TBool()
+
+pub let t-char() -> Type =
+  TChar()
+
+pub let t-str() -> Type =
+  TStr()
+
+pub let t-sym() -> Type =
+  TSym()
+
+pub let t-unit() -> Type =
+  TUnit()
+
+pub let t-string-buffer() -> Type =
+  TStringBuffer()
+
+pub let t-list(elem: Type) -> Type =
+  TList(elem)
+
+pub let t-map(key: Type, val: Type) -> Type =
+  TMap(key, val)
+
+pub let t-maybe(elem: Type) -> Type =
+  TMaybe(elem)
+
+pub let t-result(ok: Type, err: Type) -> Type =
+  TResult(ok, err)
+
+pub let t-ref(elem: Type) -> Type =
+  TRef(elem)
+
+pub let t-fn(params: List Type, ret: Type) -> Type =
+  TFn(params, ret)
+
+pub let t-nominal(name: Str, args: List Type, kind: Str) -> Type =
+  TNominal(name, args, kind)
 
 ; ---------------------------------------------------------------------------
 ; Structural equality (ignores display names on TVar, exactly as host's
 ; typeEqual does — a variable's spelling is not part of its identity).
 
-(pub defn type-equal (a: Type) (b: Type) -> Bool
-  (match a
-    (TInt) (match b (TInt) true _ false)
-    (TFloat) (match b (TFloat) true _ false)
-    (TBool) (match b (TBool) true _ false)
-    (TChar) (match b (TChar) true _ false)
-    (TStr) (match b (TStr) true _ false)
-    (TSym) (match b (TSym) true _ false)
-    (TUnit) (match b (TUnit) true _ false)
-    (TStringBuffer) (match b (TStringBuffer) true _ false)
-    (TVar ida _) (match b (TVar idb _) (= ida idb) _ false)
-    (TParam na) (match b (TParam nb) (= na nb) _ false)
-    (TList ea) (match b (TList eb) (type-equal ea eb) _ false)
-    (TMap ka va) (match b (TMap kb vb) (and (type-equal ka kb) (type-equal va vb)) _ false)
-    (TMaybe ea) (match b (TMaybe eb) (type-equal ea eb) _ false)
-    (TResult oa ea) (match b (TResult ob eb) (and (type-equal oa ob) (type-equal ea eb)) _ false)
-    (TRef ea) (match b (TRef eb) (type-equal ea eb) _ false)
-    (TFn pa ra) (match b (TFn pb rb) (and (type-list-equal pa pb) (type-equal ra rb)) _ false)
-    (TNominal na aa ka) (match b (TNominal nb ab kb) (and (= na nb) (= ka kb) (type-list-equal aa ab)) _ false)))
+pub let type-equal(a: Type, b: Type) -> Bool =
+  match (a)
+    | TInt ->
+      match (b)
+        | TInt -> true
+        | _ -> false
+    | TFloat ->
+      match (b)
+        | TFloat -> true
+        | _ -> false
+    | TBool ->
+      match (b)
+        | TBool -> true
+        | _ -> false
+    | TChar ->
+      match (b)
+        | TChar -> true
+        | _ -> false
+    | TStr ->
+      match (b)
+        | TStr -> true
+        | _ -> false
+    | TSym ->
+      match (b)
+        | TSym -> true
+        | _ -> false
+    | TUnit ->
+      match (b)
+        | TUnit -> true
+        | _ -> false
+    | TStringBuffer ->
+      match (b)
+        | TStringBuffer -> true
+        | _ -> false
+    | TVar(ida, _) ->
+      match (b)
+        | TVar(idb, _) -> ida == idb
+        | _ -> false
+    | TParam(na) ->
+      match (b)
+        | TParam(nb) -> na == nb
+        | _ -> false
+    | TList(ea) ->
+      match (b)
+        | TList(eb) -> type-equal(ea, eb)
+        | _ -> false
+    | TMap(ka, va) ->
+      match (b)
+        | TMap(kb, vb) -> type-equal(ka, kb) && type-equal(va, vb)
+        | _ -> false
+    | TMaybe(ea) ->
+      match (b)
+        | TMaybe(eb) -> type-equal(ea, eb)
+        | _ -> false
+    | TResult(oa, ea) ->
+      match (b)
+        | TResult(ob, eb) -> type-equal(oa, ob) && type-equal(ea, eb)
+        | _ -> false
+    | TRef(ea) ->
+      match (b)
+        | TRef(eb) -> type-equal(ea, eb)
+        | _ -> false
+    | TFn(pa, ra) ->
+      match (b)
+        | TFn(pb, rb) -> type-list-equal(pa, pb) && type-equal(ra, rb)
+        | _ -> false
+    | TNominal(na, aa, ka) ->
+      match (b)
+        | TNominal(nb, ab, kb) -> na == nb && ka == kb && type-list-equal(aa, ab)
+        | _ -> false
 
-(pub defn type-list-equal (xs: (List Type)) (ys: (List Type)) -> Bool
-  (match xs
-    [] (match ys [] true _ false)
-    (Cons x xrest)
-      (match ys
-        [] false
-        (Cons y yrest) (and (type-equal x y) (type-list-equal xrest yrest)))))
+pub let type-list-equal(xs: List Type, ys: List Type) -> Bool =
+  match (xs)
+    | [] ->
+      match (ys)
+        | [] -> true
+        | _ -> false
+    | Cons(x, xrest) ->
+      match (ys)
+        | [] -> false
+        | Cons(y, yrest) -> type-equal(x, y) && type-list-equal(xrest, yrest)
 
 ; ---------------------------------------------------------------------------
 ; Diagnostic spelling — not a pretty-printer, "canonical enough to read in
 ; an error message". Mirrors host's typeShow.
 
-(pub defn type-show (t: Type) -> Str
-  (match t
-    (TInt) "Int"
-    (TFloat) "Float"
-    (TBool) "Bool"
-    (TChar) "Char"
-    (TStr) "Str"
-    (TSym) "Sym"
-    (TUnit) "Unit"
-    (TStringBuffer) "StringBuffer"
-    (TVar id name) (if (= name "") (str-concat "a" (show id)) name)
-    (TParam name) name
-    (TList elem) (str-concat "(List " (type-show elem) ")")
-    (TMap k v) (str-concat "(Map " (type-show k) " " (type-show v) ")")
-    (TMaybe elem) (str-concat "(Maybe " (type-show elem) ")")
-    (TResult ok err) (str-concat "(Result " (type-show ok) " " (type-show err) ")")
-    (TRef elem) (str-concat "(Ref " (type-show elem) ")")
-    (TFn params ret) (str-concat "(Fn " (type-show-list params) " -> " (type-show ret) ")")
-    (TNominal name args _) (type-show-nominal name args)))
+pub let type-show(t: Type) -> Str =
+  match (t)
+    | TInt -> "Int"
+    | TFloat -> "Float"
+    | TBool -> "Bool"
+    | TChar -> "Char"
+    | TStr -> "Str"
+    | TSym -> "Sym"
+    | TUnit -> "Unit"
+    | TStringBuffer -> "StringBuffer"
+    | TVar(id, name) ->
+      if name == "" -> str-concat("a", show(id))
+       | else -> name
+    | TParam(name) -> name
+    | TList(elem) -> str-concat("(List ", type-show(elem), ")")
+    | TMap(k, v) -> str-concat("(Map ", type-show(k), " ", type-show(v), ")")
+    | TMaybe(elem) -> str-concat("(Maybe ", type-show(elem), ")")
+    | TResult(ok, err) -> str-concat("(Result ", type-show(ok), " ", type-show(err), ")")
+    | TRef(elem) -> str-concat("(Ref ", type-show(elem), ")")
+    | TFn(params, ret) -> str-concat("(Fn ", type-show-list(params), " -> ", type-show(ret), ")")
+    | TNominal(name, args, _) -> type-show-nominal(name, args)
 
-(defn type-show-nominal (name: Str) (args: (List Type)) -> Str
-  (match args
-    [] name
-    _ (str-concat "(" name " " (type-show-list args) ")")))
+let type-show-nominal(name: Str, args: List Type) -> Str =
+  match (args)
+    | [] -> name
+    | _ -> str-concat("(", name, " ", type-show-list(args), ")")
 
-(defn type-show-list (xs: (List Type)) -> Str
-  (match xs
-    [] ""
-    [x] (type-show x)
-    (Cons x rest) (str-concat (type-show x) " " (type-show-list rest))))
+let type-show-list(xs: List Type) -> Str =
+  match (xs)
+    | [] -> ""
+    | [x] -> type-show(x)
+    | Cons(x, rest) -> str-concat(type-show(x), " ", type-show-list(rest))
 
 ; ---------------------------------------------------------------------------
 ; Showable / orderable (§2.12), evaluated on expanded types. `Ref`,
@@ -153,44 +254,44 @@
 ; re-wrapped as TNominal, so this is complete for every type this typer can
 ; itself construct.
 
-(pub defn is-showable (t: Type) -> Bool
-  (match t
-    (TStringBuffer) false
-    (TRef _) false
-    (TFn _ _) false
-    (TList elem) (is-showable elem)
-    (TMaybe elem) (is-showable elem)
-    (TMap k v) (and (is-showable k) (is-showable v))
-    (TResult ok err) (and (is-showable ok) (is-showable err))
-    (TNominal _ args _) (type-list-all-showable args)
-    _ true))
+pub let is-showable(t: Type) -> Bool =
+  match (t)
+    | TStringBuffer -> false
+    | TRef(_) -> false
+    | TFn(_, _) -> false
+    | TList(elem) -> is-showable(elem)
+    | TMaybe(elem) -> is-showable(elem)
+    | TMap(k, v) -> is-showable(k) && is-showable(v)
+    | TResult(ok, err) -> is-showable(ok) && is-showable(err)
+    | TNominal(_, args, _) -> type-list-all-showable(args)
+    | _ -> true
 
-(defn type-list-all-showable (xs: (List Type)) -> Bool
-  (match xs
-    [] true
-    (Cons x rest) (and (is-showable x) (type-list-all-showable rest))))
+let type-list-all-showable(xs: List Type) -> Bool =
+  match (xs)
+    | [] -> true
+    | Cons(x, rest) -> is-showable(x) && type-list-all-showable(rest)
 
-(pub defn is-orderable (t: Type) -> Bool
-  (match t
-    (TInt) true
-    (TBool) true
-    (TChar) true
-    (TStr) true
-    (TSym) true
-    (TUnit) true
-    (TFloat) false
-    (TStringBuffer) false
-    (TRef _) false
-    (TFn _ _) false
-    (TVar _ _) true
-    (TParam _) true
-    (TList elem) (is-orderable elem)
-    (TMaybe elem) (is-orderable elem)
-    (TMap k v) (and (is-orderable k) (is-orderable v))
-    (TResult ok err) (and (is-orderable ok) (is-orderable err))
-    (TNominal _ args _) (type-list-all-orderable args)))
+pub let is-orderable(t: Type) -> Bool =
+  match (t)
+    | TInt -> true
+    | TBool -> true
+    | TChar -> true
+    | TStr -> true
+    | TSym -> true
+    | TUnit -> true
+    | TFloat -> false
+    | TStringBuffer -> false
+    | TRef(_) -> false
+    | TFn(_, _) -> false
+    | TVar(_, _) -> true
+    | TParam(_) -> true
+    | TList(elem) -> is-orderable(elem)
+    | TMaybe(elem) -> is-orderable(elem)
+    | TMap(k, v) -> is-orderable(k) && is-orderable(v)
+    | TResult(ok, err) -> is-orderable(ok) && is-orderable(err)
+    | TNominal(_, args, _) -> type-list-all-orderable(args)
 
-(defn type-list-all-orderable (xs: (List Type)) -> Bool
-  (match xs
-    [] true
-    (Cons x rest) (and (is-orderable x) (type-list-all-orderable rest))))
+let type-list-all-orderable(xs: List Type) -> Bool =
+  match (xs)
+    | [] -> true
+    | Cons(x, rest) -> is-orderable(x) && type-list-all-orderable(rest)

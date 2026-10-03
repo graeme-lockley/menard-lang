@@ -1,1 +1,4 @@
-(while)
+let f() -> Int = {
+  let g(n: Int) -> Int = n
+  g(1)
+}

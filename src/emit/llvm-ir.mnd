@@ -70,39 +70,27 @@
 ; i64`) and that its `IRet`'s value is consequently already `i32`-typed by
 ; the time it is written.
 
-(pub variant Item
   ; An i64/i32 constant already encoded per LLVM's zig-zag signed
   ; integer scheme (`v>=0: v*2`, `v<0: (-v)*2+1` — see `bc-writer.mnd`'s
   ; `encode-signed-i64`) — consumes the next value id, like an instruction.
-  (IConstI64 Int)
-  (IConstI32 Int)
   ; `alloca i64, align 8`: `sizeConstAbsId` is the **absolute** (not
   ; relative) id of the i32 constant `1` this alloca's array size uses —
   ; see header comment's "deliberately not relative".
-  (IAlloca Int)
   ; opcode, lhs-rel, rhs-rel -> new i64 value (see llvm-ir opcode
   ; constants below).
-  (IBinop Int Int Int)
   ; predicate, lhs-rel, rhs-rel -> new i1 value.
-  (ICmp2 Int Int Int)
   ; opcode, val-rel, dest-type-index -> new value (only `Trunc`, i32, used
   ; here — `main`'s untagged return).
-  (ICast Int Int Int)
   ; ptr-rel, val-rel (both i64) — no result.
-  (IStore Int Int)
   ; ptr-rel -> new i64 value.
-  (ILoad Int)
   ; unconditional branch: target block, absolute.
-  (IBr Int)
   ; conditional branch: true-block, false-block (both absolute), cond-rel.
-  (ICondBr Int Int Int)
   ; callee-rel, arg-rels -> new i64 value. The callee's own function type
   ; is derived from `(List Int)`'s length (its arity) by `write-module-bc`
   ; — every function of a given arity shares one function type (spec
   ; §3.4: "compile each polymorphic function exactly once" extends
   ; trivially here since there is no polymorphism in this ABI at all, only
   ; one type per arity).
-  (ICall Int (List Int))
   ; A call to one of the three fixed runtime externs (`mn_write_stdout`/
   ; `mn_write_stderr`, kind `extern-kind-write`; `mn_print_i64`, kind
   ; `extern-kind-print`) — `println`/`print`/`write` lowering's one
@@ -116,24 +104,56 @@
   ; them the way it does for `ICall`, since a real one-`Int`-argument
   ; user call and a call to `mn_print_i64` are both "one argument" but
   ; need different function types and different result semantics.
-  (ICallVoid Int Int (List Int))
   ; val-rel — the function's return value (already `i32`-typed, via a
   ; preceding `ICast`, for `main`; tagged `i64` otherwise).
-  (IRet Int)
   ; No operands. Terminates the block after `mn_panic`, which does not return.
-  (IUnreachable))
+pub type Item =
+  | IConstI64(Int)
+  | IConstI32(Int)
+  | IAlloca(Int)
+  | IBinop(Int, Int, Int)
+  | ICmp2(Int, Int, Int)
+  | ICast(Int, Int, Int)
+  | IStore(Int, Int)
+  | ILoad(Int)
+  | IBr(Int)
+  | ICondBr(Int, Int, Int)
+  | ICall(Int, List Int)
+  | ICallVoid(Int, Int, List Int)
+  | IRet(Int)
+  | IUnreachable
 
 ; One function: `i64`/`i64 x nparams` -> `i64` ABI, except `is-main`
 ; (`(i32, ptr) -> i32`, spec: `mn_init` at entry, untag + trunc before
 ; this `IRet`). `nblocks` is the `DECLAREBLOCKS` count; `items` is the
 ; full, already-ordered instruction (+ inline constant) stream.
-(pub defrec LFunc (name: Str) (nparams: Int) (is-main: Bool) (nblocks: Int) (items: (List Item)))
+pub record LFunc {
+  name: Str
+  nparams: Int
+  is-main: Bool
+  nblocks: Int
+  items: List Item
+}
 
-(pub defn lfunc-name (f: LFunc) -> Str (match f (LFunc n _ _ _ _) n))
-(pub defn lfunc-nparams (f: LFunc) -> Int (match f (LFunc _ n _ _ _) n))
-(pub defn lfunc-is-main (f: LFunc) -> Bool (match f (LFunc _ _ m _ _) m))
-(pub defn lfunc-nblocks (f: LFunc) -> Int (match f (LFunc _ _ _ b _) b))
-(pub defn lfunc-items (f: LFunc) -> (List Item) (match f (LFunc _ _ _ _ i) i))
+pub let lfunc-name(f: LFunc) -> Str =
+  match (f)
+    | LFunc(n, _, _, _, _) -> n
+
+pub let lfunc-nparams(f: LFunc) -> Int =
+  match (f)
+    | LFunc(_, n, _, _, _) -> n
+
+pub let lfunc-is-main(f: LFunc) -> Bool =
+  match (f)
+    | LFunc(_, _, m, _, _) -> m
+
+pub let lfunc-nblocks(f: LFunc) -> Int =
+  match (f)
+    | LFunc(_, _, _, b, _) -> b
+
+pub let lfunc-items(f: LFunc) -> List Item =
+  match (f)
+    | LFunc(_, _, _, _, i) -> i
 
 ; The module: an ordered list of user functions, plus every distinct
 ; string literal `println`/`print`/`write` lowering needs a global for
@@ -146,13 +166,29 @@
 ; A cross-module function the object calls but does not define. `name` is
 ; the Menard name the call uses; `link` is the symbol clang resolves.
 ; Abs ids follow the fixed runtime externs, in this list's order.
-(pub defrec Imp (name: Str) (link: Str) (arity: Int))
+pub record Imp {
+  name: Str
+  link: Str
+  arity: Int
+}
 
-(pub defrec LlvmModule (funcs: (List LFunc)) (globals: (List Str)) (imports: (List Imp)))
+pub record LlvmModule {
+  funcs: List LFunc
+  globals: List Str
+  imports: List Imp
+}
 
-(pub defn llvm-module-funcs (m: LlvmModule) -> (List LFunc) (match m (LlvmModule fs _ _) fs))
-(pub defn llvm-module-globals (m: LlvmModule) -> (List Str) (match m (LlvmModule _ gs _) gs))
-(pub defn llvm-module-imports (m: LlvmModule) -> (List Imp) (match m (LlvmModule _ _ is) is))
+pub let llvm-module-funcs(m: LlvmModule) -> List LFunc =
+  match (m)
+    | LlvmModule(fs, _, _) -> fs
+
+pub let llvm-module-globals(m: LlvmModule) -> List Str =
+  match (m)
+    | LlvmModule(_, gs, _) -> gs
+
+pub let llvm-module-imports(m: LlvmModule) -> List Imp =
+  match (m)
+    | LlvmModule(_, _, is) -> is
 
 ; ---------------------------------------------------------------------------
 ; The fixed runtime externs — always declared, in this fixed order,
@@ -167,116 +203,310 @@
 ; Order: mn_write_stdout, mn_print_i64, mn_write_stderr, mn_alloc,
 ; heap helpers (3C), mn_print_str, Str/Ref/SB (3D), Map (3F), closures (3E),
 ; tier-0 I/O (3G: mn_init … mn_exit).
-(pub let extern-count 86)
+pub let extern-count = 86
 
-(pub defn extern-write-stdout-abs (num-strings: Int) -> Int num-strings)
-(pub defn extern-print-i64-abs (num-strings: Int) -> Int (+ num-strings 1))
-(pub defn extern-write-stderr-abs (num-strings: Int) -> Int (+ num-strings 2))
-(pub defn extern-alloc-abs (num-strings: Int) -> Int (+ num-strings 3))
-(pub defn extern-nil-abs (num-strings: Int) -> Int (+ num-strings 4))
-(pub defn extern-cons-abs (num-strings: Int) -> Int (+ num-strings 5))
-(pub defn extern-none-abs (num-strings: Int) -> Int (+ num-strings 6))
-(pub defn extern-some-abs (num-strings: Int) -> Int (+ num-strings 7))
-(pub defn extern-ok-abs (num-strings: Int) -> Int (+ num-strings 8))
-(pub defn extern-err-abs (num-strings: Int) -> Int (+ num-strings 9))
-(pub defn extern-tag-abs (num-strings: Int) -> Int (+ num-strings 10))
-(pub defn extern-slot-abs (num-strings: Int) -> Int (+ num-strings 11))
-(pub defn extern-print-str-abs (num-strings: Int) -> Int (+ num-strings 12))
-(pub defn extern-str-new-abs (num-strings: Int) -> Int (+ num-strings 13))
-(pub defn extern-str-concat-abs (num-strings: Int) -> Int (+ num-strings 14))
-(pub defn extern-str-byte-length-abs (num-strings: Int) -> Int (+ num-strings 15))
-(pub defn extern-str-byte-abs (num-strings: Int) -> Int (+ num-strings 16))
-(pub defn extern-str-slice-abs (num-strings: Int) -> Int (+ num-strings 17))
-(pub defn extern-ref-new-abs (num-strings: Int) -> Int (+ num-strings 18))
-(pub defn extern-ref-deref-abs (num-strings: Int) -> Int (+ num-strings 19))
-(pub defn extern-ref-set-abs (num-strings: Int) -> Int (+ num-strings 20))
-(pub defn extern-sb-new-abs (num-strings: Int) -> Int (+ num-strings 21))
-(pub defn extern-sb-append-abs (num-strings: Int) -> Int (+ num-strings 22))
-(pub defn extern-sb-append-byte-abs (num-strings: Int) -> Int (+ num-strings 23))
-(pub defn extern-sb-take-str-abs (num-strings: Int) -> Int (+ num-strings 24))
-(pub defn extern-map-new-abs (num-strings: Int) -> Int (+ num-strings 25))
-(pub defn extern-map-set-abs (num-strings: Int) -> Int (+ num-strings 26))
-(pub defn extern-map-get-abs (num-strings: Int) -> Int (+ num-strings 27))
-(pub defn extern-map-has-abs (num-strings: Int) -> Int (+ num-strings 28))
-(pub defn extern-map-size-abs (num-strings: Int) -> Int (+ num-strings 29))
-(pub defn extern-env-0-abs (num-strings: Int) -> Int (+ num-strings 30))
-(pub defn extern-env-1-abs (num-strings: Int) -> Int (+ num-strings 31))
-(pub defn extern-env-get-abs (num-strings: Int) -> Int (+ num-strings 32))
-(pub defn extern-closure-new-abs (num-strings: Int) -> Int (+ num-strings 33))
-(pub defn extern-apply-1-abs (num-strings: Int) -> Int (+ num-strings 34))
-(pub defn extern-init-abs (num-strings: Int) -> Int (+ num-strings 35))
-(pub defn extern-arg-count-abs (num-strings: Int) -> Int (+ num-strings 36))
-(pub defn extern-arg-abs (num-strings: Int) -> Int (+ num-strings 37))
-(pub defn extern-read-file-abs (num-strings: Int) -> Int (+ num-strings 38))
-(pub defn extern-write-file-abs (num-strings: Int) -> Int (+ num-strings 39))
-(pub defn extern-exit-abs (num-strings: Int) -> Int (+ num-strings 40))
-(pub defn extern-new-abs (num-strings: Int) -> Int (+ num-strings 41))
-(pub defn extern-set-slot-abs (num-strings: Int) -> Int (+ num-strings 42))
-(pub defn extern-apply-0-abs (num-strings: Int) -> Int (+ num-strings 43))
-(pub defn extern-apply-2-abs (num-strings: Int) -> Int (+ num-strings 44))
-(pub defn extern-closure-bare-abs (num-strings: Int) -> Int (+ num-strings 45))
-(pub defn extern-ctor-closure-abs (num-strings: Int) -> Int (+ num-strings 46))
-(pub defn extern-show-abs (num-strings: Int) -> Int (+ num-strings 47))
-(pub defn extern-env-new-abs (num-strings: Int) -> Int (+ num-strings 48))
-(pub defn extern-env-set-abs (num-strings: Int) -> Int (+ num-strings 49))
-(pub defn extern-equal-abs (num-strings: Int) -> Int (+ num-strings 50))
-(pub defn extern-compare-abs (num-strings: Int) -> Int (+ num-strings 51))
-(pub defn extern-write-abs (num-strings: Int) -> Int (+ num-strings 52))
-(pub defn extern-sb-length-abs (num-strings: Int) -> Int (+ num-strings 53))
-(pub defn extern-dump-abs (num-strings: Int) -> Int (+ num-strings 54))
-(pub defn extern-spawn-abs (num-strings: Int) -> Int (+ num-strings 55))
-(pub defn extern-getenv-abs (num-strings: Int) -> Int (+ num-strings 56))
-(pub defn extern-exists-abs (num-strings: Int) -> Int (+ num-strings 57))
-(pub defn extern-rename-abs (num-strings: Int) -> Int (+ num-strings 58))
-(pub defn extern-root-keep-abs (num-strings: Int) -> Int (+ num-strings 59))
-(pub defn extern-root-get-abs (num-strings: Int) -> Int (+ num-strings 60))
-(pub defn extern-root-save-abs (num-strings: Int) -> Int (+ num-strings 61))
-(pub defn extern-root-restore-abs (num-strings: Int) -> Int (+ num-strings 62))
-(pub defn extern-root-push-abs (num-strings: Int) -> Int (+ num-strings 63))
-(pub defn extern-float-from-str-abs (num-strings: Int) -> Int (+ num-strings 64))
-(pub defn extern-fadd-abs (num-strings: Int) -> Int (+ num-strings 65))
-(pub defn extern-fsub-abs (num-strings: Int) -> Int (+ num-strings 66))
-(pub defn extern-fmul-abs (num-strings: Int) -> Int (+ num-strings 67))
-(pub defn extern-fdiv-abs (num-strings: Int) -> Int (+ num-strings 68))
-(pub defn extern-spawn-capture-abs (num-strings: Int) -> Int (+ num-strings 69))
-(pub defn extern-panic-abs (num-strings: Int) -> Int (+ num-strings 70))
-(pub defn extern-trace-push-abs (num-strings: Int) -> Int (+ num-strings 71))
-(pub defn extern-trace-pop-abs (num-strings: Int) -> Int (+ num-strings 72))
-(pub defn extern-panic-at-abs (num-strings: Int) -> Int (+ num-strings 73))
-(pub defn extern-isatty-abs (num-strings: Int) -> Int (+ num-strings 74))
-(pub defn extern-mtime-abs (num-strings: Int) -> Int (+ num-strings 75))
-(pub defn extern-cwd-abs (num-strings: Int) -> Int (+ num-strings 76))
-(pub defn extern-ensure-dir-abs (num-strings: Int) -> Int (+ num-strings 77))
-(pub defn extern-list-dir-abs (num-strings: Int) -> Int (+ num-strings 78))
-(pub defn extern-realpath-abs (num-strings: Int) -> Int (+ num-strings 79))
-(pub defn extern-now-ms-abs (num-strings: Int) -> Int (+ num-strings 80))
-(pub defn extern-remove-abs (num-strings: Int) -> Int (+ num-strings 81))
-(pub defn extern-is-dir-abs (num-strings: Int) -> Int (+ num-strings 82))
-(pub defn extern-sb-to-str-abs (num-strings: Int) -> Int (+ num-strings 83))
-(pub defn extern-slot-get-abs (num-strings: Int) -> Int (+ num-strings 84))
-(pub defn extern-slot-set-abs (num-strings: Int) -> Int (+ num-strings 85))
+pub let extern-write-stdout-abs(num-strings: Int) -> Int =
+  num-strings
+
+pub let extern-print-i64-abs(num-strings: Int) -> Int =
+  num-strings + 1
+
+pub let extern-write-stderr-abs(num-strings: Int) -> Int =
+  num-strings + 2
+
+pub let extern-alloc-abs(num-strings: Int) -> Int =
+  num-strings + 3
+
+pub let extern-nil-abs(num-strings: Int) -> Int =
+  num-strings + 4
+
+pub let extern-cons-abs(num-strings: Int) -> Int =
+  num-strings + 5
+
+pub let extern-none-abs(num-strings: Int) -> Int =
+  num-strings + 6
+
+pub let extern-some-abs(num-strings: Int) -> Int =
+  num-strings + 7
+
+pub let extern-ok-abs(num-strings: Int) -> Int =
+  num-strings + 8
+
+pub let extern-err-abs(num-strings: Int) -> Int =
+  num-strings + 9
+
+pub let extern-tag-abs(num-strings: Int) -> Int =
+  num-strings + 10
+
+pub let extern-slot-abs(num-strings: Int) -> Int =
+  num-strings + 11
+
+pub let extern-print-str-abs(num-strings: Int) -> Int =
+  num-strings + 12
+
+pub let extern-str-new-abs(num-strings: Int) -> Int =
+  num-strings + 13
+
+pub let extern-str-concat-abs(num-strings: Int) -> Int =
+  num-strings + 14
+
+pub let extern-str-byte-length-abs(num-strings: Int) -> Int =
+  num-strings + 15
+
+pub let extern-str-byte-abs(num-strings: Int) -> Int =
+  num-strings + 16
+
+pub let extern-str-slice-abs(num-strings: Int) -> Int =
+  num-strings + 17
+
+pub let extern-ref-new-abs(num-strings: Int) -> Int =
+  num-strings + 18
+
+pub let extern-ref-deref-abs(num-strings: Int) -> Int =
+  num-strings + 19
+
+pub let extern-ref-set-abs(num-strings: Int) -> Int =
+  num-strings + 20
+
+pub let extern-sb-new-abs(num-strings: Int) -> Int =
+  num-strings + 21
+
+pub let extern-sb-append-abs(num-strings: Int) -> Int =
+  num-strings + 22
+
+pub let extern-sb-append-byte-abs(num-strings: Int) -> Int =
+  num-strings + 23
+
+pub let extern-sb-take-str-abs(num-strings: Int) -> Int =
+  num-strings + 24
+
+pub let extern-map-new-abs(num-strings: Int) -> Int =
+  num-strings + 25
+
+pub let extern-map-set-abs(num-strings: Int) -> Int =
+  num-strings + 26
+
+pub let extern-map-get-abs(num-strings: Int) -> Int =
+  num-strings + 27
+
+pub let extern-map-has-abs(num-strings: Int) -> Int =
+  num-strings + 28
+
+pub let extern-map-size-abs(num-strings: Int) -> Int =
+  num-strings + 29
+
+pub let extern-env-0-abs(num-strings: Int) -> Int =
+  num-strings + 30
+
+pub let extern-env-1-abs(num-strings: Int) -> Int =
+  num-strings + 31
+
+pub let extern-env-get-abs(num-strings: Int) -> Int =
+  num-strings + 32
+
+pub let extern-closure-new-abs(num-strings: Int) -> Int =
+  num-strings + 33
+
+pub let extern-apply-1-abs(num-strings: Int) -> Int =
+  num-strings + 34
+
+pub let extern-init-abs(num-strings: Int) -> Int =
+  num-strings + 35
+
+pub let extern-arg-count-abs(num-strings: Int) -> Int =
+  num-strings + 36
+
+pub let extern-arg-abs(num-strings: Int) -> Int =
+  num-strings + 37
+
+pub let extern-read-file-abs(num-strings: Int) -> Int =
+  num-strings + 38
+
+pub let extern-write-file-abs(num-strings: Int) -> Int =
+  num-strings + 39
+
+pub let extern-exit-abs(num-strings: Int) -> Int =
+  num-strings + 40
+
+pub let extern-new-abs(num-strings: Int) -> Int =
+  num-strings + 41
+
+pub let extern-set-slot-abs(num-strings: Int) -> Int =
+  num-strings + 42
+
+pub let extern-apply-0-abs(num-strings: Int) -> Int =
+  num-strings + 43
+
+pub let extern-apply-2-abs(num-strings: Int) -> Int =
+  num-strings + 44
+
+pub let extern-closure-bare-abs(num-strings: Int) -> Int =
+  num-strings + 45
+
+pub let extern-ctor-closure-abs(num-strings: Int) -> Int =
+  num-strings + 46
+
+pub let extern-show-abs(num-strings: Int) -> Int =
+  num-strings + 47
+
+pub let extern-env-new-abs(num-strings: Int) -> Int =
+  num-strings + 48
+
+pub let extern-env-set-abs(num-strings: Int) -> Int =
+  num-strings + 49
+
+pub let extern-equal-abs(num-strings: Int) -> Int =
+  num-strings + 50
+
+pub let extern-compare-abs(num-strings: Int) -> Int =
+  num-strings + 51
+
+pub let extern-write-abs(num-strings: Int) -> Int =
+  num-strings + 52
+
+pub let extern-sb-length-abs(num-strings: Int) -> Int =
+  num-strings + 53
+
+pub let extern-dump-abs(num-strings: Int) -> Int =
+  num-strings + 54
+
+pub let extern-spawn-abs(num-strings: Int) -> Int =
+  num-strings + 55
+
+pub let extern-getenv-abs(num-strings: Int) -> Int =
+  num-strings + 56
+
+pub let extern-exists-abs(num-strings: Int) -> Int =
+  num-strings + 57
+
+pub let extern-rename-abs(num-strings: Int) -> Int =
+  num-strings + 58
+
+pub let extern-root-keep-abs(num-strings: Int) -> Int =
+  num-strings + 59
+
+pub let extern-root-get-abs(num-strings: Int) -> Int =
+  num-strings + 60
+
+pub let extern-root-save-abs(num-strings: Int) -> Int =
+  num-strings + 61
+
+pub let extern-root-restore-abs(num-strings: Int) -> Int =
+  num-strings + 62
+
+pub let extern-root-push-abs(num-strings: Int) -> Int =
+  num-strings + 63
+
+pub let extern-float-from-str-abs(num-strings: Int) -> Int =
+  num-strings + 64
+
+pub let extern-fadd-abs(num-strings: Int) -> Int =
+  num-strings + 65
+
+pub let extern-fsub-abs(num-strings: Int) -> Int =
+  num-strings + 66
+
+pub let extern-fmul-abs(num-strings: Int) -> Int =
+  num-strings + 67
+
+pub let extern-fdiv-abs(num-strings: Int) -> Int =
+  num-strings + 68
+
+pub let extern-spawn-capture-abs(num-strings: Int) -> Int =
+  num-strings + 69
+
+pub let extern-panic-abs(num-strings: Int) -> Int =
+  num-strings + 70
+
+pub let extern-trace-push-abs(num-strings: Int) -> Int =
+  num-strings + 71
+
+pub let extern-trace-pop-abs(num-strings: Int) -> Int =
+  num-strings + 72
+
+pub let extern-panic-at-abs(num-strings: Int) -> Int =
+  num-strings + 73
+
+pub let extern-isatty-abs(num-strings: Int) -> Int =
+  num-strings + 74
+
+pub let extern-mtime-abs(num-strings: Int) -> Int =
+  num-strings + 75
+
+pub let extern-cwd-abs(num-strings: Int) -> Int =
+  num-strings + 76
+
+pub let extern-ensure-dir-abs(num-strings: Int) -> Int =
+  num-strings + 77
+
+pub let extern-list-dir-abs(num-strings: Int) -> Int =
+  num-strings + 78
+
+pub let extern-realpath-abs(num-strings: Int) -> Int =
+  num-strings + 79
+
+pub let extern-now-ms-abs(num-strings: Int) -> Int =
+  num-strings + 80
+
+pub let extern-remove-abs(num-strings: Int) -> Int =
+  num-strings + 81
+
+pub let extern-is-dir-abs(num-strings: Int) -> Int =
+  num-strings + 82
+
+pub let extern-sb-to-str-abs(num-strings: Int) -> Int =
+  num-strings + 83
+
+pub let extern-slot-get-abs(num-strings: Int) -> Int =
+  num-strings + 84
+
+pub let extern-slot-set-abs(num-strings: Int) -> Int =
+  num-strings + 85
 
 ; Builtin constructor tags — must match runtime/src/variants.c.
-(pub let tag-nil 0)
-(pub let tag-cons 1)
-(pub let tag-none 2)
-(pub let tag-some 3)
-(pub let tag-ok 4)
-(pub let tag-err 5)
+pub let tag-nil = 0
+
+pub let tag-cons = 1
+
+pub let tag-none = 2
+
+pub let tag-some = 3
+
+pub let tag-ok = 4
+
+pub let tag-err = 5
 
 ; `ICallVoid`'s `kind` tag — which of the two fixed extern function
 ; *types* a void call's `fnty` field references (see `ICallVoid`'s own
 ; doc comment above for why arity alone can't disambiguate them).
-(pub let extern-kind-write 0) ; void(ptr, i64) — write_stdout/write_stderr
-(pub let extern-kind-print 1) ; void(i64) — print_i64 / print_str / mn_exit
-(pub let extern-kind-init 2) ; void(i32, ptr) — mn_init
-(pub let extern-kind-panic 3) ; void(ptr) — mn_panic
-(pub let extern-kind-trace-push 4) ; void(ptr, i64) — mn_trace_push
-(pub let extern-kind-trace-pop 5) ; void() — mn_trace_pop
-(pub let extern-kind-panic-at 6) ; void(ptr, i64, ptr) — mn_panic_at
+pub let extern-kind-write = 0
 
-(pub let cast-zext 1) ; LLVM CastOps::ZExt — i1 -> i64 for Bool immediates
-(pub let cast-ptrtoint 9) ; LLVM CastOps::PtrToInt — string global -> i64
+ ; void(ptr, i64) — write_stdout/write_stderr
+pub let extern-kind-print = 1
+
+ ; void(i64) — print_i64 / print_str / mn_exit
+pub let extern-kind-init = 2
+
+ ; void(i32, ptr) — mn_init
+pub let extern-kind-panic = 3
+
+ ; void(ptr) — mn_panic
+pub let extern-kind-trace-push = 4
+
+ ; void(ptr, i64) — mn_trace_push
+pub let extern-kind-trace-pop = 5
+
+ ; void() — mn_trace_pop
+pub let extern-kind-panic-at = 6
+
+ ; void(ptr, i64, ptr) — mn_panic_at
+
+pub let cast-zext = 1
+
+ ; LLVM CastOps::ZExt — i1 -> i64 for Bool immediates
+pub let cast-ptrtoint = 9
+
+ ; LLVM CastOps::PtrToInt — string global -> i64
 
 ; ---------------------------------------------------------------------------
 ; Opcode/predicate constants (llvm/Bitcode/LLVMBitCodes.h's
@@ -284,24 +514,37 @@
 ; backend needs — confirmed against `llvm-bcanalyzer --dump` by
 ; `tools/bc-writer/write-ssa.ts`, see its header comment).
 
-(pub let binop-add 0)
-(pub let binop-sub 1)
-(pub let binop-mul 2)
-(pub let binop-sdiv 4)
-(pub let binop-srem 6)
-(pub let binop-shl 7)
-(pub let binop-lshr 8)
-(pub let binop-ashr 9)
-(pub let binop-or 11)
+pub let binop-add = 0
 
-(pub let cast-trunc 0)
+pub let binop-sub = 1
 
-(pub let icmp-eq 32)
-(pub let icmp-ne 33)
-(pub let icmp-sgt 38)
-(pub let icmp-sge 39)
-(pub let icmp-slt 40)
-(pub let icmp-sle 41)
+pub let binop-mul = 2
+
+pub let binop-sdiv = 4
+
+pub let binop-srem = 6
+
+pub let binop-shl = 7
+
+pub let binop-lshr = 8
+
+pub let binop-ashr = 9
+
+pub let binop-or = 11
+
+pub let cast-trunc = 0
+
+pub let icmp-eq = 32
+
+pub let icmp-ne = 33
+
+pub let icmp-sgt = 38
+
+pub let icmp-sge = 39
+
+pub let icmp-slt = 40
+
+pub let icmp-sle = 41
 
 ; ---------------------------------------------------------------------------
 ; The fixed leading type-table indices every module `write-module-bc`
@@ -311,6 +554,8 @@
 ; (an `IAlloca`'s "1" is `i32`; `main`'s untag-and-return sequence casts to
 ; `i32`) — both modules import these from here rather than each defining
 ; (and risking disagreeing about) their own copy.
-(pub let ty-ptr 0)
-(pub let ty-i64 1)
-(pub let ty-i32 2)
+pub let ty-ptr = 0
+
+pub let ty-i64 = 1
+
+pub let ty-i32 = 2

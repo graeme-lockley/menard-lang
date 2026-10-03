@@ -2,73 +2,82 @@
 ; A valued flag consumes the following word. `--` ends flag parsing.
 ; @module std/cli
 
-(import std/list)
+import std/list
 
 ; One known flag. valued is true when the next word is its value.
-(pub defrec Flag (name: Str) (valued: Bool))
+pub record Flag {
+  name: Str
+  valued: Bool
+}
 
 ; The flag named name, if the table has it.
-(defn flag-named (name: Str) (flags: (List Flag)) -> (Maybe Flag)
-  (match flags
-    [] (None)
-    (Cons f rest)
-      (match f
-        (Flag n _)
-          (if (= n name) (Some f) (flag-named name rest)))))
+let flag-named(name: Str, flags: List Flag) -> Maybe Flag =
+  match (flags)
+    | [] -> None()
+    | Cons(f, rest) ->
+      match (f)
+        | Flag(n, _) ->
+          if n == name -> Some(f)
+           | else -> flag-named(name, rest)
 
 ; Whether name occurs as its own word before `--`.
-; @test (has-flag ["run" "--clean" "a.mnd"] "--clean") => true
-(pub defn has-flag (args: (List Str)) (name: Str) -> Bool
-  (match args
-    [] false
-    (Cons a rest)
-      (if (= a "--") false
-        (if (= a name) true (has-flag rest name)))))
+; @test has-flag(["run", "--clean", "a.mnd"], "--clean") => true
+pub let has-flag(args: List Str, name: Str) -> Bool =
+  match (args)
+    | [] -> false
+    | Cons(a, rest) ->
+      if a == "--" -> false
+       | a == name -> true
+       | else -> has-flag(rest, name)
 
 ; The word after name, or "" when name is absent or has no following word.
-; @test (flag-value ["-o" "out" "a.mnd"] "-o") => "out"
-(pub defn flag-value (args: (List Str)) (name: Str) -> Str
-  (match args
-    [] ""
-    (Cons a rest)
-      (cond
-        ((= a "--") "")
-        ((= a name) (match rest [] "" (Cons v _) v))
-        (else (flag-value rest name)))))
+; @test flag-value(["-o", "out", "a.mnd"], "-o") => "out"
+pub let flag-value(args: List Str, name: Str) -> Str =
+  match (args)
+    | [] -> ""
+    | Cons(a, rest) ->
+      if a == "--" -> ""
+       | a == name ->
+        match (rest)
+          | [] -> ""
+          | Cons(v, _) -> v
+       | else -> flag-value(rest, name)
 
 ; Positionals accumulated in reverse, stopping at `--`.
-(defn positionals-onto (args: (List Str)) (flags: (List Flag)) (acc: (List Str)) -> (List Str)
-  (match args
-    [] (reverse acc)
-    (Cons a rest)
-      (if (= a "--") (reverse acc)
-        (match (flag-named a flags)
-          (None) (positionals-onto rest flags (Cons a acc))
-          (Some f)
-            (match f
-              (Flag _ valued)
-                (if valued
-                  (match rest
-                    [] (reverse acc)
-                    (Cons _ more) (positionals-onto more flags acc))
-                  (positionals-onto rest flags acc)))))))
+let positionals-onto(args: List Str, flags: List Flag, acc: List Str) -> List Str =
+  match (args)
+    | [] -> reverse(acc)
+    | Cons(a, rest) ->
+      if a == "--" -> reverse(acc)
+       | else ->
+        match (flag-named(a, flags))
+          | None -> positionals-onto(rest, flags, Cons(a, acc))
+          | Some(f) ->
+            match (f)
+              | Flag(_, valued) ->
+                if valued ->
+                  match (rest)
+                    | [] -> reverse(acc)
+                    | Cons(_, more) -> positionals-onto(more, flags, acc)
+                 | else -> positionals-onto(rest, flags, acc)
 
 ; Words that are not flags in the table and not a valued flag's argument.
-; @test (positionals ["check" "-o" "out" "a.mnd"] [(Flag "-o" true)]) => ["check" "a.mnd"]
-(pub defn positionals (args: (List Str)) (flags: (List Flag)) -> (List Str)
-  (positionals-onto args flags []))
+; @test positionals(["check", "-o", "out", "a.mnd"], [Flag("-o", true)]) => ["check", "a.mnd"]
+pub let positionals(args: List Str, flags: List Flag) -> List Str =
+  positionals-onto(args, flags, [])
 
 ; The positional at index, or "" when there are fewer.
-; @test (positional ["check" "a.mnd"] [] 1) => "a.mnd"
-(pub defn positional (args: (List Str)) (flags: (List Flag)) (index: Int) -> Str
-  (match (nth (positionals args flags) index)
-    (Some s) s
-    (None) ""))
+; @test positional(["check", "a.mnd"], [], 1) => "a.mnd"
+pub let positional(args: List Str, flags: List Flag, index: Int) -> Str =
+  match (nth(positionals(args, flags), index))
+    | Some(s) -> s
+    | None -> ""
 
 ; The words after the first `--`.
-; @test (args-after ["run" "a.mnd" "--" "-n"]) => ["-n"]
-(pub defn args-after (args: (List Str)) -> (List Str)
-  (match args
-    [] []
-    (Cons a rest)
-      (if (= a "--") rest (args-after rest))))
+; @test args-after(["run", "a.mnd", "--", "-n"]) => ["-n"]
+pub let args-after(args: List Str) -> List Str =
+  match (args)
+    | [] -> []
+    | Cons(a, rest) ->
+      if a == "--" -> rest
+       | else -> args-after(rest)

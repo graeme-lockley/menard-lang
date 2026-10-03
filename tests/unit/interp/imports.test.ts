@@ -44,7 +44,7 @@ describe("import specifiers", () => {
   });
 
   test("std/basics is in scope without an import", () => {
-    const host = createHost({ fs: createVirtualFs({ "/main.mnd": "(not true)\n" }) });
+    const host = createHost({ fs: createVirtualFs({ "/main.mnd": "not(true)\n" }) });
     const src = host.readFile("/main.mnd");
     expect(src.ok).toBe(true);
     if (!src.ok) return;
@@ -56,7 +56,7 @@ describe("import specifiers", () => {
   test("a bare std/list import loads the library", () => {
     const host = createHost({
       fs: createVirtualFs({
-        "/main.mnd": "(import std/list)\n(length [1 2 3])\n",
+        "/main.mnd": "import std/list\nlength([1, 2, 3])\n",
       }),
     });
     const src = host.readFile("/main.mnd");
@@ -72,9 +72,9 @@ describe("import specifiers", () => {
     const host = createHost({
       fs: createVirtualFs({
         "/main.mnd":
-          '(import github:acme/ansi@v1/console)\n(import github:acme/ansi@v2/console)\n',
-        "/.menard/deps/acme/ansi/v1/console.mnd": "(pub defn hi -> Int 1)\n",
-        "/.menard/deps/acme/ansi/v2/console.mnd": "(pub defn hi -> Int 2)\n",
+          'import github:acme/ansi@v1/console\nimport github:acme/ansi@v2/console\n',
+        "/.menard/deps/acme/ansi/v1/console.mnd": "pub let hi() -> Int = 1\n",
+        "/.menard/deps/acme/ansi/v2/console.mnd": "pub let hi() -> Int = 2\n",
       }),
       env: { HOME: "" },
     });

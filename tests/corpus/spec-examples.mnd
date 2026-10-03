@@ -1,42 +1,55 @@
 ; Spec examples — Phase 0 corpus (syntax only)
 
-(defrec (Pair [a b]) (fst: a) (snd: b))
+record Pair[a, b] {
+  fst: a
+  snd: b
+}
 
 ; `Tree` refers to itself in `Node`'s payload, so — like `Ast` in
 ; `src/reader/ast.mnd` — it needs an empty forward declaration before its
 ; real definition (the typer registers a type's name only once its whole
 ; `variant`/`defrec` form has been collected, so a single self-referential
 ; form can't see its own name yet).
-(variant (Tree [a]))
-(variant (Tree [a])
-  (Leaf a)
-  (Node (Tree a) (Tree a))
-  (Empty))
+type Tree[a] =
 
-(defrec (Env [v]))
-(defrec (Env [v]) (parent: (Maybe (Env v))) (bindings: (Map Str v)))
+type Tree[a] =
+  | Leaf(a)
+  | Node(Tree a, Tree a)
+  | Empty
 
-(alias Ints (List Int))
-(alias EnvMap (Map Str Str))
+record Env[v] {
 
-(defn sign (n: Int) -> Str
-  (if (< n 0) "negative"
-    (if (= n 0) "zero" "positive")))
+}
 
-(defn sum-to (n: Int) -> Int
-  (loop ((i 0) (acc 0))
-    (if (> i n)
-      acc
-      (recur (+ i 1) (+ acc i)))))
+record Env[v] {
+  parent: Maybe (Env v)
+  bindings: Map Str v
+}
 
-(defn (tree-size [a]) (t: (Tree a)) -> Int
-  (match t
-    (Empty)       0
-    (Leaf _)      1
-    (Node l r)    (+ 1 (tree-size l) (tree-size r))))
+alias Ints = List Int
 
-(defn count-down (n: Int) -> Unit
-  (let i (ref n))
-  (while (> (deref i) 0)
-    (print (deref i))
-    (set! i (- (deref i) 1))))
+alias EnvMap = Map Str Str
+
+let sign(n: Int) -> Str =
+  if n < 0 -> "negative"
+   | n == 0 -> "zero"
+   | else -> "positive"
+
+let sum-to(n: Int) -> Int =
+  loop (i = 0, acc = 0)
+    if i > n -> acc
+     | else -> recur(i + 1, acc + i)
+
+let tree-size[a](t: Tree a) -> Int =
+  match (t)
+    | Empty -> 0
+    | Leaf(_) -> 1
+    | Node(l, r) -> 1 + tree-size(l) + tree-size(r)
+
+let count-down(n: Int) -> Unit {
+  let i = ref(n)
+  while (deref(i) > 0) {
+    print(deref(i))
+    set!(i, deref(i) - 1)
+  }
+}

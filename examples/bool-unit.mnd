@@ -2,32 +2,35 @@
 ; Prints one line per value: t, f, is-pos, and the Unit from touch.
 ; Run with: `./mn run examples/bool-unit.mnd`
 
-(import std/io)
+import std/io
 
-(defn is-pos (n: Int) -> Bool
-  (> n 0))
+let is-pos(n: Int) -> Bool =
+  n > 0
 
-(defn bool-word (b: Bool) -> Str
-  (if b "true" "false"))
+let bool-word(b: Bool) -> Str =
+  if b -> "true"
+   | else -> "false"
 
-(defn say-bool (label: Str) (b: Bool) -> Int
-  (do
-    (write stdout label)
-    (write stdout (bool-word b))
-    (println)
-    0))
+let say-bool(label: Str, b: Bool) -> Int {
+  write(stdout, label)
+  write(stdout, bool-word(b))
+  println()
+  0
+}
 
-(defn touch -> Unit
-  (let _ 0)
-  ())
+let touch() -> Unit {
+  let _ = 0
+  ()
+}
 
-(defn main -> Int
-  (let t true)
-  (let f false)
-  (touch)
-  (say-bool "t = " t)
-  (say-bool "f = " f)
-  (say-bool "is-pos(5) = " (is-pos 5))
-  (say-bool "is-pos(0) = " (is-pos 0))
-  (println "touch = ()")
-  0)
+let main() -> Int {
+  let t = true
+  let f = false
+  touch()
+  say-bool("t = ", t)
+  say-bool("f = ", f)
+  say-bool("is-pos(5) = ", is-pos(5))
+  say-bool("is-pos(0) = ", is-pos(0))
+  println("touch = ()")
+  0
+}

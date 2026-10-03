@@ -6,312 +6,353 @@
 ;   (mni 1) (src HASH) (dep HASH "abs") (init "sym"|-) (main "sym" "Ret"|-)
 ;   (fn "name" "link" ARITY) (ctor "name" TAG ARITY) (stub <decl>)
 
-(import "../reader/ast.mnd")
-(import "../reader/read.mnd")
-(import "../reader/print.mnd")
-(import "../modules/graph.mnd")
-(import std/fs)
-(import std/io)
-(import std/string)
-(import std/sys)
+import "../reader/ast.mnd"
 
-(pub defrec DepRec (hash: Int) (path: Str))
-(pub defrec FnRec (name: Str) (link: Str) (arity: Int))
-(pub defrec CtorRec (name: Str) (tag: Int) (arity: Int))
-(pub defrec Iface
-  (src-hash: Int)
-  (deps: (List DepRec))
-  (init: Str)
-  (main-sym: Str)
-  (main-ret: Str)
-  (fns: (List FnRec))
-  (ctors: (List CtorRec))
-  (stubs: (List Ast)))
+import "../reader/read.mnd"
 
-(defn sym-str (ast: Ast) -> (Maybe Str)
-  (match ast (SymNode n _) (Some n) _ (None)))
+import "../reader/print.mnd"
 
-(defn blank -> Span (Span 0 0 0 1))
+import "../modules/graph.mnd"
 
-(defn quote-str (s: Str) -> Str
-  (print-form (StrNode s (blank))))
+import std/fs
 
-(defn dirname-of (path: Str) -> Str
-  (do
-    (let n (str-byte-length path))
-    (let slash (last-slash path (- n 1)))
-    (if (< slash 0) "."
-      (if (= slash 0) "/" (str-slice path 0 slash)))))
+import std/io
 
-(defn last-slash (s: Str) (i: Int) -> Int
-  (if (< i 0) (- 1)
-    (if (= (str-byte s i) 47) i
-      (last-slash s (- i 1)))))
+import std/string
 
-(pub defn cache-root -> Str
-  (match (getenv "MENARD_CACHE")
-    (Some s) (if (> (str-byte-length s) 0) s (default-cache))
-    (None) (default-cache)))
+import std/sys
 
-(defn default-cache -> Str
-  (match (getenv "HOME")
-    (Some h) (if (> (str-byte-length h) 0) (str-concat h "/.menard") "/tmp/menard")
-    (None) "/tmp/menard"))
+pub record DepRec {
+  hash: Int
+  path: Str
+}
 
-(pub defn canonical-path (path: Str) -> Str
-  (do
-    (let direct (realpath path))
-    (if (> (str-byte-length direct) 0) direct
-      (normalize-path
-        (if (starts-with path "/") path
-          (str-concat (cwd) "/" path))))))
+pub record FnRec {
+  name: Str
+  link: Str
+  arity: Int
+}
+
+pub record CtorRec {
+  name: Str
+  tag: Int
+  arity: Int
+}
+
+pub record Iface {
+  src-hash: Int
+  deps: List DepRec
+  init: Str
+  main-sym: Str
+  main-ret: Str
+  fns: List FnRec
+  ctors: List CtorRec
+  stubs: List Ast
+}
+
+let sym-str(ast: Ast) -> Maybe Str =
+  match (ast)
+    | SymNode(n, _) -> Some(n)
+    | _ -> None()
+
+let blank() -> Span =
+  Span(0, 0, 0, 1)
+
+let quote-str(s: Str) -> Str =
+  print-form(StrNode(s, blank()))
+
+let dirname-of(path: Str) -> Str {
+  let n = str-byte-length(path)
+  let slash = last-slash(path, n - 1)
+  if slash < 0 -> "."
+   | slash == 0 -> "/"
+   | else -> str-slice(path, 0, slash)
+}
+
+let last-slash(s: Str, i: Int) -> Int =
+  if i < 0 -> -1
+   | str-byte(s, i) == 47 -> i
+   | else -> last-slash(s, i - 1)
+
+pub let cache-root() -> Str =
+  match (getenv("MENARD_CACHE"))
+    | Some(s) ->
+      if str-byte-length(s) > 0 -> s
+       | else -> default-cache()
+    | None -> default-cache()
+
+let default-cache() -> Str =
+  match (getenv("HOME"))
+    | Some(h) ->
+      if str-byte-length(h) > 0 -> str-concat(h, "/.menard")
+       | else -> "/tmp/menard"
+    | None -> "/tmp/menard"
+
+pub let canonical-path(path: Str) -> Str {
+  let direct = realpath(path)
+  if str-byte-length(direct) > 0 -> direct
+   | else ->
+    normalize-path(
+      if starts-with(path, "/") -> path
+       | else -> str-concat(cwd(), "/", path)
+    )
+}
 
 ; Path recorded in panic frames and diagnostics. Relative to the
 ; working directory when the file lives under it, so the object bytes
 ; do not contain an absolute path.
-(pub defn display-path (abs: Str) -> Str
-  (do
-    (let prefix (str-concat (cwd) "/"))
-    (if (starts-with abs prefix)
-      (str-slice abs (str-byte-length prefix) (- (str-byte-length abs) (str-byte-length prefix)))
-      abs)))
+pub let display-path(abs: Str) -> Str {
+  let prefix = str-concat(cwd(), "/")
+  if starts-with(abs, prefix) -> str-slice(abs, str-byte-length(prefix), str-byte-length(abs) - str-byte-length(prefix))
+   | else -> abs
+}
 
-(defn cache-base (abs: Str) -> Str
-  (str-concat (cache-root) abs))
+let cache-base(abs: Str) -> Str =
+  str-concat(cache-root(), abs)
 
-(pub defn iface-path (abs: Str) -> Str
-  (str-concat (cache-base abs) ".mni"))
+pub let iface-path(abs: Str) -> Str =
+  str-concat(cache-base(abs), ".mni")
 
-(pub defn object-path (abs: Str) -> Str
-  (str-concat (cache-base abs) ".bc"))
+pub let object-path(abs: Str) -> Str =
+  str-concat(cache-base(abs), ".bc")
 
-(pub defn cache-bin (abs: Str) -> Str
-  (str-concat (cache-root) "/out/" (show (bytes-hash abs))))
+pub let cache-bin(abs: Str) -> Str =
+  str-concat(cache-root(), "/out/", show(bytes-hash(abs)))
 
-(pub defn ensure-parent (path: Str) -> Bool
-  (ensure-dir (dirname-of path)))
+pub let ensure-parent(path: Str) -> Bool =
+  ensure-dir(dirname-of(path))
 
-(pub defn hash-file (path: Str) -> Int
-  (match (read-file path)
-    (Ok s) (bytes-hash s)
-    (Err _) 0))
+pub let hash-file(path: Str) -> Int =
+  match (read-file(path))
+    | Ok(s) -> bytes-hash(s)
+    | Err(_) -> 0
 
-(let nl
-  (do
-    (let sb (sb-new))
-    (sb-append-byte! sb 10)
-    (sb-take-str! sb)))
+let nl =
+  {
+    let sb = sb-new()
+    sb-append-byte!(sb, 10)
+    sb-take-str!(sb)
+  }
 
-(defn add-line (sb: StringBuffer) (s: Str) -> Unit
-  (do
-    (sb-append! sb s)
-    (sb-append! sb nl)
-    ()))
+let add-line(sb: StringBuffer, s: Str) -> Unit {
+  sb-append!(sb, s)
+  sb-append!(sb, nl)
+  ()
+}
 
-(defn write-deps (sb: StringBuffer) (deps: (List DepRec)) -> Unit
-  (match deps
-    [] ()
-    (Cons (DepRec h p) rest)
-      (do
-        (add-line sb (str-concat "(dep " (show h) " " (quote-str p) ")"))
-        (write-deps sb rest))))
+let write-deps(sb: StringBuffer, deps: List DepRec) -> Unit =
+  match (deps)
+    | [] -> ()
+    | Cons(DepRec(h, p), rest) ->
+      {
+        add-line(sb, str-concat("(dep ", show(h), " ", quote-str(p), ")"))
+        write-deps(sb, rest)
+      }
 
-(defn write-fns (sb: StringBuffer) (fns: (List FnRec)) -> Unit
-  (match fns
-    [] ()
-    (Cons (FnRec name link ar) rest)
-      (do
-        (add-line sb
-          (str-concat "(fn " (quote-str name) " " (quote-str link) " " (show ar) ")"))
-        (write-fns sb rest))))
+let write-fns(sb: StringBuffer, fns: List FnRec) -> Unit =
+  match (fns)
+    | [] -> ()
+    | Cons(FnRec(name, link, ar), rest) ->
+      {
+        add-line(sb, str-concat("(fn ", quote-str(name), " ", quote-str(link), " ", show(ar), ")"))
+        write-fns(sb, rest)
+      }
 
-(defn write-ctors (sb: StringBuffer) (ctors: (List CtorRec)) -> Unit
-  (match ctors
-    [] ()
-    (Cons (CtorRec name tag ar) rest)
-      (do
-        (add-line sb
-          (str-concat "(ctor " (quote-str name) " " (show tag) " " (show ar) ")"))
-        (write-ctors sb rest))))
+let write-ctors(sb: StringBuffer, ctors: List CtorRec) -> Unit =
+  match (ctors)
+    | [] -> ()
+    | Cons(CtorRec(name, tag, ar), rest) ->
+      {
+        add-line(sb, str-concat("(ctor ", quote-str(name), " ", show(tag), " ", show(ar), ")"))
+        write-ctors(sb, rest)
+      }
 
-(defn write-stubs (sb: StringBuffer) (stubs: (List Ast)) -> Unit
-  (match stubs
-    [] ()
-    (Cons f rest)
-      (do
-        (add-line sb (str-concat "(stub " (print-form f) ")"))
-        (write-stubs sb rest))))
+let write-stubs(sb: StringBuffer, stubs: List Ast) -> Unit =
+  match (stubs)
+    | [] -> ()
+    | Cons(f, rest) ->
+      {
+        add-line(sb, str-concat("(stub ", print-form(f), ")"))
+        write-stubs(sb, rest)
+      }
 
-(defn dash (s: Str) -> Str
-  (if (= (str-byte-length s) 0) "-" s))
+let dash(s: Str) -> Str =
+  if str-byte-length(s) == 0 -> "-"
+   | else -> s
 
-(defn iface-text (iface: Iface) -> Str
-  (match iface
-    (Iface src deps init main-sym main-ret fns ctors stubs)
-      (do
-        (let sb (sb-new))
-        (add-line sb "(mni 1)")
-        (add-line sb (str-concat "(src " (show src) ")"))
-        (write-deps sb deps)
-        (add-line sb (str-concat "(init " (quote-str (dash init)) ")"))
-        (add-line sb
-          (str-concat "(main " (quote-str (dash main-sym)) " " (quote-str (dash main-ret)) ")"))
-        (write-fns sb fns)
-        (write-ctors sb ctors)
-        (write-stubs sb stubs)
-        (sb-take-str! sb))))
+let iface-text(iface: Iface) -> Str =
+  match (iface)
+    | Iface(src, deps, init, main-sym, main-ret, fns, ctors, stubs) ->
+      {
+        let sb = sb-new()
+        add-line(sb, "(mni 1)")
+        add-line(sb, str-concat("(src ", show(src), ")"))
+        write-deps(sb, deps)
+        add-line(sb, str-concat("(init ", quote-str(dash(init)), ")"))
+        add-line(sb, str-concat("(main ", quote-str(dash(main-sym)), " ", quote-str(dash(main-ret)), ")"))
+        write-fns(sb, fns)
+        write-ctors(sb, ctors)
+        write-stubs(sb, stubs)
+        sb-take-str!(sb)
+      }
 
-(pub defn write-iface (abs: Str) (iface: Iface) -> Bool
-  (do
-    (let path (iface-path abs))
-    (ensure-parent path)
-    (match (write-file path (iface-text iface))
-      (Ok _) true
-      (Err _) false)))
+pub let write-iface(abs: Str, iface: Iface) -> Bool {
+  let path = iface-path(abs)
+  ensure-parent(path)
+  match (write-file(path, iface-text(iface)))
+    | Ok(_) -> true
+    | Err(_) -> false
+}
 
-(defn undash (s: Str) -> Str
-  (if (= s "-") "" s))
+let undash(s: Str) -> Str =
+  if s == "-" -> ""
+   | else -> s
 
-(defn head-of (a: Ast) -> Str
-  (match a
-    (ParenNode (Cons h _) _)
-      (match (sym-str h) (Some n) n (None) "")
-    _ ""))
+let head-of(a: Ast) -> Str =
+  match (a)
+    | ParenNode(Cons(h, _), _) ->
+      match (sym-str(h))
+        | Some(n) -> n
+        | None -> ""
+    | _ -> ""
 
-(defn elem-str (elems: (List Ast)) (i: Int) -> Str
-  (match elems
-    [] ""
-    (Cons e rest)
-      (if (= i 0)
-        (match e (StrNode s _) s _ "")
-        (elem-str rest (- i 1)))))
+let elem-str(elems: List Ast, i: Int) -> Str =
+  match (elems)
+    | [] -> ""
+    | Cons(e, rest) ->
+      if i == 0 ->
+        match (e)
+          | StrNode(s, _) -> s
+          | _ -> ""
+       | else -> elem-str(rest, i - 1)
 
-(defn elem-int (elems: (List Ast)) (i: Int) -> Int
-  (match elems
-    [] 0
-    (Cons e rest)
-      (if (= i 0)
-        (match e (IntNode n _) n _ 0)
-        (elem-int rest (- i 1)))))
+let elem-int(elems: List Ast, i: Int) -> Int =
+  match (elems)
+    | [] -> 0
+    | Cons(e, rest) ->
+      if i == 0 ->
+        match (e)
+          | IntNode(n, _) -> n
+          | _ -> 0
+       | else -> elem-int(rest, i - 1)
 
-(defn elem-ast (elems: (List Ast)) (i: Int) -> (Maybe Ast)
-  (match elems
-    [] (None)
-    (Cons e rest)
-      (if (= i 0) (Some e) (elem-ast rest (- i 1)))))
+let elem-ast(elems: List Ast, i: Int) -> Maybe Ast =
+  match (elems)
+    | [] -> None()
+    | Cons(e, rest) ->
+      if i == 0 -> Some(e)
+       | else -> elem-ast(rest, i - 1)
 
-(defn reverse-deps (xs: (List DepRec)) (acc: (List DepRec)) -> (List DepRec)
-  (match xs [] acc (Cons x rest) (reverse-deps rest (Cons x acc))))
+let reverse-deps(xs: List DepRec, acc: List DepRec) -> List DepRec =
+  match (xs)
+    | [] -> acc
+    | Cons(x, rest) -> reverse-deps(rest, Cons(x, acc))
 
-(defn reverse-fns (xs: (List FnRec)) (acc: (List FnRec)) -> (List FnRec)
-  (match xs [] acc (Cons x rest) (reverse-fns rest (Cons x acc))))
+let reverse-fns(xs: List FnRec, acc: List FnRec) -> List FnRec =
+  match (xs)
+    | [] -> acc
+    | Cons(x, rest) -> reverse-fns(rest, Cons(x, acc))
 
-(defn reverse-ctors (xs: (List CtorRec)) (acc: (List CtorRec)) -> (List CtorRec)
-  (match xs [] acc (Cons x rest) (reverse-ctors rest (Cons x acc))))
+let reverse-ctors(xs: List CtorRec, acc: List CtorRec) -> List CtorRec =
+  match (xs)
+    | [] -> acc
+    | Cons(x, rest) -> reverse-ctors(rest, Cons(x, acc))
 
-(defn reverse-asts (xs: (List Ast)) (acc: (List Ast)) -> (List Ast)
-  (match xs [] acc (Cons x rest) (reverse-asts rest (Cons x acc))))
+let reverse-asts(xs: List Ast, acc: List Ast) -> List Ast =
+  match (xs)
+    | [] -> acc
+    | Cons(x, rest) -> reverse-asts(rest, Cons(x, acc))
 
-(defn take-form (a: Ast) (src-hash: (Ref Int)) (deps: (Ref (List DepRec))) (init: (Ref Str)) (main-sym: (Ref Str)) (main-ret: (Ref Str)) (fns: (Ref (List FnRec))) (ctors: (Ref (List CtorRec))) (stubs: (Ref (List Ast))) -> Unit
-  (match a
-    (ParenNode elems _)
-      (do
-        (let h (head-of a))
-        (cond
-          ((= h "src") (set! src-hash (elem-int elems 1)))
-          ((= h "dep")
-            (set! deps (Cons (DepRec (elem-int elems 1) (elem-str elems 2)) (deref deps))))
-          ((= h "init") (set! init (undash (elem-str elems 1))))
-          ((= h "main")
-            (do
-              (set! main-sym (undash (elem-str elems 1)))
-              (set! main-ret (undash (elem-str elems 2)))
-              ()))
-          ((= h "fn")
-            (set! fns (Cons (FnRec (elem-str elems 1) (elem-str elems 2) (elem-int elems 3)) (deref fns))))
-          ((= h "ctor")
-            (set! ctors (Cons (CtorRec (elem-str elems 1) (elem-int elems 2) (elem-int elems 3)) (deref ctors))))
-          ((= h "stub")
-            (match (elem-ast elems 1)
-              (Some inner) (set! stubs (Cons inner (deref stubs)))
-              (None) ()))
-          (else ()))
-        ())
-    _ ()))
+let take-form(a: Ast, src-hash: Ref Int, deps: Ref (List DepRec), init: Ref Str, main-sym: Ref Str, main-ret: Ref Str, fns: Ref (List FnRec), ctors: Ref (List CtorRec), stubs: Ref (List Ast)) -> Unit =
+  match (a)
+    | ParenNode(elems, _) ->
+      {
+        let h = head-of(a)
+        if h == "src" -> set!(src-hash, elem-int(elems, 1))
+         | h == "dep" -> set!(deps, Cons(DepRec(elem-int(elems, 1), elem-str(elems, 2)), deref(deps)))
+         | h == "init" -> set!(init, undash(elem-str(elems, 1)))
+         | h == "main" ->
+          {
+            set!(main-sym, undash(elem-str(elems, 1)))
+            set!(main-ret, undash(elem-str(elems, 2)))
+            ()
+          }
+         | h == "fn" -> set!(fns, Cons(FnRec(elem-str(elems, 1), elem-str(elems, 2), elem-int(elems, 3)), deref(fns)))
+         | h == "ctor" -> set!(ctors, Cons(CtorRec(elem-str(elems, 1), elem-int(elems, 2), elem-int(elems, 3)), deref(ctors)))
+         | h == "stub" ->
+          match (elem-ast(elems, 1))
+            | Some(inner) -> set!(stubs, Cons(inner, deref(stubs)))
+            | None -> ()
+         | else -> ()
+        ()
+      }
+    | _ -> ()
 
-(defn take-forms (forms: (List Ast)) (src-hash: (Ref Int)) (deps: (Ref (List DepRec))) (init: (Ref Str)) (main-sym: (Ref Str)) (main-ret: (Ref Str)) (fns: (Ref (List FnRec))) (ctors: (Ref (List CtorRec))) (stubs: (Ref (List Ast))) -> Unit
-  (match forms
-    [] ()
-    (Cons f rest)
-      (do
-        (take-form f src-hash deps init main-sym main-ret fns ctors stubs)
-        (take-forms rest src-hash deps init main-sym main-ret fns ctors stubs))))
+let take-forms(forms: List Ast, src-hash: Ref Int, deps: Ref (List DepRec), init: Ref Str, main-sym: Ref Str, main-ret: Ref Str, fns: Ref (List FnRec), ctors: Ref (List CtorRec), stubs: Ref (List Ast)) -> Unit =
+  match (forms)
+    | [] -> ()
+    | Cons(f, rest) ->
+      {
+        take-form(f, src-hash, deps, init, main-sym, main-ret, fns, ctors, stubs)
+        take-forms(rest, src-hash, deps, init, main-sym, main-ret, fns, ctors, stubs)
+      }
 
-(defn iface-from-forms (forms: (List Ast)) -> Iface
-  (do
-    (let src-hash (ref 0))
-    (let deps (ref []))
-    (let init (ref ""))
-    (let main-sym (ref ""))
-    (let main-ret (ref ""))
-    (let fns (ref []))
-    (let ctors (ref []))
-    (let stubs (ref []))
-    (take-forms forms src-hash deps init main-sym main-ret fns ctors stubs)
-    (Iface
-      (deref src-hash)
-      (reverse-deps (deref deps) [])
-      (deref init)
-      (deref main-sym)
-      (deref main-ret)
-      (reverse-fns (deref fns) [])
-      (reverse-ctors (deref ctors) [])
-      (reverse-asts (deref stubs) []))))
+let iface-from-forms(forms: List Ast) -> Iface {
+  let src-hash = ref(0)
+  let deps = ref([])
+  let init = ref("")
+  let main-sym = ref("")
+  let main-ret = ref("")
+  let fns = ref([])
+  let ctors = ref([])
+  let stubs = ref([])
+  take-forms(forms, src-hash, deps, init, main-sym, main-ret, fns, ctors, stubs)
+  Iface(deref(src-hash), reverse-deps(deref(deps), []), deref(init), deref(main-sym), deref(main-ret), reverse-fns(deref(fns), []), reverse-ctors(deref(ctors), []), reverse-asts(deref(stubs), []))
+}
 
-(pub defn read-iface (abs: Str) -> (Maybe Iface)
-  (match (read-file (iface-path abs))
-    (Err _) (None)
-    (Ok text)
-      (match (read-all text)
-        (Err _) (None)
-        (Ok forms) (Some (iface-from-forms forms)))))
+pub let read-iface(abs: Str) -> Maybe Iface =
+  match (read-file(iface-path(abs)))
+    | Err(_) -> None()
+    | Ok(text) ->
+      match (read-all(text))
+        | Err(_) -> None()
+        | Ok(forms) -> Some(iface-from-forms(forms))
 
-(defn deps-match (deps: (List DepRec)) -> Bool
-  (match deps
-    [] true
-    (Cons (DepRec h path) rest)
-      (if (= h (hash-file (iface-path path))) (deps-match rest) false)))
+let deps-match(deps: List DepRec) -> Bool =
+  match (deps)
+    | [] -> true
+    | Cons(DepRec(h, path), rest) ->
+      if h == hash-file(iface-path(path)) -> deps-match(rest)
+       | else -> false
 
-(defn stamps-fresh (abs: Str) -> Bool
-  (do
-    (let src (mtime abs))
-    (let iface (mtime (iface-path abs)))
-    (let obj (mtime (object-path abs)))
-    (and (> src 0) (> iface src) (> obj src) true)))
+let stamps-fresh(abs: Str) -> Bool {
+  let src = mtime(abs)
+  let iface = mtime(iface-path(abs))
+  let obj = mtime(object-path(abs))
+  src > 0 && iface > src && obj > src && true
+}
 
-(pub defn iface-fresh (abs: Str) (iface: Iface) -> Bool
-  (match iface
-    (Iface src deps _ _ _ _ _ _)
-      (and (exists (object-path abs))
-           (deps-match deps)
-           (or (stamps-fresh abs) (= (hash-file abs) src)))))
+pub let iface-fresh(abs: Str, iface: Iface) -> Bool =
+  match (iface)
+    | Iface(src, deps, _, _, _, _, _, _) -> exists(object-path(abs)) && deps-match(deps) && stamps-fresh(abs) || hash-file(abs) == src
 
-(pub defn remove-cache (abs: Str) -> Unit
-  (do
-    (remove (iface-path abs))
-    (remove (object-path abs))
-    ()))
+pub let remove-cache(abs: Str) -> Unit {
+  remove(iface-path(abs))
+  remove(object-path(abs))
+  ()
+}
 
-(defn split-acc (s: Str) (i: Int) (start: Int) (n: Int) (acc: (List Str)) -> (List Str)
-  (if (> i n) acc
-    (if (or (= i n) (= (str-byte s i) 10))
-      (if (= i start)
-        (split-acc s (+ i 1) (+ i 1) n acc)
-        (split-acc s (+ i 1) (+ i 1) n (Cons (str-slice s start (- i start)) acc)))
-      (split-acc s (+ i 1) start n acc))))
+let split-acc(s: Str, i: Int, start: Int, n: Int, acc: List Str) -> List Str =
+  if i > n -> acc
+   | i == n || str-byte(s, i) == 10 ->
+    if i == start -> split-acc(s, i + 1, i + 1, n, acc)
+     | else -> split-acc(s, i + 1, i + 1, n, Cons(str-slice(s, start, i - start), acc))
+   | else -> split-acc(s, i + 1, start, n, acc)
 
-(defn reverse-strs (xs: (List Str)) (acc: (List Str)) -> (List Str)
-  (match xs [] acc (Cons x rest) (reverse-strs rest (Cons x acc))))
+let reverse-strs(xs: List Str, acc: List Str) -> List Str =
+  match (xs)
+    | [] -> acc
+    | Cons(x, rest) -> reverse-strs(rest, Cons(x, acc))
 
-(pub defn split-lines (s: Str) -> (List Str)
-  (reverse-strs (split-acc s 0 0 (str-byte-length s) []) []))
+pub let split-lines(s: Str) -> List Str =
+  reverse-strs(split-acc(s, 0, 0, str-byte-length(s), []), [])

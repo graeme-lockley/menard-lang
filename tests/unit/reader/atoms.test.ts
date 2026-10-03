@@ -17,10 +17,10 @@ describe("symbols and ! hygiene", () => {
   });
 
   test("trailing ! is allowed", () => {
-    const a = mustRead("set!");
-    expect(a.tag).toBe("sym");
     const b = mustRead("sb-append!");
     expect(b.tag).toBe("sym");
+    const call = mustRead("set!(1)");
+    expect(call.tag).toBe("list");
   });
 
   test("! only as final character", () => {
@@ -39,13 +39,13 @@ describe("symbols and ! hygiene", () => {
     }
   });
 
-  test("-> is a symbol", () => {
-    const a = mustRead("->");
-    expect(a.tag).toBe("sym");
+  test("a bare arrow is not an identifier", () => {
+    const r = read("->");
+    expect(r.ok).toBe(false);
   });
 
   test("round-trip symbols", () => {
-    for (const s of ["x", "map", "set!", "sb-append!", "fst:", "->", "<", "="]) {
+    for (const s of ["x", "map", "sb-append!", "fst:"]) {
       const a = mustRead(s);
       const b = mustRead(print(a));
       expect(astEqual(a, b)).toBe(true);

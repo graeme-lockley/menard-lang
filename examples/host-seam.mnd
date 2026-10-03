@@ -2,44 +2,46 @@
 ; Run from the repo root: ./mn run examples/host-seam.mnd
 ; `println` only prints string literals, so computed text goes through `write`.
 
-(import std/fs)
-(import std/io)
-(import std/proc)
-(import std/sys)
+import std/fs
 
-(let nl
-  (do
-    (let sb (sb-new))
-    (sb-append-byte! sb 10)
-    (sb-take-str! sb)))
+import std/io
 
-(defn line (s: Str) -> Unit
-  (do
-    (write stdout s)
-    (write stdout nl)
-    ()))
+import std/proc
 
-(defn main -> Int
-  (do
-    (if (exists "examples/fixtures/echo-input.txt")
-      (println "fixture exists")
-      (println "fixture missing"))
-    (match (getenv "PATH")
-      (Some _) (println "PATH is set")
-      (None) (println "PATH is unset"))
-    (match (spawn ["/usr/bin/true"])
-      (Ok st)
-        (match st
-          (Exited n) (line (str-concat "true exited " (show n)))
-          (Signalled n) (line (str-concat "true signalled " (show n))))
-      (Err _) (println "spawn failed"))
-    (match (write-file "build/rename-src.txt" "hi")
-      (Ok _) ()
-      (Err _) (println "write failed"))
-    (match (rename "build/rename-src.txt" "build/rename-dst.txt")
-      (Ok _) (println "renamed")
-      (Err _) (println "rename failed"))
-    (if (exists "build/rename-dst.txt")
-      (println "renamed file exists")
-      (println "renamed file missing"))
-    0))
+import std/sys
+
+let nl =
+  {
+    let sb = sb-new()
+    sb-append-byte!(sb, 10)
+    sb-take-str!(sb)
+  }
+
+let line(s: Str) -> Unit {
+  write(stdout, s)
+  write(stdout, nl)
+  ()
+}
+
+let main() -> Int {
+  if exists("examples/fixtures/echo-input.txt") -> println("fixture exists")
+   | else -> println("fixture missing")
+  match (getenv("PATH"))
+    | Some(_) -> println("PATH is set")
+    | None -> println("PATH is unset")
+  match (spawn(["/usr/bin/true"]))
+    | Ok(st) ->
+      match (st)
+        | Exited(n) -> line(str-concat("true exited ", show(n)))
+        | Signalled(n) -> line(str-concat("true signalled ", show(n)))
+    | Err(_) -> println("spawn failed")
+  match (write-file("build/rename-src.txt", "hi"))
+    | Ok(_) -> ()
+    | Err(_) -> println("write failed")
+  match (rename("build/rename-src.txt", "build/rename-dst.txt"))
+    | Ok(_) -> println("renamed")
+    | Err(_) -> println("rename failed")
+  if exists("build/rename-dst.txt") -> println("renamed file exists")
+   | else -> println("renamed file missing")
+  0
+}

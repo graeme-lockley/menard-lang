@@ -1,7 +1,8 @@
 ; `if`'s test position must be Bool — the typer must reject this with
 ; E_TYPE_MISMATCH, matching host/src/type/check.ts's `inferIf`.
 
-(defn f -> Int
-  (if 1 2 3))
+let f() -> Int =
+  if 1 -> 2
+   | else -> 3
 
-(println (show (f)))
+println(show(f()))

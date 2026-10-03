@@ -763,6 +763,8 @@ function collectDef(env: TypeEnv, ast: Ast): void {
     const { name, params } = parseTypeName(ast.elems[1]!);
     if (!name) return;
     const paramSet = new Set(params);
+    // Register the name before payloads so a variant can mention itself.
+    env.types.set(name, { kind: "variant", name, params, ctors: [], span: ast.span });
     const ctors: VariantCtor[] = [];
     for (let i = 2; i < ast.elems.length; i++) {
       const ce = ast.elems[i]!;
@@ -1076,6 +1078,8 @@ function inferIf(
   expectType(env, infer(env, ast.elems[1]!, local, subst), prim("Bool"), subst, ast.elems[1]!.span);
   const th = infer(env, ast.elems[2]!, local, subst);
   const el = infer(env, ast.elems[3]!, local, subst);
+  // A missing else is lowered to (). () is Unit, so a missing else
+  // typechecks only when every arm is Unit.
   expectType(env, el, th, subst, ast.elems[3]!.span);
   return applySubst(th, subst);
 }

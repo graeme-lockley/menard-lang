@@ -2,6 +2,6 @@
 ; @module std/string-buffer
 
 ; Append the show spelling of v.
-; @test (sb-append-show! (sb-new) 41) => ()
-(pub defn (sb-append-show! [a]) (sb: StringBuffer) (v: a) -> Unit
-  (sb-append! sb (show v)))
+; @test sb-append-show!(sb-new(), 41) => ()
+pub let sb-append-show![a](sb: StringBuffer, v: a) -> Unit =
+  sb-append!(sb, show(v))

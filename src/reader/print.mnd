@@ -1,78 +1,713 @@
-; Printer — turns Ast forms back into source bytes. Mirrors
-; host/src/reader/print.ts. "Canonical enough for round-trip", not a
-; pretty-printer: no re-indentation, no comment preservation.
+; Printer. Renders core forms in the surface from docs/syntax.md.
+; Mirrors host/src/reader/print.ts.
 
-(import "./ast.mnd")
+import "./ast.mnd"
 
-; Re-export shim — see casing.mnd for why this is needed.
-(pub alias Ast Ast)
-(pub alias Span Span)
+pub alias Ast = Ast
 
-(defn print-str-byte-into (bytes: Str) (sb: StringBuffer) (i: Int) -> Unit
-  (let b (str-byte bytes i))
-  (if (or (= b 92) (= b 34)) (sb-append-byte! sb 92) ())
-  (sb-append-byte! sb b))
+let nl() -> Str {
+  let sb = sb-new()
+  sb-append-byte!(sb, 10)
+  sb-take-str!(sb)
+}
 
-(defn print-str-bytes-into (bytes: Str) (sb: StringBuffer) (i: Int) (n: Int) -> Unit
-  (if (>= i n) ()
-    (do
-      (print-str-byte-into bytes sb i)
-      (print-str-bytes-into bytes sb (+ i 1) n))))
+let pad(n: Int) -> Str =
+  pad-from(n, "")
 
-(defn print-str-into (bytes: Str) (sb: StringBuffer) -> Unit
-  (do
-    (sb-append-byte! sb 34)
-    (print-str-bytes-into bytes sb 0 (str-byte-length bytes))
-    (sb-append-byte! sb 34)))
+let pad-from(n: Int, acc: Str) -> Str =
+  if n <= 0 -> acc
+   | else -> pad-from(n - 1, str-concat(acc, " "))
 
-(defn print-list-elems-into (elems: (List Ast)) (sb: StringBuffer) (first: Bool) -> Unit
-  (match elems
-    [] ()
-    (Cons x rest)
-      (do
-        (if first () (sb-append-byte! sb 32))
-        (print-into x sb)
-        (print-list-elems-into rest sb false))))
+let join(xs: List Str, sep: Str) -> Str =
+  match (xs)
+    | [] -> ""
+    | Cons(h, []) -> h
+    | Cons(h, t) -> str-concat(h, str-concat(sep, join(t, sep)))
 
-(defn print-list-into (open: Int) (close: Int) (elems: (List Ast)) (sb: StringBuffer) -> Unit
-  (do
-    (sb-append-byte! sb open)
-    (print-list-elems-into elems sb true)
-    (sb-append-byte! sb close)))
+let sym-str(a: Ast) -> Maybe Str =
+  match (a)
+    | SymNode(n, _) -> Some(n)
+    | _ -> None()
 
-(defn print-into (a: Ast) (sb: StringBuffer) -> Unit
-  (match a
-    (ParenNode elems _) (print-list-into 40 41 elems sb)
-    (BracketNode elems _) (print-list-into 91 93 elems sb)
-    (SymNode name _) (sb-append! sb name)
-    (IntNode v _) (sb-append! sb (show v))
-    ; FloatNode carries raw source text verbatim (see ast.mnd) — printed
-    ; back out as-is, which is what keeps this a byte-identical round trip.
-    (FloatNode text _) (sb-append! sb text)
-    (StrNode bytes _) (print-str-into bytes sb)
-    (BoolNode v _) (sb-append! sb (show v))))
+let head-str(a: Ast) -> Maybe Str =
+  match (a)
+    | ParenNode(Cons(h, _), _) -> sym-str(h)
+    | _ -> None()
 
-; Print a single Ast to a Str (canonical enough for round-trip).
-(pub defn print-form (a: Ast) -> Str
-  (do
-    (let sb (sb-new))
-    (print-into a sb)
-    (sb-take-str! sb)))
+let is-head(a: Ast, name: Str) -> Bool =
+  match (head-str(a))
+    | Some(n) -> n == name
+    | None -> false
 
-(defn print-all-into (xs: (List Ast)) (sb: StringBuffer) (first: Bool) -> Unit
-  (match xs
-    [] ()
-    (Cons x rest)
-      (do
-        (if first () (sb-append-byte! sb 10))
-        (print-into x sb)
-        (print-all-into rest sb false))))
+let is-unit(a: Ast) -> Bool =
+  match (a)
+    | ParenNode([], _) -> true
+    | _ -> false
 
-; Print top-level forms separated by newlines, with one trailing newline
-; when non-empty.
-(pub defn print-form-all (xs: (List Ast)) -> Str
-  (do
-    (let sb (sb-new))
-    (print-all-into xs sb true)
-    (match xs [] () _ (sb-append-byte! sb 10))
-    (sb-take-str! sb)))
+let name-text(s: Str) -> Str =
+  if s == "status->exit-code" -> "status-exit-code"
+   | s == "block-terminated?" -> "block-terminated"
+   | s == "slot-store?" -> "slot-store"
+   | s == "record" -> "scan-record"
+   | s == "pub" -> "exported"
+   | else -> s
+
+let has-nl(s: Str) -> Bool =
+  has-nl-from(s, 0, str-byte-length(s))
+
+let has-nl-from(s: Str, i: Int, n: Int) -> Bool =
+  if i >= n -> false
+   | str-byte(s, i) == 10 -> true
+   | else -> has-nl-from(s, i + 1, n)
+
+let quote-str(s: Str) -> Str {
+  let sb = sb-new()
+  sb-append-byte!(sb, 34)
+  quote-bytes(sb, s, 0, str-byte-length(s))
+  sb-append-byte!(sb, 34)
+  sb-take-str!(sb)
+}
+
+let quote-bytes(sb: StringBuffer, s: Str, i: Int, n: Int) -> Unit =
+  if i >= n -> ()
+   | else ->
+    {
+      let b = str-byte(s, i)
+      if b == 92 || b == 34 -> sb-append-byte!(sb, 92)
+       | else -> ()
+      sb-append-byte!(sb, b)
+      quote-bytes(sb, s, i + 1, n)
+    }
+
+let is-upper-name(s: Str) -> Bool {
+  let b = str-byte(s, 0)
+  b >= 65 && b <= 90
+}
+
+pub let print-form(a: Ast) -> Str =
+  print-form-at(a, 0)
+
+pub let print-form-all(xs: List Ast) -> Str {
+  let body = join-forms(xs)
+  if body == "" -> ""
+   | else -> str-concat(body, nl())
+}
+
+let join-forms(xs: List Ast) -> Str =
+  match (xs)
+    | [] -> ""
+    | Cons(h, []) -> print-form(h)
+    | Cons(h, t) -> str-concat(print-form(h), str-concat(str-concat(nl(), nl()), join-forms(t)))
+
+let print-form-at(a: Ast, ind: Int) -> Str =
+  if is-head(a, "pub") -> str-concat("pub ", print-pub-rest(a, ind))
+   | is-head(a, "defn") -> print-defn(a, ind)
+   | is-head(a, "defrec") -> print-record(a, ind)
+   | is-head(a, "variant") -> print-variant(a, ind)
+   | is-head(a, "alias") -> print-alias(a)
+   | is-head(a, "import") -> print-import(a)
+   | is-head(a, "extern") -> print-extern(a)
+   | is-head(a, "test") -> print-test(a, ind)
+   | else -> print-expr(a, ind)
+
+let print-pub-rest(a: Ast, ind: Int) -> Str =
+  match (a)
+    | ParenNode(Cons(_, rest), sp) -> print-form-at(ParenNode(rest, sp), ind)
+    | _ -> ""
+
+let print-alias(a: Ast) -> Str =
+  match (a)
+    | ParenNode(Cons(_, Cons(name, Cons(ty, _))), _) -> str-concat("alias ", str-concat(print-expr(name, 0), str-concat(" = ", print-type(ty))))
+    | _ -> "alias"
+
+let print-import(a: Ast) -> Str =
+  match (a)
+    | ParenNode(Cons(_, Cons(path, _)), _) -> str-concat("import ", print-atom(path))
+    | _ -> "import"
+
+let print-test(a: Ast, ind: Int) -> Str =
+  match (a)
+    | ParenNode(Cons(_, Cons(desc, Cons(body, _))), _) -> str-concat("test ", str-concat(print-atom(desc), str-concat(" =", placed(body, ind + 2))))
+    | _ -> "test"
+
+let print-defn(a: Ast, ind: Int) -> Str =
+  match (a)
+    | ParenNode(Cons(_, Cons(name, rest)), _) -> print-defn-rest(name, rest, ind)
+    | _ -> "let"
+
+let print-defn-rest(name: Ast, rest: List Ast, ind: Int) -> Str {
+  let params = params-before(rest, [])
+  let after = after-arrow(rest)
+  match (after)
+    | Cons(ret, bodies) ->
+      {
+        let sig = str-concat("let ", str-concat(print-defn-name(name), str-concat("(", str-concat(join(params, ", "), str-concat(") -> ", print-type(ret))))))
+        print-defn-body(sig, bodies, ind)
+      }
+    | [] -> str-concat("let ", print-defn-name(name))
+}
+
+let params-before(xs: List Ast, acc: List Str) -> List Str =
+  match (xs)
+    | [] -> rev-str(acc, [])
+    | Cons(h, t) ->
+      match (sym-str(h))
+        | Some(n) ->
+          if n == "->" -> rev-str(acc, [])
+           | else -> params-before(t, Cons(print-param(h), acc))
+        | None -> params-before(t, Cons(print-param(h), acc))
+
+let rev-str(xs: List Str, acc: List Str) -> List Str =
+  match (xs)
+    | [] -> acc
+    | Cons(h, t) -> rev-str(t, Cons(h, acc))
+
+let after-arrow(xs: List Ast) -> List Ast =
+  match (xs)
+    | [] -> []
+    | Cons(h, t) ->
+      match (sym-str(h))
+        | Some(n) ->
+          if n == "->" -> t
+           | else -> after-arrow(t)
+        | None -> after-arrow(t)
+
+let print-defn-body(sig: Str, bodies: List Ast, ind: Int) -> Str =
+  match (bodies)
+    | [] -> sig
+    | Cons(only, []) ->
+      if is-head(only, "do") || is-head(only, "let") -> str-concat(sig, str-concat(" ", print-as-block(bodies, ind)))
+       | else -> str-concat(sig, str-concat(str-concat(" =", nl()), str-concat(pad(ind + 2), print-expr(only, ind + 2))))
+    | _ -> str-concat(sig, str-concat(" ", print-as-block(bodies, ind)))
+
+let print-as-block(bodies: List Ast, ind: Int) -> Str =
+  match (bodies)
+    | Cons(only, []) ->
+      if is-head(only, "do") -> print-block(only, ind)
+       | else -> print-block(wrap-do(bodies), ind)
+    | _ -> print-block(wrap-do(bodies), ind)
+
+let wrap-do(bodies: List Ast) -> Ast =
+  ParenNode(Cons(SymNode("do", Span(0, 0, 0, 0)), bodies), Span(0, 0, 0, 0))
+
+let print-defn-name(a: Ast) -> Str =
+  match (a)
+    | SymNode(n, _) -> name-text(n)
+    | ParenNode(Cons(SymNode(n, _), rest), _) ->
+      match (rest)
+        | [] -> name-text(n)
+        | Cons(BracketNode(ps, _), _) -> str-concat(name-text(n), str-concat("[", str-concat(join(map-atom(ps), ", "), "]")))
+        | _ -> print-atom(a)
+    | _ -> print-atom(a)
+
+let map-atom(xs: List Ast) -> List Str =
+  match (xs)
+    | [] -> []
+    | Cons(h, t) -> Cons(print-atom(h), map-atom(t))
+
+let print-param(a: Ast) -> Str =
+  match (a)
+    | ParenNode(elems, _) -> print-param-elems(elems)
+    | _ -> print-atom(a)
+
+let print-param-elems(elems: List Ast) -> Str =
+  match (elems)
+    | Cons(name, Cons(ty, rest)) ->
+      {
+        let raw = sym-or(name, "")
+        let bare = name-text(strip-colon(raw))
+        let prefix =
+          if has-sym(rest, "...") || has-sym(elems, "...") -> "..."
+           | else -> ""
+        str-concat(prefix, str-concat(bare, str-concat(": ", print-type(ty))))
+      }
+    | _ -> ""
+
+let sym-or(a: Ast, d: Str) -> Str =
+  match (sym-str(a))
+    | Some(n) -> n
+    | None -> d
+
+let strip-colon(s: Str) -> Str {
+  let n = str-byte-length(s)
+  if n > 0 && str-byte(s, n - 1) == 58 -> str-slice(s, 0, n - 1)
+   | else -> s
+}
+
+let has-sym(xs: List Ast, name: Str) -> Bool =
+  match (xs)
+    | [] -> false
+    | Cons(h, t) ->
+      match (sym-str(h))
+        | Some(n) ->
+          if n == name -> true
+           | else -> has-sym(t, name)
+        | None -> has-sym(t, name)
+
+let print-record(a: Ast, ind: Int) -> Str =
+  match (a)
+    | ParenNode(Cons(_, Cons(name, fields)), _) ->
+      str-concat("record ", str-concat(print-defn-name(name), str-concat(" {", str-concat(nl(), str-concat(join(map-field(fields, ind), nl()), str-concat(nl(), str-concat(pad(ind), "}")))))))
+    | _ -> "record"
+
+let map-field(xs: List Ast, ind: Int) -> List Str =
+  match (xs)
+    | [] -> []
+    | Cons(h, t) -> Cons(str-concat(pad(ind + 2), print-field(h)), map-field(t, ind))
+
+let print-field(a: Ast) -> Str =
+  match (a)
+    | ParenNode(Cons(name, Cons(ty, _)), _) -> str-concat(strip-colon(sym-or(name, "")), str-concat(": ", print-type(ty)))
+    | _ -> print-atom(a)
+
+let print-variant(a: Ast, ind: Int) -> Str =
+  match (a)
+    | ParenNode(Cons(_, Cons(name, ctors)), _) ->
+      if ctors == [] -> str-concat("type ", str-concat(print-defn-name(name), str-concat(" =", nl())))
+       | else -> str-concat("type ", str-concat(print-defn-name(name), str-concat(" =", str-concat(nl(), join(map-ctor(ctors, ind), nl())))))
+    | _ -> "type"
+
+let map-ctor(xs: List Ast, ind: Int) -> List Str =
+  match (xs)
+    | [] -> []
+    | Cons(h, t) -> Cons(str-concat(pad(ind + 2), str-concat("| ", print-ctor(h))), map-ctor(t, ind))
+
+let print-ctor(a: Ast) -> Str =
+  match (a)
+    | SymNode(n, _) -> n
+    | ParenNode(Cons(name, []), _) -> print-atom(name)
+    | ParenNode(Cons(name, args), _) -> str-concat(print-atom(name), str-concat("(", str-concat(join(map-type(args), ", "), ")")))
+    | _ -> print-atom(a)
+
+let map-type(xs: List Ast) -> List Str =
+  match (xs)
+    | [] -> []
+    | Cons(h, t) -> Cons(print-type(h), map-type(t))
+
+let print-extern(a: Ast) -> Str =
+  match (a)
+    | ParenNode(Cons(_, Cons(name, rest)), _) ->
+      {
+        let params = params-before(rest, [])
+        match (after-arrow(rest))
+          | Cons(ret, _) -> str-concat("extern ", str-concat(print-atom(name), str-concat("(", str-concat(join(params, ", "), str-concat(") -> ", print-type(ret))))))
+          | [] -> str-concat("extern ", print-atom(name))
+      }
+    | _ -> "extern"
+
+let print-block(a: Ast, ind: Int) -> Str =
+  match (a)
+    | ParenNode(Cons(_, body), _) ->
+      str-concat("{", str-concat(nl(), str-concat(join(map-stmt(body, ind), nl()), str-concat(nl(), str-concat(pad(ind), "}")))))
+    | _ -> "{}"
+
+let map-stmt(xs: List Ast, ind: Int) -> List Str =
+  match (xs)
+    | [] -> []
+    | Cons(h, t) -> Cons(str-concat(pad(ind + 2), print-stmt(h, ind + 2)), map-stmt(t, ind))
+
+let print-stmt(a: Ast, ind: Int) -> Str =
+  if is-head(a, "let") -> print-form-at(a, ind)
+   | else -> print-expr(a, ind)
+
+let print-expr(a: Ast, ind: Int) -> Str =
+  match (a)
+    | IntNode(n, _) -> show(n)
+    | FloatNode(n, _) -> n
+    | BoolNode(n, _) ->
+      if n -> "true"
+       | else -> "false"
+    | StrNode(n, _) -> quote-str(n)
+    | SymNode(n, _) -> name-text(n)
+    | BracketNode(xs, _) -> str-concat("[", str-concat(join(map-expr(xs, ind), ", "), "]"))
+    | ParenNode([], _) -> "()"
+    | ParenNode(elems, _) -> print-paren(elems, a, ind)
+
+let map-expr(xs: List Ast, ind: Int) -> List Str =
+  match (xs)
+    | [] -> []
+    | Cons(h, t) -> Cons(print-expr(h, ind), map-expr(t, ind))
+
+let print-paren(elems: List Ast, whole: Ast, ind: Int) -> Str =
+  match (elems)
+    | [] -> "()"
+    | Cons(h, rest) ->
+      match (sym-str(h))
+        | Some(n) -> print-headed(n, rest, whole, ind)
+        | None -> print-call(h, rest, ind)
+
+let print-headed(n: Str, rest: List Ast, whole: Ast, ind: Int) -> Str =
+  if n == "do" -> print-block(whole, ind)
+   | n == "if" -> print-if(whole, ind)
+   | n == "cond" -> print-cond(rest, ind)
+   | n == "when" -> print-when(rest, ind)
+   | n == "match" -> print-match(rest, ind)
+   | n == "fn" -> print-fn(rest, ind)
+   | n == "pub" -> str-concat("pub ", print-form-at(ParenNode(rest, Span(0, 0, 0, 0)), ind))
+   | n == "let" -> print-let(rest, ind)
+   | n == "loop" -> print-loop(rest, ind)
+   | n == "while" -> print-while(rest, ind)
+   | n == "quote" ->
+    match (rest)
+      | Cons(s, _) -> str-concat("'", print-atom(s))
+      | [] -> "'"
+   | n == "and" -> print-logic(rest, "&&", 2, ind)
+   | n == "or" -> print-logic(rest, "||", 1, ind)
+   | n == "not" -> print-not(rest, ind)
+   | is-op(n) -> print-op(n, rest, ind)
+   | n == "-" -> print-minus(rest, ind)
+   | else -> print-call(SymNode(n, Span(0, 0, 0, 0)), rest, ind)
+
+let is-op(n: Str) -> Bool =
+  n == "+" || n == "*" || n == "/" || n == "%" || n == "<" || n == ">" || n == "<=" || n == ">=" || n == "="
+
+let print-not(rest: List Ast, ind: Int) -> Str =
+  match (rest)
+    | Cons(inner, _) ->
+      if is-head(inner, "=") -> print-neq(inner, ind)
+       | else -> print-call(SymNode("not", Span(0, 0, 0, 0)), rest, ind)
+    | [] -> "not()"
+
+let print-neq(inner: Ast, ind: Int) -> Str =
+  match (inner)
+    | ParenNode(Cons(_, Cons(a, Cons(b, _))), _) -> str-concat(wrap-operand(3, a, false, ind), str-concat(" != ", wrap-operand(3, b, true, ind)))
+    | _ -> "!= "
+
+let op-prec(op: Str) -> Int =
+  if op == "||" -> 1
+   | op == "&&" -> 2
+   | op == "=" || op == "==" || op == "<" || op == ">" || op == "<=" || op == ">=" -> 3
+   | op == "+" || op == "-" -> 4
+   | op == "*" || op == "/" || op == "%" -> 5
+   | else -> 0
+
+let expr-prec(a: Ast) -> Int =
+  match (sym-str-of-head(a))
+    | Some(n) ->
+      if n == "or" -> 1
+       | n == "and" -> 2
+       | n == "not" && is-neq(a) -> 3
+       | n == "-" && is-unary-minus(a) -> 6
+       | else -> op-prec(n)
+    | None -> 0
+
+let sym-str-of-head(a: Ast) -> Maybe Str =
+  match (a)
+    | ParenNode(Cons(h, _), _) -> sym-str(h)
+    | _ -> None()
+
+let is-neq(a: Ast) -> Bool =
+  match (a)
+    | ParenNode(Cons(_, Cons(inner, _)), _) -> is-head(inner, "=")
+    | _ -> false
+
+let is-unary-minus(a: Ast) -> Bool =
+  match (a)
+    | ParenNode(Cons(_, Cons(_, [])), _) -> true
+    | _ -> false
+
+let wrap-operand(parent: Int, child: Ast, right: Bool, ind: Int) -> Str {
+  let text = print-expr(child, ind)
+  let cp = expr-prec(child)
+  if cp == 0 -> text
+   | right && cp <= parent -> str-concat("(", str-concat(text, ")"))
+   | not(right) && cp < parent -> str-concat("(", str-concat(text, ")"))
+   | else -> text
+}
+
+let print-logic(rest: List Ast, surface: Str, prec: Int, ind: Int) -> Str =
+  print-op-from(rest, surface, prec, true, ind)
+
+let print-minus(rest: List Ast, ind: Int) -> Str =
+  match (rest)
+    | Cons(a, []) -> str-concat("-", wrap-operand(6, a, true, ind))
+    | Cons(a, Cons(b, _)) -> str-concat(wrap-operand(4, a, false, ind), str-concat(" - ", wrap-operand(4, b, true, ind)))
+    | _ -> "-"
+
+let print-op(op: Str, rest: List Ast, ind: Int) -> Str {
+  let surface =
+    if op == "=" -> "=="
+     | else -> op
+  print-op-from(rest, surface, op-prec(op), true, ind)
+}
+
+let print-op-from(rest: List Ast, surface: Str, prec: Int, first: Bool, ind: Int) -> Str =
+  match (rest)
+    | [] -> ""
+    | Cons(a, []) -> wrap-operand(prec, a, not(first), ind)
+    | Cons(a, more) -> str-concat(wrap-operand(prec, a, not(first), ind), str-concat(str-concat(str-concat(" ", surface), " "), print-op-from(more, surface, prec, false, ind)))
+
+let print-let(rest: List Ast, ind: Int) -> Str =
+  match (rest)
+    | Cons(name, Cons(expr, [])) -> str-concat("let ", str-concat(print-atom(name), str-concat(" =", placed(expr, ind + 2))))
+    | Cons(name, Cons(expr, body)) -> print-block(wrap-do(Cons(ParenNode([SymNode("let", Span(0, 0, 0, 0)), name, expr], Span(0, 0, 0, 0)), body)), ind)
+    | _ -> "let"
+
+let placed(a: Ast, ind: Int) -> Str =
+  if laid-out(a) -> str-concat(nl(), str-concat(pad(ind), print-expr(a, ind)))
+   | else ->
+    {
+      let text = print-expr(a, ind)
+      if has-nl(text) -> str-concat(nl(), str-concat(pad(ind), text))
+       | else -> str-concat(" ", text)
+    }
+
+let laid-out(a: Ast) -> Bool =
+  is-head(a, "if") || is-head(a, "match") || is-head(a, "cond") || is-head(a, "when") || is-head(a, "loop")
+
+let arrow-body(body: Ast, ind: Int) -> Str {
+  let text = print-expr(body, ind)
+  if has-nl(text) || is-head(body, "if") || is-head(body, "match") || is-head(body, "loop") || is-head(body, "while") || is-head(body, "do") -> str-concat(nl(), str-concat(pad(ind), text))
+   | else -> str-concat(" ", text)
+}
+
+let print-if(a: Ast, ind: Int) -> Str =
+  join(if-lines(flatten-if(a), ind, true), nl())
+
+type IfArm =
+  | IfThen(Ast, Ast)
+  | IfElse(Ast)
+
+let flatten-if(a: Ast) -> List IfArm =
+  match (a)
+    | ParenNode(Cons(_, Cons(test, Cons(then, Cons(els, _)))), _) ->
+      if is-unit(els) -> [IfThen(test, then)]
+       | is-head(els, "if") -> Cons(IfThen(test, then), flatten-if(els))
+       | else -> [IfThen(test, then), IfElse(els)]
+    | _ -> [IfElse(a)]
+
+let if-lines(arms: List IfArm, ind: Int, first: Bool) -> List Str =
+  match (arms)
+    | [] -> []
+    | Cons(IfThen(test, body), rest) ->
+      if first -> Cons(str-concat("if ", str-concat(print-expr(test, ind), str-concat(" ->", arrow-body(body, ind + 2)))), if-lines(rest, ind, false))
+       | else -> Cons(str-concat(pad(ind), str-concat(" | ", str-concat(print-expr(test, ind), str-concat(" ->", arrow-body(body, ind + 2))))), if-lines(rest, ind, false))
+    | Cons(IfElse(body), rest) -> Cons(str-concat(pad(ind), str-concat(" | else ->", arrow-body(body, ind + 2))), if-lines(rest, ind, false))
+
+let print-cond(rest: List Ast, ind: Int) -> Str =
+  join(cond-lines(rest, ind, true), nl())
+
+let cond-lines(xs: List Ast, ind: Int, first: Bool) -> List Str =
+  match (xs)
+    | [] -> []
+    | Cons(clause, rest) -> Cons(cond-line(clause, ind, first), cond-lines(rest, ind, false))
+
+let cond-line(clause: Ast, ind: Int, first: Bool) -> Str =
+  match (clause)
+    | ParenNode(Cons(test, body), _) ->
+      {
+        let rendered = cond-body(body, ind)
+        match (sym-str(test))
+          | Some(n) ->
+            if n == "else" -> str-concat(pad(ind), str-concat(" | else ->", rendered))
+             | first -> str-concat("if ", str-concat(print-expr(test, ind), str-concat(" ->", rendered)))
+             | else -> str-concat(pad(ind), str-concat(" | ", str-concat(print-expr(test, ind), str-concat(" ->", rendered))))
+          | None ->
+            if first -> str-concat("if ", str-concat(print-expr(test, ind), str-concat(" ->", rendered)))
+             | else -> str-concat(pad(ind), str-concat(" | ", str-concat(print-expr(test, ind), str-concat(" ->", rendered))))
+      }
+    | _ -> ""
+
+let cond-body(body: List Ast, ind: Int) -> Str =
+  match (body)
+    | Cons(only, []) -> arrow-body(only, ind + 2)
+    | _ -> arrow-body(wrap-do(body), ind + 2)
+
+let print-when(rest: List Ast, ind: Int) -> Str =
+  match (rest)
+    | [] -> "when()"
+    | Cons(test, body) ->
+      match (body)
+        | Cons(only, []) -> str-concat("if ", str-concat(print-expr(test, ind), str-concat(" ->", arrow-body(only, ind + 2))))
+        | _ -> str-concat("if ", str-concat(print-expr(test, ind), str-concat(" ->", arrow-body(wrap-do(body), ind + 2))))
+
+let print-match(rest: List Ast, ind: Int) -> Str =
+  match (rest)
+    | Cons(scrut, arms) -> str-concat(str-concat("match (", str-concat(print-expr(scrut, ind), ")")), str-concat(nl(), join(match-lines(arms, ind), nl())))
+    | [] -> "match (())"
+
+let match-lines(xs: List Ast, ind: Int) -> List Str =
+  match (xs)
+    | [] -> []
+    | Cons(pat, Cons(body, rest)) -> Cons(str-concat(pad(ind + 2), str-concat("| ", str-concat(print-pat(pat), str-concat(" ->", arrow-body(body, ind + 4))))), match-lines(rest, ind))
+    | Cons(_, _) -> []
+
+let print-pat(a: Ast) -> Str =
+  match (a)
+    | BracketNode(xs, _) -> str-concat("[", str-concat(join(map-pat(xs), ", "), "]"))
+    | ParenNode([], _) -> "()"
+    | ParenNode(Cons(SymNode(n, _), []), _) ->
+      if is-upper-name(n) -> n
+       | else -> str-concat(n, "()")
+    | ParenNode(Cons(h, args), _) ->
+      match (sym-str(h))
+        | Some(n) -> str-concat(n, str-concat("(", str-concat(join(map-pat(args), ", "), ")")))
+        | None -> print-expr(a, 0)
+    | _ -> print-atom(a)
+
+let map-pat(xs: List Ast) -> List Str =
+  match (xs)
+    | [] -> []
+    | Cons(h, t) -> Cons(print-pat(h), map-pat(t))
+
+let print-fn(rest: List Ast, ind: Int) -> Str =
+  match (rest)
+    | Cons(params, Cons(body, _)) ->
+      {
+        let ps = fn-params(params)
+        if is-head(body, "do") -> str-concat("fn (", str-concat(ps, str-concat(") ", print-block(body, ind))))
+         | else ->
+          {
+            let b = print-expr(body, ind + 2)
+            if not(has-nl(b)) && not(laid-out(body)) -> str-concat("fn (", str-concat(ps, str-concat(") = ", b)))
+             | else -> str-concat("fn (", str-concat(ps, str-concat(") =", str-concat(nl(), str-concat(pad(ind + 2), b)))))
+          }
+      }
+    | _ -> "fn ()"
+
+let fn-params(a: Ast) -> Str =
+  match (a)
+    | ParenNode(xs, _) -> join(map-atom(xs), ", ")
+    | _ -> ""
+
+let print-loop(rest: List Ast, ind: Int) -> Str =
+  match (rest)
+    | Cons(binds, Cons(body, _)) -> str-concat("loop (", str-concat(loop-binds(binds), str-concat(")", str-concat(nl(), str-concat(pad(ind + 2), print-expr(body, ind + 2))))))
+    | _ -> "loop ()"
+
+let loop-binds(a: Ast) -> Str =
+  match (a)
+    | ParenNode(xs, _) -> join(map-bind(xs), ", ")
+    | _ -> ""
+
+let map-bind(xs: List Ast) -> List Str =
+  match (xs)
+    | [] -> []
+    | Cons(h, t) -> Cons(one-bind(h), map-bind(t))
+
+let one-bind(a: Ast) -> Str =
+  match (a)
+    | ParenNode(Cons(name, Cons(expr, _)), _) -> str-concat(print-atom(name), str-concat(" = ", print-expr(expr, 0)))
+    | _ -> print-atom(a)
+
+let print-while(rest: List Ast, ind: Int) -> Str =
+  match (rest)
+    | [] -> "while (()) {}"
+    | Cons(test, body) -> str-concat("while (", str-concat(print-expr(test, ind), str-concat(") ", print-block(wrap-do(body), ind))))
+
+let print-call(callee: Ast, args: List Ast, ind: Int) -> Str {
+  let f =
+    match (callee)
+      | SymNode(_, _) -> print-atom(callee)
+      | _ -> str-concat("(", str-concat(print-expr(callee, ind), ")"))
+  if call-hangs(args) -> str-concat(f, str-concat("(", str-concat(nl(), str-concat(format-args(args, ind + 2, true), str-concat(nl(), str-concat(pad(ind), ")"))))))
+   | else -> str-concat(f, str-concat("(", str-concat(format-args(args, ind, false), ")")))
+}
+
+let call-hangs(xs: List Ast) -> Bool =
+  match (xs)
+    | [] -> false
+    | Cons(h, t) ->
+      match (sym-str(h))
+        | Some(n) ->
+          if n == "..." ->
+            match (t)
+              | Cons(next, rest) -> laid-out(next) || has-nl(print-expr(next, 0)) || call-hangs(rest)
+              | [] -> false
+           | else -> laid-out(h) || has-nl(print-expr(h, 0)) || call-hangs(t)
+        | None -> laid-out(h) || has-nl(print-expr(h, 0)) || call-hangs(t)
+
+let format-args(xs: List Ast, ind: Int, hang: Bool) -> Str {
+  let sep =
+    if hang -> str-concat(",", nl())
+     | else -> ", "
+  join(arg-parts(xs, ind, hang), sep)
+}
+
+let arg-parts(xs: List Ast, ind: Int, hang: Bool) -> List Str =
+  match (xs)
+    | [] -> []
+    | Cons(h, t) ->
+      match (sym-str(h))
+        | Some(n) ->
+          if n == "..." ->
+            match (t)
+              | Cons(next, rest) -> Cons(arg-piece(str-concat("...", print-expr(next, ind)), ind, hang), arg-parts(rest, ind, hang))
+              | [] -> [arg-piece("...", ind, hang)]
+           | else -> Cons(arg-piece(print-expr(h, ind), ind, hang), arg-parts(t, ind, hang))
+        | None -> Cons(arg-piece(print-expr(h, ind), ind, hang), arg-parts(t, ind, hang))
+
+let arg-piece(text: Str, ind: Int, hang: Bool) -> Str =
+  if hang -> str-concat(pad(ind), text)
+   | else -> text
+
+let print-type(a: Ast) -> Str =
+  match (a)
+    | SymNode(n, _) -> n
+    | ParenNode([], _) -> "()"
+    | ParenNode(Cons(h, rest), _) ->
+      match (sym-str(h))
+        | Some(n) ->
+          if n == "Fn" -> print-fn-type(rest)
+           | else -> print-type-app(n, rest)
+        | None -> print-atom(a)
+    | _ -> print-atom(a)
+
+let print-fn-type(rest: List Ast) -> Str {
+  let ps = types-before-arrow(rest, [])
+  let ret = type-after-arrow(rest)
+  match (ps)
+    | [] -> str-concat("() -> ", ret)
+    | Cons(only, []) -> str-concat("(", str-concat(only, str-concat(") -> ", ret)))
+    | _ -> str-concat("(", str-concat(join(ps, ", "), str-concat(") -> ", ret)))
+}
+
+let types-before-arrow(xs: List Ast, acc: List Str) -> List Str =
+  match (xs)
+    | [] -> rev-str(acc, [])
+    | Cons(h, _) ->
+      match (sym-str(h))
+        | Some(n) ->
+          if n == "->" -> rev-str(acc, [])
+           | else -> types-before-arrow-cons(xs, acc)
+        | None -> types-before-arrow-cons(xs, acc)
+
+let types-before-arrow-cons(xs: List Ast, acc: List Str) -> List Str =
+  match (xs)
+    | Cons(h, t) -> types-before-arrow(t, Cons(print-type(h), acc))
+    | [] -> rev-str(acc, [])
+
+let type-after-arrow(xs: List Ast) -> Str =
+  match (xs)
+    | [] -> "?"
+    | Cons(h, t) ->
+      match (sym-str(h))
+        | Some(n) ->
+          if n == "->" ->
+            match (t)
+              | Cons(ret, _) -> print-type(ret)
+              | [] -> "?"
+           | else -> type-after-arrow(t)
+        | None -> type-after-arrow(t)
+
+let print-type-app(head: Str, args: List Ast) -> Str =
+  if args == [] -> head
+   | else -> str-concat(head, str-concat(" ", join(map-type-arg(args), " ")))
+
+let map-type-arg(xs: List Ast) -> List Str =
+  match (xs)
+    | [] -> []
+    | Cons(h, t) ->
+      match (h)
+        | ParenNode(_, _) -> Cons(str-concat("(", str-concat(print-type(h), ")")), map-type-arg(t))
+        | _ -> Cons(print-type(h), map-type-arg(t))
+
+let print-atom(a: Ast) -> Str =
+  match (a)
+    | SymNode(n, _) -> name-text(n)
+    | StrNode(n, _) -> quote-str(n)
+    | IntNode(n, _) -> show(n)
+    | BoolNode(n, _) ->
+      if n -> "true"
+       | else -> "false"
+    | _ -> print-expr(a, 0)

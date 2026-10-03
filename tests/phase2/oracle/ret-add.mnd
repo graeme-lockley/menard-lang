@@ -4,4 +4,5 @@
 ; header comment), not a folded `ret i32 42`. See
 ; `tests/phase2/oracle.test.ts`.
 
-(defn main -> Int (+ 20 22))
+let main() -> Int =
+  20 + 22

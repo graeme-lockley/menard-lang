@@ -1,8 +1,9 @@
 ; Casing — form-aware casing check for defn/defrec/variant/alias skeletons.
 ; Mirrors host/src/reader/casing.ts.
 
-(import "./ast.mnd")
-(import "../util/result.mnd")
+import "./ast.mnd"
+
+import "../util/result.mnd"
 
 ; Re-export shim: the current host typer (host/src/type/check.ts,
 ; `checkPubPrivateTypes`) only accepts a `pub` signature mentioning a
@@ -12,188 +13,182 @@
 ; introducing a second, distinct nominal type (aliases are fully
 ; transparent, so `Ast` here and `Ast` in ast.mnd remain the same type).
 ; Revisit once the typer treats a re-exported type as satisfying the check.
-(pub alias Ast Ast)
-(pub alias Span Span)
+pub alias Ast = Ast
 
-(pub defrec CasingError (span: Span) (message: Str))
+pub alias Span = Span
 
-(defn mk-err (sp: Span) (message: Str) -> (Result Unit CasingError)
-  (Err (CasingError sp message)))
+pub record CasingError {
+  span: Span
+  message: Str
+}
 
-(defn first-byte (name: Str) -> Int
-  (if (> (str-byte-length name) 0) (str-byte name 0) -1))
+let mk-err(sp: Span, message: Str) -> Result Unit CasingError =
+  Err(CasingError(sp, message))
 
-(defn is-upper-initial (name: Str) -> Bool
-  (let b (first-byte name))
-  (and (>= b 65) (<= b 90)))
+let first-byte(name: Str) -> Int =
+  if str-byte-length(name) > 0 -> str-byte(name, 0)
+   | else -> -1
 
-(defn is-lower-initial (name: Str) -> Bool
-  (let b (first-byte name))
-  (and (>= b 97) (<= b 122)))
+let is-upper-initial(name: Str) -> Bool {
+  let b = first-byte(name)
+  b >= 65 && b <= 90
+}
 
-(defn expect-lower (node: Ast) (role: Str) -> (Result Unit CasingError)
-  (match node
-    (SymNode name sp)
-      (if (is-lower-initial name)
-        (Ok ())
-        (mk-err sp (str-concat role " must begin with a lowercase letter")))
-    _ (mk-err (ast-span node) (str-concat "expected " role " to be a symbol"))))
+let is-lower-initial(name: Str) -> Bool {
+  let b = first-byte(name)
+  b >= 97 && b <= 122
+}
 
-(defn expect-upper (node: Ast) (role: Str) -> (Result Unit CasingError)
-  (match node
-    (SymNode name sp)
-      (if (is-upper-initial name)
-        (Ok ())
-        (mk-err sp (str-concat role " must begin with an uppercase letter")))
-    _ (mk-err (ast-span node) (str-concat "expected " role " to be a symbol"))))
+let expect-lower(node: Ast, role: Str) -> Result Unit CasingError =
+  match (node)
+    | SymNode(name, sp) ->
+      if is-lower-initial(name) -> Ok(())
+       | else -> mk-err(sp, str-concat(role, " must begin with a lowercase letter"))
+    | _ -> mk-err(ast-span(node), str-concat("expected ", role, " to be a symbol"))
+
+let expect-upper(node: Ast, role: Str) -> Result Unit CasingError =
+  match (node)
+    | SymNode(name, sp) ->
+      if is-upper-initial(name) -> Ok(())
+       | else -> mk-err(sp, str-concat(role, " must begin with an uppercase letter"))
+    | _ -> mk-err(ast-span(node), str-concat("expected ", role, " to be a symbol"))
 
 ; Run `f` over every element of `xs`, stopping at the first failure.
-(defn check-all (xs: (List Ast)) (f: (Fn Ast -> (Result Unit CasingError))) -> (Result Unit CasingError)
-  (match xs
-    [] (Ok ())
-    (Cons x rest) (result-then (f x) (fn () (check-all rest f)))))
+let check-all(xs: List Ast, f: (Ast) -> Result Unit CasingError) -> Result Unit CasingError =
+  match (xs)
+    | [] -> Ok(())
+    | Cons(x, rest) -> result-then(f(x), fn () = check-all(rest, f))
 
-(defn check-type-params (node: Ast) -> (Result Unit CasingError)
-  (match node
-    (BracketNode elems _) (check-all elems (fn (p) (expect-lower p "type parameter")))
-    _ (mk-err (ast-span node) "type parameters must be a bracket list")))
+let check-type-params(node: Ast) -> Result Unit CasingError =
+  match (node)
+    | BracketNode(elems, _) -> check-all(elems, fn (p) = expect-lower(p, "type parameter"))
+    | _ -> mk-err(ast-span(node), "type parameters must be a bracket list")
 
 ; Walk type expressions in declaration skeletons: Upper constructors, lower vars.
-(defn check-type-expr (node: Ast) -> (Result Unit CasingError)
-  (match node
-    (SymNode name sp)
-      (if (or (is-lower-initial name) (is-upper-initial name))
-        (Ok ())
-        (mk-err sp "type name must begin with a letter"))
-    (BracketNode elems _) (check-all elems check-type-expr)
-    (ParenNode elems sp) (check-type-expr-app elems sp)
-    _ (mk-err (ast-span node) "invalid type expression")))
+let check-type-expr(node: Ast) -> Result Unit CasingError =
+  match (node)
+    | SymNode(name, sp) ->
+      if is-lower-initial(name) || is-upper-initial(name) -> Ok(())
+       | else -> mk-err(sp, "type name must begin with a letter")
+    | BracketNode(elems, _) -> check-all(elems, check-type-expr)
+    | ParenNode(elems, sp) -> check-type-expr-app(elems, sp)
+    | _ -> mk-err(ast-span(node), "invalid type expression")
 
-(defn check-type-expr-app (elems: (List Ast)) (sp: Span) -> (Result Unit CasingError)
-  (match elems
-    [] (Ok ())
-    (Cons head rest) (check-type-expr-app-head head rest elems)))
+let check-type-expr-app(elems: List Ast, sp: Span) -> Result Unit CasingError =
+  match (elems)
+    | [] -> Ok(())
+    | Cons(head, rest) -> check-type-expr-app-head(head, rest, elems)
 
-(defn check-type-expr-app-head (head: Ast) (rest: (List Ast)) (elems: (List Ast)) -> (Result Unit CasingError)
-  (match head
-    (SymNode _ _) (result-then (expect-upper head "type constructor") (fn () (check-all rest check-type-expr)))
-    _ (check-all elems check-type-expr)))
+let check-type-expr-app-head(head: Ast, rest: List Ast, elems: List Ast) -> Result Unit CasingError =
+  match (head)
+    | SymNode(_, _) -> result-then(expect-upper(head, "type constructor"), fn () = check-all(rest, check-type-expr))
+    | _ -> check-all(elems, check-type-expr)
 
 ; (fst: a) — field name (with optional trailing ':') plus its type expression(s).
-(defn check-field (node: Ast) -> (Result Unit CasingError)
-  (match node
-    (ParenNode elems sp) (check-field-elems elems sp)
-    _ (mk-err (ast-span node) "expected field form (name: Type)")))
+let check-field(node: Ast) -> Result Unit CasingError =
+  match (node)
+    | ParenNode(elems, sp) -> check-field-elems(elems, sp)
+    | _ -> mk-err(ast-span(node), "expected field form (name: Type)")
 
-(defn check-field-elems (elems: (List Ast)) (sp: Span) -> (Result Unit CasingError)
-  (match elems
-    [] (mk-err sp "expected field form (name: Type)")
-    (Cons name rest) (check-field-name-and-types name rest)))
+let check-field-elems(elems: List Ast, sp: Span) -> Result Unit CasingError =
+  match (elems)
+    | [] -> mk-err(sp, "expected field form (name: Type)")
+    | Cons(name, rest) -> check-field-name-and-types(name, rest)
 
-(defn check-field-name-and-types (name: Ast) (rest: (List Ast)) -> (Result Unit CasingError)
-  (match name
-    (SymNode raw sp) (result-then (check-field-name raw sp) (fn () (check-all rest check-type-expr)))
-    _ (mk-err (ast-span name) "expected field name")))
+let check-field-name-and-types(name: Ast, rest: List Ast) -> Result Unit CasingError =
+  match (name)
+    | SymNode(raw, sp) -> result-then(check-field-name(raw, sp), fn () = check-all(rest, check-type-expr))
+    | _ -> mk-err(ast-span(name), "expected field name")
 
-(defn strip-trailing-colon (raw: Str) -> Str
-  (let n (str-byte-length raw))
-  (if (and (> n 0) (= (str-byte raw (- n 1)) 58))
-    (str-slice raw 0 (- n 1))
-    raw))
+let strip-trailing-colon(raw: Str) -> Str {
+  let n = str-byte-length(raw)
+  if n > 0 && str-byte(raw, n - 1) == 58 -> str-slice(raw, 0, n - 1)
+   | else -> raw
+}
 
-(defn check-field-name (raw: Str) (sp: Span) -> (Result Unit CasingError)
-  (let field-name (strip-trailing-colon raw))
-  (if (and (> (str-byte-length field-name) 0) (is-lower-initial field-name))
-    (Ok ())
-    (mk-err sp "field name must begin with a lowercase letter")))
+let check-field-name(raw: Str, sp: Span) -> Result Unit CasingError {
+  let field-name = strip-trailing-colon(raw)
+  if str-byte-length(field-name) > 0 && is-lower-initial(field-name) -> Ok(())
+   | else -> mk-err(sp, "field name must begin with a lowercase letter")
+}
 
-(defn check-variant-ctor (node: Ast) -> (Result Unit CasingError)
-  (match node
-    (ParenNode elems sp) (check-variant-ctor-elems elems sp)
-    _ (mk-err (ast-span node) "expected variant constructor form")))
+let check-variant-ctor(node: Ast) -> Result Unit CasingError =
+  match (node)
+    | ParenNode(elems, sp) -> check-variant-ctor-elems(elems, sp)
+    | _ -> mk-err(ast-span(node), "expected variant constructor form")
 
-(defn check-variant-ctor-elems (elems: (List Ast)) (sp: Span) -> (Result Unit CasingError)
-  (match elems
-    [] (mk-err sp "expected variant constructor form")
-    (Cons head rest) (result-then (expect-upper head "variant constructor") (fn () (check-all rest check-type-expr)))))
+let check-variant-ctor-elems(elems: List Ast, sp: Span) -> Result Unit CasingError =
+  match (elems)
+    | [] -> mk-err(sp, "expected variant constructor form")
+    | Cons(head, rest) -> result-then(expect-upper(head, "variant constructor"), fn () = check-all(rest, check-type-expr))
 
 ; Shared by defn/defrec/variant: `Name` or `(Name [params…])`.
-(defn check-decl-name (name-part: Ast) (role: Str) (whole-message: Str) (expect: (Fn Ast Str -> (Result Unit CasingError))) -> (Result Unit CasingError)
-  (match name-part
-    (SymNode _ _) (expect name-part role)
-    (ParenNode np-elems _) (check-decl-name-app np-elems name-part role whole-message expect)
-    _ (mk-err (ast-span name-part) whole-message)))
+let check-decl-name(name-part: Ast, role: Str, whole-message: Str, expect: (Ast, Str) -> Result Unit CasingError) -> Result Unit CasingError =
+  match (name-part)
+    | SymNode(_, _) -> expect(name-part, role)
+    | ParenNode(np-elems, _) -> check-decl-name-app(np-elems, name-part, role, whole-message, expect)
+    | _ -> mk-err(ast-span(name-part), whole-message)
 
-(defn check-decl-name-app (np-elems: (List Ast)) (name-part: Ast) (role: Str) (whole-message: Str) (expect: (Fn Ast Str -> (Result Unit CasingError))) -> (Result Unit CasingError)
-  (match np-elems
-    [] (mk-err (ast-span name-part) whole-message)
-    (Cons the-name more)
-      (result-then (expect the-name role) (fn () (check-decl-tparams more)))))
+let check-decl-name-app(np-elems: List Ast, name-part: Ast, role: Str, whole-message: Str, expect: (Ast, Str) -> Result Unit CasingError) -> Result Unit CasingError =
+  match (np-elems)
+    | [] -> mk-err(ast-span(name-part), whole-message)
+    | Cons(the-name, more) -> result-then(expect(the-name, role), fn () = check-decl-tparams(more))
 
-(defn check-decl-tparams (more: (List Ast)) -> (Result Unit CasingError)
-  (match more
-    [] (Ok ())
-    (Cons tparams _) (check-type-params tparams)))
+let check-decl-tparams(more: List Ast) -> Result Unit CasingError =
+  match (more)
+    | [] -> Ok(())
+    | Cons(tparams, _) -> check-type-params(tparams)
 
 ; (defn name … ) or (defn (name [params…]) … )
-(defn check-defn (elems: (List Ast)) (whole-span: Span) -> (Result Unit CasingError)
-  (match elems
-    (Cons _ (Cons name-part _))
-      (check-decl-name name-part "function name" "malformed defn name" expect-lower)
-    _ (mk-err whole-span "malformed defn")))
+let check-defn(elems: List Ast, whole-span: Span) -> Result Unit CasingError =
+  match (elems)
+    | Cons(_, Cons(name-part, _)) -> check-decl-name(name-part, "function name", "malformed defn name", expect-lower)
+    | _ -> mk-err(whole-span, "malformed defn")
 
 ; (defrec Name fields…) or (defrec (Name [params…]) fields…)
-(defn check-defrec (elems: (List Ast)) (whole-span: Span) -> (Result Unit CasingError)
-  (match elems
-    (Cons _ (Cons name-part fields))
-      (result-then
-        (check-decl-name name-part "record type name" "malformed defrec name" expect-upper)
-        (fn () (check-all fields check-field)))
-    _ (mk-err whole-span "malformed defrec")))
+let check-defrec(elems: List Ast, whole-span: Span) -> Result Unit CasingError =
+  match (elems)
+    | Cons(_, Cons(name-part, fields)) -> result-then(check-decl-name(name-part, "record type name", "malformed defrec name", expect-upper), fn () = check-all(fields, check-field))
+    | _ -> mk-err(whole-span, "malformed defrec")
 
 ; (variant Name ctors…) or (variant (Name [params…]) ctors…)
-(defn check-variant (elems: (List Ast)) (whole-span: Span) -> (Result Unit CasingError)
-  (match elems
-    (Cons _ (Cons name-part ctors))
-      (result-then
-        (check-decl-name name-part "variant type name" "malformed variant name" expect-upper)
-        (fn () (check-all ctors check-variant-ctor)))
-    _ (mk-err whole-span "malformed variant")))
+let check-variant(elems: List Ast, whole-span: Span) -> Result Unit CasingError =
+  match (elems)
+    | Cons(_, Cons(name-part, ctors)) -> result-then(check-decl-name(name-part, "variant type name", "malformed variant name", expect-upper), fn () = check-all(ctors, check-variant-ctor))
+    | _ -> mk-err(whole-span, "malformed variant")
 
 ; (alias Name Type) — Name is a type spelling, Upper.
-(defn check-alias (elems: (List Ast)) (whole-span: Span) -> (Result Unit CasingError)
-  (match elems
-    (Cons _ (Cons name-part (Cons type-part _)))
-      (result-then (expect-upper name-part "alias name") (fn () (check-type-expr type-part)))
-    _ (mk-err whole-span "malformed alias")))
+let check-alias(elems: List Ast, whole-span: Span) -> Result Unit CasingError =
+  match (elems)
+    | Cons(_, Cons(name-part, Cons(type-part, _))) -> result-then(expect-upper(name-part, "alias name"), fn () = check-type-expr(type-part))
+    | _ -> mk-err(whole-span, "malformed alias")
 
-(defn check-form-named (name: Str) (elems: (List Ast)) (rest: (List Ast)) (sp: Span) -> (Result Unit CasingError)
-  (cond
-    ((= name "defn") (check-defn elems sp))
-    ((= name "defrec") (check-defrec elems sp))
-    ((= name "variant") (check-variant elems sp))
-    ((= name "alias") (check-alias elems sp))
-    (else (check-all rest check-form))))
+let check-form-named(name: Str, elems: List Ast, rest: List Ast, sp: Span) -> Result Unit CasingError =
+  if name == "defn" -> check-defn(elems, sp)
+   | name == "defrec" -> check-defrec(elems, sp)
+   | name == "variant" -> check-variant(elems, sp)
+   | name == "alias" -> check-alias(elems, sp)
+   | else -> check-all(rest, check-form)
 
-(defn check-form-nonempty (head: Ast) (rest: (List Ast)) (elems: (List Ast)) (sp: Span) -> (Result Unit CasingError)
-  (match head
-    (SymNode name _) (check-form-named name elems rest sp)
-    _ (check-all elems check-form)))
+let check-form-nonempty(head: Ast, rest: List Ast, elems: List Ast, sp: Span) -> Result Unit CasingError =
+  match (head)
+    | SymNode(name, _) -> check-form-named(name, elems, rest, sp)
+    | _ -> check-all(elems, check-form)
 
 ; Form-aware casing check for known special-form skeletons (spec §2.1).
 ; Unknown heads are skipped (no false positives), recursing into children.
-(pub defn check-form (node: Ast) -> (Result Unit CasingError)
-  (match node
-    (ParenNode elems sp) (check-form-paren elems sp)
-    _ (Ok ())))
+pub let check-form(node: Ast) -> Result Unit CasingError =
+  match (node)
+    | ParenNode(elems, sp) -> check-form-paren(elems, sp)
+    | _ -> Ok(())
 
-(defn check-form-paren (elems: (List Ast)) (sp: Span) -> (Result Unit CasingError)
-  (match elems
-    [] (Ok ())
-    (Cons head rest) (check-form-nonempty head rest elems sp)))
+let check-form-paren(elems: List Ast, sp: Span) -> Result Unit CasingError =
+  match (elems)
+    | [] -> Ok(())
+    | Cons(head, rest) -> check-form-nonempty(head, rest, elems, sp)
 
-(pub defn check-casing (node: Ast) -> (Result Unit CasingError)
-  (check-form node))
+pub let check-casing(node: Ast) -> Result Unit CasingError =
+  check-form(node)
 
-(pub defn check-casing-all (xs: (List Ast)) -> (Result Unit CasingError)
-  (check-all xs check-form))
+pub let check-casing-all(xs: List Ast) -> Result Unit CasingError =
+  check-all(xs, check-form)

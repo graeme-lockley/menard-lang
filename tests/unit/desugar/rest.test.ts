@@ -5,20 +5,20 @@ import { diagnose, run } from "../../../host/src/interp/pipeline.ts";
 import { createHost, createVirtualFs } from "../../../host/src/host/index.ts";
 
 const lib = `
-(defn sum (xs: (List Int) ...) -> Int
-  (match xs
-    [] 0
-    (Cons h t) (+ h (sum ... t))))
+let sum(...xs: List Int) -> Int =
+  match (xs)
+    | [] -> 0
+    | Cons(h, t) -> h + sum(...t)
 
-(defn join-more (sep: Str) (head: Str) (tail: (List Str)) -> Str
-  (match tail
-    [] head
-    (Cons h t) (join-more sep (str-concat head sep h) t)))
+let join-more(sep: Str, head: Str, tail: List Str) -> Str =
+  match (tail)
+    | [] -> head
+    | Cons(h, t) -> join-more(sep, str-concat(head, sep, h), t)
 
-(defn join (sep: Str) (parts: (List Str) ...) -> Str
-  (match parts
-    [] ""
-    (Cons h t) (join-more sep h t)))
+let join(sep: Str, ...parts: List Str) -> Str =
+  match (parts)
+    | [] -> ""
+    | Cons(h, t) -> join-more(sep, h, t)
 `;
 
 function truth(expr: string): void {
@@ -29,38 +29,41 @@ function truth(expr: string): void {
 
 describe("rest parameters", () => {
   test("literals, one element, and the empty call", () => {
-    truth("(= (sum 1 2 3) 6)");
-    truth("(= (sum 4) 4)");
-    truth("(= (sum) 0)");
+    truth("sum(1, 2, 3) == 6");
+    truth("sum(4) == 4");
+    truth("sum() == 0");
   });
 
   test("splices a list, with elements before or after it", () => {
-    truth("(let xs [1 2 3] (= (sum ... xs) 6))");
-    truth("(let xs [2 3] (= (sum 1 ... xs) 6))");
-    truth("(let xs [1 2] (= (sum ... xs 3) 6))");
-    truth("(let xs [1] (let ys [2 3] (= (sum ... xs ... ys) 6)))");
+    truth("{\n  let xs = [1, 2, 3]\n  sum(...xs) == 6\n}");
+    truth("{\n  let xs = [2, 3]\n  sum(1, ...xs) == 6\n}");
+    truth("{\n  let xs = [1, 2]\n  sum(...xs, 3) == 6\n}");
+    truth("{\n  let xs = [1]\n  let ys = [2, 3]\n  sum(...xs, ...ys) == 6\n}");
   });
 
   test("a fixed parameter stays in front of the rest", () => {
-    truth("(= (join \", \" \"a\" \"b\" \"c\") \"a, b, c\")");
-    truth("(= (join \", \") \"\")");
-    truth("(let xs [\"a\" \"b\"] (= (join \":\" ... xs) \"a:b\"))");
-    truth("(let xs [\"b\"] (= (join \"-\" \"a\" ... xs \"c\") \"a-b-c\"))");
+    truth('join(", ", "a", "b", "c") == "a, b, c"');
+    truth('join(", ") == ""');
+    truth('{\n  let xs = ["a", "b"]\n  join(":", ...xs) == "a:b"\n}');
+    truth('{\n  let xs = ["b"]\n  join("-", "a", ...xs, "c") == "a-b-c"\n}');
   });
 
   test("an imported rest function packs in the caller", () => {
     const fs = createVirtualFs({
-      "/lib.mnd": `(pub defn sum (xs: (List Int) ...) -> Int
-  (match xs
-    [] 0
-    (Cons h t) (+ h (sum ... t))))`,
+      "/lib.mnd": `pub let sum(...xs: List Int) -> Int =
+  match (xs)
+    | [] -> 0
+    | Cons(h, t) -> h + sum(...t)
+`,
     });
     const host = createHost({ fs });
     const r = run(
-      `(import "/lib.mnd")
-(let xs [1])
-(let ys [2 3])
-(= (sum ... xs ... ys) 6)`,
+      `import "/lib.mnd"
+{
+  let xs = [1]
+  let ys = [2, 3]
+  sum(...xs, ...ys) == 6
+}`,
       { path: "/main.mnd", host },
     );
     expect(r.ok).toBe(true);

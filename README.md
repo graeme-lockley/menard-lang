@@ -17,7 +17,8 @@ Menard asks one question: can a language small enough for one person to finish
 express its own compiler, target LLVM, and still have closures and a real
 collector?
 
-Every feature is judged by finishability. The frontend is s-expressions, type
+Every feature is judged by finishability. The frontend is the surface in
+[`docs/syntax.md`](docs/syntax.md), type
 parameters are declared rather than inferred, the syntax is closed (no macros),
 and the emitter is deliberately naive — LLVM does the optimisation work.
 Closures and the collector are isolated and deferred until self-hosting works.
@@ -42,8 +43,9 @@ decisions are in [`docs/decisions.md`](docs/decisions.md).
 
 ## The language
 
-- **Surface:** s-expressions (`.mnd` files). No infix, no significant whitespace,
-  no macros — ever.
+- **Surface:** infix operators, `let` declarations, and `{ }` blocks (`.mnd`
+  files). Layout aligns `if` arms and `match` / `type` alternatives. No macros
+  — ever. See [`docs/syntax.md`](docs/syntax.md).
 - **Types:** static; primitives plus records, variants, and explicit type
   parameters. Instantiation, not Hindley–Milner inference.
 - **Values:** one 64-bit word each; `Int` is 63-bit tagged; immutability by
@@ -53,12 +55,12 @@ decisions are in [`docs/decisions.md`](docs/decisions.md).
 - **Runtime (planned):** precise tag-based GC, shadow-stack rooting, C11 runtime
   linked by clang.
 
-```lisp
-(defn (tree-size [a]) (t: (Tree a)) -> Int
-  (match t
-    (Empty)     0
-    (Leaf _)    1
-    (Node l r)  (+ 1 (+ (tree-size l) (tree-size r)))))
+```
+let tree-size[a](t: Tree a) -> Int =
+  match (t)
+    | Empty -> 0
+    | Leaf(_) -> 1
+    | Node(l, r) -> 1 + tree-size(l) + tree-size(r)
 ```
 
 ## Status

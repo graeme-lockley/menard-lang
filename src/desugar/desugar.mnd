@@ -18,179 +18,166 @@
 ; the two entry points below reverse the final list once to restore the
 ; host's chronological (first-error-first) order.
 
-(import "../reader/ast.mnd")
+import "../reader/ast.mnd"
 
 ; Re-export shim: see reader/casing.mnd for why this is needed — a `pub`
 ; signature here (desugar-form/desugar-all, DesugarError's own fields) may
 ; only mention a nominal type this module's own export set contains.
-(pub alias Ast Ast)
-(pub alias Span Span)
+pub alias Ast = Ast
 
-(pub defrec DesugarError (span: Span) (code: Str) (message: Str))
+pub alias Span = Span
+
+pub record DesugarError {
+  span: Span
+  code: Str
+  message: Str
+}
 
 ; ---------------------------------------------------------------------------
 ; Diagnostic accumulator
 
-(defn push-diag! (diags: (Ref (List DesugarError))) (sp: Span) (code: Str) (message: Str) -> Unit
-  (set! diags (Cons (DesugarError sp code message) (deref diags))))
+let push-diag!(diags: Ref (List DesugarError), sp: Span, code: Str, message: Str) -> Unit =
+  set!(diags, Cons(DesugarError(sp, code, message), deref(diags)))
 
-(defn reverse-onto (xs: (List DesugarError)) (acc: (List DesugarError)) -> (List DesugarError)
-  (match xs
-    [] acc
-    (Cons x rest) (reverse-onto rest (Cons x acc))))
+let reverse-onto(xs: List DesugarError, acc: List DesugarError) -> List DesugarError =
+  match (xs)
+    | [] -> acc
+    | Cons(x, rest) -> reverse-onto(rest, Cons(x, acc))
 
-(defn reverse-diags (xs: (List DesugarError)) -> (List DesugarError)
-  (reverse-onto xs []))
+let reverse-diags(xs: List DesugarError) -> List DesugarError =
+  reverse-onto(xs, [])
 
 ; ---------------------------------------------------------------------------
 ; Small Ast builders
 
-(defn mk-sym (name: Str) (sp: Span) -> Ast
-  (SymNode name sp))
+let mk-sym(name: Str, sp: Span) -> Ast =
+  SymNode(name, sp)
 
-(defn is-sym (ast: Ast) (name: Str) -> Bool
-  (match ast
-    (SymNode n _) (= n name)
-    _ false))
+let is-sym(ast: Ast, name: Str) -> Bool =
+  match (ast)
+    | SymNode(n, _) -> n == name
+    | _ -> false
 
-(defn elems-tail (elems: (List Ast)) -> (List Ast)
-  (match elems
-    [] []
-    (Cons _ rest) rest))
+let elems-tail(elems: List Ast) -> List Ast =
+  match (elems)
+    | [] -> []
+    | Cons(_, rest) -> rest
 
-(defn append-list (xs: (List Ast)) (ys: (List Ast)) -> (List Ast)
-  (match xs
-    [] ys
-    (Cons x rest) (Cons x (append-list rest ys))))
+let append-list(xs: List Ast, ys: List Ast) -> List Ast =
+  match (xs)
+    | [] -> ys
+    | Cons(x, rest) -> Cons(x, append-list(rest, ys))
 
 ; `(do body…)` when there is more than one body form, `body[0]` when there
 ; is exactly one, or Unit `()` when there is none. Shared by cond/when.
-(defn wrap-do (body: (List Ast)) (sp: Span) -> Ast
-  (match body
-    [] (ParenNode [] sp)
-    [b] b
-    _ (ParenNode (Cons (mk-sym "do" sp) body) sp)))
+let wrap-do(body: List Ast, sp: Span) -> Ast =
+  match (body)
+    | [] -> ParenNode([], sp)
+    | [b] -> b
+    | _ -> ParenNode(Cons(mk-sym("do", sp), body), sp)
 
 ; ---------------------------------------------------------------------------
 ; Recursive descent
 
-(defn map-desugar (elems: (List Ast)) (diags: (Ref (List DesugarError))) -> (List Ast)
-  (match elems
-    [] []
-    (Cons x rest) (Cons (desugar-node x diags) (map-desugar rest diags))))
+let map-desugar(elems: List Ast, diags: Ref (List DesugarError)) -> List Ast =
+  match (elems)
+    | [] -> []
+    | Cons(x, rest) -> Cons(desugar-node(x, diags), map-desugar(rest, diags))
 
 ; `[e …]` → `(Cons e … (Nil))`. `[]` → `(Nil)`.
-(defn cons-chain (elems: (List Ast)) (sp: Span) -> Ast
-  (match elems
-    [] (ParenNode [(mk-sym "Nil" sp)] sp)
-    (Cons e rest)
-      (ParenNode
-        [(mk-sym "Cons" sp) e (cons-chain rest sp)]
-        sp)))
+let cons-chain(elems: List Ast, sp: Span) -> Ast =
+  match (elems)
+    | [] -> ParenNode([mk-sym("Nil", sp)], sp)
+    | Cons(e, rest) -> ParenNode([mk-sym("Cons", sp), e, cons-chain(rest, sp)], sp)
 
-(defn is-decl-keyword (ast: Ast) -> Bool
-  (match ast
-    (SymNode n _) (or (= n "defn") (= n "defrec") (= n "variant"))
-    _ false))
+let is-decl-keyword(ast: Ast) -> Bool =
+  match (ast)
+    | SymNode(n, _) -> n == "defn" || n == "defrec" || n == "variant"
+    | _ -> false
 
 ; `(name [params…])` — the bracket list is type parameters.
-(defn desugar-name-form (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (match elems
-    (Cons name (Cons (BracketNode ps psp) rest))
-      (ParenNode
-        (Cons (desugar-node name diags)
-          (Cons (BracketNode (map-desugar ps diags) psp) (map-desugar rest diags)))
-        sp)
-    _ (ParenNode (map-desugar elems diags) sp)))
+let desugar-name-form(elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (elems)
+    | Cons(name, Cons(BracketNode(ps, psp), rest)) -> ParenNode(Cons(desugar-node(name, diags), Cons(BracketNode(map-desugar(ps, diags), psp), map-desugar(rest, diags))), sp)
+    | _ -> ParenNode(map-desugar(elems, diags), sp)
 
-(defn desugar-maybe-name (name: Ast) (diags: (Ref (List DesugarError))) -> Ast
-  (match name
-    (ParenNode elems sp) (desugar-name-form elems sp diags)
-    _ (desugar-node name diags)))
+let desugar-maybe-name(name: Ast, diags: Ref (List DesugarError)) -> Ast =
+  match (name)
+    | ParenNode(elems, sp) -> desugar-name-form(elems, sp, diags)
+    | _ -> desugar-node(name, diags)
 
-(defn desugar-decl (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (match elems
-    (Cons kw (Cons name rest))
-      (ParenNode
-        (Cons (desugar-node kw diags)
-          (Cons (desugar-maybe-name name diags) (map-desugar rest diags)))
-        sp)
-    _ (ParenNode (map-desugar elems diags) sp)))
+let desugar-decl(elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (elems)
+    | Cons(kw, Cons(name, rest)) -> ParenNode(Cons(desugar-node(kw, diags), Cons(desugar-maybe-name(name, diags), map-desugar(rest, diags))), sp)
+    | _ -> ParenNode(map-desugar(elems, diags), sp)
 
-(defn desugar-pub (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (match elems
-    (Cons pub-kw (Cons kw (Cons name rest)))
-      (if (is-decl-keyword kw)
-        (ParenNode
-          (Cons (desugar-node pub-kw diags)
-            (Cons (desugar-node kw diags)
-              (Cons (desugar-maybe-name name diags) (map-desugar rest diags))))
-          sp)
-        (ParenNode (map-desugar elems diags) sp))
-    _ (ParenNode (map-desugar elems diags) sp)))
+let desugar-pub(elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (elems)
+    | Cons(pub-kw, Cons(kw, Cons(name, rest))) ->
+      if is-decl-keyword(kw) -> ParenNode(Cons(desugar-node(pub-kw, diags), Cons(desugar-node(kw, diags), Cons(desugar-maybe-name(name, diags), map-desugar(rest, diags)))), sp)
+       | else -> ParenNode(map-desugar(elems, diags), sp)
+    | _ -> ParenNode(map-desugar(elems, diags), sp)
 
-(defn desugar-node (ast: Ast) (diags: (Ref (List DesugarError))) -> Ast
-  (match ast
-    (ParenNode elems sp) (desugar-paren elems sp diags)
-    (BracketNode elems sp) (cons-chain (map-desugar elems diags) sp)
-    _ ast))
+let desugar-node(ast: Ast, diags: Ref (List DesugarError)) -> Ast =
+  match (ast)
+    | ParenNode(elems, sp) -> desugar-paren(elems, sp, diags)
+    | BracketNode(elems, sp) -> cons-chain(map-desugar(elems, diags), sp)
+    | _ -> ast
 
-(defn desugar-paren (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (match elems
-    [] (ParenNode [] sp)
-    (Cons head _) (desugar-paren-head head elems sp diags)))
+let desugar-paren(elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (elems)
+    | [] -> ParenNode([], sp)
+    | Cons(head, _) -> desugar-paren-head(head, elems, sp, diags)
 
-(defn desugar-paren-head (head: Ast) (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (match head
-    (SymNode name _) (desugar-paren-named name elems sp diags)
-    _ (ParenNode (map-desugar elems diags) sp)))
+let desugar-paren-head(head: Ast, elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (head)
+    | SymNode(name, _) -> desugar-paren-named(name, elems, sp, diags)
+    | _ -> ParenNode(map-desugar(elems, diags), sp)
 
-(defn desugar-paren-named (name: Str) (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (cond
-    ((or (= name "defn") (= name "defrec") (= name "variant")) (desugar-decl elems sp diags))
-    ((= name "pub") (desugar-pub elems sp diags))
-    ((= name "and") (desugar-and elems sp diags))
-    ((= name "or") (desugar-or elems sp diags))
-    ((= name "cond") (desugar-cond elems sp diags))
-    ((= name "when") (desugar-when elems sp diags))
-    ((= name "while") (desugar-while elems sp diags))
-    (else (desugar-operator name elems sp diags))))
+let desugar-paren-named(name: Str, elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  if name == "defn" || name == "defrec" || name == "variant" -> desugar-decl(elems, sp, diags)
+   | name == "pub" -> desugar-pub(elems, sp, diags)
+   | name == "and" -> desugar-and(elems, sp, diags)
+   | name == "or" -> desugar-or(elems, sp, diags)
+   | name == "cond" -> desugar-cond(elems, sp, diags)
+   | name == "when" -> desugar-when(elems, sp, diags)
+   | name == "while" -> desugar-while(elems, sp, diags)
+   | else -> desugar-operator(name, elems, sp, diags)
 
 ; ---------------------------------------------------------------------------
 ; (and) → true; (and x) → x; (and x y …) → (if x (and y …) false)
 
-(defn desugar-and (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (desugar-and-args (elems-tail elems) sp diags))
+let desugar-and(elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  desugar-and-args(elems-tail(elems), sp, diags)
 
-(defn desugar-and-args (args: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (match args
-    [] (BoolNode true sp)
-    [x] (desugar-node x diags)
-    (Cons x rest) (desugar-and-rest x rest sp diags)))
+let desugar-and-args(args: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (args)
+    | [] -> BoolNode(true, sp)
+    | [x] -> desugar-node(x, diags)
+    | Cons(x, rest) -> desugar-and-rest(x, rest, sp, diags)
 
-(defn desugar-and-rest (x: Ast) (rest: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (let rest-form (ParenNode (Cons (mk-sym "and" sp) rest) sp))
-  (desugar-node
-    (ParenNode [(mk-sym "if" sp) x rest-form (BoolNode false sp)] sp)
-    diags))
+let desugar-and-rest(x: Ast, rest: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast {
+  let rest-form = ParenNode(Cons(mk-sym("and", sp), rest), sp)
+  desugar-node(ParenNode([mk-sym("if", sp), x, rest-form, BoolNode(false, sp)], sp), diags)
+}
 
 ; ---------------------------------------------------------------------------
 ; (or) → false; (or x) → x; (or x y …) → (if x x (or y …))
 
-(defn desugar-or (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (desugar-or-args (elems-tail elems) sp diags))
+let desugar-or(elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  desugar-or-args(elems-tail(elems), sp, diags)
 
-(defn desugar-or-args (args: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (match args
-    [] (BoolNode false sp)
-    [x] (desugar-node x diags)
-    (Cons x rest) (desugar-or-rest x rest sp diags)))
+let desugar-or-args(args: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (args)
+    | [] -> BoolNode(false, sp)
+    | [x] -> desugar-node(x, diags)
+    | Cons(x, rest) -> desugar-or-rest(x, rest, sp, diags)
 
-(defn desugar-or-rest (x: Ast) (rest: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (let rest-form (ParenNode (Cons (mk-sym "or" sp) rest) sp))
-  (desugar-node
-    (ParenNode [(mk-sym "if" sp) x x rest-form] sp)
-    diags))
+let desugar-or-rest(x: Ast, rest: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast {
+  let dx = desugar-node(x, diags)
+  let drest = desugar-node(ParenNode(Cons(mk-sym("or", sp), rest), sp), diags)
+  ParenNode([mk-sym("if", sp), dx, dx, drest], sp)
+}
 
 ; ---------------------------------------------------------------------------
 ; Open-arity calls. Two arguments stay the binary intrinsic. More than two
@@ -199,218 +186,217 @@
 ; One argument of `-`/`f-` is negation. A chain `(< a b c)` is
 ; `(and (< a b) (< b c))`, so each middle operand is evaluated twice.
 
-(defn is-fold-op (name: Str) -> Bool
-  (or (= name "+") (= name "*") (= name "f+") (= name "f*") (= name "str-concat")))
+let is-fold-op(name: Str) -> Bool =
+  name == "+" || name == "*" || name == "f+" || name == "f*" || name == "str-concat"
 
-(defn is-sub-op (name: Str) -> Bool
-  (or (= name "-") (= name "f-")))
+let is-sub-op(name: Str) -> Bool =
+  name == "-" || name == "f-"
 
-(defn is-div-op (name: Str) -> Bool
-  (or (= name "/") (= name "f/")))
+let is-div-op(name: Str) -> Bool =
+  name == "/" || name == "f/"
 
-(defn is-cmp-op (name: Str) -> Bool
-  (or (= name "<") (= name ">") (= name "<=") (= name ">=") (= name "=")))
+let is-cmp-op(name: Str) -> Bool =
+  name == "<" || name == ">" || name == "<=" || name == ">=" || name == "="
 
-(defn desugar-operator (name: Str) (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (cond
-    ((is-fold-op name) (desugar-fold name elems sp diags))
-    ((is-sub-op name) (desugar-sub name elems sp diags))
-    ((is-div-op name) (desugar-div name elems sp diags))
-    ((is-cmp-op name) (desugar-cmp name elems sp diags))
-    (else (ParenNode (map-desugar elems diags) sp))))
+let desugar-operator(name: Str, elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  if is-fold-op(name) -> desugar-fold(name, elems, sp, diags)
+   | is-sub-op(name) -> desugar-sub(name, elems, sp, diags)
+   | is-div-op(name) -> desugar-div(name, elems, sp, diags)
+   | is-cmp-op(name) -> desugar-cmp(name, elems, sp, diags)
+   | else -> ParenNode(map-desugar(elems, diags), sp)
 
-(defn desugar-arity-fail (name: Str) (how: Str) (fallback: Ast) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (do
-    (push-diag! diags sp "E_DESUGAR_ARITY" (str-concat name " expects " how))
-    fallback))
+let desugar-arity-fail(name: Str, how: Str, fallback: Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast {
+  push-diag!(diags, sp, "E_DESUGAR_ARITY", str-concat(name, " expects ", how))
+  fallback
+}
 
-(defn binary-call (name: Str) (a: Ast) (b: Ast) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (ParenNode [(mk-sym name sp) (desugar-node a diags) (desugar-node b diags)] sp))
+let binary-call(name: Str, a: Ast, b: Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  ParenNode([mk-sym(name, sp), desugar-node(a, diags), desugar-node(b, diags)], sp)
 
-(defn fold-bin (name: Str) (acc: Ast) (rest: (List Ast)) (sp: Span) -> Ast
-  (match rest
-    [] acc
-    (Cons b more) (fold-bin name (ParenNode [(mk-sym name sp) acc b] sp) more sp)))
+let fold-bin(name: Str, acc: Ast, rest: List Ast, sp: Span) -> Ast =
+  match (rest)
+    | [] -> acc
+    | Cons(b, more) -> fold-bin(name, ParenNode([mk-sym(name, sp), acc, b], sp), more, sp)
 
-(defn desugar-folded (name: Str) (args: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (match args
-    (Cons a rest) (desugar-node (fold-bin name a rest sp) diags)
-    [] (ParenNode [(mk-sym name sp)] sp)))
+let desugar-folded(name: Str, args: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (args)
+    | Cons(a, rest) -> desugar-node(fold-bin(name, a, rest, sp), diags)
+    | [] -> ParenNode([mk-sym(name, sp)], sp)
 
-(defn desugar-fold (name: Str) (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (desugar-fold-args name (elems-tail elems) sp diags))
+let desugar-fold(name: Str, elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  desugar-fold-args(name, elems-tail(elems), sp, diags)
 
-(defn desugar-fold-args (name: Str) (args: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (match args
-    [] (desugar-arity-fail name "at least 1 argument" (ParenNode [(mk-sym name sp)] sp) sp diags)
-    [a] (desugar-node a diags)
-    [a b] (binary-call name a b sp diags)
-    _ (desugar-folded name args sp diags)))
+let desugar-fold-args(name: Str, args: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (args)
+    | [] -> desugar-arity-fail(name, "at least 1 argument", ParenNode([mk-sym(name, sp)], sp), sp, diags)
+    | [a] -> desugar-node(a, diags)
+    | [a, b] -> binary-call(name, a, b, sp, diags)
+    | _ -> desugar-folded(name, args, sp, diags)
 
-(defn sub-zero (name: Str) (sp: Span) -> Ast
-  (if (= name "f-")
-    (FloatNode "0.0" sp)
-    (IntNode 0 sp)))
+let sub-zero(name: Str, sp: Span) -> Ast =
+  if name == "f-" -> FloatNode("0.0", sp)
+   | else -> IntNode(0, sp)
 
-(defn desugar-sub (name: Str) (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (desugar-sub-args name (elems-tail elems) sp diags))
+let desugar-sub(name: Str, elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  desugar-sub-args(name, elems-tail(elems), sp, diags)
 
-(defn desugar-sub-args (name: Str) (args: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (match args
-    [] (desugar-arity-fail name "at least 1 argument" (ParenNode [(mk-sym name sp)] sp) sp diags)
-    [a] (desugar-node (ParenNode [(mk-sym name sp) (sub-zero name sp) a] sp) diags)
-    [a b] (binary-call name a b sp diags)
-    _ (desugar-folded name args sp diags)))
+let desugar-sub-args(name: Str, args: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (args)
+    | [] -> desugar-arity-fail(name, "at least 1 argument", ParenNode([mk-sym(name, sp)], sp), sp, diags)
+    | [a] -> desugar-node(ParenNode([mk-sym(name, sp), sub-zero(name, sp), a], sp), diags)
+    | [a, b] -> binary-call(name, a, b, sp, diags)
+    | _ -> desugar-folded(name, args, sp, diags)
 
-(defn desugar-div (name: Str) (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (desugar-div-args name (elems-tail elems) sp diags))
+let desugar-div(name: Str, elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  desugar-div-args(name, elems-tail(elems), sp, diags)
 
-(defn desugar-div-args (name: Str) (args: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (match args
-    [] (desugar-arity-fail name "at least 2 arguments" (ParenNode [(mk-sym name sp)] sp) sp diags)
-    [a] (desugar-arity-fail name "at least 2 arguments" (ParenNode [(mk-sym name sp) a] sp) sp diags)
-    [a b] (binary-call name a b sp diags)
-    _ (desugar-folded name args sp diags)))
+let desugar-div-args(name: Str, args: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (args)
+    | [] -> desugar-arity-fail(name, "at least 2 arguments", ParenNode([mk-sym(name, sp)], sp), sp, diags)
+    | [a] -> desugar-arity-fail(name, "at least 2 arguments", ParenNode([mk-sym(name, sp), a], sp), sp, diags)
+    | [a, b] -> binary-call(name, a, b, sp, diags)
+    | _ -> desugar-folded(name, args, sp, diags)
 
-(defn cmp-pairs (name: Str) (args: (List Ast)) (sp: Span) -> (List Ast)
-  (match args
-    (Cons a (Cons b rest))
-      (Cons (ParenNode [(mk-sym name sp) a b] sp) (cmp-pairs name (Cons b rest) sp))
-    _ []))
+let cmp-pairs(name: Str, args: List Ast, sp: Span) -> List Ast =
+  match (args)
+    | Cons(a, Cons(b, rest)) -> Cons(ParenNode([mk-sym(name, sp), a, b], sp), cmp-pairs(name, Cons(b, rest), sp))
+    | _ -> []
 
-(defn desugar-cmp (name: Str) (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (desugar-cmp-args name (elems-tail elems) sp diags))
+let desugar-cmp(name: Str, elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  desugar-cmp-args(name, elems-tail(elems), sp, diags)
 
-(defn desugar-cmp-args (name: Str) (args: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (match args
-    [] (desugar-arity-fail name "at least 2 arguments" (ParenNode [(mk-sym name sp)] sp) sp diags)
-    [a] (desugar-arity-fail name "at least 2 arguments" (ParenNode [(mk-sym name sp) a] sp) sp diags)
-    [a b] (binary-call name a b sp diags)
-    _ (desugar-node (ParenNode (Cons (mk-sym "and" sp) (cmp-pairs name args sp)) sp) diags)))
+let desugar-cmp-args(name: Str, args: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (args)
+    | [] -> desugar-arity-fail(name, "at least 2 arguments", ParenNode([mk-sym(name, sp)], sp), sp, diags)
+    | [a] -> desugar-arity-fail(name, "at least 2 arguments", ParenNode([mk-sym(name, sp), a], sp), sp, diags)
+    | [a, b] -> binary-call(name, a, b, sp, diags)
+    | _ -> desugar-node(ParenNode(Cons(mk-sym("and", sp), cmp-pairs(name, args, sp)), sp), diags)
 
 ; ---------------------------------------------------------------------------
 ; (cond (test e…) … (else e…)) → nested (if test (do e…) …)
 
-(defn cond-no-match (sp: Span) -> Ast
-  (ParenNode [(mk-sym "panic" sp) (StrNode "cond: no match" sp)] sp))
+let cond-no-match(sp: Span) -> Ast =
+  ParenNode([mk-sym("panic", sp), StrNode("cond: no match", sp)], sp)
 
-(defn desugar-cond (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (desugar-cond-dispatch (elems-tail elems) elems sp diags))
+let desugar-cond(elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  desugar-cond-dispatch(elems-tail(elems), elems, sp, diags)
 
-(defn desugar-cond-dispatch (clauses: (List Ast)) (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (match clauses
-    []
-      (do
-        (push-diag! diags sp "E_DESUGAR_COND_EMPTY" "cond requires at least one clause")
-        (ParenNode elems sp))
-    _ (desugar-cond-clauses clauses sp diags)))
+let desugar-cond-dispatch(clauses: List Ast, elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (clauses)
+    | [] ->
+      {
+        push-diag!(diags, sp, "E_DESUGAR_COND_EMPTY", "cond requires at least one clause")
+        ParenNode(elems, sp)
+      }
+    | _ -> desugar-cond-clauses(clauses, sp, diags)
 
-(defn desugar-cond-clauses (clauses: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (match clauses
-    [] (cond-no-match sp)
-    (Cons first rest) (desugar-cond-clause first rest sp diags)))
+let desugar-cond-clauses(clauses: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (clauses)
+    | [] -> cond-no-match(sp)
+    | Cons(first, rest) -> desugar-cond-clause(first, rest, sp, diags)
 
-(defn desugar-cond-clause (first: Ast) (rest: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (match first
-    (ParenNode felems fsp) (desugar-cond-clause-elems first felems fsp rest sp diags)
-    _
-      (do
-        (push-diag! diags (ast-span first) "E_DESUGAR_COND_CLAUSE" "cond clause must be a list (test exprs...)")
-        first)))
+let desugar-cond-clause(first: Ast, rest: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (first)
+    | ParenNode(felems, fsp) -> desugar-cond-clause-elems(first, felems, fsp, rest, sp, diags)
+    | _ ->
+      {
+        push-diag!(diags, ast-span(first), "E_DESUGAR_COND_CLAUSE", "cond clause must be a list (test exprs...)")
+        first
+      }
 
-(defn desugar-cond-clause-elems (first: Ast) (felems: (List Ast)) (fsp: Span) (rest: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (match felems
-    []
-      (do
-        (push-diag! diags fsp "E_DESUGAR_COND_CLAUSE" "cond clause must be a list (test exprs...)")
-        first)
-    (Cons test body) (desugar-cond-test test body rest sp diags)))
+let desugar-cond-clause-elems(first: Ast, felems: List Ast, fsp: Span, rest: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (felems)
+    | [] ->
+      {
+        push-diag!(diags, fsp, "E_DESUGAR_COND_CLAUSE", "cond clause must be a list (test exprs...)")
+        first
+      }
+    | Cons(test, body) -> desugar-cond-test(test, body, rest, sp, diags)
 
-(defn desugar-cond-test (test: Ast) (body: (List Ast)) (rest: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (if (is-sym test "else")
-    (desugar-cond-else test body rest sp diags)
-    (desugar-cond-if test body rest sp diags)))
+let desugar-cond-test(test: Ast, body: List Ast, rest: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  if is-sym(test, "else") -> desugar-cond-else(test, body, rest, sp, diags)
+   | else -> desugar-cond-if(test, body, rest, sp, diags)
 
-(defn desugar-cond-else (test: Ast) (body: (List Ast)) (rest: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (do
-    (match rest
-      [] ()
-      (Cons _ _) (push-diag! diags (ast-span test) "E_DESUGAR_COND_ELSE" "else must be the last cond clause"))
-    (desugar-cond-else-body body sp diags)))
+let desugar-cond-else(test: Ast, body: List Ast, rest: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast {
+  match (rest)
+    | [] -> ()
+    | Cons(_, _) -> push-diag!(diags, ast-span(test), "E_DESUGAR_COND_ELSE", "else must be the last cond clause")
+  desugar-cond-else-body(body, sp, diags)
+}
 
-(defn desugar-cond-else-body (body: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (match body
-    [] (ParenNode [] sp)
-    [b] (desugar-node b diags)
-    _ (desugar-node (ParenNode (Cons (mk-sym "do" sp) body) sp) diags)))
+let desugar-cond-else-body(body: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (body)
+    | [] -> ParenNode([], sp)
+    | [b] -> desugar-node(b, diags)
+    | _ -> desugar-node(ParenNode(Cons(mk-sym("do", sp), body), sp), diags)
 
-(defn desugar-cond-if (test: Ast) (body: (List Ast)) (rest: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (let then-expr (wrap-do body sp))
-  (let else-expr (desugar-cond-clauses rest sp diags))
-  (desugar-node
-    (ParenNode [(mk-sym "if" sp) test then-expr else-expr] sp)
-    diags))
+let desugar-cond-if(test: Ast, body: List Ast, rest: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast {
+  let then-expr = wrap-do(body, sp)
+  let else-expr = desugar-cond-clauses(rest, sp, diags)
+  desugar-node(ParenNode([mk-sym("if", sp), test, then-expr, else-expr], sp), diags)
+}
 
 ; ---------------------------------------------------------------------------
 ; (when test body…) → (if test (do body…) ())
 
-(defn desugar-when (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (match elems
-    (Cons _ (Cons test body)) (desugar-when-body test body sp diags)
-    _
-      (do
-        (push-diag! diags sp "E_DESUGAR_WHEN" "when requires a test and optional body")
-        (ParenNode elems sp))))
+let desugar-when(elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (elems)
+    | Cons(_, Cons(test, body)) -> desugar-when-body(test, body, sp, diags)
+    | _ ->
+      {
+        push-diag!(diags, sp, "E_DESUGAR_WHEN", "when requires a test and optional body")
+        ParenNode(elems, sp)
+      }
 
-(defn desugar-when-body (test: Ast) (body: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (let then-expr (wrap-do body sp))
-  (desugar-node
-    (ParenNode [(mk-sym "if" sp) test then-expr (ParenNode (Nil) sp)] sp)
-    diags))
+let desugar-when-body(test: Ast, body: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast {
+  let then-expr = wrap-do(body, sp)
+  desugar-node(ParenNode([mk-sym("if", sp), test, then-expr, ParenNode(Nil(), sp)], sp), diags)
+}
 
 ; ---------------------------------------------------------------------------
 ; (while test body…) → (loop () (if test (do body… (recur)) ()))
 
-(defn desugar-while (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (match elems
-    (Cons _ (Cons test body)) (desugar-while-body test body sp diags)
-    _
-      (do
-        (push-diag! diags sp "E_DESUGAR_WHILE" "while requires a test")
-        (ParenNode elems sp))))
+let desugar-while(elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (elems)
+    | Cons(_, Cons(test, body)) -> desugar-while-body(test, body, sp, diags)
+    | _ ->
+      {
+        push-diag!(diags, sp, "E_DESUGAR_WHILE", "while requires a test")
+        ParenNode(elems, sp)
+      }
 
-(defn while-body-do (body: (List Ast)) (recur-form: Ast) (sp: Span) -> Ast
-  (match body
-    [] recur-form
-    _ (ParenNode (Cons (mk-sym "do" sp) (append-list body [recur-form])) sp)))
+let while-body-do(body: List Ast, recur-form: Ast, sp: Span) -> Ast =
+  match (body)
+    | [] -> recur-form
+    | _ -> ParenNode(Cons(mk-sym("do", sp), append-list(body, [recur-form])), sp)
 
-(defn desugar-while-body (test: Ast) (body: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (let recur-form (ParenNode [(mk-sym "recur" sp)] sp))
-  (let body-do (while-body-do body recur-form sp))
-  (let if-form (ParenNode [(mk-sym "if" sp) test body-do (ParenNode (Nil) sp)] sp))
-  (desugar-node
-    (ParenNode [(mk-sym "loop" sp) (ParenNode (Nil) sp) if-form] sp)
-    diags))
+let desugar-while-body(test: Ast, body: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast {
+  let recur-form = ParenNode([mk-sym("recur", sp)], sp)
+  let body-do = while-body-do(body, recur-form, sp)
+  let if-form = ParenNode([mk-sym("if", sp), test, body-do, ParenNode(Nil(), sp)], sp)
+  desugar-node(ParenNode([mk-sym("loop", sp), ParenNode(Nil(), sp), if-form], sp), diags)
+}
 
 ; ---------------------------------------------------------------------------
 ; Entry points
 
-(defn finish-desugar (forms: (List Ast)) (diags: (Ref (List DesugarError))) -> (Result (List Ast) (List DesugarError))
-  (let ds (deref diags))
-  (match ds
-    [] (Ok forms)
-    (Cons _ _) (Err (reverse-diags ds))))
+let finish-desugar(forms: List Ast, diags: Ref (List DesugarError)) -> Result (List Ast) (List DesugarError) {
+  let ds = deref(diags)
+  match (ds)
+    | [] -> Ok(forms)
+    | Cons(_, _) -> Err(reverse-diags(ds))
+}
 
 ; Desugar one form; recursively desugars children. Returns a one-element
 ; list on success, mirroring the host's `{ ok: true; forms: [out] }`.
-(pub defn desugar-form (form: Ast) -> (Result (List Ast) (List DesugarError))
-  (do
-    (let diags (ref []))
-    (let out (desugar-node form diags))
-    (finish-desugar [out] diags)))
+pub let desugar-form(form: Ast) -> Result (List Ast) (List DesugarError) {
+  let diags = ref([])
+  let out = desugar-node(form, diags)
+  finish-desugar([out], diags)
+}
 
-(pub defn desugar-all (forms: (List Ast)) -> (Result (List Ast) (List DesugarError))
-  (do
-    (let diags (ref []))
-    (let out (map-desugar forms diags))
-    (finish-desugar out diags)))
+pub let desugar-all(forms: List Ast) -> Result (List Ast) (List DesugarError) {
+  let diags = ref([])
+  let out = map-desugar(forms, diags)
+  finish-desugar(out, diags)
+}

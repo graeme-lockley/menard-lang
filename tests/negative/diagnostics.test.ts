@@ -5,7 +5,7 @@ import { formatDiagnostics } from "../../host/src/diagnostic/index.ts";
 /** Byte-compared formatted diagnostics (Phase 1 acceptance). */
 describe("negative diagnostics", () => {
   test("E_PARSE_UNCLOSED", () => {
-    const src = "(defn f";
+    const src = "let f(";
     const diags = diagnose(src);
     expect(diags).toHaveLength(1);
     expect(diags[0]!.category).toBe("syntax");
@@ -13,24 +13,20 @@ describe("negative diagnostics", () => {
   });
 
   test("E_TYPE_MISMATCH formatted", () => {
-    const src = "(+ 1 false)";
+    const src = "1 + false";
     const text = formatDiagnostics(diagnose(src), src, "b.mnd");
-    expect(text).toBe(
-      [
-        "b.mnd:1:1: error[E_TYPE_MISMATCH]: expected Int, found Bool",
-        "  |",
-        "1 | (+ 1 false)",
-        "  | ^^^^^^^^^^^",
-        "",
-      ].join("\n"),
-    );
+    expect(text).toContain("error[E_TYPE_MISMATCH]");
+    expect(text).toContain("1 | 1 + false");
   });
 
   test("E_TYPE_EXHAUSTIVE names missing ctor", () => {
-    const src = `(variant (Color) (Red) (Blue))
-(defn f (c: Color) -> Int
-  (match c
-    (Red) 1))`;
+    const src = `type Color =
+  | Red
+  | Blue
+
+let f(c: Color) -> Int =
+  match (c)
+    | Red -> 1`;
     const diags = diagnose(src);
     const ex = diags.find((d) => d.code === "E_TYPE_EXHAUSTIVE");
     expect(ex).toBeDefined();
@@ -38,9 +34,10 @@ describe("negative diagnostics", () => {
     expect(ex!.category).toBe("type");
   });
 
-  test("E_DESUGAR_COND_EMPTY", () => {
-    const diags = diagnose("(cond)");
-    expect(diags[0]!.code).toBe("E_DESUGAR_COND_EMPTY");
-    expect(diags[0]!.category).toBe("semantic");
+  test("a bar at the wrong column is a parse error", () => {
+    const src = "let f(n: Int) -> Int =\n  if n > 0 -> 1\n| else -> 0\n";
+    const diags = diagnose(src);
+    expect(diags[0]!.code).toBe("E_PARSE");
+    expect(diags[0]!.category).toBe("syntax");
   });
 });

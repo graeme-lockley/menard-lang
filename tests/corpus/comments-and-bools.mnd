@@ -1,11 +1,12 @@
 ; Comments, bools, and nested lists
 
-(defn flag (b: Bool) -> Bool
   ; identity
-  b)
+let flag(b: Bool) -> Bool =
+  b
 
-(defn pick (c: Bool) -> Int
-  (if c 1 0))
+let pick(c: Bool) -> Int =
+  if c -> 1
+   | else -> 0
 
-(defn both (a: Bool) (b: Bool) -> Bool
-  (and a b))
+let both(a: Bool, b: Bool) -> Bool =
+  a && b

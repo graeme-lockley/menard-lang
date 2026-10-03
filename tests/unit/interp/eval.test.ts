@@ -80,17 +80,24 @@ describe("builtins StringBuffer", () => {
 
 describe("evaluator depth", () => {
   test("non-tail recursion of 20k frames stays within memory", () => {
-    const src = `(defn mk (n: Int) -> Int (if (= n 0) 0 (+ 1 (mk (- n 1)))))
-(mk 20000)`;
+    const src = `let mk(n: Int) -> Int =
+  if n == 0 -> 0
+   | else -> 1 + mk(n - 1)
+mk(20000)`;
     const r = run(src);
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(20000n);
   }, 60_000);
 
   test("builds and sizes a 10k-element list", () => {
-    const src = `(defn mk (n: Int) -> (List Int) (if (= n 0) (Nil) (Cons n (mk (- n 1)))))
-(defn (size [a]) (xs: (List a)) -> Int (match xs (Nil) 0 (Cons _ t) (+ 1 (size t))))
-(size (mk 10000))`;
+    const src = `let mk(n: Int) -> List Int =
+  if n == 0 -> Nil()
+   | else -> Cons(n, mk(n - 1))
+let size[a](xs: List a) -> Int =
+  match (xs)
+    | [] -> 0
+    | Cons(_, t) -> 1 + size(t)
+size(mk(10000))`;
     const r = run(src);
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(10000n);
@@ -99,7 +106,7 @@ describe("evaluator depth", () => {
 
 describe("intrinsics via run", () => {
   test("show int", () => {
-    const r = run('(show 42)');
+    const r = run("show(42)");
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "str") {
       expect(new TextDecoder().decode(r.value.bytes)).toBe("42");
@@ -108,7 +115,7 @@ describe("intrinsics via run", () => {
 
   test("print writes Str bare, no newline", () => {
     const host = createHost();
-    const r = run('(print "hi")', { host });
+    const r = run('print("hi")', { host });
     expect(r.ok).toBe(true);
     const out = host.stdout.map((b) => new TextDecoder().decode(b)).join("");
     expect(out).toBe("hi");
@@ -116,7 +123,7 @@ describe("intrinsics via run", () => {
 
   test("println appends newline", () => {
     const host = createHost();
-    const r = run('(println "hi")', { host });
+    const r = run('println("hi")', { host });
     expect(r.ok).toBe(true);
     const out = host.stdout.map((b) => new TextDecoder().decode(b)).join("");
     expect(out).toBe("hi\n");
@@ -124,23 +131,23 @@ describe("intrinsics via run", () => {
 
   test("print zero args writes nothing; println writes newline", () => {
     const h1 = createHost();
-    expect(run("(print)", { host: h1 }).ok).toBe(true);
+    expect(run("print()", { host: h1 }).ok).toBe(true);
     expect(h1.stdout).toEqual([]);
     const h2 = createHost();
-    expect(run("(println)", { host: h2 }).ok).toBe(true);
+    expect(run("println()", { host: h2 }).ok).toBe(true);
     expect(new TextDecoder().decode(h2.stdout[0]!)).toBe("\n");
   });
 
   test("print mixes Str raw and show of Int", () => {
     const host = createHost();
-    const r = run('(print "a" 1)', { host });
+    const r = run('print("a", 1)', { host });
     expect(r.ok).toBe(true);
     const out = host.stdout.map((b) => new TextDecoder().decode(b)).join("");
     expect(out).toBe("a1");
   });
 
   test("show still quotes Str", () => {
-    const r = run('(show "hi")');
+    const r = run('show("hi")');
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "str") {
       expect(new TextDecoder().decode(r.value.bytes)).toBe('"hi"');
@@ -148,10 +155,11 @@ describe("intrinsics via run", () => {
   });
 
   test("map round trip", () => {
-    const src = `(do
-  (let m (map-new))
-  (let m2 (map-set m "a" 1))
-  (map-get m2 "a"))`;
+    const src = `{
+  let m = map-new()
+  let m2 = map-set(m, "a", 1)
+  map-get(m2, "a")
+}`;
     const r = run(src);
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "variant") {
@@ -183,7 +191,7 @@ describe("virtual fs", () => {
 
 describe("negative fixtures (formatted)", () => {
   test("type error golden shape", () => {
-    const src = "(+ 1 true)";
+    const src = "1 + true";
     const diags = diagnose(src);
     expect(diags.length).toBeGreaterThan(0);
     const text = formatDiagnostics(diags, src, "neg.mnd");

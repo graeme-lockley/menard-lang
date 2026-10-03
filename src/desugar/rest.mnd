@@ -6,598 +6,661 @@
 ; with a generated `mn-rest-append`. Runs after desugar and before typing.
 ; Mirrors host/src/desugar/rest.ts.
 
-(import "../reader/ast.mnd")
-
-(pub alias Ast Ast)
-(pub alias Span Span)
-
-(pub defrec RestError (span: Span) (code: Str) (message: Str))
-
-(pub defrec RestPack (forms: (List Ast)) (errors: (List RestError)))
-
-(defrec RestFn (name: Str) (fixed: Int))
-
-(defrec SplitLast (init: (List Ast)) (last: Ast))
-
-(defrec ArrowSplit (prefix: (List Ast)) (body: (List Ast)))
-
-(variant Piece
-  (Elem Ast)
-  (Splice Ast Span))
-
-(defrec PieceParse (pieces: (List Piece)) (bad: Bool))
-
-(defrec PieceSplit (fixed: (List Piece)) (rest: (List Piece)))
-
-(defrec PackCtx
-  (sigs: (List RestFn))
-  (diags: (Ref (List RestError)))
-  (need: (Ref Bool))
-  (append-name: Str)
-  (splice-span: (Ref Span)))
-
-(defn push-ref (diags: (Ref (List RestError))) (sp: Span) (code: Str) (message: Str) -> Unit
-  (set! diags (Cons (RestError sp code message) (deref diags))))
-
-(defn reverse-errs (xs: (List RestError)) (acc: (List RestError)) -> (List RestError)
-  (match xs
-    [] acc
-    (Cons x rest) (reverse-errs rest (Cons x acc))))
-
-(defn mk-sym (name: Str) (sp: Span) -> Ast
-  (SymNode name sp))
-
-(defn sym-of (ast: Ast) -> (Maybe Str)
-  (match ast
-    (SymNode n _) (Some n)
-    _ (None)))
-
-(defn is-sym (ast: Ast) (name: Str) -> Bool
-  (match (sym-of ast)
-    (Some n) (= n name)
-    (None) false))
-
-(defn is-dots (ast: Ast) -> Bool
-  (is-sym ast "..."))
-
-(defn append-asts (xs: (List Ast)) (ys: (List Ast)) -> (List Ast)
-  (match xs
-    [] ys
-    (Cons x rest) (Cons x (append-asts rest ys))))
-
-(defn reverse-asts (xs: (List Ast)) (acc: (List Ast)) -> (List Ast)
-  (match xs
-    [] acc
-    (Cons x rest) (reverse-asts rest (Cons x acc))))
-
-(defn nil-node (sp: Span) -> Ast
-  (ParenNode [(mk-sym "Nil" sp)] sp))
-
-(defn cons-node (h: Ast) (t: Ast) (sp: Span) -> Ast
-  (ParenNode [(mk-sym "Cons" sp) h t] sp))
-
-(defn call-node (name: Str) (args: (List Ast)) (sp: Span) -> Ast
-  (ParenNode (Cons (mk-sym name sp) args) sp))
-
-(defn is-nil-node (ast: Ast) -> Bool
-  (match ast
-    (ParenNode [h] _) (is-sym h "Nil")
-    _ false))
-
-(defn contains-dots (ast: Ast) -> Bool
-  (match ast
-    (SymNode n _) (= n "...")
-    (ParenNode elems _) (contains-dots-list elems)
-    (BracketNode elems _) (contains-dots-list elems)
-    _ false))
-
-(defn contains-dots-list (xs: (List Ast)) -> Bool
-  (match xs
-    [] false
-    (Cons x rest) (if (contains-dots x) true (contains-dots-list rest))))
-
-(defn dots-span (ast: Ast) -> Span
-  (if (is-dots ast) (ast-span ast)
-    (match ast
-      (ParenNode elems _) (dots-span-list elems (ast-span ast))
-      (BracketNode elems _) (dots-span-list elems (ast-span ast))
-      _ (ast-span ast))))
-
-(defn dots-span-list (xs: (List Ast)) (fallback: Span) -> Span
-  (match xs
-    [] fallback
-    (Cons x rest)
-      (if (contains-dots x) (dots-span x) (dots-span-list rest fallback))))
-
-(defn unwrap (form: Ast) -> Ast
-  (match form
-    (ParenNode (Cons h rest) sp) (if (is-sym h "pub") (ParenNode rest sp) form)
-    _ form))
-
-(defn name-text (ast: Ast) -> (Maybe Str)
-  (match ast
-    (SymNode n _) (Some n)
-    (ParenNode (Cons h _) _) (sym-of h)
-    _ (None)))
-
-(defn defined-name (form: Ast) -> (Maybe Str)
-  (match (unwrap form)
-    (ParenNode (Cons h (Cons name _)) _)
-      (if (or (is-sym h "defn") (is-sym h "extern")) (name-text name) (None))
-    _ (None)))
-
-(defn let-name (form: Ast) -> (Maybe Str)
-  (match (unwrap form)
-    (ParenNode (Cons h (Cons name _)) _)
-      (if (is-sym h "let") (sym-of name) (None))
-    _ (None)))
-
-(defn take-params (xs: (List Ast)) -> (List Ast)
-  (match xs
-    [] []
-    (Cons x rest) (if (is-sym x "->") [] (Cons x (take-params rest)))))
-
-(defn param-asts (form: Ast) -> (Maybe (List Ast))
-  (match (unwrap form)
-    (ParenNode (Cons h (Cons _ rest)) _)
-      (if (or (is-sym h "defn") (is-sym h "extern")) (Some (take-params rest)) (None))
-    _ (None)))
-
-(defn is-list-type (ast: Ast) -> Bool
-  (match ast
-    (ParenNode (Cons h rest) _)
-      (if (is-sym h "List")
-        (match rest [] false (Cons _ _) true)
-        false)
-    _ false))
-
-(defn not-empty (xs: (List Ast)) -> Bool
-  (match xs [] false (Cons _ _) true))
-
-(defn report-if (report: Bool) (diags: (Ref (List RestError))) (sp: Span) (message: Str) -> Unit
-  (if report (push-ref diags sp "E_TYPE_REST" message) ()))
-
-(defn split-last (xs: (List Ast)) (acc: (List Ast)) -> (Maybe SplitLast)
-  (match xs
-    [] (None)
-    (Cons x []) (Some (SplitLast (reverse-asts acc []) x))
-    (Cons x rest) (split-last rest (Cons x acc))))
-
-(defn validate-rest-type (init: (List Ast)) (sp: Span) (i: Int) (diags: (Ref (List RestError))) (report: Bool) -> (Maybe Int)
-  (match init
-    (Cons _ (Cons ty []))
-      (if (is-list-type ty) (Some i)
-        (do
-          (report-if report diags (ast-span ty) "rest parameter type must be a List")
-          (None)))
-    _ (do
-        (report-if report diags sp "rest parameter must be a (name: Type ...) form")
-        (None))))
-
-(defn validate-rest-elems (elems: (List Ast)) (sp: Span) (i: Int) (diags: (Ref (List RestError))) (report: Bool) -> (Maybe Int)
-  (match (split-last elems [])
-    (None)
-      (do
-        (report-if report diags sp "rest parameter must be a (name: Type ...) form")
-        (None))
-    (Some (SplitLast init last))
-      (if (is-dots last)
-        (if (contains-dots-list init)
-          (do
-            (report-if report diags (dots-span-list init sp) "rest marker must be the last element of the parameter")
-            (None))
-          (validate-rest-type init sp i diags report))
-        (do
-          (report-if report diags (dots-span-list elems sp) "rest marker must be the last element of the parameter")
-          (None)))))
-
-(defn validate-rest-param (p: Ast) (i: Int) (diags: (Ref (List RestError))) (report: Bool) -> (Maybe Int)
-  (match p
-    (ParenNode elems sp) (validate-rest-elems elems sp i diags report)
-    _ (do
-        (report-if report diags (dots-span p) "rest parameter must be a (name: Type ...) form")
-        (None))))
-
-(defn rest-fixed-params (ps: (List Ast)) (i: Int) (diags: (Ref (List RestError))) (report: Bool) -> (Maybe Int)
-  (match ps
-    [] (None)
-    (Cons p rest)
-      (if (contains-dots p)
-        (if (not-empty rest)
-          (do
-            (report-if report diags (dots-span p) "rest parameter must be last")
-            (None))
-          (validate-rest-param p i diags report))
-        (rest-fixed-params rest (+ i 1) diags report))))
-
-(defn rest-fixed (form: Ast) (diags: (Ref (List RestError))) (report: Bool) -> (Maybe Int)
-  (match (param-asts form)
-    (None) (None)
-    (Some ps) (rest-fixed-params ps 0 diags report)))
-
-(defn drop-sig (sigs: (List RestFn)) (name: Str) -> (List RestFn)
-  (match sigs
-    [] []
-    (Cons (RestFn n k) rest)
-      (if (= n name) (drop-sig rest name)
-        (Cons (RestFn n k) (drop-sig rest name)))))
-
-(defn put-sig (sigs: (List RestFn)) (name: Str) (k: Int) -> (List RestFn)
-  (append-sigs (drop-sig sigs name) [(RestFn name k)]))
-
-(defn append-sigs (xs: (List RestFn)) (ys: (List RestFn)) -> (List RestFn)
-  (match xs
-    [] ys
-    (Cons x rest) (Cons x (append-sigs rest ys))))
-
-(defn consider-form (sigs: (List RestFn)) (form: Ast) (diags: (Ref (List RestError))) -> (List RestFn)
-  (match (defined-name form)
-    (Some name)
-      (match (rest-fixed form diags true)
-        (Some k) (put-sig sigs name k)
-        (None) (drop-sig sigs name))
-    (None)
-      (match (let-name form)
-        (Some name) (drop-sig sigs name)
-        (None) sigs)))
-
-(defn collect-sigs (forms: (List Ast)) (diags: (Ref (List RestError))) (acc: (List RestFn)) -> (List RestFn)
-  (match forms
-    [] acc
-    (Cons f rest) (collect-sigs rest diags (consider-form acc f diags))))
-
-(defn fixed-of (name: Str) (sigs: (List RestFn)) -> (Maybe Int)
-  (match sigs
-    [] (None)
-    (Cons (RestFn n k) rest) (if (= n name) (Some k) (fixed-of name rest))))
-
-(defn add-strs (xs: (List Str)) (acc: (List Str)) -> (List Str)
-  (match xs
-    [] acc
-    (Cons x rest) (add-strs rest (Cons x acc))))
-
-(defn ctor-names (xs: (List Ast)) (acc: (List Str)) -> (List Str)
-  (match xs
-    [] acc
-    (Cons x rest)
-      (match x
-        (ParenNode (Cons h _) _)
-          (match (sym-of h)
-            (Some n) (ctor-names rest (Cons n acc))
-            (None) (ctor-names rest acc))
-        _ (ctor-names rest acc))))
-
-(defn decl-names (form: Ast) -> (List Str)
-  (match (unwrap form)
-    (ParenNode (Cons h (Cons name more)) _)
-      (decl-names-kw h name more)
-    _ []))
-
-(defn decl-names-kw (h: Ast) (name: Ast) (more: (List Ast)) -> (List Str)
-  (cond
-    ((or (is-sym h "defn") (or (is-sym h "extern") (or (is-sym h "defrec") (is-sym h "alias"))))
-      (match (name-text name) (Some n) [n] (None) []))
-    ((is-sym h "let") (match (sym-of name) (Some n) [n] (None) []))
-    ((is-sym h "variant")
-      (match (name-text name)
-        (Some n) (ctor-names more [n])
-        (None) (ctor-names more [])))
-    (else [])))
-
-(defn collect-names (forms: (List Ast)) (acc: (List Str)) -> (List Str)
-  (match forms
-    [] acc
-    (Cons f rest) (collect-names rest (add-strs (decl-names f) acc))))
-
-(defn name-taken (xs: (List Str)) (name: Str) -> Bool
-  (match xs
-    [] false
-    (Cons h rest) (if (= h name) true (name-taken rest name))))
-
-(defn fresh-append (names: (List Str)) (n: Int) -> Str
-  (let candidate (if (= n 0) "mn-rest-append" (str-concat "mn-rest-append-" (show n))))
-  (if (name-taken names candidate) (fresh-append names (+ n 1)) candidate))
-
-(defn ctx-sigs (ctx: PackCtx) -> (List RestFn)
-  (match ctx (PackCtx s _ _ _ _) s))
-
-(defn ctx-diags (ctx: PackCtx) -> (Ref (List RestError))
-  (match ctx (PackCtx _ d _ _ _) d))
-
-(defn ctx-need (ctx: PackCtx) -> (Ref Bool)
-  (match ctx (PackCtx _ _ n _ _) n))
-
-(defn ctx-append (ctx: PackCtx) -> Str
-  (match ctx (PackCtx _ _ _ n _) n))
-
-(defn ctx-splice (ctx: PackCtx) -> (Ref Span)
-  (match ctx (PackCtx _ _ _ _ s) s))
-
-(defn push-err (ctx: PackCtx) (sp: Span) (code: Str) (message: Str) -> Unit
-  (let diags (ctx-diags ctx))
-  (set! diags (Cons (RestError sp code message) (deref diags))))
-
-(defn mark-need (ctx: PackCtx) (sp: Span) -> Unit
-  (let need (ctx-need ctx))
-  (let splice (ctx-splice ctx))
-  (do
-    (set! need true)
-    (set! splice sp)
-    ()))
-
-(defn reverse-pieces (xs: (List Piece)) (acc: (List Piece)) -> (List Piece)
-  (match xs
-    [] acc
-    (Cons x rest) (reverse-pieces rest (Cons x acc))))
-
-(defn piece-expr (p: Piece) -> Ast
-  (match p
-    (Elem e) e
-    (Splice e _) e))
-
-(defn piece-span (p: Piece) -> Span
-  (match p
-    (Elem e) (ast-span e)
-    (Splice _ sp) sp))
-
-(defn piece-exprs (ps: (List Piece)) -> (List Ast)
-  (match ps
-    [] []
-    (Cons p rest) (Cons (piece-expr p) (piece-exprs rest))))
-
-(defn piece-len (ps: (List Piece)) -> Int
-  (match ps
-    [] 0
-    (Cons _ rest) (+ 1 (piece-len rest))))
-
-(defn first-splice (ps: (List Piece)) -> (Maybe Piece)
-  (match ps
-    [] (None)
-    (Cons p rest) (if (match p (Splice _ _) true (Elem _) false) (Some p) (first-splice rest))))
-
-(defn call-of (head: Ast) (ps: (List Piece)) (sp: Span) -> Ast
-  (ParenNode (Cons head (piece-exprs ps)) sp))
-
-(defn take-pieces (n: Int) (ps: (List Piece)) (acc: (List Piece)) -> PieceSplit
-  (if (= n 0) (PieceSplit (reverse-pieces acc []) ps)
-    (match ps
-      [] (PieceSplit (reverse-pieces acc []) [])
-      (Cons p rest) (take-pieces (- n 1) rest (Cons p acc)))))
-
-(defn place-piece (p: Piece) (acc: Ast) (ctx: PackCtx) (sp: Span) -> Ast
-  (match p
-    (Elem e) (cons-node e acc sp)
-    (Splice e ssp)
-      (if (is-nil-node acc) e
-        (do
-          (mark-need ctx ssp)
-          (call-node (ctx-append ctx) [e acc] sp)))))
-
-(defn build-rest (ps: (List Piece)) (ctx: PackCtx) (sp: Span) -> Ast
-  (match ps
-    [] (nil-node sp)
-    (Cons p rest) (place-piece p (build-rest rest ctx sp) ctx sp)))
-
-(defn pack-short (head: Ast) (ps: (List Piece)) (sp: Span) (ctx: PackCtx) -> Ast
-  (match (first-splice ps)
-    (Some p)
-      (do
-        (push-err ctx (piece-span p) "E_TYPE_SPREAD" "spread in a fixed argument")
-        (call-of head ps sp))
-    (None) (call-of head ps sp)))
-
-(defn pack-long (head: Ast) (k: Int) (ps: (List Piece)) (sp: Span) (ctx: PackCtx) -> Ast
-  (match (take-pieces k ps [])
-    (PieceSplit fixed rest)
-      (match (first-splice fixed)
-        (Some p)
-          (do
-            (push-err ctx (piece-span p) "E_TYPE_SPREAD" "spread in a fixed argument")
-            (call-of head ps sp))
-        (None)
-          (ParenNode
-            (append-asts (Cons head (piece-exprs fixed)) [(build-rest rest ctx sp)])
-            sp))))
-
-(defn pack-named (head: Ast) (k: Int) (ps: (List Piece)) (sp: Span) (ctx: PackCtx) -> Ast
-  (if (< (piece-len ps) k) (pack-short head ps sp ctx)
-    (pack-long head k ps sp ctx)))
-
-(defn finish-plain (head: Ast) (ps: (List Piece)) (sp: Span) (ctx: PackCtx) -> Ast
-  (match (first-splice ps)
-    (Some p)
-      (do
-        (push-err ctx (piece-span p) "E_TYPE_SPREAD" "spread is only valid in a rest-parameter call")
-        (call-of head ps sp))
-    (None) (call-of head ps sp)))
-
-(defn split-pieces (args: (List Ast)) (ctx: PackCtx) -> PieceParse
-  (split-go args ctx [] false))
-
-(defn split-go (args: (List Ast)) (ctx: PackCtx) (acc: (List Piece)) (bad: Bool) -> PieceParse
-  (match args
-    [] (PieceParse (reverse-pieces acc []) bad)
-    (Cons a rest)
-      (if (is-dots a) (split-dots a rest ctx acc bad)
-        (split-go rest ctx (Cons (Elem (rewrite-expr a ctx)) acc) bad))))
-
-(defn split-dots (dots: Ast) (rest: (List Ast)) (ctx: PackCtx) (acc: (List Piece)) (bad: Bool) -> PieceParse
-  (match rest
-    []
-      (do
-        (push-err ctx (ast-span dots) "E_TYPE_SPREAD" "spread takes one expression")
-        (PieceParse (reverse-pieces acc []) true))
-    (Cons n more)
-      (if (is-dots n)
-        (do
-          (push-err ctx (ast-span dots) "E_TYPE_SPREAD" "spread takes one expression")
-          (split-go rest ctx acc true))
-        (split-go more ctx (Cons (Splice (rewrite-value n ctx) (ast-span dots)) acc) bad))))
-
-(defn finish-call (head: Ast) (name: Str) (args: (List Ast)) (sp: Span) (ctx: PackCtx) -> Ast
-  (match (split-pieces args ctx)
-    (PieceParse ps bad)
-      (if bad (call-of head ps sp)
-        (match (fixed-of name (ctx-sigs ctx))
-          (Some k) (pack-named head k ps sp ctx)
-          (None) (finish-plain head ps sp ctx)))))
-
-(defn rewrite-values (xs: (List Ast)) (ctx: PackCtx) -> (List Ast)
-  (match xs
-    [] []
-    (Cons x rest) (Cons (rewrite-value x ctx) (rewrite-values rest ctx))))
-
-(defn rewrite-exprs (xs: (List Ast)) (ctx: PackCtx) -> (List Ast)
-  (match xs
-    [] []
-    (Cons x rest) (Cons (rewrite-expr x ctx) (rewrite-exprs rest ctx))))
-
-(defn rewrite-expr (ast: Ast) (ctx: PackCtx) -> Ast
-  (match ast
-    (ParenNode elems sp) (rewrite-paren elems sp ctx)
-    (BracketNode elems sp) (BracketNode (rewrite-exprs elems ctx) sp)
-    _ ast))
-
-(defn rewrite-value (ast: Ast) (ctx: PackCtx) -> Ast
-  (let out (rewrite-expr ast ctx))
-  (if (is-dots out)
-    (do
-      (push-err ctx (ast-span out) "E_TYPE_SPREAD" "spread takes one expression")
-      out)
-    out))
-
-(defn rewrite-lambda (fn-sym: Ast) (rest: (List Ast)) (sp: Span) (ctx: PackCtx) -> Ast
-  (match rest
-    (Cons params body)
-      (do
-        (if (contains-dots params)
-          (push-err ctx (dots-span params) "E_TYPE_REST" "`...` is not allowed on a lambda")
-          ())
-        (ParenNode (Cons fn-sym (Cons params (rewrite-values body ctx))) sp))
-    _ (ParenNode (Cons fn-sym rest) sp)))
-
-(defn rewrite-paren (elems: (List Ast)) (sp: Span) (ctx: PackCtx) -> Ast
-  (match elems
-    [] (ParenNode [] sp)
-    (Cons h rest) (rewrite-head h rest sp ctx)))
-
-(defn rewrite-head (h: Ast) (rest: (List Ast)) (sp: Span) (ctx: PackCtx) -> Ast
-  (match (sym-of h)
-    (Some "quote") (ParenNode (Cons h rest) sp)
-    (Some "fn") (rewrite-lambda h rest sp ctx)
-    (Some "lambda") (rewrite-lambda h rest sp ctx)
-    (Some "...")
-      (do
-        (push-err ctx sp "E_TYPE_SPREAD" "`...` marks the next argument; it is not a call")
-        (ParenNode (Cons h rest) sp))
-    (Some name) (finish-call h name rest sp ctx)
-    (None) (finish-computed h rest sp ctx)))
-
-(defn finish-computed (h: Ast) (args: (List Ast)) (sp: Span) (ctx: PackCtx) -> Ast
-  (let head (rewrite-value h ctx))
-  (finish-computed-head head args sp ctx))
-
-(defn finish-computed-head (head: Ast) (args: (List Ast)) (sp: Span) (ctx: PackCtx) -> Ast
-  (match (sym-of head)
-    (Some name) (finish-call head name args sp ctx)
-    (None)
-      (match (split-pieces args ctx)
-        (PieceParse ps bad)
-          (if bad (call-of head ps sp) (finish-plain head ps sp ctx)))))
-
-(defn strip-param (ast: Ast) -> Ast
-  (match ast
-    (ParenNode elems sp)
-      (match (split-last elems [])
-        (None) ast
-        (Some (SplitLast init last))
-          (if (is-dots last) (ParenNode init sp) ast))
-    _ ast))
-
-(defn strip-prefix (xs: (List Ast)) -> (List Ast)
-  (match xs
-    [] []
-    (Cons x rest)
-      (if (is-sym x "->") xs
-        (Cons (strip-param x) (strip-prefix rest)))))
-
-(defn split-arrow (xs: (List Ast)) (acc: (List Ast)) -> (Maybe ArrowSplit)
-  (match xs
-    [] (None)
-    (Cons x rest)
-      (if (is-sym x "->")
-        (match rest
-          (Cons ret body) (Some (ArrowSplit (reverse-asts (Cons ret (Cons x acc)) []) body))
-          [] (None))
-        (split-arrow rest (Cons x acc)))))
-
-(defn rewrite-header (form: Ast) (ctx: PackCtx) -> Ast
-  (match form
-    (ParenNode elems sp)
-      (match (split-arrow elems [])
-        (None) form
-        (Some (ArrowSplit prefix body))
-          (ParenNode (append-asts (strip-prefix prefix) (rewrite-values body ctx)) sp))
-    _ form))
-
-(defn rewrite-inner (form: Ast) (ctx: PackCtx) -> Ast
-  (match form
-    (ParenNode (Cons h _) _)
-      (if (or (is-sym h "defn") (is-sym h "extern")) (rewrite-header form ctx)
-        (rewrite-value form ctx))
-    _ (rewrite-value form ctx)))
-
-(defn rewrap (original: Ast) (inner: Ast) -> Ast
-  (match original
-    (ParenNode (Cons h _) sp)
-      (if (is-sym h "pub")
-        (match inner
-          (ParenNode elems _) (ParenNode (Cons h elems) sp)
-          _ inner)
-        inner)
-    _ inner))
-
-(defn rewrite-top (form: Ast) (ctx: PackCtx) -> Ast
-  (rewrap form (rewrite-inner (unwrap form) ctx)))
-
-(defn rewrite-forms (forms: (List Ast)) (ctx: PackCtx) -> (List Ast)
-  (match forms
-    [] []
-    (Cons f rest) (Cons (rewrite-top f ctx) (rewrite-forms rest ctx))))
-
-(defn append-defn (name: Str) (sp: Span) -> Ast
-  (ParenNode
-    [(mk-sym "defn" sp)
-     (ParenNode [(mk-sym name sp) (BracketNode [(mk-sym "a" sp)] sp)] sp)
-     (ParenNode [(mk-sym "xs:" sp) (ParenNode [(mk-sym "List" sp) (mk-sym "a" sp)] sp)] sp)
-     (ParenNode [(mk-sym "ys:" sp) (ParenNode [(mk-sym "List" sp) (mk-sym "a" sp)] sp)] sp)
-     (mk-sym "->" sp)
-     (ParenNode [(mk-sym "List" sp) (mk-sym "a" sp)] sp)
-     (ParenNode
-       [(mk-sym "match" sp)
-        (mk-sym "xs" sp)
-        (ParenNode [(mk-sym "Nil" sp)] sp)
-        (mk-sym "ys" sp)
-        (ParenNode [(mk-sym "Cons" sp) (mk-sym "h" sp) (mk-sym "t" sp)] sp)
-        (ParenNode
-          [(mk-sym "Cons" sp)
-           (mk-sym "h" sp)
-           (ParenNode [(mk-sym name sp) (mk-sym "t" sp) (mk-sym "ys" sp)] sp)]
-          sp)]
-       sp)]
-    sp))
-
-(pub defn pack-rest (forms: (List Ast)) -> RestPack
-  (do
-    (let diags (ref []))
-    (let sigs (collect-sigs forms diags []))
-    (let append-name (fresh-append (collect-names forms []) 0))
-    (let need (ref false))
-    (let splice (ref (Span 0 0 0 0)))
-    (let ctx (PackCtx sigs diags need append-name splice))
-    (let packed (rewrite-forms forms ctx))
-    (let out
-      (if (deref need)
-        (append-asts packed [(append-defn append-name (deref splice))])
-        packed))
-    (RestPack out (reverse-errs (deref diags) []))))
+import "../reader/ast.mnd"
+
+pub alias Ast = Ast
+
+pub alias Span = Span
+
+pub record RestError {
+  span: Span
+  code: Str
+  message: Str
+}
+
+pub record RestPack {
+  forms: List Ast
+  errors: List RestError
+}
+
+record RestFn {
+  name: Str
+  fixed: Int
+}
+
+record SplitLast {
+  init: List Ast
+  last: Ast
+}
+
+record ArrowSplit {
+  prefix: List Ast
+  body: List Ast
+}
+
+type Piece =
+  | Elem(Ast)
+  | Splice(Ast, Span)
+
+record PieceParse {
+  pieces: List Piece
+  bad: Bool
+}
+
+record PieceSplit {
+  fixed: List Piece
+  rest: List Piece
+}
+
+record PackCtx {
+  sigs: List RestFn
+  diags: Ref (List RestError)
+  need: Ref Bool
+  append-name: Str
+  splice-span: Ref Span
+}
+
+let push-ref(diags: Ref (List RestError), sp: Span, code: Str, message: Str) -> Unit =
+  set!(diags, Cons(RestError(sp, code, message), deref(diags)))
+
+let reverse-errs(xs: List RestError, acc: List RestError) -> List RestError =
+  match (xs)
+    | [] -> acc
+    | Cons(x, rest) -> reverse-errs(rest, Cons(x, acc))
+
+let mk-sym(name: Str, sp: Span) -> Ast =
+  SymNode(name, sp)
+
+let sym-of(ast: Ast) -> Maybe Str =
+  match (ast)
+    | SymNode(n, _) -> Some(n)
+    | _ -> None()
+
+let is-sym(ast: Ast, name: Str) -> Bool =
+  match (sym-of(ast))
+    | Some(n) -> n == name
+    | None -> false
+
+let is-dots(ast: Ast) -> Bool =
+  is-sym(ast, "...")
+
+let append-asts(xs: List Ast, ys: List Ast) -> List Ast =
+  match (xs)
+    | [] -> ys
+    | Cons(x, rest) -> Cons(x, append-asts(rest, ys))
+
+let reverse-asts(xs: List Ast, acc: List Ast) -> List Ast =
+  match (xs)
+    | [] -> acc
+    | Cons(x, rest) -> reverse-asts(rest, Cons(x, acc))
+
+let nil-node(sp: Span) -> Ast =
+  ParenNode([mk-sym("Nil", sp)], sp)
+
+let cons-node(h: Ast, t: Ast, sp: Span) -> Ast =
+  ParenNode([mk-sym("Cons", sp), h, t], sp)
+
+let call-node(name: Str, args: List Ast, sp: Span) -> Ast =
+  ParenNode(Cons(mk-sym(name, sp), args), sp)
+
+let is-nil-node(ast: Ast) -> Bool =
+  match (ast)
+    | ParenNode([h], _) -> is-sym(h, "Nil")
+    | _ -> false
+
+let contains-dots(ast: Ast) -> Bool =
+  match (ast)
+    | SymNode(n, _) -> n == "..."
+    | ParenNode(elems, _) -> contains-dots-list(elems)
+    | BracketNode(elems, _) -> contains-dots-list(elems)
+    | _ -> false
+
+let contains-dots-list(xs: List Ast) -> Bool =
+  match (xs)
+    | [] -> false
+    | Cons(x, rest) ->
+      if contains-dots(x) -> true
+       | else -> contains-dots-list(rest)
+
+let dots-span(ast: Ast) -> Span =
+  if is-dots(ast) -> ast-span(ast)
+   | else ->
+    match (ast)
+      | ParenNode(elems, _) -> dots-span-list(elems, ast-span(ast))
+      | BracketNode(elems, _) -> dots-span-list(elems, ast-span(ast))
+      | _ -> ast-span(ast)
+
+let dots-span-list(xs: List Ast, fallback: Span) -> Span =
+  match (xs)
+    | [] -> fallback
+    | Cons(x, rest) ->
+      if contains-dots(x) -> dots-span(x)
+       | else -> dots-span-list(rest, fallback)
+
+let unwrap(form: Ast) -> Ast =
+  match (form)
+    | ParenNode(Cons(h, rest), sp) ->
+      if is-sym(h, "pub") -> ParenNode(rest, sp)
+       | else -> form
+    | _ -> form
+
+let name-text(ast: Ast) -> Maybe Str =
+  match (ast)
+    | SymNode(n, _) -> Some(n)
+    | ParenNode(Cons(h, _), _) -> sym-of(h)
+    | _ -> None()
+
+let defined-name(form: Ast) -> Maybe Str =
+  match (unwrap(form))
+    | ParenNode(Cons(h, Cons(name, _)), _) ->
+      if is-sym(h, "defn") || is-sym(h, "extern") -> name-text(name)
+       | else -> None()
+    | _ -> None()
+
+let let-name(form: Ast) -> Maybe Str =
+  match (unwrap(form))
+    | ParenNode(Cons(h, Cons(name, _)), _) ->
+      if is-sym(h, "let") -> sym-of(name)
+       | else -> None()
+    | _ -> None()
+
+let take-params(xs: List Ast) -> List Ast =
+  match (xs)
+    | [] -> []
+    | Cons(x, rest) ->
+      if is-sym(x, "->") -> []
+       | else -> Cons(x, take-params(rest))
+
+let param-asts(form: Ast) -> Maybe (List Ast) =
+  match (unwrap(form))
+    | ParenNode(Cons(h, Cons(_, rest)), _) ->
+      if is-sym(h, "defn") || is-sym(h, "extern") -> Some(take-params(rest))
+       | else -> None()
+    | _ -> None()
+
+let is-list-type(ast: Ast) -> Bool =
+  match (ast)
+    | ParenNode(Cons(h, rest), _) ->
+      if is-sym(h, "List") ->
+        match (rest)
+          | [] -> false
+          | Cons(_, _) -> true
+       | else -> false
+    | _ -> false
+
+let not-empty(xs: List Ast) -> Bool =
+  match (xs)
+    | [] -> false
+    | Cons(_, _) -> true
+
+let report-if(report: Bool, diags: Ref (List RestError), sp: Span, message: Str) -> Unit =
+  if report -> push-ref(diags, sp, "E_TYPE_REST", message)
+
+let split-last(xs: List Ast, acc: List Ast) -> Maybe SplitLast =
+  match (xs)
+    | [] -> None()
+    | Cons(x, []) -> Some(SplitLast(reverse-asts(acc, []), x))
+    | Cons(x, rest) -> split-last(rest, Cons(x, acc))
+
+let validate-rest-type(init: List Ast, sp: Span, i: Int, diags: Ref (List RestError), report: Bool) -> Maybe Int =
+  match (init)
+    | Cons(_, Cons(ty, [])) ->
+      if is-list-type(ty) -> Some(i)
+       | else ->
+        {
+          report-if(report, diags, ast-span(ty), "rest parameter type must be a List")
+          None()
+        }
+    | _ ->
+      {
+        report-if(report, diags, sp, "rest parameter must be a (name: Type ...) form")
+        None()
+      }
+
+let validate-rest-elems(elems: List Ast, sp: Span, i: Int, diags: Ref (List RestError), report: Bool) -> Maybe Int =
+  match (split-last(elems, []))
+    | None ->
+      {
+        report-if(report, diags, sp, "rest parameter must be a (name: Type ...) form")
+        None()
+      }
+    | Some(SplitLast(init, last)) ->
+      if is-dots(last) ->
+        if contains-dots-list(init) ->
+          {
+            report-if(report, diags, dots-span-list(init, sp), "rest marker must be the last element of the parameter")
+            None()
+          }
+         | else -> validate-rest-type(init, sp, i, diags, report)
+       | else ->
+        {
+          report-if(report, diags, dots-span-list(elems, sp), "rest marker must be the last element of the parameter")
+          None()
+        }
+
+let validate-rest-param(p: Ast, i: Int, diags: Ref (List RestError), report: Bool) -> Maybe Int =
+  match (p)
+    | ParenNode(elems, sp) -> validate-rest-elems(elems, sp, i, diags, report)
+    | _ ->
+      {
+        report-if(report, diags, dots-span(p), "rest parameter must be a (name: Type ...) form")
+        None()
+      }
+
+let rest-fixed-params(ps: List Ast, i: Int, diags: Ref (List RestError), report: Bool) -> Maybe Int =
+  match (ps)
+    | [] -> None()
+    | Cons(p, rest) ->
+      if contains-dots(p) ->
+        if not-empty(rest) ->
+          {
+            report-if(report, diags, dots-span(p), "rest parameter must be last")
+            None()
+          }
+         | else -> validate-rest-param(p, i, diags, report)
+       | else -> rest-fixed-params(rest, i + 1, diags, report)
+
+let rest-fixed(form: Ast, diags: Ref (List RestError), report: Bool) -> Maybe Int =
+  match (param-asts(form))
+    | None -> None()
+    | Some(ps) -> rest-fixed-params(ps, 0, diags, report)
+
+let drop-sig(sigs: List RestFn, name: Str) -> List RestFn =
+  match (sigs)
+    | [] -> []
+    | Cons(RestFn(n, k), rest) ->
+      if n == name -> drop-sig(rest, name)
+       | else -> Cons(RestFn(n, k), drop-sig(rest, name))
+
+let put-sig(sigs: List RestFn, name: Str, k: Int) -> List RestFn =
+  append-sigs(drop-sig(sigs, name), [RestFn(name, k)])
+
+let append-sigs(xs: List RestFn, ys: List RestFn) -> List RestFn =
+  match (xs)
+    | [] -> ys
+    | Cons(x, rest) -> Cons(x, append-sigs(rest, ys))
+
+let consider-form(sigs: List RestFn, form: Ast, diags: Ref (List RestError)) -> List RestFn =
+  match (defined-name(form))
+    | Some(name) ->
+      match (rest-fixed(form, diags, true))
+        | Some(k) -> put-sig(sigs, name, k)
+        | None -> drop-sig(sigs, name)
+    | None ->
+      match (let-name(form))
+        | Some(name) -> drop-sig(sigs, name)
+        | None -> sigs
+
+let collect-sigs(forms: List Ast, diags: Ref (List RestError), acc: List RestFn) -> List RestFn =
+  match (forms)
+    | [] -> acc
+    | Cons(f, rest) -> collect-sigs(rest, diags, consider-form(acc, f, diags))
+
+let fixed-of(name: Str, sigs: List RestFn) -> Maybe Int =
+  match (sigs)
+    | [] -> None()
+    | Cons(RestFn(n, k), rest) ->
+      if n == name -> Some(k)
+       | else -> fixed-of(name, rest)
+
+let add-strs(xs: List Str, acc: List Str) -> List Str =
+  match (xs)
+    | [] -> acc
+    | Cons(x, rest) -> add-strs(rest, Cons(x, acc))
+
+let ctor-names(xs: List Ast, acc: List Str) -> List Str =
+  match (xs)
+    | [] -> acc
+    | Cons(x, rest) ->
+      match (x)
+        | ParenNode(Cons(h, _), _) ->
+          match (sym-of(h))
+            | Some(n) -> ctor-names(rest, Cons(n, acc))
+            | None -> ctor-names(rest, acc)
+        | _ -> ctor-names(rest, acc)
+
+let decl-names(form: Ast) -> List Str =
+  match (unwrap(form))
+    | ParenNode(Cons(h, Cons(name, more)), _) -> decl-names-kw(h, name, more)
+    | _ -> []
+
+let decl-names-kw(h: Ast, name: Ast, more: List Ast) -> List Str =
+  if is-sym(h, "defn") || is-sym(h, "extern") || is-sym(h, "defrec") || is-sym(h, "alias") ->
+    match (name-text(name))
+      | Some(n) -> [n]
+      | None -> []
+   | is-sym(h, "let") ->
+    match (sym-of(name))
+      | Some(n) -> [n]
+      | None -> []
+   | is-sym(h, "variant") ->
+    match (name-text(name))
+      | Some(n) -> ctor-names(more, [n])
+      | None -> ctor-names(more, [])
+   | else -> []
+
+let collect-names(forms: List Ast, acc: List Str) -> List Str =
+  match (forms)
+    | [] -> acc
+    | Cons(f, rest) -> collect-names(rest, add-strs(decl-names(f), acc))
+
+let name-taken(xs: List Str, name: Str) -> Bool =
+  match (xs)
+    | [] -> false
+    | Cons(h, rest) ->
+      if h == name -> true
+       | else -> name-taken(rest, name)
+
+let fresh-append(names: List Str, n: Int) -> Str {
+  let candidate =
+    if n == 0 -> "mn-rest-append"
+     | else -> str-concat("mn-rest-append-", show(n))
+  if name-taken(names, candidate) -> fresh-append(names, n + 1)
+   | else -> candidate
+}
+
+let ctx-sigs(ctx: PackCtx) -> List RestFn =
+  match (ctx)
+    | PackCtx(s, _, _, _, _) -> s
+
+let ctx-diags(ctx: PackCtx) -> Ref (List RestError) =
+  match (ctx)
+    | PackCtx(_, d, _, _, _) -> d
+
+let ctx-need(ctx: PackCtx) -> Ref Bool =
+  match (ctx)
+    | PackCtx(_, _, n, _, _) -> n
+
+let ctx-append(ctx: PackCtx) -> Str =
+  match (ctx)
+    | PackCtx(_, _, _, n, _) -> n
+
+let ctx-splice(ctx: PackCtx) -> Ref Span =
+  match (ctx)
+    | PackCtx(_, _, _, _, s) -> s
+
+let push-err(ctx: PackCtx, sp: Span, code: Str, message: Str) -> Unit {
+  let diags = ctx-diags(ctx)
+  set!(diags, Cons(RestError(sp, code, message), deref(diags)))
+}
+
+let mark-need(ctx: PackCtx, sp: Span) -> Unit {
+  let need = ctx-need(ctx)
+  let splice = ctx-splice(ctx)
+  {
+    set!(need, true)
+    set!(splice, sp)
+    ()
+  }
+}
+
+let reverse-pieces(xs: List Piece, acc: List Piece) -> List Piece =
+  match (xs)
+    | [] -> acc
+    | Cons(x, rest) -> reverse-pieces(rest, Cons(x, acc))
+
+let piece-expr(p: Piece) -> Ast =
+  match (p)
+    | Elem(e) -> e
+    | Splice(e, _) -> e
+
+let piece-span(p: Piece) -> Span =
+  match (p)
+    | Elem(e) -> ast-span(e)
+    | Splice(_, sp) -> sp
+
+let piece-exprs(ps: List Piece) -> List Ast =
+  match (ps)
+    | [] -> []
+    | Cons(p, rest) -> Cons(piece-expr(p), piece-exprs(rest))
+
+let piece-len(ps: List Piece) -> Int =
+  match (ps)
+    | [] -> 0
+    | Cons(_, rest) -> 1 + piece-len(rest)
+
+let first-splice(ps: List Piece) -> Maybe Piece =
+  match (ps)
+    | [] -> None()
+    | Cons(p, rest) ->
+      if match (p)
+        | Splice(_, _) -> true
+        | Elem(_) -> false -> Some(p)
+       | else -> first-splice(rest)
+
+let call-of(head: Ast, ps: List Piece, sp: Span) -> Ast =
+  ParenNode(Cons(head, piece-exprs(ps)), sp)
+
+let take-pieces(n: Int, ps: List Piece, acc: List Piece) -> PieceSplit =
+  if n == 0 -> PieceSplit(reverse-pieces(acc, []), ps)
+   | else ->
+    match (ps)
+      | [] -> PieceSplit(reverse-pieces(acc, []), [])
+      | Cons(p, rest) -> take-pieces(n - 1, rest, Cons(p, acc))
+
+let place-piece(p: Piece, acc: Ast, ctx: PackCtx, sp: Span) -> Ast =
+  match (p)
+    | Elem(e) -> cons-node(e, acc, sp)
+    | Splice(e, ssp) ->
+      if is-nil-node(acc) -> e
+       | else ->
+        {
+          mark-need(ctx, ssp)
+          call-node(ctx-append(ctx), [e, acc], sp)
+        }
+
+let build-rest(ps: List Piece, ctx: PackCtx, sp: Span) -> Ast =
+  match (ps)
+    | [] -> nil-node(sp)
+    | Cons(p, rest) -> place-piece(p, build-rest(rest, ctx, sp), ctx, sp)
+
+let pack-short(head: Ast, ps: List Piece, sp: Span, ctx: PackCtx) -> Ast =
+  match (first-splice(ps))
+    | Some(p) ->
+      {
+        push-err(ctx, piece-span(p), "E_TYPE_SPREAD", "spread in a fixed argument")
+        call-of(head, ps, sp)
+      }
+    | None -> call-of(head, ps, sp)
+
+let pack-long(head: Ast, k: Int, ps: List Piece, sp: Span, ctx: PackCtx) -> Ast =
+  match (take-pieces(k, ps, []))
+    | PieceSplit(fixed, rest) ->
+      match (first-splice(fixed))
+        | Some(p) ->
+          {
+            push-err(ctx, piece-span(p), "E_TYPE_SPREAD", "spread in a fixed argument")
+            call-of(head, ps, sp)
+          }
+        | None -> ParenNode(append-asts(Cons(head, piece-exprs(fixed)), [build-rest(rest, ctx, sp)]), sp)
+
+let pack-named(head: Ast, k: Int, ps: List Piece, sp: Span, ctx: PackCtx) -> Ast =
+  if piece-len(ps) < k -> pack-short(head, ps, sp, ctx)
+   | else -> pack-long(head, k, ps, sp, ctx)
+
+let finish-plain(head: Ast, ps: List Piece, sp: Span, ctx: PackCtx) -> Ast =
+  match (first-splice(ps))
+    | Some(p) ->
+      {
+        push-err(ctx, piece-span(p), "E_TYPE_SPREAD", "spread is only valid in a rest-parameter call")
+        call-of(head, ps, sp)
+      }
+    | None -> call-of(head, ps, sp)
+
+let split-pieces(args: List Ast, ctx: PackCtx) -> PieceParse =
+  split-go(args, ctx, [], false)
+
+let split-go(args: List Ast, ctx: PackCtx, acc: List Piece, bad: Bool) -> PieceParse =
+  match (args)
+    | [] -> PieceParse(reverse-pieces(acc, []), bad)
+    | Cons(a, rest) ->
+      if is-dots(a) -> split-dots(a, rest, ctx, acc, bad)
+       | else -> split-go(rest, ctx, Cons(Elem(rewrite-expr(a, ctx)), acc), bad)
+
+let split-dots(dots: Ast, rest: List Ast, ctx: PackCtx, acc: List Piece, bad: Bool) -> PieceParse =
+  match (rest)
+    | [] ->
+      {
+        push-err(ctx, ast-span(dots), "E_TYPE_SPREAD", "spread takes one expression")
+        PieceParse(reverse-pieces(acc, []), true)
+      }
+    | Cons(n, more) ->
+      if is-dots(n) ->
+        {
+          push-err(ctx, ast-span(dots), "E_TYPE_SPREAD", "spread takes one expression")
+          split-go(rest, ctx, acc, true)
+        }
+       | else -> split-go(more, ctx, Cons(Splice(rewrite-value(n, ctx), ast-span(dots)), acc), bad)
+
+let finish-call(head: Ast, name: Str, args: List Ast, sp: Span, ctx: PackCtx) -> Ast =
+  match (split-pieces(args, ctx))
+    | PieceParse(ps, bad) ->
+      if bad -> call-of(head, ps, sp)
+       | else ->
+        match (fixed-of(name, ctx-sigs(ctx)))
+          | Some(k) -> pack-named(head, k, ps, sp, ctx)
+          | None -> finish-plain(head, ps, sp, ctx)
+
+let rewrite-values(xs: List Ast, ctx: PackCtx) -> List Ast =
+  match (xs)
+    | [] -> []
+    | Cons(x, rest) -> Cons(rewrite-value(x, ctx), rewrite-values(rest, ctx))
+
+let rewrite-exprs(xs: List Ast, ctx: PackCtx) -> List Ast =
+  match (xs)
+    | [] -> []
+    | Cons(x, rest) -> Cons(rewrite-expr(x, ctx), rewrite-exprs(rest, ctx))
+
+let rewrite-expr(ast: Ast, ctx: PackCtx) -> Ast =
+  match (ast)
+    | ParenNode(elems, sp) -> rewrite-paren(elems, sp, ctx)
+    | BracketNode(elems, sp) -> BracketNode(rewrite-exprs(elems, ctx), sp)
+    | _ -> ast
+
+let rewrite-value(ast: Ast, ctx: PackCtx) -> Ast {
+  let out = rewrite-expr(ast, ctx)
+  if is-dots(out) ->
+    {
+      push-err(ctx, ast-span(out), "E_TYPE_SPREAD", "spread takes one expression")
+      out
+    }
+   | else -> out
+}
+
+let rewrite-lambda(fn-sym: Ast, rest: List Ast, sp: Span, ctx: PackCtx) -> Ast =
+  match (rest)
+    | Cons(params, body) ->
+      {
+        if contains-dots(params) -> push-err(ctx, dots-span(params), "E_TYPE_REST", "`...` is not allowed on a lambda")
+        ParenNode(Cons(fn-sym, Cons(params, rewrite-values(body, ctx))), sp)
+      }
+    | _ -> ParenNode(Cons(fn-sym, rest), sp)
+
+let rewrite-paren(elems: List Ast, sp: Span, ctx: PackCtx) -> Ast =
+  match (elems)
+    | [] -> ParenNode([], sp)
+    | Cons(h, rest) -> rewrite-head(h, rest, sp, ctx)
+
+let rewrite-head(h: Ast, rest: List Ast, sp: Span, ctx: PackCtx) -> Ast =
+  match (sym-of(h))
+    | Some("quote") -> ParenNode(Cons(h, rest), sp)
+    | Some("fn") -> rewrite-lambda(h, rest, sp, ctx)
+    | Some("lambda") -> rewrite-lambda(h, rest, sp, ctx)
+    | Some("...") ->
+      {
+        push-err(ctx, sp, "E_TYPE_SPREAD", "`...` marks the next argument; it is not a call")
+        ParenNode(Cons(h, rest), sp)
+      }
+    | Some(name) -> finish-call(h, name, rest, sp, ctx)
+    | None -> finish-computed(h, rest, sp, ctx)
+
+let finish-computed(h: Ast, args: List Ast, sp: Span, ctx: PackCtx) -> Ast {
+  let head = rewrite-value(h, ctx)
+  finish-computed-head(head, args, sp, ctx)
+}
+
+let finish-computed-head(head: Ast, args: List Ast, sp: Span, ctx: PackCtx) -> Ast =
+  match (sym-of(head))
+    | Some(name) -> finish-call(head, name, args, sp, ctx)
+    | None ->
+      match (split-pieces(args, ctx))
+        | PieceParse(ps, bad) ->
+          if bad -> call-of(head, ps, sp)
+           | else -> finish-plain(head, ps, sp, ctx)
+
+let strip-param(ast: Ast) -> Ast =
+  match (ast)
+    | ParenNode(elems, sp) ->
+      match (split-last(elems, []))
+        | None -> ast
+        | Some(SplitLast(init, last)) ->
+          if is-dots(last) -> ParenNode(init, sp)
+           | else -> ast
+    | _ -> ast
+
+let strip-prefix(xs: List Ast) -> List Ast =
+  match (xs)
+    | [] -> []
+    | Cons(x, rest) ->
+      if is-sym(x, "->") -> xs
+       | else -> Cons(strip-param(x), strip-prefix(rest))
+
+let split-arrow(xs: List Ast, acc: List Ast) -> Maybe ArrowSplit =
+  match (xs)
+    | [] -> None()
+    | Cons(x, rest) ->
+      if is-sym(x, "->") ->
+        match (rest)
+          | Cons(ret, body) -> Some(ArrowSplit(reverse-asts(Cons(ret, Cons(x, acc)), []), body))
+          | [] -> None()
+       | else -> split-arrow(rest, Cons(x, acc))
+
+let rewrite-header(form: Ast, ctx: PackCtx) -> Ast =
+  match (form)
+    | ParenNode(elems, sp) ->
+      match (split-arrow(elems, []))
+        | None -> form
+        | Some(ArrowSplit(prefix, body)) -> ParenNode(append-asts(strip-prefix(prefix), rewrite-values(body, ctx)), sp)
+    | _ -> form
+
+let rewrite-inner(form: Ast, ctx: PackCtx) -> Ast =
+  match (form)
+    | ParenNode(Cons(h, _), _) ->
+      if is-sym(h, "defn") || is-sym(h, "extern") -> rewrite-header(form, ctx)
+       | else -> rewrite-value(form, ctx)
+    | _ -> rewrite-value(form, ctx)
+
+let rewrap(original: Ast, inner: Ast) -> Ast =
+  match (original)
+    | ParenNode(Cons(h, _), sp) ->
+      if is-sym(h, "pub") ->
+        match (inner)
+          | ParenNode(elems, _) -> ParenNode(Cons(h, elems), sp)
+          | _ -> inner
+       | else -> inner
+    | _ -> inner
+
+let rewrite-top(form: Ast, ctx: PackCtx) -> Ast =
+  rewrap(form, rewrite-inner(unwrap(form), ctx))
+
+let rewrite-forms(forms: List Ast, ctx: PackCtx) -> List Ast =
+  match (forms)
+    | [] -> []
+    | Cons(f, rest) -> Cons(rewrite-top(f, ctx), rewrite-forms(rest, ctx))
+
+let append-defn(name: Str, sp: Span) -> Ast =
+  ParenNode([mk-sym("defn", sp), ParenNode([mk-sym(name, sp), BracketNode([mk-sym("a", sp)], sp)], sp), ParenNode([mk-sym("xs:", sp), ParenNode([mk-sym("List", sp), mk-sym("a", sp)], sp)], sp), ParenNode([mk-sym("ys:", sp), ParenNode([mk-sym("List", sp), mk-sym("a", sp)], sp)], sp), mk-sym("->", sp), ParenNode([mk-sym("List", sp), mk-sym("a", sp)], sp), ParenNode([mk-sym("match", sp), mk-sym("xs", sp), ParenNode([mk-sym("Nil", sp)], sp), mk-sym("ys", sp), ParenNode([mk-sym("Cons", sp), mk-sym("h", sp), mk-sym("t", sp)], sp), ParenNode([mk-sym("Cons", sp), mk-sym("h", sp), ParenNode([mk-sym(name, sp), mk-sym("t", sp), mk-sym("ys", sp)], sp)], sp)], sp)], sp)
+
+pub let pack-rest(forms: List Ast) -> RestPack {
+  let diags = ref([])
+  let sigs = collect-sigs(forms, diags, [])
+  let append-name = fresh-append(collect-names(forms, []), 0)
+  let need = ref(false)
+  let splice = ref(Span(0, 0, 0, 0))
+  let ctx = PackCtx(sigs, diags, need, append-name, splice)
+  let packed = rewrite-forms(forms, ctx)
+  let out =
+    if deref(need) -> append-asts(packed, [append-defn(append-name, deref(splice))])
+     | else -> packed
+  RestPack(out, reverse-errs(deref(diags), []))
+}

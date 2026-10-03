@@ -1,9 +1,10 @@
 ; Slice 3D oracle: Str concat; stdout "hello\n", exit 5.
 
-(import std/io)
+import std/io
 
-(defn main -> Int
-  (let s (str-concat "hel" "lo"))
-  (write 1 s)
-  (println)
-  (str-byte-length s))
+let main() -> Int {
+  let s = str-concat("hel", "lo")
+  write(1, s)
+  println()
+  str-byte-length(s)
+}

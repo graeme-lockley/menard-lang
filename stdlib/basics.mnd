@@ -2,31 +2,35 @@
 ; @module std/basics
 
 ; Returns its argument unchanged.
-; @test (id 1) => 1
-(pub defn (id [a]) (x: a) -> a
-  x)
+; @test id(1) => 1
+pub let id[a](x: a) -> a =
+  x
 
 ; Logical negation.
-; @test (not true) => false
-(pub defn not (b: Bool) -> Bool
-  (if b false true))
+; @test not(true) => false
+pub let not(b: Bool) -> Bool =
+  if b -> false
+   | else -> true
 
 ; The smaller of x and y.
-; @test (min 2 5) => 2
-(pub defn min (x: Int) (y: Int) -> Int
-  (if (< x y) x y))
+; @test min(2, 5) => 2
+pub let min(x: Int, y: Int) -> Int =
+  if x < y -> x
+   | else -> y
 
 ; The larger of x and y.
-; @test (max 2 5) => 5
-(pub defn max (x: Int) (y: Int) -> Int
-  (if (> x y) x y))
+; @test max(2, 5) => 5
+pub let max(x: Int, y: Int) -> Int =
+  if x > y -> x
+   | else -> y
 
 ; Absolute value of n.
-; @test (abs -3) => 3
-(pub defn abs (n: Int) -> Int
-  (if (< n 0) (- n) n))
+; @test abs(-3) => 3
+pub let abs(n: Int) -> Int =
+  if n < 0 -> -n
+   | else -> n
 
 ; n limited to the inclusive range lo through hi.
-; @test (clamp 0 10 15) => 10
-(pub defn clamp (lo: Int) (hi: Int) (n: Int) -> Int
-  (min hi (max lo n)))
+; @test clamp(0, 10, 15) => 10
+pub let clamp(lo: Int, hi: Int, n: Int) -> Int =
+  min(hi, max(lo, n))

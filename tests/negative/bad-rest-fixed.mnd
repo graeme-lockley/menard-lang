@@ -1,5 +1,5 @@
-(defn join (sep: Str) (parts: (List Str) ...) -> Str
-  "")
+let join(sep: Str, ...parts: List Str) -> Str =
+  ""
 
-(defn use (xs: (List Str)) -> Str
-  (join ... xs))
+let use(xs: List Str) -> Str =
+  join(...xs)

@@ -1,8 +1,11 @@
-(defn sum (xs: (List Int) ...) -> Int
-  (match xs
-    [] 0
-    (Cons h t) (+ h (sum ... t))))
+let sum(...xs: List Int) -> Int =
+  match (xs)
+    | [] -> 0
+    | Cons(h, t) -> h + sum(...t)
 
-(defn main -> Int
-  (let xs [1 2]
-    (+ (sum 1 2 3) (sum) (sum ... xs) (sum 1 ... xs) (sum ... xs 4))))
+let main() -> Int {
+  {
+    let xs = [1, 2]
+    sum(1, 2, 3) + sum() + sum(...xs) + sum(1, ...xs) + sum(...xs, 4)
+  }
+}

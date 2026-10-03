@@ -1,11 +1,11 @@
 ; A simple, well-typed defn using only builtin Int arithmetic — exercises
-; the Phase 2 typer's happy path (defn signature, `+`, recursion via a
+; the Phase 2 typer's happy path (let signature, `+`, recursion via a
 ; second mutually-independent defn).
 
-(defn add-one (x: Int) -> Int
-  (+ x 1))
+let add-one(x: Int) -> Int =
+  x + 1
 
-(defn double (x: Int) -> Int
-  (* x 2))
+let double(x: Int) -> Int =
+  x * 2
 
-(println (show (double (add-one 20))))
+println(show(double(add-one(20))))

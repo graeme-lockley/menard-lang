@@ -2,183 +2,177 @@
 ;
 ; A doc comment is the contiguous `;` lines immediately above a `defn`,
 ; with no blank line before the form. The first line is the summary.
-; Every `pub defn` needs at least one `@test` line.
+; Every `pub let` needs at least one `@test` line.
 ;
 ; Usage: bun run host/src/cli/menard.ts run src/tools/docs.mnd -- stdlib
 ; Prints one record per published function. Exits 1 when a check fails.
 
-(import std/fs)
-(import std/io)
-(import std/list)
-(import std/string)
-(import std/sys)
+import std/fs
 
-(defrec Scan (text: Str) (ok: Bool))
+import std/io
+
+import std/list
+
+import std/string
+
+import std/sys
+
+record Scan {
+  text: Str
+  ok: Bool
+}
 
 ; A newline byte.
-(let nl
-  (do
-    (let sb (sb-new))
-    (sb-append-byte! sb 10)
-    (sb-take-str! sb)))
+let nl =
+  {
+    let sb = sb-new()
+    sb-append-byte!(sb, 10)
+    sb-take-str!(sb)
+  }
 
 ; Drop one leading space when the comment has one.
-(defn comment-body (line: Str) -> Str
-  (do
-    (let n (str-byte-length line))
-    (let rest (str-slice line 1 (- n 1)))
-    (if (and (> (str-byte-length rest) 0) (= (str-byte rest 0) 32))
-      (str-slice rest 1 (- (str-byte-length rest) 1))
-      rest)))
+let comment-body(line: Str) -> Str {
+  let n = str-byte-length(line)
+  let rest = str-slice(line, 1, n - 1)
+  if str-byte-length(rest) > 0 && str-byte(rest, 0) == 32 -> str-slice(rest, 1, str-byte-length(rest) - 1)
+   | else -> rest
+}
 
-; The symbol at the start of s, stopping at space, `[`, or `)`.
-(defn take-sym (s: Str) (i: Int) (n: Int) -> Str
-  (if (>= i n) (str-slice s 0 n)
-    (do
-      (let b (str-byte s i))
-      (if (or (= b 32) (= b 91) (= b 41))
-        (str-slice s 0 i)
-        (take-sym s (+ i 1) n)))))
+; The symbol at the start of s, stopping at space, `[`, `(`, or `)`.
+let take-sym(s: Str, i: Int, n: Int) -> Str =
+  if i >= n -> str-slice(s, 0, n)
+   | else ->
+    {
+      let b = str-byte(s, i)
+      if b == 32 || b == 91 || b == 40 || b == 41 -> str-slice(s, 0, i)
+       | else -> take-sym(s, i + 1, n)
+    }
 
 ; The function name from a defn header line.
-(defn defn-name (line: Str) -> Str
-  (do
-    (let raw
-      (if (starts-with line "(pub defn ")
-        (str-slice line 10 (- (str-byte-length line) 10))
-        (str-slice line 6 (- (str-byte-length line) 6))))
-    (let head
-      (if (starts-with raw "(")
-        (str-slice raw 1 (- (str-byte-length raw) 1))
-        raw))
-    (take-sym head 0 (str-byte-length head))))
+let defn-name(line: Str) -> Str {
+  let raw =
+    if starts-with(line, "pub let ") -> str-slice(line, 8, str-byte-length(line) - 8)
+     | else -> str-slice(line, 4, str-byte-length(line) - 4)
+  take-sym(raw, 0, str-byte-length(raw))
+}
 
 ; True when line is a top-level defn header.
-(defn is-defn (line: Str) -> Bool
-  (or (starts-with line "(defn ") (starts-with line "(pub defn ")))
+let is-defn(line: Str) -> Bool =
+  starts-with(line, "let ") || starts-with(line, "pub let ")
 
 ; True when the defn is published.
-(defn is-pub (line: Str) -> Bool
-  (starts-with line "(pub defn "))
+let is-pub(line: Str) -> Bool =
+  starts-with(line, "pub let ")
 
 ; The first summary line.
-(defn summary-of (docs: (List Str)) -> Str
-  (match docs
-    [] ""
-    (Cons h _) h))
+let summary-of(docs: List Str) -> Str =
+  match (docs)
+    | [] -> ""
+    | Cons(h, _) -> h
 
 ; Doc lines that record an example.
-(defn tests-of (docs: (List Str)) (acc: (List Str)) -> (List Str)
-  (match docs
-    [] (reverse acc)
-    (Cons h t)
-      (if (starts-with h "@test")
-        (tests-of t (Cons h acc))
-        (tests-of t acc))))
+let tests-of(docs: List Str, acc: List Str) -> List Str =
+  match (docs)
+    | [] -> reverse(acc)
+    | Cons(h, t) ->
+      if starts-with(h, "@test") -> tests-of(t, Cons(h, acc))
+       | else -> tests-of(t, acc)
 
 ; `@module name` from a comment body, or the current module.
-(defn module-of (body: Str) (current: Str) -> Str
-  (if (starts-with body "@module ")
-    (str-slice body 8 (- (str-byte-length body) 8))
-    current))
+let module-of(body: Str, current: Str) -> Str =
+  if starts-with(body, "@module ") -> str-slice(body, 8, str-byte-length(body) - 8)
+   | else -> current
 
 ; One published record, plus a missing-summary or missing-@test note.
-(defn record (module: Str) (name: Str) (sig: Str) (docs: (List Str)) (pub: Bool) -> Scan
-  (do
-    (let summary (summary-of docs))
-    (let tests (tests-of docs []))
-    (let missing-summary (= summary ""))
-    (let missing-test (and pub (= (length tests) 0)))
-    (let note
-      (if missing-summary
-        (str-concat "error: " module " " name " has no summary" nl)
-        (if missing-test
-          (str-concat "error: " module " " name " has no @test" nl)
-          "")))
-    (let body
-      (if pub
-        (str-concat
-          "module: " module nl
-          "name: " name nl
-          "signature: " sig nl
-          "summary: " summary nl
-          (join nl tests) nl nl)
-        ""))
-    (Scan (str-concat note body) (not (or missing-summary missing-test)))))
+let scan-record(module: Str, name: Str, sig: Str, docs: List Str, exported: Bool) -> Scan {
+  let summary = summary-of(docs)
+  let tests = tests-of(docs, [])
+  let missing-summary = summary == ""
+  let missing-test = exported && length(tests) == 0
+  let note =
+    if missing-summary -> str-concat("error: ", module, " ", name, " has no summary", nl)
+     | missing-test -> str-concat("error: ", module, " ", name, " has no @test", nl)
+     | else -> ""
+  let body =
+    if exported -> str-concat("module: ", module, nl, "name: ", name, nl, "signature: ", sig, nl, "summary: ", summary, nl, join(nl, tests), nl, nl)
+     | else -> ""
+  Scan(str-concat(note, body), not(missing-summary || missing-test))
+}
 
 ; Walk the lines of one file.
-(defn scan-lines (ls: (List Str)) (docs: (List Str)) (module: Str) (acc: Scan) -> Scan
-  (match ls
-    [] acc
-    (Cons raw rest)
-      (do
-        (let line raw)
-        (cond
-          ((= line "") (scan-lines rest [] module acc))
-          ((= (str-byte line 0) 59)
-            (scan-lines rest (append docs [(comment-body line)]) (module-of (comment-body line) module) acc))
-          ((is-defn line)
-            (do
-              (let rec (record module (defn-name line) line docs (is-pub line)))
-              (match rec
-                (Scan text ok)
-                  (match acc
-                    (Scan prev pok)
-                      (scan-lines rest [] module (Scan (str-concat prev text) (and pok ok)))))))
-          (else (scan-lines rest [] module acc))))))
+let scan-lines(ls: List Str, docs: List Str, module: Str, acc: Scan) -> Scan =
+  match (ls)
+    | [] -> acc
+    | Cons(raw, rest) ->
+      {
+        let line = raw
+        if line == "" -> scan-lines(rest, [], module, acc)
+         | str-byte(line, 0) == 59 -> scan-lines(rest, append(docs, [comment-body(line)]), module-of(comment-body(line), module), acc)
+         | is-defn(line) ->
+          {
+            let rec = scan-record(module, defn-name(line), line, docs, is-pub(line))
+            match (rec)
+              | Scan(text, ok) ->
+                match (acc)
+                  | Scan(prev, pok) -> scan-lines(rest, [], module, Scan(str-concat(prev, text), pok && ok))
+          }
+         | else -> scan-lines(rest, [], module, acc)
+      }
 
 ; Lines of s, keeping blanks so a blank line can end a doc comment.
-(defn split-keep (s: Str) (i: Int) (start: Int) (n: Int) (acc: (List Str)) -> (List Str)
-  (if (> i n) (reverse acc)
-    (if (or (= i n) (= (str-byte s i) 10))
-      (split-keep s (+ i 1) (+ i 1) n (Cons (str-slice s start (- i start)) acc))
-      (split-keep s (+ i 1) start n acc))))
+let split-keep(s: Str, i: Int, start: Int, n: Int, acc: List Str) -> List Str =
+  if i > n -> reverse(acc)
+   | i == n || str-byte(s, i) == 10 -> split-keep(s, i + 1, i + 1, n, Cons(str-slice(s, start, i - start), acc))
+   | else -> split-keep(s, i + 1, start, n, acc)
 
 ; Scan one library file. A missing file is a failure.
-(defn scan-file (path: Str) -> Scan
-  (match (read-file path)
-    (Err _) (Scan (str-concat "error: cannot read " path nl) false)
-    (Ok src)
-      (scan-lines (split-keep src 0 0 (str-byte-length src) []) [] "" (Scan "" true))))
+let scan-file(path: Str) -> Scan =
+  match (read-file(path))
+    | Err(_) -> Scan(str-concat("error: cannot read ", path, nl), false)
+    | Ok(src) -> scan-lines(split-keep(src, 0, 0, str-byte-length(src), []), [], "", Scan("", true))
 
 ; Library sources, not the colocated tests.
-(defn lib-name (name: Str) -> Bool
-  (and (ends-with name ".mnd") (not (ends-with name ".test.mnd"))))
+let lib-name(name: Str) -> Bool =
+  ends-with(name, ".mnd") && not(ends-with(name, ".test.mnd"))
 
 ; Join dir and name.
-(defn join-path (dir: Str) (name: Str) -> Str
-  (if (or (= dir "") (= dir ".")) name
-    (str-concat dir "/" name)))
+let join-path(dir: Str, name: Str) -> Str =
+  if dir == "" || dir == "." -> name
+   | else -> str-concat(dir, "/", name)
 
 ; Scan each library file in dir.
-(defn scan-names (dir: Str) (names: (List Str)) (acc: Scan) -> Scan
-  (match names
-    [] acc
-    (Cons name rest)
-      (if (lib-name name)
-        (do
-          (let one (scan-file (join-path dir name)))
-          (match one
-            (Scan text ok)
-              (match acc
-                (Scan prev pok)
-                  (scan-names dir rest (Scan (str-concat prev text) (and pok ok))))))
-        (scan-names dir rest acc))))
+let scan-names(dir: Str, names: List Str, acc: Scan) -> Scan =
+  match (names)
+    | [] -> acc
+    | Cons(name, rest) ->
+      if lib-name(name) ->
+        {
+          let one = scan-file(join-path(dir, name))
+          match (one)
+            | Scan(text, ok) ->
+              match (acc)
+                | Scan(prev, pok) -> scan-names(dir, rest, Scan(str-concat(prev, text), pok && ok))
+        }
+       | else -> scan-names(dir, rest, acc)
 
 ; The published records for dir, and whether every defn is documented.
-(defn library-docs (dir: Str) -> Scan
-  (scan-names dir (sort (split-keep (list-dir dir) 0 0 (str-byte-length (list-dir dir)) [])) (Scan "" true)))
+let library-docs(dir: Str) -> Scan =
+  scan-names(dir, sort(split-keep(list-dir(dir), 0, 0, str-byte-length(list-dir(dir)), [])), Scan("", true))
 
 ; True when dir's library defns have summaries and every pub defn has @test.
-(pub defn library-docs-ok (dir: Str) -> Bool
-  (match (library-docs dir)
-    (Scan _ ok) ok))
+pub let library-docs-ok(dir: Str) -> Bool =
+  match (library-docs(dir))
+    | Scan(_, ok) -> ok
 
-(defn main -> Int
-  (do
-    (let dir (if (> (arg-count) 0) (arg 0) "stdlib"))
-    (match (library-docs dir)
-      (Scan text ok)
-        (do
-          (write stdout text)
-          (if ok 0 1)))))
+let main() -> Int {
+  let dir =
+    if arg-count() > 0 -> arg(0)
+     | else -> "stdlib"
+  match (library-docs(dir))
+    | Scan(text, ok) ->
+      {
+        write(stdout, text)
+        if ok -> 0
+         | else -> 1
+      }
+}

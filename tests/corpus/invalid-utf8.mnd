@@ -1,1 +1,2 @@
-(defn go -> Str "ÿþ")
+let go() -> Str =
+  "ÿþ"
