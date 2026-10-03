@@ -1,0 +1,38 @@
+; Static pool summary. Paths are relative to the process cwd, which
+; `./mn test` leaves as the repo root. The golden file is what
+; `pool-dump` used to print, including the newline `println` adds.
+; `emit` still running collection stays in tests/phase2/pool.test.ts.
+
+(import "../reader/read.mnd")
+(import "./pool.mnd")
+(import "../../stdlib/io.mnd")
+
+(defn nl -> Str
+  (do
+    (let sb (sb-new))
+    (sb-append-byte! sb 10)
+    (sb-take-str! sb)))
+
+(defn read-forms (path: Str) -> (Maybe (List Ast))
+  (match (read-file path)
+    (Err _) (None)
+    (Ok src)
+      (match (read-all src)
+        (Err _) (None)
+        (Ok forms) (Some forms))))
+
+(defn summary-is (fixture: Str) (golden: Str) -> Bool
+  (match (read-forms fixture)
+    (None) false
+    (Some forms)
+      (match (read-file golden)
+        (Err _) false
+        (Ok text) (= (str-concat (pool-summary forms) (nl)) text))))
+
+(test "dedups identical Str literals, reports a nullary ctor, and sorts by bytes"
+  (summary-is "tests/phase2/fixtures/pool-basic.mnd" "tests/phase2/goldens/pool-basic.txt"))
+
+(test "a program with no literals and no nullary ctors has an empty pool"
+  (match (read-forms "tests/corpus/comments-and-bools.mnd")
+    (None) false
+    (Some forms) (= (pool-summary forms) "")))

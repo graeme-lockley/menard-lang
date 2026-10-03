@@ -1,4 +1,4 @@
-; Fixture for tests/phase2/derive.test.ts: a `show` use site whose
+; Fixture for src/derive/plan.test.mnd and tests/phase2/derive.test.ts: a `show` use site whose
 ; argument is an `Int` literal — the plan's own "does `(show 1)` report
 ; `Int` as needing `show`" acceptance check.
 

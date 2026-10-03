@@ -1,0 +1,25 @@
+; Derive plan. Paths are relative to the process cwd, which `./mn test`
+; leaves as the repo root. `--dump-after=derive` stays in
+; tests/phase2/derive.test.ts.
+
+(import "../reader/read.mnd")
+(import "./plan.mnd")
+(import "../../stdlib/io.mnd")
+
+(defn plan-of (path: Str) -> (Maybe Str)
+  (match (read-file path)
+    (Err _) (None)
+    (Ok src)
+      (match (read-all src)
+        (Err _) (None)
+        (Ok forms) (Some (describe-derives forms)))))
+
+(test "(show 1) plans show for Int"
+  (match (plan-of "tests/phase2/fixtures/derive-show-int.mnd")
+    (Some p) (= p "Int: show")
+    (None) false))
+
+(test "(show (Red)) plans show for the declared type, not the constructor"
+  (match (plan-of "tests/phase2/fixtures/derive-show-variant.mnd")
+    (Some p) (= p "Color: show")
+    (None) false))

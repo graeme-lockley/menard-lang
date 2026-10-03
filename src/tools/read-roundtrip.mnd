@@ -4,7 +4,7 @@
 ; otherwise prints a reason to stderr and exits non-zero.
 ;
 ; Usage: bun run host/src/cli/menard.ts run src/tools/read-roundtrip.mnd -- <file.mnd>
-; Driven from tests/phase2/reader-roundtrip.test.ts.
+; The same property is src/reader/read.test.mnd.
 
 (import "../reader/ast.mnd")
 (import "../reader/read.mnd")

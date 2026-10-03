@@ -4,7 +4,7 @@
 ; a successful read; otherwise prints a reason to stderr and exits 1.
 ;
 ; Usage: bun run host/src/cli/menard.ts run src/tools/pool-dump.mnd -- <file.mnd>
-; Driven from tests/phase2/pool.test.ts.
+; The same summary is src/pool/pool.test.mnd.
 
 (import "../reader/ast.mnd")
 (import "../reader/read.mnd")

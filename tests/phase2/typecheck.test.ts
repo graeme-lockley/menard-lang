@@ -1,19 +1,10 @@
 /**
- * Phase 2 — the Menard-in-Menard typer (`src/type/check.mnd`), wired into
- * `src/mn.mnd`'s `check`/`emit` pipeline as the stage after desugaring.
+ * Phase 2 — the typer wired into `src/mn.mnd`'s `check` pipeline.
  *
- * Runs `src/mn.mnd` (compiled/interpreted by the Phase 1 host, exactly as
- * `bun run host/src/cli/menard.ts run …` would) against real fixture files
- * and checks that:
- *   - `check` accepts a well-typed program (simple `defn` + Int arithmetic).
- *   - `check` rejects an unbound variable with `E_TYPE_UNBOUND`, mirroring
- *     the diagnostic code `host/src/type/check.ts` reports (see
- *     `tests/unit/type/typecheck.test.ts`).
- *   - `check` rejects a non-Bool `if` test with `E_TYPE_MISMATCH`, again
- *     mirroring the host's typer.
- *   - `--dump-after=type` prints the post-typecheck forms to stderr, and
- *     only runs when the program is well-typed (it never fires when an
- *     earlier stage — or the typer itself — already failed).
+ * Accept/reject and rest-packing are `src/type/check.test.mnd`. This file
+ * checks `--dump-after=type`: it prints the post-typecheck forms on
+ * success, and it does not run when typechecking already failed. A
+ * desugar error still stops the pipeline before the typer.
  */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -63,30 +54,6 @@ function runMenard(entryRelPath: string, argv: string[]): RunOut {
 }
 
 describe("src/mn.mnd check — typer wired after desugar", () => {
-  test("accepts a well-typed defn using Int arithmetic", () => {
-    const out = runMenard("src/mn.mnd", ["check", abs("tests/phase2/fixtures/type-ok.mnd")]);
-    expect(out.stderr).toBe("");
-    expect(out.exitCode).toBe(0);
-  });
-
-  test("rejects an unbound variable with E_TYPE_UNBOUND", () => {
-    const out = runMenard("src/mn.mnd", [
-      "check",
-      abs("tests/negative/bad-type-unbound.mnd"),
-    ]);
-    expect(out.exitCode).toBe(1);
-    expect(out.stderr).toContain("[E_TYPE_UNBOUND]");
-  });
-
-  test("rejects a non-Bool if test with E_TYPE_MISMATCH", () => {
-    const out = runMenard("src/mn.mnd", [
-      "check",
-      abs("tests/negative/bad-type-if-nonbool.mnd"),
-    ]);
-    expect(out.exitCode).toBe(1);
-    expect(out.stderr).toContain("[E_TYPE_MISMATCH]");
-  });
-
   test("--dump-after=type dumps the post-typecheck forms on success", () => {
     const out = runMenard("src/mn.mnd", [
       "check",
@@ -106,20 +73,6 @@ describe("src/mn.mnd check — typer wired after desugar", () => {
     ]);
     expect(out.exitCode).toBe(1);
     expect(out.stderr).toContain("[E_TYPE_UNBOUND]");
-  });
-
-  test("packs a rest parameter before typing", () => {
-    const out = runMenard("src/mn.mnd", [
-      "check",
-      abs("tests/phase2/fixtures/rest-ok.mnd"),
-      "--dump-after=type",
-    ]);
-    expect(out.exitCode).toBe(0);
-    // sum, main, and the generated append used by `(sum ... xs 4)`.
-    // A call like `(sum 1 2 3)` only typechecks once it has been packed
-    // into the single list parameter.
-    const defns = out.stderr.match(/SymNode "defn"/g) ?? [];
-    expect(defns.length).toBe(3);
   });
 
   test("still fails a desugar error before the typer ever runs", () => {

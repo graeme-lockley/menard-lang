@@ -1,20 +1,9 @@
 /**
- * Phase 2 slice 2F — static pool collection (`src/pool/pool.mnd`),
- * exercised through the harness `src/tools/pool-dump.mnd` (not part of
- * the compiler — see that module's own header comment) and, separately,
- * confirmed to be wired into the real `emit` path.
+ * Phase 2 slice 2F — pool collection wired into `emit`.
  *
- * Runs `src/mn.mnd`/`src/tools/pool-dump.mnd` (compiled/interpreted by
- * the Phase 1 host, exactly as `bun run host/src/cli/menard.ts run …`
- * would) against real fixture files and checks that:
- *   - `pool-summary` dedups two identical `Str` literals to one entry,
- *     keeps a distinct third literal as its own entry, and reports a
- *     nullary constructor mention (`(None)`) — matching the golden fixture
- *     `tests/phase2/goldens/pool-basic.txt` byte for byte.
- *   - Entries are sorted by byte content (ADR 38/spec §2.2.1).
- *   - `emit` still succeeds on a foldable program once pool collection
- *     runs ahead of lowering (`emit/bitcode.mnd`'s wiring) — the
- *     collector must not change what a program compiles to.
+ * `pool-summary` against `tests/phase2/goldens/pool-basic.txt` is
+ * `src/pool/pool.test.mnd`. This file checks that `emit` still succeeds
+ * once collection runs ahead of lowering.
  */
 import { describe, expect, test } from "bun:test";
 import { readFileSync, unlink, mkdtemp } from "node:fs";
@@ -67,37 +56,6 @@ function runMenard(entryRelPath: string, argv: string[]): RunOut {
   }
   return { exitCode: 2, stdout, stderr: stderr + "\n[panic] " + r.message };
 }
-
-const POOL_BASIC_GOLDEN = readFileSync(abs("tests/phase2/goldens/pool-basic.txt"), "utf-8");
-
-describe("src/tools/pool-dump.mnd", () => {
-  test("dedups identical Str literals, keeps a distinct one, reports a nullary ctor mention", () => {
-    const out = runMenard("src/tools/pool-dump.mnd", [abs("tests/phase2/fixtures/pool-basic.mnd")]);
-    expect(out.stderr).toBe("");
-    expect(out.exitCode).toBe(0);
-    expect(out.stdout).toBe(POOL_BASIC_GOLDEN);
-  });
-
-  test("entries are sorted by byte content ('ctor …' before 'str …')", () => {
-    const out = runMenard("src/tools/pool-dump.mnd", [abs("tests/phase2/fixtures/pool-basic.mnd")]);
-    const lines = out.stdout.trimEnd().split("\n");
-    const sorted = [...lines].sort();
-    expect(lines).toEqual(sorted);
-  });
-
-  test("reports two unique Str entries for two identical literals plus one distinct one", () => {
-    const out = runMenard("src/tools/pool-dump.mnd", [abs("tests/phase2/fixtures/pool-basic.mnd")]);
-    const strLines = out.stdout.trimEnd().split("\n").filter((l) => l.startsWith("str "));
-    expect(strLines).toEqual(['str "hello"', 'str "world"']);
-  });
-
-  test("an empty program has an empty pool", () => {
-    const out = runMenard("src/tools/pool-dump.mnd", [abs("tests/corpus/comments-and-bools.mnd")]);
-    expect(out.exitCode).toBe(0);
-    // No Str literals or nullary constructor mentions in this corpus file.
-    expect(out.stdout).toBe("\n");
-  });
-});
 
 describe("src/mn.mnd emit — pool collection wired ahead of lowering", () => {
   test("emit still succeeds on hello.mnd once pool collection runs first", async () => {

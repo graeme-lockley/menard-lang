@@ -1,0 +1,72 @@
+; Typer. Paths are relative to the process cwd, which `./mn test` leaves
+; as the repo root. Forms are desugared first, matching the pipeline
+; contract in src/type/check.mnd. CLI dump flags stay in
+; tests/phase2/typecheck.test.ts.
+
+(import "../reader/read.mnd")
+(import "../desugar/desugar.mnd")
+(import "./check.mnd")
+(import "../../stdlib/io.mnd")
+
+(defn read-forms (path: Str) -> (Maybe (List Ast))
+  (match (read-file path)
+    (Err _) (None)
+    (Ok src)
+      (match (read-all src)
+        (Err _) (None)
+        (Ok forms) (Some forms))))
+
+(defn desugared (path: Str) -> (Maybe (List Ast))
+  (match (read-forms path)
+    (None) (None)
+    (Some forms)
+      (match (desugar-all forms)
+        (Err _) (None)
+        (Ok out) (Some out))))
+
+(defn type-codes-have (es: (List TypeError)) (code: Str) -> Bool
+  (match es
+    [] false
+    (Cons (TypeError _ c _) rest)
+      (if (= c code) true (type-codes-have rest code))))
+
+(defn type-has-code (path: Str) (code: Str) -> Bool
+  (match (desugared path)
+    (None) false
+    (Some forms)
+      (match (typecheck-forms forms)
+        (Ok _) false
+        (Err es) (type-codes-have es code))))
+
+(defn is-defn (form: Ast) -> Bool
+  (match form
+    (ParenNode (Cons h _) _)
+      (match h (SymNode n _) (= n "defn") _ false)
+    _ false))
+
+(defn count-defns (forms: (List Ast)) -> Int
+  (match forms
+    [] 0
+    (Cons f rest) (+ (if (is-defn f) 1 0) (count-defns rest))))
+
+(test "a well-typed defn typechecks"
+  (match (desugared "tests/phase2/fixtures/type-ok.mnd")
+    (None) false
+    (Some forms)
+      (match (typecheck-forms forms)
+        (Ok _) true
+        (Err _) false)))
+
+(test "an unbound variable is E_TYPE_UNBOUND"
+  (type-has-code "tests/negative/bad-type-unbound.mnd" "E_TYPE_UNBOUND"))
+
+(test "a non-Bool if test is E_TYPE_MISMATCH"
+  (type-has-code "tests/negative/bad-type-if-nonbool.mnd" "E_TYPE_MISMATCH"))
+
+(test "a rest parameter is packed to a list before typing"
+  (match (desugared "tests/phase2/fixtures/rest-ok.mnd")
+    (None) false
+    (Some forms)
+      (match (typecheck-forms forms)
+        (Ok out) (= (count-defns out) 3)
+        (Err _) false)))

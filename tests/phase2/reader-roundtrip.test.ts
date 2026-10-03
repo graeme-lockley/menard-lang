@@ -3,11 +3,8 @@
  *
  * Runs the Menard programs under `src/` (compiled/interpreted by the Phase 1
  * host, exactly as `bun run host/src/cli/menard.ts run …` would) against the
- * real filesystem, and checks:
- *   - `src/tools/read-roundtrip.mnd` round-trips corpus files through
- *     read → print → read → structural-equality.
- *   - `src/mn.mnd`'s `check` and `emit` CLI modes behave per the plan's
- *     acceptance criteria.
+ * real filesystem, and checks `src/mn.mnd`'s `check` and `emit` CLI modes.
+ * The read → print → read property is `src/reader/read.test.mnd`.
  */
 import { describe, expect, test } from "bun:test";
 import { readFileSync, readFile as readFileCb, unlink, mkdtemp } from "node:fs";
@@ -68,17 +65,6 @@ const CORPUS_FILES = [
   "tests/corpus/spec-examples.mnd",
   "tests/corpus/invalid-utf8.mnd",
 ];
-
-describe("src/tools/read-roundtrip.mnd", () => {
-  for (const rel of CORPUS_FILES) {
-    test(`round-trips ${rel}`, () => {
-      const out = runMenard("src/tools/read-roundtrip.mnd", [abs(rel)]);
-      expect(out.stderr).toBe("");
-      expect(out.exitCode).toBe(0);
-      expect(out.stdout).toBe("ok\n");
-    });
-  }
-});
 
 describe("src/mn.mnd check", () => {
   for (const rel of CORPUS_FILES) {

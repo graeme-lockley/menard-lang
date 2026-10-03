@@ -1,4 +1,4 @@
-; Fixture for tests/phase2/pool.test.ts: two identical `Str` literals, one
+; Fixture for src/pool/pool.test.mnd: two identical `Str` literals, one
 ; distinct `Str` literal, and one nullary constructor mention — exercises
 ; `pool/pool.mnd`'s dedup-by-byte-content rule (the two `"hello"`s must
 ; collapse to one entry) alongside its constructor-mention collection.

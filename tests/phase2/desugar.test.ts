@@ -1,16 +1,10 @@
 /**
- * Phase 2 — the Menard-in-Menard desugarer (`src/desugar/desugar.mnd`),
- * wired into `src/mn.mnd`'s `check`/`emit` pipeline.
+ * Phase 2 — desugar wired into `src/mn.mnd`'s `check` pipeline.
  *
- * Runs `src/mn.mnd` (compiled/interpreted by the Phase 1 host, exactly as
- * `bun run host/src/cli/menard.ts run …` would) against real fixture files
- * and checks that:
- *   - `check` accepts programs using `and`/`or`/`cond`/`when`/`while` sugar.
- *   - `--dump-after=desugar` prints the *expanded* forms (no more `and`,
- *     `or`, `cond`, `when`, or `while` heads) while `--dump-after=reader`
- *     still prints the original, unexpanded forms.
- *   - Each malformed-sugar case reports the same `E_DESUGAR_*` diagnostic
- *     code the host's `host/src/desugar/desugar.ts` reports, and exits 1.
+ * Expansion and `E_DESUGAR_*` codes are `src/desugar/desugar.test.mnd`.
+ * This file checks the CLI: `check` accepts sugar, `--dump-after` prints
+ * the pre- and post-desugar forms, and a parse or casing error still
+ * stops the pipeline before desugar.
  */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -94,18 +88,7 @@ describe("src/mn.mnd check — desugar wired after casing", () => {
     }
   });
 
-  test("while desugars to loop/recur, not left as sugar", () => {
-    const out = runMenard("src/mn.mnd", [
-      "check",
-      abs("tests/phase2/fixtures/desugar-while.mnd"),
-      "--dump-after=desugar",
-    ]);
-    expect(out.exitCode).toBe(0);
-    expect(out.stderr).toContain('"loop"');
-    expect(out.stderr).not.toContain('"while"');
-  });
-
-  test("bracket lists desugar to Cons/Nil and still typecheck", () => {
+  test("bracket lists still typecheck", () => {
     const file = abs("tests/phase2/fixtures/list-sugar.mnd");
     const before = runMenard("src/mn.mnd", ["check", file, "--dump-after=reader"]);
     expect(before.exitCode).toBe(0);
@@ -127,20 +110,4 @@ describe("src/mn.mnd check — desugar wired after casing", () => {
     expect(out.stderr).toContain("must begin with a lowercase letter");
   });
 
-  const desugarErrorCases: { fixture: string; code: string }[] = [
-    { fixture: "bad-desugar-cond-empty.mnd", code: "E_DESUGAR_COND_EMPTY" },
-    { fixture: "bad-desugar-cond-clause.mnd", code: "E_DESUGAR_COND_CLAUSE" },
-    { fixture: "bad-desugar-cond-else.mnd", code: "E_DESUGAR_COND_ELSE" },
-    { fixture: "bad-desugar-when.mnd", code: "E_DESUGAR_WHEN" },
-    { fixture: "bad-desugar-while.mnd", code: "E_DESUGAR_WHILE" },
-    { fixture: "bad-desugar-arity.mnd", code: "E_DESUGAR_ARITY" },
-  ];
-
-  for (const { fixture, code } of desugarErrorCases) {
-    test(`exits 1 with ${code} on ${fixture}`, () => {
-      const out = runMenard("src/mn.mnd", ["check", abs(`tests/negative/${fixture}`)]);
-      expect(out.exitCode).toBe(1);
-      expect(out.stderr).toContain(`[${code}]`);
-    });
-  }
 });

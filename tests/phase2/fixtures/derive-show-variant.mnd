@@ -1,4 +1,4 @@
-; Fixture for tests/phase2/derive.test.ts: a `show` use site whose
+; Fixture for src/derive/plan.test.mnd: a `show` use site whose
 ; argument is a nullary constructor of a user-declared `variant` — checks
 ; the plan resolves a locally declared type, not only builtins.
 

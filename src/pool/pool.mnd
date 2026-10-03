@@ -13,9 +13,9 @@
 ; agree on it byte for byte.
 ;
 ; `pool-summary` renders the result as one line per unique entry,
-; `"str \"…\""` or `"ctor Name"`, sorted — a goldenable text form for
-; `tests/phase2/pool.test.ts`, driven through the small harness
-; `src/tools/pool-dump.mnd`. `Float` literals and interned `Sym` names
+; `"str \"…\""` or `"ctor Name"`, sorted — a goldenable text form checked
+; by `src/pool/pool.test.mnd`. `src/tools/pool-dump.mnd` prints the same
+; text for a file. `Float` literals and interned `Sym` names
 ; (the pool's other two entry kinds, per §2.2.1) are not collected yet —
 ; `reader/ast.mnd`'s own header comment notes Menard has no float
 ; arithmetic to *produce* a `Float` value yet, and no program under `src/`

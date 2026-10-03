@@ -1,0 +1,108 @@
+; Desugar pass. Paths are relative to the process cwd, which `./mn test`
+; leaves as the repo root. CLI dump flags stay in tests/phase2/desugar.test.ts.
+
+(import "../reader/read.mnd")
+(import "../reader/print.mnd")
+(import "./desugar.mnd")
+(import "../../stdlib/io.mnd")
+
+(defn not (b: Bool) -> Bool (if b false true))
+
+(defn bytes-eq (s: Str) (i: Int) (pat: Str) (j: Int) (n: Int) -> Bool
+  (if (>= j n) true
+    (if (= (str-byte s (+ i j)) (str-byte pat j))
+      (bytes-eq s i pat (+ j 1) n)
+      false)))
+
+(defn str-has (s: Str) (needle: Str) -> Bool
+  (do
+    (let n (str-byte-length needle))
+    (let sn (str-byte-length s))
+    (loop ((j 0))
+      (if (> (+ j n) sn) false
+        (if (bytes-eq s j needle 0 n) true
+          (recur (+ j 1)))))))
+
+(defn has-head (text: Str) (name: Str) -> Bool
+  (or (str-has text (str-concat "(" name " "))
+    (str-has text (str-concat "(" name ")"))))
+
+(defn read-forms (path: Str) -> (Maybe (List Ast))
+  (match (read-file path)
+    (Err _) (None)
+    (Ok src)
+      (match (read-all src)
+        (Err _) (None)
+        (Ok forms) (Some forms))))
+
+(defn desugared-text (path: Str) -> (Maybe Str)
+  (match (read-forms path)
+    (None) (None)
+    (Some forms)
+      (match (desugar-all forms)
+        (Err _) (None)
+        (Ok out) (Some (print-form-all out)))))
+
+(defn no-sugar (text: Str) -> Bool
+  (and (not (has-head text "and"))
+    (and (not (has-head text "or"))
+      (and (not (has-head text "cond"))
+        (and (not (has-head text "when"))
+          (not (has-head text "while")))))))
+
+(defn codes-have (es: (List DesugarError)) (code: Str) -> Bool
+  (match es
+    [] false
+    (Cons (DesugarError _ c _) rest)
+      (if (= c code) true (codes-have rest code))))
+
+(defn desugar-has-code (path: Str) (code: Str) -> Bool
+  (match (read-forms path)
+    (None) false
+    (Some forms)
+      (match (desugar-all forms)
+        (Ok _) false
+        (Err es) (codes-have es code))))
+
+(test "and/or/cond/when/while expand to if and loop"
+  (match (desugared-text "tests/phase2/fixtures/desugar-ok.mnd")
+    (None) false
+    (Some text)
+      (and (str-has text "(if ")
+        (and (str-has text "(loop ")
+          (no-sugar text)))))
+
+(test "while expands to loop"
+  (match (desugared-text "tests/phase2/fixtures/desugar-while.mnd")
+    (None) false
+    (Some text)
+      (and (str-has text "(loop ")
+        (not (has-head text "while")))))
+
+(test "bracket lists become Cons/Nil and a type-parameter list stays"
+  (match (desugared-text "tests/phase2/fixtures/list-sugar.mnd")
+    (None) false
+    (Some text)
+      (and (str-has text "[a]")
+        (and (str-has text "Cons")
+          (and (str-has text "(Nil)")
+            (and (not (str-has text "[h"))
+              (not (str-has text "[10"))))))))
+
+(test "empty cond is E_DESUGAR_COND_EMPTY"
+  (desugar-has-code "tests/negative/bad-desugar-cond-empty.mnd" "E_DESUGAR_COND_EMPTY"))
+
+(test "a non-list cond clause is E_DESUGAR_COND_CLAUSE"
+  (desugar-has-code "tests/negative/bad-desugar-cond-clause.mnd" "E_DESUGAR_COND_CLAUSE"))
+
+(test "else before a clause is E_DESUGAR_COND_ELSE"
+  (desugar-has-code "tests/negative/bad-desugar-cond-else.mnd" "E_DESUGAR_COND_ELSE"))
+
+(test "when without a test is E_DESUGAR_WHEN"
+  (desugar-has-code "tests/negative/bad-desugar-when.mnd" "E_DESUGAR_WHEN"))
+
+(test "while without a test is E_DESUGAR_WHILE"
+  (desugar-has-code "tests/negative/bad-desugar-while.mnd" "E_DESUGAR_WHILE"))
+
+(test "a bare + is E_DESUGAR_ARITY"
+  (desugar-has-code "tests/negative/bad-desugar-arity.mnd" "E_DESUGAR_ARITY"))

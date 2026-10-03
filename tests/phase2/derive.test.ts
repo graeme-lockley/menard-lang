@@ -1,20 +1,10 @@
 /**
- * Phase 2 slice 2F — derive planning (`src/derive/plan.mnd`), wired into
- * `src/mn.mnd`'s `--dump-after=derive`.
+ * Phase 2 slice 2F — derive planning wired into `--dump-after=derive`.
  *
- * Runs `src/mn.mnd` (compiled/interpreted by the Phase 1 host, exactly as
- * `bun run host/src/cli/menard.ts run …` would) against real fixture files
- * and checks that:
- *   - `--dump-after=derive` prints `describe-derives`'s plan to stderr,
- *     alongside the existing raw forms `dump`.
- *   - A program using `(show 1)` reports `Int` as needing `show` — the
- *     slice's own acceptance check.
- *   - A program using `(show (Red))` on a user-declared nullary
- *     constructor reports the *declared* type name (`Color`), not the
- *     constructor name.
- *   - `plan-derives` is still the identity on `forms` — `check` still
- *     accepts these programs with an otherwise-empty stderr when the
- *     flag is not given.
+ * What `describe-derives` reports is `src/derive/plan.test.mnd`. This
+ * file checks the flag: the plan is printed beside the forms dump, and
+ * it is not printed when typechecking already failed or when the flag
+ * is absent.
  */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -81,17 +71,6 @@ describe("src/mn.mnd check — derive planning wired after rooting", () => {
     expect(out.stderr).toContain('"defn"');
     // …alongside the new derive plan line.
     expect(out.stderr).toContain("Int: show");
-  });
-
-  test("--dump-after=derive resolves a user variant's declared type name, not its ctor name", () => {
-    const out = runMenard("src/mn.mnd", [
-      "check",
-      abs("tests/phase2/fixtures/derive-show-variant.mnd"),
-      "--dump-after=derive",
-    ]);
-    expect(out.exitCode).toBe(0);
-    expect(out.stderr).toContain("Color: show");
-    expect(out.stderr).not.toContain("Red: show");
   });
 
   test("--dump-after=derive never fires when typechecking fails", () => {
