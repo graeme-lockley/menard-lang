@@ -108,6 +108,20 @@ describe("src/mn.mnd check — typer wired after desugar", () => {
     expect(out.stderr).toContain("[E_TYPE_UNBOUND]");
   });
 
+  test("packs a rest parameter before typing", () => {
+    const out = runMenard("src/mn.mnd", [
+      "check",
+      abs("tests/phase2/fixtures/rest-ok.mnd"),
+      "--dump-after=type",
+    ]);
+    expect(out.exitCode).toBe(0);
+    // sum, main, and the generated append used by `(sum ... xs 4)`.
+    // A call like `(sum 1 2 3)` only typechecks once it has been packed
+    // into the single list parameter.
+    const defns = out.stderr.match(/SymNode "defn"/g) ?? [];
+    expect(defns.length).toBe(3);
+  });
+
   test("still fails a desugar error before the typer ever runs", () => {
     const out = runMenard("src/mn.mnd", [
       "check",

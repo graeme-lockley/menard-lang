@@ -25,6 +25,7 @@
 ;     un-desugared forms directly will see `E_TYPE_UNBOUND` on those heads.
 
 (import "../reader/ast.mnd")
+(import "../desugar/rest.mnd")
 (import "./types.mnd")
 
 ; Re-export shim — see reader/casing.mnd for why this is needed: a `pub`
@@ -468,7 +469,9 @@
     (do
       (err! env "E_TYPE_ARITY"
         (str-concat "function arity mismatch: expected "
-          (str-concat (show (list-length pa)) (str-concat ", found " (show (list-length pb)))))
+                    (show (list-length pa))
+                    ", found "
+                    (show (list-length pb)))
         span)
       false)))
 
@@ -495,7 +498,7 @@
 (defn unify-mismatch (env: TypeEnv) (ta: Type) (tb: Type) (span: Span) -> Bool
   (do
     (err! env "E_TYPE_MISMATCH"
-      (str-concat "expected " (str-concat (type-show ta) (str-concat ", found " (type-show tb))))
+      (str-concat "expected " (type-show ta) ", found " (type-show tb))
       span)
     false))
 
@@ -1183,7 +1186,10 @@
 (defn check-recur-arity (env: TypeEnv) (args: (List Ast)) (expected: (List Type)) (sp: Span) -> Unit
   (if (= (list-length args) (list-length expected)) ()
     (err! env "E_TYPE_ARITY"
-      (str-concat "recur expects " (str-concat (show (list-length expected)) (str-concat " argument(s), got " (show (list-length args)))))
+      (str-concat "recur expects "
+                  (show (list-length expected))
+                  " argument(s), got "
+                  (show (list-length args)))
       sp)))
 
 (defn infer-recur-with (env: TypeEnv) (args: (List Ast)) (expected: (List Type)) (sp: Span) (local: (Map Str Type)) -> Type
@@ -1449,7 +1455,7 @@
   (do
     (let t (apply-subst env (infer env a local)))
     (if (or (type-is-str t) (is-showable t)) ()
-      (err! env "E_TYPE_SHOWABLE" (str-concat "type " (str-concat (type-show t) " is not showable")) (ast-span a)))))
+      (err! env "E_TYPE_SHOWABLE" (str-concat "type " (type-show t) " is not showable") (ast-span a)))))
 
 (defn check-print-args (env: TypeEnv) (args: (List Ast)) (local: (Map Str Type)) -> Unit
   (match args
@@ -1474,7 +1480,7 @@
   (do
     (let t (apply-subst env (first-type-or-fresh arg-types env)))
     (if (pred t) ()
-      (err! env code (str-concat "type " (str-concat (type-show t) (str-concat " is " label))) (first-span-or args sp)))))
+      (err! env code (str-concat "type " (type-show t) " is " label) (first-span-or args sp)))))
 
 (defn check-show-compare (env: TypeEnv) (head: Ast) (arg-types: (List Type)) (args: (List Ast)) (sp: Span) -> Unit
   (if (is-sym head "show") (check-predicate-arg env arg-types args sp is-showable "E_TYPE_SHOWABLE" "not showable")
@@ -1607,11 +1613,18 @@
     [] (Ok forms)
     _ (Err (reverse-errs errs))))
 
-; Typecheck a single-file program's top-level forms (post-desugar). Two
-; passes: collect every declared type and defn scheme first (so mutual
-; recursion and forward references between defns typecheck), then check
-; every body/expression.
-(pub defn typecheck-forms (forms: (List Ast)) -> (Result (List Ast) (List TypeError))
+(defn rest-to-type (es: (List RestError)) -> (List TypeError)
+  (match es
+    [] []
+    (Cons (RestError sp code msg) rest)
+      (Cons (TypeError sp code msg) (rest-to-type rest))))
+
+; Typecheck a single-file program's top-level forms (post-desugar, post
+; rest-pack). Two passes: collect every declared type and defn scheme
+; first (so mutual recursion and forward references between defns
+; typecheck), then check every body/expression. Rest parameters are
+; packed first, so the typer sees an ordinary list parameter.
+(defn typecheck-collected (forms: (List Ast)) -> (Result (List Ast) (List TypeError))
   (do
     (let env (empty-env))
     (collect-defs env forms)
@@ -1619,3 +1632,10 @@
     (let top-local (ref (map-new)))
     (run-typecheck-top env forms top-local)
     (finish-typecheck forms (deref (env-diags env)))))
+
+(pub defn typecheck-forms (forms: (List Ast)) -> (Result (List Ast) (List TypeError))
+  (match (pack-rest forms)
+    (RestPack packed errs)
+      (match errs
+        [] (typecheck-collected packed)
+        _ (Err (rest-to-type errs)))))

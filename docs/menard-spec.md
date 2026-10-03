@@ -647,7 +647,7 @@ choice.
   (match t
     (Empty)       0
     (Leaf _)      1
-    (Node l r)    (+ 1 (+ (tree-size l) (tree-size r)))))
+    (Node l r)    (+ 1 (tree-size l) (tree-size r))))
 
 (defn count-down (n: Int) -> Unit
   (let i (ref n))
@@ -698,6 +698,49 @@ during desugaring (before typing). `[e1 e2 …]` and `[]` are sugar for a
 `Cons`/`Nil` chain, in expression position and in `match` patterns. A bracket
 list in a `defn`, `defrec`, or `variant` name form is a type-parameter list
 and is not expanded. `(Cons h t)` remains the open list pattern.
+
+`+`, `*`, `f+`, `f*`, and `str-concat` accept one or more arguments. One
+argument is that argument; two or more are a left fold into the binary
+intrinsic, so `(+ a b c)` is `(+ (+ a b) c)`. `-` and `f-` are the same fold,
+and a single argument is negation: `(- x)` is `(- 0 x)`, `(f- x)` is
+`(f- 0.0 x)`. `/` and `f/` are that left fold and require at least two
+arguments, so `(/ 8 4 2)` is `(/ (/ 8 4) 2)`. `<`, `>`, `<=`, `>=`, and `=`
+require at least two arguments and chain, so `(< a b c)` is
+`(and (< a b) (< b c))` and each middle operand is evaluated twice. A call
+with too few arguments is a desugar error (`E_DESUGAR_ARITY`). A two-argument
+call is left as the binary intrinsic, which is all the typer and the backend
+see.
+
+A top-level `defn` or `extern` may end its parameter list with one rest
+parameter. `...` is the last element of that parameter form, the parameter
+is last, and the type is written as a `List`:
+
+```
+(defn sum (xs: (List Int) ...) -> Int body)
+(defn join (sep: Str) (parts: (List Str) ...) -> Str body)
+```
+
+Packing runs after desugaring and before typing, and the parameter inside
+the body is an ordinary list. `(sum 1 2 3)` is
+`(sum (Cons 1 (Cons 2 (Cons 3 (Nil)))))`. `(sum)` is `(sum (Nil))`.
+`(sum xs)` is still a one-element call, so a value that is already a list
+is wrapped in another list. `...` before an argument splices that list,
+and the spliced expression is evaluated once:
+
+```
+(sum ... xs)       ; the elements of xs
+(sum 1 ... xs)     ; 1, then the elements of xs
+(sum ... xs 1)     ; the elements of xs, then 1
+(sum ... xs ... ys)
+```
+
+A splice that is not a suffix of the rest arguments is appended. A lambda
+cannot take `...`. `...` that is not the last parameter, or whose type is
+not written as a `List`, is `E_TYPE_REST`. A splice on a function with no
+rest parameter, a splice in a fixed argument, or a bare `...` is
+`E_TYPE_SPREAD`. This is compiler sugar over one list parameter, not a
+macro and not a new special form. The `...` here is three ASCII dots, the
+identifier `...`. It is not the documentation ellipsis used for `print`.
 
 Note what is **not** here: `show`, `print`, `println`, `=`, `compare` and `dump`
 are **compiler-known intrinsics** (§2.8.1), not special forms, because they are
@@ -2054,7 +2097,9 @@ is a human debug aid only — never the compared artifact or the driver's input.
 
 **Pass ordering constraints** (violating these causes subtle miscompiles):
 
-1. Desugaring and `match` expansion happen **before** typing.
+1. Desugaring and `match` expansion happen **before** typing. Rest-parameter
+   packing happens after desugaring and before typing: a call is rewritten
+   into one list argument, and the typer never sees `...`.
 2. Alias expansion happens **before** typing — the typer only ever sees canonical
    types (§2.3). The display view is assembled from recorded source spellings at
    diagnostic time.

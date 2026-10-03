@@ -1,0 +1,2 @@
+(defn bad (xs: (List Int) ...) (y: Int) -> Int
+  y)

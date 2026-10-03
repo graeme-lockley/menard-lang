@@ -36,11 +36,10 @@
 (defn join-path (dir: Str) (name: Str) -> Str
   (if (or (= dir "") (= dir ".")) name
     (if (= dir "/") (str-concat "/" name)
-      (str-concat dir (str-concat "/" name)))))
+      (str-concat dir "/" name))))
 
 (defn skip-name (name: Str) -> Bool
-  (or (starts-with name ".")
-    (or (= name "node_modules") (or (= name "build") (= name "target")))))
+  (or (starts-with name ".") (= name "node_modules") (= name "build") (= name "target")))
 
 (defn insert-str (x: Str) (xs: (List Str)) -> (List Str)
   (match xs
@@ -279,7 +278,7 @@
             ())
           ())
         (write stdout (paint-text on "[32m" (str-concat (show p) " passed")))
-        (write stdout (str-concat " (" (str-concat (show ms) "ms)")))
+        (write stdout (str-concat " (" (show ms) "ms)"))
         (write stdout (nl))
         ())))
 

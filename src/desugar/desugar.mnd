@@ -1,7 +1,9 @@
 ; Desugar — expands `and`/`or`/`cond`/`when`/`while` into `if`/`do`/`loop`/
-; `recur`, and `[e1 e2 …]` / `[]` into a `Cons`/`Nil` chain (expressions and
-; `match` patterns). A bracket list in a `defn`/`defrec`/`variant` name form
-; is a type-parameter list and is left alone. Mirrors host/src/desugar/desugar.ts.
+; `recur`, `[e1 e2 …]` / `[]` into a `Cons`/`Nil` chain, and open-arity
+; calls of `+` `*` `f+` `f*` `str-concat` `-` `f-` `/` `f/` `<` `>` `<=`
+; `>=` `=` into the binary intrinsics (see the sections below). A bracket
+; list in a `defn`/`defrec`/`variant` name form is a type-parameter list
+; and is left alone. Mirrors host/src/desugar/desugar.ts.
 ;
 ; The host threads a single mutable `Diagnostic[]` accumulator through every
 ; recursive call so a form can keep producing *some* output even after an
@@ -88,7 +90,7 @@
 
 (defn is-decl-keyword (ast: Ast) -> Bool
   (match ast
-    (SymNode n _) (or (= n "defn") (or (= n "defrec") (= n "variant")))
+    (SymNode n _) (or (= n "defn") (= n "defrec") (= n "variant"))
     _ false))
 
 ; `(name [params…])` — the bracket list is type parameters.
@@ -144,7 +146,7 @@
     _ (ParenNode (map-desugar elems diags) sp)))
 
 (defn desugar-paren-named (name: Str) (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (if (or (= name "defn") (or (= name "defrec") (= name "variant")))
+  (if (or (= name "defn") (= name "defrec") (= name "variant"))
     (desugar-decl elems sp diags)
     (if (= name "pub")
       (desugar-pub elems sp diags)
@@ -158,7 +160,7 @@
               (desugar-when elems sp diags)
               (if (= name "while")
                 (desugar-while elems sp diags)
-                (ParenNode (map-desugar elems diags) sp)))))))))
+                (desugar-operator name elems sp diags)))))))))
 
 ; ---------------------------------------------------------------------------
 ; (and) → true; (and x) → x; (and x y …) → (if x (and y …) false)
@@ -195,6 +197,105 @@
   (desugar-node
     (ParenNode [(mk-sym "if" sp) x x rest-form] sp)
     diags))
+
+; ---------------------------------------------------------------------------
+; Open-arity calls. Two arguments stay the binary intrinsic. More than two
+; left-fold into that intrinsic (`/` and the comparisons require two).
+; One argument of `+`/`*`/`f+`/`f*`/`str-concat` is the argument itself.
+; One argument of `-`/`f-` is negation. A chain `(< a b c)` is
+; `(and (< a b) (< b c))`, so each middle operand is evaluated twice.
+
+(defn is-fold-op (name: Str) -> Bool
+  (or (= name "+") (= name "*") (= name "f+") (= name "f*") (= name "str-concat")))
+
+(defn is-sub-op (name: Str) -> Bool
+  (or (= name "-") (= name "f-")))
+
+(defn is-div-op (name: Str) -> Bool
+  (or (= name "/") (= name "f/")))
+
+(defn is-cmp-op (name: Str) -> Bool
+  (or (= name "<") (= name ">") (= name "<=") (= name ">=") (= name "=")))
+
+(defn desugar-operator (name: Str) (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
+  (if (is-fold-op name)
+    (desugar-fold name elems sp diags)
+    (if (is-sub-op name)
+      (desugar-sub name elems sp diags)
+      (if (is-div-op name)
+        (desugar-div name elems sp diags)
+        (if (is-cmp-op name)
+          (desugar-cmp name elems sp diags)
+          (ParenNode (map-desugar elems diags) sp))))))
+
+(defn desugar-arity-fail (name: Str) (how: Str) (fallback: Ast) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
+  (do
+    (push-diag! diags sp "E_DESUGAR_ARITY" (str-concat name " expects " how))
+    fallback))
+
+(defn binary-call (name: Str) (a: Ast) (b: Ast) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
+  (ParenNode [(mk-sym name sp) (desugar-node a diags) (desugar-node b diags)] sp))
+
+(defn fold-bin (name: Str) (acc: Ast) (rest: (List Ast)) (sp: Span) -> Ast
+  (match rest
+    [] acc
+    (Cons b more) (fold-bin name (ParenNode [(mk-sym name sp) acc b] sp) more sp)))
+
+(defn desugar-folded (name: Str) (args: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
+  (match args
+    (Cons a rest) (desugar-node (fold-bin name a rest sp) diags)
+    [] (ParenNode [(mk-sym name sp)] sp)))
+
+(defn desugar-fold (name: Str) (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
+  (desugar-fold-args name (elems-tail elems) sp diags))
+
+(defn desugar-fold-args (name: Str) (args: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
+  (match args
+    [] (desugar-arity-fail name "at least 1 argument" (ParenNode [(mk-sym name sp)] sp) sp diags)
+    [a] (desugar-node a diags)
+    [a b] (binary-call name a b sp diags)
+    _ (desugar-folded name args sp diags)))
+
+(defn sub-zero (name: Str) (sp: Span) -> Ast
+  (if (= name "f-")
+    (FloatNode "0.0" sp)
+    (IntNode 0 sp)))
+
+(defn desugar-sub (name: Str) (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
+  (desugar-sub-args name (elems-tail elems) sp diags))
+
+(defn desugar-sub-args (name: Str) (args: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
+  (match args
+    [] (desugar-arity-fail name "at least 1 argument" (ParenNode [(mk-sym name sp)] sp) sp diags)
+    [a] (desugar-node (ParenNode [(mk-sym name sp) (sub-zero name sp) a] sp) diags)
+    [a b] (binary-call name a b sp diags)
+    _ (desugar-folded name args sp diags)))
+
+(defn desugar-div (name: Str) (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
+  (desugar-div-args name (elems-tail elems) sp diags))
+
+(defn desugar-div-args (name: Str) (args: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
+  (match args
+    [] (desugar-arity-fail name "at least 2 arguments" (ParenNode [(mk-sym name sp)] sp) sp diags)
+    [a] (desugar-arity-fail name "at least 2 arguments" (ParenNode [(mk-sym name sp) a] sp) sp diags)
+    [a b] (binary-call name a b sp diags)
+    _ (desugar-folded name args sp diags)))
+
+(defn cmp-pairs (name: Str) (args: (List Ast)) (sp: Span) -> (List Ast)
+  (match args
+    (Cons a (Cons b rest))
+      (Cons (ParenNode [(mk-sym name sp) a b] sp) (cmp-pairs name (Cons b rest) sp))
+    _ []))
+
+(defn desugar-cmp (name: Str) (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
+  (desugar-cmp-args name (elems-tail elems) sp diags))
+
+(defn desugar-cmp-args (name: Str) (args: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
+  (match args
+    [] (desugar-arity-fail name "at least 2 arguments" (ParenNode [(mk-sym name sp)] sp) sp diags)
+    [a] (desugar-arity-fail name "at least 2 arguments" (ParenNode [(mk-sym name sp) a] sp) sp diags)
+    [a b] (binary-call name a b sp diags)
+    _ (desugar-node (ParenNode (Cons (mk-sym "and" sp) (cmp-pairs name args sp)) sp) diags)))
 
 ; ---------------------------------------------------------------------------
 ; (cond (test e…) … (else e…)) → nested (if test (do e…) …)

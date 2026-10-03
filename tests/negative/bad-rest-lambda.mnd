@@ -1,0 +1,2 @@
+(defn id (n: Int) -> Int
+  ((fn (xs ...) xs) n))

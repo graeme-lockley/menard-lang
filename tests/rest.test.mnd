@@ -1,0 +1,53 @@
+; Rest parameters: literal calls, the empty call, splicing a list, and a
+; fixed parameter in front of the rest. `(sum xs)` is a one-element call
+; and is covered by tests/negative/bad-rest-wrap.mnd.
+
+(defn sum (xs: (List Int) ...) -> Int
+  (match xs
+    [] 0
+    (Cons h t) (+ h (sum ... t))))
+
+(defn join-more (sep: Str) (head: Str) (tail: (List Str)) -> Str
+  (match tail
+    [] head
+    (Cons h t) (join-more sep (str-concat head sep h) t)))
+
+(defn join (sep: Str) (parts: (List Str) ...) -> Str
+  (match parts
+    [] ""
+    (Cons h t) (join-more sep h t)))
+
+(test "literals" (= (sum 1 2 3) 6))
+
+(test "one element" (= (sum 4) 4))
+
+(test "empty rest" (= (sum) 0))
+
+(test "splice a list"
+  (let xs [1 2 3]
+    (= (sum ... xs) 6)))
+
+(test "element then splice"
+  (let xs [2 3]
+    (= (sum 1 ... xs) 6)))
+
+(test "splice then element"
+  (let xs [1 2]
+    (= (sum ... xs 3) 6)))
+
+(test "two splices"
+  (let xs [1]
+    (let ys [2 3]
+      (= (sum ... xs ... ys) 6))))
+
+(test "join literals" (= (join ", " "a" "b" "c") "a, b, c"))
+
+(test "join with no parts" (= (join ", ") ""))
+
+(test "join splice"
+  (let xs ["a" "b"]
+    (= (join ":" ... xs) "a:b")))
+
+(test "join fixed, splice, and a following element"
+  (let xs ["b"]
+    (= (join "-" "a" ... xs "c") "a-b-c")))

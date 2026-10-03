@@ -133,6 +133,7 @@ describe("src/mn.mnd check — desugar wired after casing", () => {
     { fixture: "bad-desugar-cond-else.mnd", code: "E_DESUGAR_COND_ELSE" },
     { fixture: "bad-desugar-when.mnd", code: "E_DESUGAR_WHEN" },
     { fixture: "bad-desugar-while.mnd", code: "E_DESUGAR_WHILE" },
+    { fixture: "bad-desugar-arity.mnd", code: "E_DESUGAR_ARITY" },
   ];
 
   for (const { fixture, code } of desugarErrorCases) {

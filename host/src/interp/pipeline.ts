@@ -8,6 +8,7 @@ import { buildLineMap, offsetToLineCol } from "../diagnostic/line-map.ts";
 import { readFileSync } from "node:fs";
 import { readAll, checkCasingAll } from "../reader/index.ts";
 import { desugarAll } from "../desugar/index.ts";
+import { packRest } from "../desugar/rest.ts";
 import { typecheckForms, type ImportBundle } from "../type/check.ts";
 import { evalProgram, type EvalResult, type PanicFrame } from "../interp/eval.ts";
 import { showValue, type Value, envGet } from "../interp/index.ts";
@@ -72,9 +73,12 @@ function diagnoseSingle(src: Uint8Array, skipTypecheck?: boolean): Diagnostic[] 
     return desugared.diagnostics;
   }
 
+  const packed = packRest(desugared.forms);
+  if (!packed.ok) return packed.diagnostics;
+
   if (skipTypecheck) return [];
 
-  const typed = typecheckForms(desugared.forms);
+  const typed = typecheckForms(packed.forms);
   return typed.diagnostics;
 }
 
@@ -148,8 +152,12 @@ function runSingle(src: Uint8Array, host: Host): RunResult {
   if (!desugared.ok) {
     return { ok: false, kind: "diagnostics", diagnostics: desugared.diagnostics };
   }
+  const packed = packRest(desugared.forms);
+  if (!packed.ok) {
+    return { ok: false, kind: "diagnostics", diagnostics: packed.diagnostics };
+  }
 
-  const result: EvalResult = evalProgram(desugared.forms, host);
+  const result: EvalResult = evalProgram(packed.forms, host);
   if (!result.ok) {
     return {
       ok: false,

@@ -1,0 +1,5 @@
+(defn id (n: Int) -> Int
+  n)
+
+(defn use (n: Int) -> Int
+  (id ... n))

@@ -25,7 +25,7 @@
 
 (defn fail-parse (path: Str) (e: ParseError) -> Unit
   (match e
-    (ParseError _ msg) (fail (str-concat (str-concat path ": parse error: ") msg))))
+    (ParseError _ msg) (fail (str-concat path ": parse error: " msg))))
 
 (defn print-summary (forms: (List Ast)) -> Unit
   (do

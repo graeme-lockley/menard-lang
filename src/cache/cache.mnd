@@ -45,7 +45,7 @@
       (if (= slash 0) "/" (str-slice path 0 slash)))))
 
 (defn last-slash (s: Str) (i: Int) -> Int
-  (if (< i 0) (- 0 1)
+  (if (< i 0) (- 1)
     (if (= (str-byte s i) 47) i
       (last-slash s (- i 1)))))
 
@@ -65,7 +65,7 @@
     (if (> (str-byte-length direct) 0) direct
       (normalize-path
         (if (starts-with path "/") path
-          (str-concat (cwd) (str-concat "/" path)))))))
+          (str-concat (cwd) "/" path))))))
 
 ; Path recorded in panic frames and diagnostics. Relative to the
 ; working directory when the file lives under it, so the object bytes
@@ -87,7 +87,7 @@
   (str-concat (cache-base abs) ".bc"))
 
 (pub defn cache-bin (abs: Str) -> Str
-  (str-concat (cache-root) (str-concat "/out/" (show (bytes-hash abs)))))
+  (str-concat (cache-root) "/out/" (show (bytes-hash abs))))
 
 (pub defn ensure-parent (path: Str) -> Bool
   (ensure-dir (dirname-of path)))
@@ -114,7 +114,7 @@
     [] ()
     (Cons (DepRec h p) rest)
       (do
-        (add-line sb (str-concat "(dep " (str-concat (show h) (str-concat " " (str-concat (quote-str p) ")")))))
+        (add-line sb (str-concat "(dep " (show h) " " (quote-str p) ")"))
         (write-deps sb rest))))
 
 (defn write-fns (sb: StringBuffer) (fns: (List FnRec)) -> Unit
@@ -123,11 +123,7 @@
     (Cons (FnRec name link ar) rest)
       (do
         (add-line sb
-          (str-concat "(fn "
-            (str-concat (quote-str name)
-              (str-concat " "
-                (str-concat (quote-str link)
-                  (str-concat " " (str-concat (show ar) ")")))))))
+          (str-concat "(fn " (quote-str name) " " (quote-str link) " " (show ar) ")"))
         (write-fns sb rest))))
 
 (defn write-ctors (sb: StringBuffer) (ctors: (List CtorRec)) -> Unit
@@ -136,9 +132,7 @@
     (Cons (CtorRec name tag ar) rest)
       (do
         (add-line sb
-          (str-concat "(ctor "
-            (str-concat (quote-str name)
-              (str-concat " " (str-concat (show tag) (str-concat " " (str-concat (show ar) ")")))))))
+          (str-concat "(ctor " (quote-str name) " " (show tag) " " (show ar) ")"))
         (write-ctors sb rest))))
 
 (defn write-stubs (sb: StringBuffer) (stubs: (List Ast)) -> Unit
@@ -146,7 +140,7 @@
     [] ()
     (Cons f rest)
       (do
-        (add-line sb (str-concat "(stub " (str-concat (print-form f) ")")))
+        (add-line sb (str-concat "(stub " (print-form f) ")"))
         (write-stubs sb rest))))
 
 (defn dash (s: Str) -> Str
@@ -158,13 +152,11 @@
       (do
         (let sb (sb-new))
         (add-line sb "(mni 1)")
-        (add-line sb (str-concat "(src " (str-concat (show src) ")")))
+        (add-line sb (str-concat "(src " (show src) ")"))
         (write-deps sb deps)
-        (add-line sb (str-concat "(init " (str-concat (quote-str (dash init)) ")")))
+        (add-line sb (str-concat "(init " (quote-str (dash init)) ")"))
         (add-line sb
-          (str-concat "(main "
-            (str-concat (quote-str (dash main-sym))
-              (str-concat " " (str-concat (quote-str (dash main-ret)) ")")))))
+          (str-concat "(main " (quote-str (dash main-sym)) " " (quote-str (dash main-ret)) ")"))
         (write-fns sb fns)
         (write-ctors sb ctors)
         (write-stubs sb stubs)
@@ -292,14 +284,14 @@
     (let src (mtime abs))
     (let iface (mtime (iface-path abs)))
     (let obj (mtime (object-path abs)))
-    (and (and (> src 0) (and (> iface src) (> obj src))) true)))
+    (and (> src 0) (> iface src) (> obj src) true)))
 
 (pub defn iface-fresh (abs: Str) (iface: Iface) -> Bool
   (match iface
     (Iface src deps _ _ _ _ _ _)
       (and (exists (object-path abs))
-        (and (deps-match deps)
-          (or (stamps-fresh abs) (= (hash-file abs) src))))))
+           (deps-match deps)
+           (or (stamps-fresh abs) (= (hash-file abs) src)))))
 
 (pub defn remove-cache (abs: Str) -> Unit
   (do

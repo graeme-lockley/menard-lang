@@ -104,7 +104,7 @@
     (TResult oa ea) (match b (TResult ob eb) (and (type-equal oa ob) (type-equal ea eb)) _ false)
     (TRef ea) (match b (TRef eb) (type-equal ea eb) _ false)
     (TFn pa ra) (match b (TFn pb rb) (and (type-list-equal pa pb) (type-equal ra rb)) _ false)
-    (TNominal na aa ka) (match b (TNominal nb ab kb) (and (= na nb) (and (= ka kb) (type-list-equal aa ab))) _ false)))
+    (TNominal na aa ka) (match b (TNominal nb ab kb) (and (= na nb) (= ka kb) (type-list-equal aa ab)) _ false)))
 
 (pub defn type-list-equal (xs: (List Type)) (ys: (List Type)) -> Bool
   (match xs
@@ -130,24 +130,24 @@
     (TStringBuffer) "StringBuffer"
     (TVar id name) (if (= name "") (str-concat "a" (show id)) name)
     (TParam name) name
-    (TList elem) (str-concat "(List " (str-concat (type-show elem) ")"))
-    (TMap k v) (str-concat "(Map " (str-concat (type-show k) (str-concat " " (str-concat (type-show v) ")"))))
-    (TMaybe elem) (str-concat "(Maybe " (str-concat (type-show elem) ")"))
-    (TResult ok err) (str-concat "(Result " (str-concat (type-show ok) (str-concat " " (str-concat (type-show err) ")"))))
-    (TRef elem) (str-concat "(Ref " (str-concat (type-show elem) ")"))
-    (TFn params ret) (str-concat "(Fn " (str-concat (type-show-list params) (str-concat " -> " (str-concat (type-show ret) ")"))))
+    (TList elem) (str-concat "(List " (type-show elem) ")")
+    (TMap k v) (str-concat "(Map " (type-show k) " " (type-show v) ")")
+    (TMaybe elem) (str-concat "(Maybe " (type-show elem) ")")
+    (TResult ok err) (str-concat "(Result " (type-show ok) " " (type-show err) ")")
+    (TRef elem) (str-concat "(Ref " (type-show elem) ")")
+    (TFn params ret) (str-concat "(Fn " (type-show-list params) " -> " (type-show ret) ")")
     (TNominal name args _) (type-show-nominal name args)))
 
 (defn type-show-nominal (name: Str) (args: (List Type)) -> Str
   (match args
     [] name
-    _ (str-concat "(" (str-concat name (str-concat " " (str-concat (type-show-list args) ")"))))))
+    _ (str-concat "(" name " " (type-show-list args) ")")))
 
 (defn type-show-list (xs: (List Type)) -> Str
   (match xs
     [] ""
     [x] (type-show x)
-    (Cons x rest) (str-concat (type-show x) (str-concat " " (type-show-list rest)))))
+    (Cons x rest) (str-concat (type-show x) " " (type-show-list rest))))
 
 ; ---------------------------------------------------------------------------
 ; Showable / orderable (§2.12), evaluated on expanded types. `Ref`,

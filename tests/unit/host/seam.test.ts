@@ -11,7 +11,7 @@ describe("tier-0 host seam", () => {
   (let n (arg-count))
   (let a0 (arg 0))
   (let a1 (arg 1))
-  (str-concat (str-concat (show n) ":") (str-concat a0 a1)))`,
+  (str-concat (show n) ":" a0 a1))`,
       { host },
     );
     expect(r.ok).toBe(true);

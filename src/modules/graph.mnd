@@ -125,7 +125,7 @@
     spec
     (if (or (= dir ".") (= dir ""))
       spec
-      (str-concat dir (str-concat "/" spec)))))
+      (str-concat dir "/" spec))))
 
 ; Normalize `.` / `..` segments (no symlink resolution).
 (defn normalize-push (acc: (List Str)) (seg: Str) -> (List Str)
@@ -155,8 +155,7 @@
   (match rest
     [] (if abs (str-concat "/" h) h)
     (Cons n more)
-      (str-concat (if abs (str-concat "/" h) h)
-        (str-concat "/" (join-segments-cons n more false)))))
+      (str-concat (if abs (str-concat "/" h) h) "/" (join-segments-cons n more false))))
 
 (defn path-normalize (path: Str) -> Str
   (do
@@ -298,7 +297,7 @@
   (match (map-get pub-names name) (Some _) true (None) false))
 
 (defn module-prefix (mid: Int) -> Str
-  (str-concat "__m" (str-concat (show mid) "_")))
+  (str-concat "__m" (show mid) "_"))
 
 (defn add-rename (renames: (Map Str Str)) (prefix: Str) (name: Str) -> (Map Str Str)
   (map-set renames name (str-concat prefix name)))
@@ -316,10 +315,10 @@
   (hash-bytes path 0 (str-byte-length path) 0))
 
 (defn main-symbol (path: Str) -> Str
-  (str-concat "mn_" (str-concat (show (path-hash path)) "_main")))
+  (str-concat "mn_" (show (path-hash path)) "_main"))
 
 (defn init-symbol (path: Str) -> Str
-  (str-concat "mn_" (str-concat (show (path-hash path)) "_init")))
+  (str-concat "mn_" (show (path-hash path)) "_init"))
 
 (defn build-renames-from-list (names: (List Str)) (pub-names: (Map Str Bool)) (prefix: Str) (main-sym: Str) (acc: (Map Str Str)) -> (Map Str Str)
   (match names
@@ -390,9 +389,12 @@
           (Ok ())
           (Err
             (str-concat "duplicate pub export `"
-              (str-concat name
-                (str-concat "` from "
-                  (str-concat path (str-concat " (already exported by " (str-concat prev ")")))))))))))
+                        name
+                        "` from "
+                        path
+                        " (already exported by "
+                        prev
+                        ")"))))))
 
 (defn register-export-names! (exports: (Ref (Map Str Str))) (path: Str) (names: (List Str)) (kind: Str) -> (Result Unit Str)
   (match names
@@ -441,10 +443,7 @@
 
 (defn is-kept-decl (form: Ast) -> Bool
   (let k (form-decl-kind form))
-  (or (= k "defn")
-    (or (= k "defrec")
-      (or (= k "variant")
-        (or (= k "alias") (= k "extern"))))))
+  (or (= k "defn") (= k "defrec") (= k "variant") (= k "alias") (= k "extern")))
 
 ; Integer `(let name N)` stays at module scope so constant substitution
 ; still sees it. Every other top-level expression runs from the init.
@@ -630,7 +629,7 @@
   (path-hash s))
 
 (pub defn link-of (path: Str) (name: Str) -> Str
-  (str-concat "mn_" (str-concat (show (path-hash path)) (str-concat "_" name))))
+  (str-concat "mn_" (show (path-hash path)) "_" name))
 
 (pub defn rename-module-forms (forms: (List Ast)) (renames: (Map Str Str)) -> (List Ast)
   (rename-forms forms renames))

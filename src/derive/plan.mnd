@@ -201,10 +201,10 @@
 ; classify — never a wrong guess, only a missing one.
 
 (defn is-int-op (name: Str) -> Bool
-  (or (= name "+") (or (= name "-") (or (= name "*") (or (= name "/") (= name "%"))))))
+  (or (= name "+") (= name "-") (= name "*") (= name "/") (= name "%")))
 
 (defn is-bool-op (name: Str) -> Bool
-  (or (= name "<") (or (= name ">") (or (= name "<=") (or (= name ">=") (= name "="))))))
+  (or (= name "<") (= name ">") (= name "<=") (= name ">=") (= name "=")))
 
 (defn classify-sym (name: Str) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
   (match (map-get ctors name)
@@ -282,7 +282,7 @@
   (set! usages (Cons (Usage type-name op) (deref usages))))
 
 (defn is-derive-op (name: Str) -> Bool
-  (or (= name "show") (or (= name "compare") (or (= name "dump") (= name "=")))))
+  (or (= name "show") (= name "compare") (= name "dump") (= name "=")))
 
 (defn maybe-record-classified (op: Str) (a: Ast) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
   (match (classify-expr-type a ctors)
@@ -330,7 +330,11 @@
 ; exactly like `type/check.mnd`'s `typecheck-top-named` does for typing.
 
 (defn is-decl-head (name: Str) -> Bool
-  (or (= name "alias") (or (= name "defrec") (or (= name "variant") (or (= name "extern") (= name "import"))))))
+  (or (= name "alias")
+      (= name "defrec")
+      (= name "variant")
+      (= name "extern")
+      (= name "import")))
 
 (defn walk-top-form (ast: Ast) (ctors: (Map Str CtorMeta)) (usages: (Ref (List Usage))) -> Unit
   (walk-top-form-checked (unwrap-pub ast) ctors usages))
@@ -406,16 +410,16 @@
   (match xs
     [] ""
     [x] x
-    (Cons x rest) (str-concat x (str-concat ", " (join-with-commas rest)))))
+    (Cons x rest) (str-concat x ", " (join-with-commas rest))))
 
 (defn render-line (t: Str) (usages: (List Usage)) -> Str
-  (str-concat t (str-concat ": " (join-with-commas (ops-for-type usages t)))))
+  (str-concat t ": " (join-with-commas (ops-for-type usages t))))
 
 (defn render-lines (type-names: (List Str)) (usages: (List Usage)) -> Str
   (match type-names
     [] ""
     [t] (render-line t usages)
-    (Cons t rest) (str-concat (render-line t usages) (str-concat (nl) (render-lines rest usages)))))
+    (Cons t rest) (str-concat (render-line t usages) (nl) (render-lines rest usages))))
 
 (defn render-usages (usages: (List Usage)) -> Str
   (render-lines (sort-strs (collect-type-names usages)) usages))

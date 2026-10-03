@@ -340,7 +340,7 @@
 
 ; One-word immediates share the `i64` ABI (slice 3B).
 (defn is-word-type (ast: Ast) -> Bool
-  (or (is-int-type ast) (or (is-bool-type ast) (is-unit-type ast))))
+  (or (is-int-type ast) (is-bool-type ast) (is-unit-type ast)))
 
 ; Heap object types are still one `i64` word (a pointer) — List/Maybe/Result
 ; for slice 3C; more shapes land in later slices. User nominals (`Ast`,
@@ -357,7 +357,7 @@
 (defn strip-uniq-prefix (n: Str) -> Str
   (do
     (let len (str-byte-length n))
-    (if (and (>= len 4) (and (= (str-byte n 0) 95) (and (= (str-byte n 1) 95) (= (str-byte n 2) 109))))
+    (if (and (>= len 4) (= (str-byte n 0) 95) (= (str-byte n 1) 95) (= (str-byte n 2) 109))
       (strip-uniq-prefix-digits n 3 len)
       n)))
 
@@ -382,18 +382,19 @@
   (match (sym-str head)
     (Some n)
       (or (= n "List")
-        (or (= n "Maybe")
-          (or (= n "Result")
-            (or (= n "Ref")
-              (or (= n "Map")
-                (or (= n "Fn") (is-upper-type-name n)))))))
+          (= n "Maybe")
+          (= n "Result")
+          (= n "Ref")
+          (= n "Map")
+          (= n "Fn")
+          (is-upper-type-name n))
     (None) false))
 
 (defn is-str-type (ast: Ast) -> Bool (is-type-named ast "Str"))
 (defn is-sb-type (ast: Ast) -> Bool (is-type-named ast "StringBuffer"))
 
 (defn is-value-type (ast: Ast) -> Bool
-  (or (is-word-type ast) (or (is-heap-type ast) (or (is-str-type ast) (is-sb-type ast)))))
+  (or (is-word-type ast) (is-heap-type ast) (is-str-type ast) (is-sb-type ast)))
 
 (defn all-params-value (ps: (List LParam)) -> Bool
   (match ps [] true (Cons p rest) (and (is-value-type (lparam-ty p)) (all-params-value rest))))
@@ -423,7 +424,8 @@
 
 (defn is-unit-noop-ldefn (ld: LDefn) -> Bool
   (and (is-unit-type (ldefn-ret ld))
-    (and (match (ldefn-params ld) [] true _ false) (is-unit-literal-body (ldefn-body ld)))))
+       (match (ldefn-params ld) [] true _ false)
+       (is-unit-literal-body (ldefn-body ld))))
 
 (defn collect-noop-names (lds: (List LDefn)) -> (Map Str Bool)
   (match lds
@@ -553,7 +555,7 @@
 (defn b-root-base (b: Builder) -> (Ref Int) (match b (Builder _ _ _ _ _ _ _ r _) r))
 (defn b-root-ns (b: Builder) -> (Ref Int) (match b (Builder _ _ _ _ _ _ _ _ n) n))
 
-(defn new-bb -> BB (BB (ref (- 0 1)) (ref [])))
+(defn new-bb -> BB (BB (ref (- 1)) (ref [])))
 
 (defn builder-new (start-val: Int) -> Builder
   (Builder (ref []) (ref (new-bb)) (ref start-val) (ref 0) (ref false) (ref []) (ref false) (ref 0) (ref 0)))
@@ -934,7 +936,7 @@
 ; (collection alone never reads them) — `0 - 1` (`-1`) as a visibly
 ; invalid placeholder, same convention `new-bb`'s unresolved index uses.
 (defn str-pool-new (origins: (List Str)) -> StrPool
-  (StrPool [] (map-new) 0 (- 0 1) (- 0 1) (- 0 1) (map-new) origins (ref (map-new))))
+  (StrPool [] (map-new) 0 (- 1) (- 1) (- 1) (map-new) origins (ref (map-new))))
 
 (defn str-pool-count (p: StrPool) -> Int (str-pool-next p))
 
@@ -956,7 +958,7 @@
 ; `collect-str-pool` sees — see that function's header comment for why
 ; this content-keyed lookup never depends on traversal order matching.
 (defn str-pool-get (p: StrPool) (s: Str) -> Int
-  (match (map-get (str-pool-by-content p) s) (Some id) id (None) (- 0 1)))
+  (match (map-get (str-pool-by-content p) s) (Some id) id (None) (- 1)))
 
 (defn reverse-strs-onto (xs: (List Str)) (acc: (List Str)) -> (List Str)
   (match xs [] acc (Cons x rest) (reverse-strs-onto rest (Cons x acc))))
@@ -1060,10 +1062,10 @@
 ; for the shadow-push/pop skip (see header comment).
 
 (defn is-arith-binop (s: Str) -> Bool
-  (or (= s "+") (or (= s "-") (or (= s "*") (or (= s "/") (= s "%"))))))
+  (or (= s "+") (= s "-") (= s "*") (= s "/") (= s "%")))
 
 (defn is-cmp-op (s: Str) -> Bool
-  (or (= s "<") (or (= s ">") (or (= s "<=") (or (= s ">=") (= s "="))))))
+  (or (= s "<") (= s ">") (= s "<=") (= s ">=") (= s "=")))
 
 (defn str-in-list (s: Str) (xs: (List Str)) -> Bool
   (match xs
@@ -1214,7 +1216,7 @@
                         (if (is-runtime-op hn) (lower-runtime-op hn rest env b funcs noop pool)
                           (if (is-effect-head hn)
                             (result-then (lower-effect-op hn rest env b funcs noop pool) (fn () (Ok (const-unit! b))))
-                            (if (is-unsupported-form hn) (Err (str-concat "cannot lower `" (str-concat hn "` with the real instruction lowerer yet")))
+                            (if (is-unsupported-form hn) (Err (str-concat "cannot lower `" hn "` with the real instruction lowerer yet"))
                               (lower-call hn rest sp env b funcs noop pool)))))))))))))))
 
 ; -- if --
@@ -1451,7 +1453,7 @@
     (collect-ctors-forms forms (map-new) tag-ref)))
 
 (defn is-builtin-ctor (hn: Str) -> Bool
-  (or (= hn "Nil") (or (= hn "Cons") (or (= hn "None") (or (= hn "Some") (or (= hn "Ok") (= hn "Err")))))))
+  (or (= hn "Nil") (= hn "Cons") (= hn "None") (= hn "Some") (= hn "Ok") (= hn "Err")))
 
 (defn is-user-ctor (hn: Str) (pool: StrPool) -> Bool
   (match (map-get (str-pool-ctors pool) hn) (Some _) true (None) false))
@@ -1498,17 +1500,18 @@
 
 (defn seam-fixed-arity (hn: Str) -> (Maybe Int)
   (if (= hn "SpawnOutput") (Some 3)
-    (if (or (= hn "Other") (or (= hn "Exited") (= hn "Signalled"))) (Some 1)
+    (if (or (= hn "Other") (= hn "Exited") (= hn "Signalled")) (Some 1)
       (if (or (= hn "NotFound")
-            (or (= hn "Permission")
-              (or (= hn "Exists")
-                (or (= hn "IsADirectory")
-                  (or (= hn "NotADirectory")
-                    (or (= hn "InvalidPath")
-                      (or (= hn "TooLarge")
-                        (or (= hn "NotExecutable")
-                          (or (= hn "InvalidArgument")
-                            (or (= hn "TooManyArguments") (= hn "Unsupported"))))))))))) (Some 0)
+              (= hn "Permission")
+              (= hn "Exists")
+              (= hn "IsADirectory")
+              (= hn "NotADirectory")
+              (= hn "InvalidPath")
+              (= hn "TooLarge")
+              (= hn "NotExecutable")
+              (= hn "InvalidArgument")
+              (= hn "TooManyArguments")
+              (= hn "Unsupported")) (Some 0)
         (None)))))
 
 (defn ctor-arity-of (hn: Str) (pool: StrPool) -> Int
@@ -1517,10 +1520,10 @@
     (None)
       (if (or (= hn "Nil") (= hn "None")) 0
         (if (= hn "Cons") 2
-          (if (or (= hn "Some") (or (= hn "Ok") (= hn "Err"))) 1
+          (if (or (= hn "Some") (= hn "Ok") (= hn "Err")) 1
             (match (map-get (str-pool-ctors pool) hn)
               (Some spec) (ctor-spec-arity spec)
-              (None) (- 0 1)))))))
+              (None) (- 1)))))))
 
 (defn ctor-extern-abs (hn: Str) (ns: Int) -> Int
   (if (= hn "Nil") (extern-nil-abs ns)
@@ -1745,9 +1748,9 @@
 (defn runtime-op-arity-named (hn: Str) -> Int
   (if (or (= hn "cwd") (= hn "now-ms")) 0
   (if (str-in-list hn ["isatty" "mtime" "ensure-dir" "list-dir" "realpath" "remove" "is-dir"]) 1
-  (if (or (= hn "sb-new") (or (= hn "map-new") (or (= hn "mn-env-0") (= hn "arg-count")))) 0
+  (if (or (= hn "sb-new") (= hn "map-new") (= hn "mn-env-0") (= hn "arg-count")) 0
     (if (str-in-list hn ["str-byte-length" "ref" "deref" "sb-take-str!" "map-size" "mn-env-1" "mn-env-new" "arg" "read-file" "mn-apply-0" "show" "sb-length" "dump" "spawn" "getenv" "exists"]) 1
-      (if (or (= hn "str-slice") (or (= hn "map-set") (or (= hn "mn-apply-2") (= hn "mn-env-set")))) 3
+      (if (or (= hn "str-slice") (= hn "map-set") (= hn "mn-apply-2") (= hn "mn-env-set")) 3
         2))))))
 
 (defn lower-runtime-op (hn: Str) (args: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
@@ -1942,7 +1945,7 @@
       (result-bind (lower-expr a-ast env b funcs noop pool)
         (fn (av) (result-bind (lower-expr c-ast env b funcs noop pool)
           (fn (cv) (Ok (lower-cmp-word! op av cv b pool))))))
-    _ (Err (str-concat "comparison `" (str-concat op "` expects exactly 2 arguments")))))
+    _ (Err (str-concat "comparison `" op "` expects exactly 2 arguments"))))
 
 (defn lower-cmp-word! (op: Str) (av: Int) (cv: Int) (b: Builder) (pool: StrPool) -> Int
   (if (= op "=")
@@ -1963,7 +1966,7 @@
     [a-ast c-ast]
       (result-bind (lower-expr a-ast env b funcs noop pool)
         (fn (av) (result-bind (lower-expr c-ast env b funcs noop pool) (fn (cv) (Ok (apply-arith! b pool sp op av cv))))))
-    _ (Err (str-concat "operator " (str-concat op " expects exactly 2 arguments")))))
+    _ (Err (str-concat "operator " op " expects exactly 2 arguments"))))
 
 (defn apply-arith! (b: Builder) (pool: StrPool) (sp: Span) (op: Str) (av: Int) (cv: Int) -> Int
   (let aw (get! b av))
@@ -2037,7 +2040,12 @@
 ; for the two-pass string-global scheme these lower against.
 
 (defn is-effect-head (s: Str) -> Bool
-  (or (= s "println") (or (= s "print") (or (= s "write") (or (= s "exit") (or (= s "mn_write") (= s "mn_exit")))))))
+  (or (= s "println")
+      (= s "print")
+      (= s "write")
+      (= s "exit")
+      (= s "mn_write")
+      (= s "mn_exit")))
 
 (defn is-effect-call (f: Ast) -> Bool
   (match f
@@ -2253,7 +2261,7 @@
                 (let clo (emit-load! b slot))
                 (Ok (emit-traced-call! b pool sp (extern-apply-2-abs (str-pool-count pool))
                   [clo (get! b arg0) (get! b arg1)])))))))
-    _ (Err (str-concat "closure application supports 0–2 arguments (calling local `" (str-concat name "`)")))))
+    _ (Err (str-concat "closure application supports 0–2 arguments (calling local `" name "`)"))))
 
 (defn lower-call-with-ref (fr: FuncRef) (name: Str) (arg-asts: (List Ast)) (sp: Span) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (if (= (ast-list-length arg-asts) (func-ref-arity fr))
@@ -2306,7 +2314,7 @@
     (emit-main-init-if-needed! b is-main num-globals pool)
     (match (lower-sequence (ldefn-body ld) env0 b funcs noop pool)
       (Ok result-abs) (lower-one-func-finish ld is-main result-abs b)
-      (Err msg) (Err (str-concat (ldefn-name ld) (str-concat ": " msg))))))
+      (Err msg) (Err (str-concat (ldefn-name ld) ": " msg)))))
 
 ; Call `mn_init(argc, argv)` at the start of `main` so `arg` / `arg-count`
 ; see the process argv. Param abs ids are `num-globals` and `num-globals+1`.
@@ -2355,10 +2363,11 @@
 ; one.
 (defn is-declaration-head (s: Str) -> Bool
   (or (= s "defn")
-    (or (= s "defrec")
-      (or (= s "variant")
-        (or (= s "alias")
-          (or (= s "extern") (= s "import")))))))
+      (= s "defrec")
+      (= s "variant")
+      (= s "alias")
+      (= s "extern")
+      (= s "import")))
 
 (defn is-declaration-form (ast: Ast) -> Bool
   (match (unwrap-pub ast)
@@ -2567,31 +2576,80 @@
 
 (defn mc-pure-body (hn: Str) -> Bool
   (or (str-in-list hn ["isatty" "mtime" "now-ms" "ensure-dir" "remove" "is-dir"])
-  (or (or (or (or (= hn "if") (= hn "let")) (or (= hn "do") (= hn "loop")))
-        (or (or (= hn "recur") (= hn "match"))
-            (or (or (= hn "println") (= hn "print")) (or (= hn "shadow-push") (= hn "shadow-pop")))))
-      (or (or (or (or (= hn "write") (= hn "exit")) (or (= hn "deref") (= hn "set!")))
-            (or (or (= hn "str-byte") (= hn "str-byte-length")) (or (= hn "map-has") (= hn "map-size"))))
-          (or (or (or (or (= hn "mn-env-get") (= hn "arg-count")) (or (= hn "exists") (= hn "sb-length")))
-                (or (or (= hn "dump") (= hn "+")) (or (= hn "-") (= hn "*"))))
-              (or (or (or (= hn "/") (= hn "%")) (or (= hn "<") (= hn ">")))
-                  (or (or (= hn "<=") (= hn ">=")) (or (= hn "=") (= hn "compare")))))))))
+      (= hn "if")
+      (= hn "let")
+      (= hn "do")
+      (= hn "loop")
+      (= hn "recur")
+      (= hn "match")
+      (= hn "println")
+      (= hn "print")
+      (= hn "shadow-push")
+      (= hn "shadow-pop")
+      (= hn "write")
+      (= hn "exit")
+      (= hn "deref")
+      (= hn "set!")
+      (= hn "str-byte")
+      (= hn "str-byte-length")
+      (= hn "map-has")
+      (= hn "map-size")
+      (= hn "mn-env-get")
+      (= hn "arg-count")
+      (= hn "exists")
+      (= hn "sb-length")
+      (= hn "dump")
+      (= hn "+")
+      (= hn "-")
+      (= hn "*")
+      (= hn "/")
+      (= hn "%")
+      (= hn "<")
+      (= hn ">")
+      (= hn "<=")
+      (= hn ">=")
+      (= hn "=")
+      (= hn "compare")))
 
 (defn mc-alloc-name (hn: Str) -> Bool
   (mc-alloc-body (seam-menard-name hn)))
 
 (defn mc-alloc-body (hn: Str) -> Bool
-  (or (or (or (or (= hn "str-concat") (= hn "str-slice")) (or (= hn "ref") (= hn "sb-new")))
-        (or (or (= hn "sb-append!") (= hn "sb-append-byte!")) (or (= hn "sb-take-str!") (= hn "map-new"))))
-      (or (or (or (or (= hn "map-set") (= hn "map-get")) (or (= hn "mn-env-0") (= hn "mn-env-1")))
-            (or (or (= hn "mn-env-new") (= hn "mn-closure-new")) (or (= hn "mn-apply-0") (= hn "mn-apply-1"))))
-          (or (or (or (= hn "mn-apply-2") (= hn "arg")) (or (= hn "read-file") (= hn "write-file")))
-              (or (or (= hn "show") (or (= hn "spawn") (= hn "spawn-capture"))) (or (= hn "getenv") (= hn "rename")))
-              (or (or (= hn "f+") (= hn "f-")) (or (= hn "f*") (= hn "f/")))
-              (or (or (= hn "cwd") (= hn "list-dir")) (= hn "realpath"))))))
+  (or (= hn "str-concat")
+      (= hn "str-slice")
+      (= hn "ref")
+      (= hn "sb-new")
+      (= hn "sb-append!")
+      (= hn "sb-append-byte!")
+      (= hn "sb-take-str!")
+      (= hn "map-new")
+      (= hn "map-set")
+      (= hn "map-get")
+      (= hn "mn-env-0")
+      (= hn "mn-env-1")
+      (= hn "mn-env-new")
+      (= hn "mn-closure-new")
+      (= hn "mn-apply-0")
+      (= hn "mn-apply-1")
+      (= hn "mn-apply-2")
+      (= hn "arg")
+      (= hn "read-file")
+      (= hn "write-file")
+      (= hn "show")
+      (= hn "spawn")
+      (= hn "spawn-capture")
+      (= hn "getenv")
+      (= hn "rename")
+      (= hn "f+")
+      (= hn "f-")
+      (= hn "f*")
+      (= hn "f/")
+      (= hn "cwd")
+      (= hn "list-dir")
+      (= hn "realpath")))
 
 (defn mc-ctor-alloc (hn: Str) -> Bool
-  (and (is-upper-name hn) (and (not (= hn "Nil")) (not (= hn "None")))))
+  (and (is-upper-name hn) (not (= hn "Nil")) (not (= hn "None"))))
 
 ; One walk records direct allocs and the user-function callees. Later
 ; passes only follow that graph, so the AST is not re-walked per pass.
@@ -2842,10 +2900,10 @@
     (let num-strings (str-pool-count pool))
     (let num-funcs (ast-list-length-lds word-lds2))
     (let nimps (imp-count imports))
-    (let funcs0 (build-func-refs word-lds2 (+ num-strings (+ extern-count nimps))))
+    (let funcs0 (build-func-refs word-lds2 (+ num-strings extern-count nimps)))
     (let funcs (add-imp-refs imports (+ num-strings extern-count) funcs0))
     (let noop (collect-noop-names all-lds))
-    (let num-globals (+ (* 2 num-strings) (+ extern-count (+ nimps num-funcs))))
+    (let num-globals (+ (* 2 num-strings) extern-count nimps num-funcs))
     (let mc (mc-analyze word-lds2))
     (match (lower-all-funcs word-lds2 num-globals funcs noop pool mc)
       (Ok lfuncs) (Ok (write-module-bc (LlvmModule lfuncs (str-pool-strs pool) imports) triple))

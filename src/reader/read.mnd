@@ -145,7 +145,7 @@
 
 (defn parse-int-text (src: Str) (start: Int) (end: Int) -> Int
   (if (= (str-byte src start) 45)
-    (- 0 (digits-to-int src (+ start 1) end 0))
+    (- (digits-to-int src (+ start 1) end 0))
     (if (= (str-byte src start) 43)
       (digits-to-int src (+ start 1) end 0)
       (digits-to-int src start end 0))))

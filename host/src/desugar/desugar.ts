@@ -136,8 +136,112 @@ function desugarNode(ast: Ast, diags: Diagnostic[]): Ast {
   if (nameEquals(head.name, "cond")) return desugarCond(ast, diags);
   if (nameEquals(head.name, "when")) return desugarWhen(ast, diags);
   if (nameEquals(head.name, "while")) return desugarWhile(ast, diags);
+  const op = headText(head);
+  if (op !== null && FOLD_OPS.has(op)) return desugarFold(op, ast, diags);
+  if (op !== null && SUB_OPS.has(op)) return desugarSub(op, ast, diags);
+  if (op !== null && DIV_OPS.has(op)) return desugarDiv(op, ast, diags);
+  if (op !== null && CMP_OPS.has(op)) return desugarCmp(op, ast, diags);
 
   return list("paren", mapElems(ast.elems, diags), ast.span);
+}
+
+function headText(head: Ast): string | null {
+  if (head.tag !== "sym") return null;
+  return new TextDecoder().decode(head.name);
+}
+
+// Left fold into the binary intrinsic. One argument is the identity.
+// `+`, `*`, `f+`, `f*`, `str-concat`.
+const FOLD_OPS = new Set(["+", "*", "f+", "f*", "str-concat"]);
+// Left fold; one argument is negation (`(- x)` → `(- 0 x)`, `(f- x)` → `(f- 0.0 x)`).
+const SUB_OPS = new Set(["-", "f-"]);
+// Left fold; at least two arguments.
+const DIV_OPS = new Set(["/", "f/"]);
+// Chain: `(< a b c)` → `(and (< a b) (< b c))`. Middle operands are evaluated twice.
+const CMP_OPS = new Set(["<", ">", "<=", ">=", "="]);
+
+function pushArity(diags: Diagnostic[], span: Ast["span"], name: string, how: string): void {
+  diags.push(
+    diagnostic({
+      severity: "error",
+      category: "semantic",
+      code: "E_DESUGAR_ARITY",
+      message: `${name} expects ${how}`,
+      span,
+    }),
+  );
+}
+
+function binaryCall(name: string, a: Ast, b: Ast, span: Ast["span"], diags: Diagnostic[]): Ast {
+  return list("paren", [sym(name, span), desugarNode(a, diags), desugarNode(b, diags)], span);
+}
+
+function foldLeft(name: string, args: Ast[], span: Ast["span"]): Ast {
+  let acc = args[0]!;
+  for (let i = 1; i < args.length; i++) {
+    acc = list("paren", [sym(name, span), acc, args[i]!], span);
+  }
+  return acc;
+}
+
+function desugarFold(name: string, ast: Ast & { tag: "list" }, diags: Diagnostic[]): Ast {
+  const args = ast.elems.slice(1);
+  if (args.length === 0) {
+    pushArity(diags, ast.span, name, "at least 1 argument");
+    return ast;
+  }
+  if (args.length === 1) return desugarNode(args[0]!, diags);
+  if (args.length === 2) return binaryCall(name, args[0]!, args[1]!, ast.span, diags);
+  return desugarNode(foldLeft(name, args, ast.span), diags);
+}
+
+function subZero(name: string, span: Ast["span"]): Ast {
+  if (name === "f-") return { tag: "float", value: 0, span };
+  return { tag: "int", value: 0n, span };
+}
+
+function desugarSub(name: string, ast: Ast & { tag: "list" }, diags: Diagnostic[]): Ast {
+  const args = ast.elems.slice(1);
+  if (args.length === 0) {
+    pushArity(diags, ast.span, name, "at least 1 argument");
+    return ast;
+  }
+  if (args.length === 1) {
+    return desugarNode(
+      list("paren", [sym(name, ast.span), subZero(name, ast.span), args[0]!], ast.span),
+      diags,
+    );
+  }
+  if (args.length === 2) return binaryCall(name, args[0]!, args[1]!, ast.span, diags);
+  return desugarNode(foldLeft(name, args, ast.span), diags);
+}
+
+function desugarDiv(name: string, ast: Ast & { tag: "list" }, diags: Diagnostic[]): Ast {
+  const args = ast.elems.slice(1);
+  if (args.length < 2) {
+    pushArity(diags, ast.span, name, "at least 2 arguments");
+    return ast;
+  }
+  if (args.length === 2) return binaryCall(name, args[0]!, args[1]!, ast.span, diags);
+  return desugarNode(foldLeft(name, args, ast.span), diags);
+}
+
+function cmpChain(name: string, args: Ast[], span: Ast["span"]): Ast {
+  const pairs: Ast[] = [];
+  for (let i = 0; i < args.length - 1; i++) {
+    pairs.push(list("paren", [sym(name, span), args[i]!, args[i + 1]!], span));
+  }
+  return list("paren", [sym("and", span), ...pairs], span);
+}
+
+function desugarCmp(name: string, ast: Ast & { tag: "list" }, diags: Diagnostic[]): Ast {
+  const args = ast.elems.slice(1);
+  if (args.length < 2) {
+    pushArity(diags, ast.span, name, "at least 2 arguments");
+    return ast;
+  }
+  if (args.length === 2) return binaryCall(name, args[0]!, args[1]!, ast.span, diags);
+  return desugarNode(cmpChain(name, args, ast.span), diags);
 }
 
 function desugarAnd(ast: Ast & { tag: "list" }, diags: Diagnostic[]): Ast {

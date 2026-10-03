@@ -326,7 +326,7 @@
                     (push-fn fns n (link-of path n) (fn-arity r))
                     names
                     (Cons stub stubs)))))
-      (if (or (= k "variant") (or (= k "defrec") (or (= k "alias") (= k "extern"))))
+      (if (or (= k "variant") (= k "defrec") (= k "alias") (= k "extern"))
         (collect-exports rest path fns (ctor-names-of form names) (Cons (unwrap-pub form) stubs))
         (collect-exports rest path fns names stubs)))))
 
@@ -419,13 +419,13 @@
     (Err _) (write-bytes path bytes)))
 
 (defn rt (runtime: Str) (name: Str) -> Str
-  (str-concat runtime (str-concat "/src/" name)))
+  (str-concat runtime "/src/" name))
 
 (defn link-argv (cc: Str) (runtime: Str) (objs: (List Str)) (out: Str) -> (List Str)
   (append-strs
     (append-strs
       [cc "-std=c11" "-D_DEFAULT_SOURCE" "-Wall" "-Wextra" "-O2"
-       (str-concat "-I" (str-concat runtime "/include"))]
+       (str-concat "-I" runtime "/include")]
       objs)
     [(rt runtime "alloc.c") (rt runtime "gc.c") (rt runtime "panic.c")
      (rt runtime "print.c") (rt runtime "shadow.c") (rt runtime "variants.c")
@@ -633,7 +633,7 @@
     (Cons (DepRec _ p) rest) (Cons p (dep-paths rest))))
 
 (defn boot-path (abs: Str) -> Str
-  (str-concat (cache-root) (str-concat "/boot/" (str-concat (show (bytes-hash abs)) ".bc"))))
+  (str-concat (cache-root) "/boot/" (show (bytes-hash abs)) ".bc"))
 
 (defn link-closure (abs: Str) (iface: Iface) (ctx: Ctx) (cc: Str) (runtime: Str) (bin: Str) -> (Result Str Str)
   (match iface
@@ -688,7 +688,7 @@
         false))))
 
 (defn find-bytes (s: Str) (pat: Str) (i: Int) -> Int
-  (if (> (+ i (str-byte-length pat)) (str-byte-length s)) (- 0 1)
+  (if (> (+ i (str-byte-length pat)) (str-byte-length s)) (- 1)
     (if (bytes-match-at s i pat 0) i
       (find-bytes s pat (+ i 1)))))
 

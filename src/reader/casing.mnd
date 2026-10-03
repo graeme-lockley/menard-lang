@@ -37,7 +37,7 @@
       (if (is-lower-initial name)
         (Ok ())
         (mk-err sp (str-concat role " must begin with a lowercase letter")))
-    _ (mk-err (ast-span node) (str-concat "expected " (str-concat role " to be a symbol")))))
+    _ (mk-err (ast-span node) (str-concat "expected " role " to be a symbol"))))
 
 (defn expect-upper (node: Ast) (role: Str) -> (Result Unit CasingError)
   (match node
@@ -45,7 +45,7 @@
       (if (is-upper-initial name)
         (Ok ())
         (mk-err sp (str-concat role " must begin with an uppercase letter")))
-    _ (mk-err (ast-span node) (str-concat "expected " (str-concat role " to be a symbol")))))
+    _ (mk-err (ast-span node) (str-concat "expected " role " to be a symbol"))))
 
 ; Run `f` over every element of `xs`, stopping at the first failure.
 (defn check-all (xs: (List Ast)) (f: (Fn Ast -> (Result Unit CasingError))) -> (Result Unit CasingError)

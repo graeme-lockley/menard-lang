@@ -37,8 +37,13 @@ function menardDiags(path: string): Diag[] {
   }
   const out: Diag[] = [];
   for (const line of stderr.split("\n")) {
-    const m = line.match(/: error: (.*) \[([A-Z][A-Z0-9_]*)\]$/);
-    if (m) out.push({ message: m[1]!, code: m[2]! });
+    const coded = line.match(/error\[([A-Z][A-Z0-9_]*)\]: (.*)$/);
+    if (coded) {
+      out.push({ code: coded[1]!, message: coded[2]! });
+      continue;
+    }
+    const legacy = line.match(/: error: (.*) \[([A-Z][A-Z0-9_]*)\]$/);
+    if (legacy) out.push({ message: legacy[1]!, code: legacy[2]! });
   }
   if (out.length === 0) {
     throw new Error(`no coded diagnostic from src/mn.mnd check of ${path}:\n${stderr}`);

@@ -8,6 +8,7 @@ import {
 } from "../diagnostic/diagnostic.ts";
 import { readAll, checkCasingAll } from "../reader/index.ts";
 import { desugarAll } from "../desugar/index.ts";
+import { packRest, restExportSigs } from "../desugar/rest.ts";
 import type { Host } from "../host/host.ts";
 import type { Span } from "../reader/span.ts";
 
@@ -273,6 +274,45 @@ export function loadModuleGraph(
         }
       }
     }
+  }
+
+  const restExports = new Map<string, Map<string, number>>();
+  for (const m of raw.values()) {
+    restExports.set(m.path, restExportSigs(m.forms, m.exports));
+  }
+  let restGrew = true;
+  while (restGrew) {
+    restGrew = false;
+    for (const m of raw.values()) {
+      const mine = restExports.get(m.path)!;
+      for (const depPath of m.reexports) {
+        const dep = restExports.get(depPath);
+        if (!dep) continue;
+        for (const [name, fixed] of dep) {
+          if (m.exports.has(name) && !mine.has(name)) {
+            mine.set(name, fixed);
+            restGrew = true;
+          }
+        }
+      }
+    }
+  }
+  for (const m of raw.values()) {
+    const imported = new Map<string, number>();
+    const blocked = new Set<string>();
+    for (const imp of m.imports) {
+      const sigs = restExports.get(imp.path);
+      if (sigs) {
+        for (const [name, fixed] of sigs) imported.set(name, fixed);
+      }
+      const dep = raw.get(imp.path);
+      if (dep) {
+        for (const name of dep.exports) blocked.add(name);
+      }
+    }
+    const packed = packRest(m.forms, imported, blocked);
+    m.forms = packed.forms;
+    if (!packed.ok) diagnostics.push(...packed.diagnostics);
   }
 
   const modules = new Map<string, PreparedModule>();

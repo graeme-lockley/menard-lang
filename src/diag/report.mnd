@@ -30,7 +30,7 @@
       (Some _) false)))
 
 (pub defn paint-text (on: Bool) (code: Str) (s: Str) -> Str
-  (if on (str-concat (esc code) (str-concat s (esc "[0m"))) s))
+  (if on (str-concat (esc code) s (esc "[0m")) s))
 
 ; `Compiling` / `Linking` are light grey, the file name dark grey.
 ; Color follows stderr, same rule as diagnostics.
@@ -41,11 +41,11 @@
     (sb-append-byte! sb 10)
     (let nl (sb-take-str! sb))
     (str-concat (paint-text on "[38;5;248m" verb)
-      (str-concat " "
-        (str-concat (paint-text on "[38;5;240m" name)
-          (str-concat " "
-            (str-concat (paint-text on "[38;5;248m" (str-concat (show ms) "ms"))
-              nl)))))))
+                " "
+                (paint-text on "[38;5;240m" name)
+                " "
+                (paint-text on "[38;5;248m" (str-concat (show ms) "ms"))
+                nl)))
 
 (defn color-on -> Bool
   (tty-color 2))
@@ -129,30 +129,29 @@
     (let gw (digits-of line 1))
     (let sev-color (if (= sev "warning") "[33m" "[31m"))
     (let carets (caret-len src sp col text))
-    (str-concat
-      (paint on "[1m" path)
-      (str-concat ":"
-        (str-concat (show line)
-          (str-concat ":"
-            (str-concat (show col)
-              (str-concat ": "
-                (str-concat (paint on sev-color sev)
-                  (str-concat "["
-                    (str-concat code
-                      (str-concat "]: "
-                        (str-concat msg
-                          (str-concat (nl)
-                            (str-concat "  |"
-                              (str-concat (nl)
-                                (str-concat (pad-left (show line) gw)
-                                  (str-concat " | "
-                                    (str-concat text
-                                      (str-concat (nl)
-                                        (str-concat (repeat-str " " gw "")
-                                          (str-concat " | "
-                                            (str-concat (repeat-str " " (- col 1) "")
-                                              (str-concat (paint on sev-color (repeat-str "^" carets ""))
-                                                (nl)))))))))))))))))))))))))
+    (str-concat (paint on "[1m" path)
+                ":"
+                (show line)
+                ":"
+                (show col)
+                ": "
+                (paint on sev-color sev)
+                "["
+                code
+                "]: "
+                msg
+                (nl)
+                "  |"
+                (nl)
+                (pad-left (show line) gw)
+                " | "
+                text
+                (nl)
+                (repeat-str " " gw "")
+                " | "
+                (repeat-str " " (- col 1) "")
+                (paint on sev-color (repeat-str "^" carets ""))
+                (nl))))
 
 (pub defn report-span (path: Str) (src: Str) (sp: Span) (sev: Str) (code: Str) (msg: Str) -> Unit
   (do

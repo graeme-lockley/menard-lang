@@ -33,7 +33,7 @@
   (match t
     (Empty)       0
     (Leaf _)      1
-    (Node l r)    (+ 1 (+ (tree-size l) (tree-size r)))))
+    (Node l r)    (+ 1 (tree-size l) (tree-size r))))
 
 (defn count-down (n: Int) -> Unit
   (let i (ref n))

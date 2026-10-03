@@ -90,7 +90,7 @@
 (defn source-ctor-name (n: Str) -> Str
   (do
     (let len (str-byte-length n))
-    (if (and (>= len 4) (and (= (str-byte n 0) 95) (and (= (str-byte n 1) 95) (= (str-byte n 2) 109))))
+    (if (and (>= len 4) (= (str-byte n 0) 95) (= (str-byte n 1) 95) (= (str-byte n 2) 109))
       (source-ctor-name-digits n 3 len)
       n)))
 
@@ -110,9 +110,9 @@
   (do
     (let spelled (source-ctor-name (dc-name c)))
     (if (= (dc-arity c) 0)
-      (st (str-concat "(" (str-concat spelled ")")))
+      (st (str-concat "(" spelled ")"))
       (concat2
-        (st (str-concat "(" (str-concat spelled " ")))
+        (st (str-concat "(" spelled " "))
         (concat2 (join-shown (binders prefix (dc-arity c) 0)) (st ")"))))))
 
 (defn show-clauses (ctors: (List DeriveCtor)) -> (List Ast)
@@ -210,7 +210,7 @@
     _ (None)))
 
 (defn is-derive-op (name: Str) -> Bool
-  (or (= name "show") (or (= name "=") (or (= name "compare") (= name "dump")))))
+  (or (= name "show") (= name "=") (= name "compare") (= name "dump")))
 
 (defn op-prefix (name: Str) -> Str
   (if (= name "show") "show_"

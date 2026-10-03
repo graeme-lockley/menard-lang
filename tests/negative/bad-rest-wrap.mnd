@@ -1,0 +1,5 @@
+(defn sum (xs: (List Int) ...) -> Int
+  0)
+
+(defn use (xs: (List Int)) -> Int
+  (sum xs))

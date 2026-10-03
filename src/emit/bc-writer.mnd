@@ -282,7 +282,7 @@
 (let ty-void 3)
 
 (defn func-type-idx-for-arity (arity: Int) -> Int (+ 4 arity))
-(defn main-type-idx (ma: Int) -> Int (+ 4 (+ ma 1)))
+(defn main-type-idx (ma: Int) -> Int (+ 4 ma 1))
 ; One slot right after `main`'s own type — see header comment's ordering.
 (defn ty-i8-idx (ma: Int) -> Int (+ (main-type-idx ma) 1))
 (defn ty-write-sig-idx (ma: Int) -> Int (+ (ty-i8-idx ma) 1)) ; void(ptr, i64)
@@ -293,7 +293,7 @@
 (defn ty-pop-sig-idx (ma: Int) -> Int (+ (ty-panic-sig-idx ma) 1)) ; void()
 (defn ty-panic-at-sig-idx (ma: Int) -> Int (+ (ty-pop-sig-idx ma) 1)) ; void(ptr, i64, ptr)
 ; String `i`'s (0-indexed, in `globals` order) own `[len x i8]` array type.
-(defn ty-str-array-idx (ma: Int) (i: Int) -> Int (+ (ty-panic-at-sig-idx ma) (+ i 1)))
+(defn ty-str-array-idx (ma: Int) (i: Int) -> Int (+ (ty-panic-at-sig-idx ma) i 1))
 
 (defn i64-param-types (n: Int) -> (List Int)
   (if (<= n 0) [] (Cons ty-i64 (i64-param-types (- n 1)))))
@@ -327,7 +327,7 @@
 (defn write-types! (t: BitSink) (ma: Int) (globals: (List Str)) -> Unit
   (do
     (let ns (int-list-length (str-lengths globals)))
-    (write-record! t type-code-numentry [(+ 4 (+ (+ ma 1) (+ 9 ns)))])
+    (write-record! t type-code-numentry [(+ 4 ma 1 9 ns)])
     (write-record! t type-code-opaque-pointer [0]) ; idx 0: ptr, addrspace 0
     (write-record! t type-code-integer [64]) ; idx 1: i64
     (write-record! t type-code-integer [32]) ; idx 2: i32
@@ -514,7 +514,7 @@
 
 (defn write-globalvar! (m: BitSink) (ma: Int) (i: Int) (len: Int) (init-base: Int) -> Unit
   (write-record! m module-code-globalvar
-    [(ty-str-array-idx ma i) globalvar-flags (+ (+ init-base i) 1) 0 0 0 0 0 0 0 0 0 0 0]))
+    [(ty-str-array-idx ma i) globalvar-flags (+ init-base i 1) 0 0 0 0 0 0 0 0 0 0 0]))
 
 (defn write-globalvars! (m: BitSink) (ma: Int) (lens: (List Int)) (i: Int) (init-base: Int) -> Unit
   (match lens
@@ -561,7 +561,7 @@
 ; `IConstI32`); this module only ever writes the already-encoded integer
 ; it is handed.
 (pub defn encode-signed-i64 (v: Int) -> Int
-  (if (>= v 0) (* v 2) (+ (* (- 0 v) 2) 1)))
+  (if (>= v 0) (* v 2) (+ (* (- v) 2) 1)))
 
 ; `SETTYPE ty; INTEGER encoded` (or `NULL` for the zero shortcut, exactly
 ; as slice 2A's single-constant writer used) — one function-local constant,
@@ -802,13 +802,13 @@
     (write-record! m module-code-version [1]) ; version 1: relative value ids
     (write-target-triple! m triple)
     (enter-subblock! m type-block-id (fn (t) (write-types! t ma globals)))
-    (write-globalvars! m ma (str-lengths globals) 0 (+ ns (+ extern-count (+ ni (lfunc-list-length fs)))))
+    (write-globalvars! m ma (str-lengths globals) 0 (+ ns extern-count ni (lfunc-list-length fs)))
     (write-extern-decls! m ma)
     (write-import-decls! m imps)
     (write-function-decls! m fs ma)
     (enter-subblock! m constants-block-id (fn (c) (write-global-consts! c ma globals 0)))
     (write-function-bodies! m ma fs)
-    (enter-subblock! m value-symtab-block-id (fn (v) (do (write-extern-vst-entries! v ns) (write-import-vst! v imps (+ ns extern-count)) (write-vst-entries! v fs (+ ns (+ extern-count ni))))))))
+    (enter-subblock! m value-symtab-block-id (fn (v) (do (write-extern-vst-entries! v ns) (write-import-vst! v imps (+ ns extern-count)) (write-vst-entries! v fs (+ ns extern-count ni)))))))
 
 ; The raw (unwrapped) bitcode bytes for `mod` — magic `BC\xC0\xDE`
 ; followed by the module block above. No Darwin wrapper (ADR 40).

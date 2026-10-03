@@ -190,7 +190,7 @@
 ; content, sort by byte content" for this text form.
 
 (defn quote-str (s: Str) -> Str
-  (str-concat "\"" (str-concat s "\"")))
+  (str-concat "\"" s "\""))
 
 (defn record-str! (entries: (Ref (List Str))) (s: Str) -> Unit
   (set! entries (Cons (str-concat "str " (quote-str s)) (deref entries))))
@@ -245,7 +245,11 @@
 ; `walk-top-form` does for use-site collection.
 
 (defn is-decl-head (name: Str) -> Bool
-  (or (= name "alias") (or (= name "defrec") (or (= name "variant") (or (= name "extern") (= name "import"))))))
+  (or (= name "alias")
+      (= name "defrec")
+      (= name "variant")
+      (= name "extern")
+      (= name "import")))
 
 (defn walk-top-form-checked (ast: Ast) (arities: (Map Str Int)) (entries: (Ref (List Str))) -> Unit
   (match ast
@@ -297,7 +301,7 @@
   (match xs
     [] ""
     [x] x
-    (Cons x rest) (str-concat x (str-concat (nl) (join-lines rest)))))
+    (Cons x rest) (str-concat x (nl) (join-lines rest))))
 
 ; The static pool candidates `forms` mentions — every distinct `Str`
 ; literal and every distinct nullary constructor mention (see this

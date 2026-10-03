@@ -80,15 +80,21 @@
 
 (defn is-dump-flag (s: Str) -> Bool
   (or (is-dump-after-reader s)
-    (or (is-dump-after-desugar s)
-      (or (is-dump-after-type s)
-        (or (is-dump-after-close s) (or (is-dump-after-root s) (is-dump-after-derive s)))))))
+      (is-dump-after-desugar s)
+      (is-dump-after-type s)
+      (is-dump-after-close s)
+      (is-dump-after-root s)
+      (is-dump-after-derive s)))
 
 (defn is-bare-flag (s: Str) -> Bool
-  (or (is-dump-flag s) (or (= s "--show-result") (or (= s "--clean") (or (= s "--verbose") (= s "--quiet"))))))
+  (or (is-dump-flag s)
+      (= s "--show-result")
+      (= s "--clean")
+      (= s "--verbose")
+      (= s "--quiet")))
 
 (defn is-valued-flag (s: Str) -> Bool
-  (or (= s "-o") (or (= s "--cc") (= s "--runtime"))))
+  (or (= s "-o") (= s "--cc") (= s "--runtime")))
 
 (defn has-dump-after-reader-from (i: Int) (n: Int) -> Bool
   (if (>= i n)
@@ -416,7 +422,7 @@
         false))))
 
 (defn find-bytes (s: Str) (pat: Str) (i: Int) -> Int
-  (if (> (+ i (str-byte-length pat)) (str-byte-length s)) (- 0 1)
+  (if (> (+ i (str-byte-length pat)) (str-byte-length s)) (- 1)
     (if (bytes-match-at s i pat 0) i
       (find-bytes s pat (+ i 1)))))
 
@@ -542,7 +548,7 @@
   (str-concat "build/" (stem-of file)))
 
 (defn rt-src (runtime: Str) (name: Str) -> Str
-  (str-concat runtime (str-concat "/src/" name)))
+  (str-concat runtime "/src/" name))
 
 (defn clang-argv (cc: Str) (runtime: Str) (bc: Str) (link-out: Str) -> (List Str)
   [
@@ -552,7 +558,7 @@
   "-Wall"
   "-Wextra"
   "-O2"
-  (str-concat "-I" (str-concat runtime "/include"))
+  (str-concat "-I" runtime "/include")
   bc
   (rt-src runtime "alloc.c")
   (rt-src runtime "gc.c")
@@ -620,7 +626,7 @@
   (do
     (let candidate
       (if (= (str-byte-length dir) 0) name
-        (str-concat dir (str-concat "/" name))))
+        (str-concat dir "/" name)))
     (if (exists candidate) (Some candidate) (None))))
 
 (defn search-path (path: Str) (name: Str) (i: Int) -> (Maybe Str)
@@ -711,7 +717,12 @@
 
 (defn dispatch (mode: Str) (file: Str) (has-out: Bool) (out: Str) (bin: Str) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) -> Unit
   (if (= mode "check")
-    (if (or dump-after-reader (or dump-after-desugar (or dump-after-type (or dump-after-close (or dump-after-root dump-after-derive)))))
+    (if (or dump-after-reader
+            dump-after-desugar
+            dump-after-type
+            dump-after-close
+            dump-after-root
+            dump-after-derive)
       (run-check file dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive)
       (run-cached file "" false false))
     (if (= mode "emit")

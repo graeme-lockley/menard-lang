@@ -1,0 +1,5 @@
+(defn join (sep: Str) (parts: (List Str) ...) -> Str
+  "")
+
+(defn use (xs: (List Str)) -> Str
+  (join ... xs))
