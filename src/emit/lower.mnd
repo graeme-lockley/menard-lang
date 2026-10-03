@@ -923,7 +923,7 @@
 ; `Builder`'s own `items`); `str-pool-strs` reverses it once, for
 ; `LlvmModule`'s `globals` (id `0..S-1`, in `pool.mnd`'s sorted order,
 ; with `println`'s newline appended when it is not already a literal).
-(defrec CtorSpec (tag: Int) (arity: Int))
+(pub defrec CtorSpec (tag: Int) (arity: Int))
 (defn ctor-spec-tag (c: CtorSpec) -> Int (match c (CtorSpec t _) t))
 (defn ctor-spec-arity (c: CtorSpec) -> Int (match c (CtorSpec _ a) a))
 
