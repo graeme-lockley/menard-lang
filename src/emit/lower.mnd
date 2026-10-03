@@ -185,6 +185,7 @@
 (import "../util/result.mnd")
 (import "./llvm-ir.mnd")
 (import "./bc-writer.mnd")
+(import std/list)
 
 (pub alias Ast Ast)
 (pub alias Span Span)
@@ -203,11 +204,6 @@
 (defn strip-trailing-colon (raw: Str) -> Str
   (let n (str-byte-length raw))
   (if (and (> n 0) (= (str-byte raw (- n 1)) 58)) (str-slice raw 0 (- n 1)) raw))
-
-(defn ast-list-length (xs: (List Ast)) -> Int
-  (match xs
-    [] 0
-    (Cons _ rest) (+ 1 (ast-list-length rest))))
 
 ; ---------------------------------------------------------------------------
 ; `defn` header parsing: name, `(name: Type)` params (both parts kept —
@@ -393,8 +389,21 @@
 (defn is-str-type (ast: Ast) -> Bool (is-type-named ast "Str"))
 (defn is-sb-type (ast: Ast) -> Bool (is-type-named ast "StringBuffer"))
 
+; A declared type parameter (`a` in `(defn (f [a]) …)`) is one word too.
+; The lowerer emits one body and never instantiates, so `a` has the same
+; ABI as `Int` or `(List a)`.
+(defn is-type-var (ast: Ast) -> Bool
+  (match ast
+    (SymNode n _)
+      (and (> (str-byte-length n) 0)
+        (do
+          (let b (str-byte n 0))
+          (and (>= b 97) (<= b 122)
+            (not (or (= n "Int") (= n "Bool") (= n "Unit") (= n "Str"))))))
+    _ false))
+
 (defn is-value-type (ast: Ast) -> Bool
-  (or (is-word-type ast) (is-heap-type ast) (is-str-type ast) (is-sb-type ast)))
+  (or (is-word-type ast) (is-heap-type ast) (is-str-type ast) (is-sb-type ast) (is-type-var ast)))
 
 (defn all-params-value (ps: (List LParam)) -> Bool
   (match ps [] true (Cons p rest) (and (is-value-type (lparam-ty p)) (all-params-value rest))))
@@ -749,8 +758,6 @@
     (emit! b (ICall callee-rel arg-rels))
     (bump-val! b)))
 
-(defn not (b: Bool) -> Bool (if b false true))
-
 ; May-collect functions keep every Menard word in a shadow slot and reload
 ; it at each use, so a copying collection can update the slot. The index
 ; `mn_root_keep` returns is a tagged immediate, not a pointer.
@@ -960,10 +967,7 @@
 (defn str-pool-get (p: StrPool) (s: Str) -> Int
   (match (map-get (str-pool-by-content p) s) (Some id) id (None) (- 1)))
 
-(defn reverse-strs-onto (xs: (List Str)) (acc: (List Str)) -> (List Str)
-  (match xs [] acc (Cons x rest) (reverse-strs-onto rest (Cons x acc))))
-
-(defn str-pool-strs (p: StrPool) -> (List Str) (reverse-strs-onto (str-pool-order-rev p) []))
+(defn str-pool-strs (p: StrPool) -> (List Str) (reverse (str-pool-order-rev p)))
 
 ; Fixes the three externs' abs ids (`llvm-ir.mnd`'s `extern-write-stdout-
 ; abs`/etc.) once the final string count is known — called exactly once,
@@ -1406,7 +1410,7 @@
 (defn register-variant-ctor-name (cname: Str) (payload-asts: (List Ast)) (acc: (Map Str CtorSpec)) (tag-ref: (Ref Int)) -> (Map Str CtorSpec)
   (match (builtin-ctor-tag-of cname)
     (Some _) acc
-    (None) (register-ctor-spec acc cname (ast-list-length payload-asts) tag-ref)))
+    (None) (register-ctor-spec acc cname (length payload-asts) tag-ref)))
 
 (defn register-variant-ctors (ctors: (List Ast)) (acc: (Map Str CtorSpec)) (tag-ref: (Ref Int)) -> (Map Str CtorSpec)
   (match ctors
@@ -1426,7 +1430,7 @@
         (Some name)
           (match (builtin-ctor-tag-of name)
             (Some _) acc
-            (None) (register-ctor-spec acc name (ast-list-length fields) tag-ref)))
+            (None) (register-ctor-spec acc name (length fields) tag-ref)))
     [] acc))
 
 (defn collect-ctors-named (hn: Str) (rest: (List Ast)) (acc: (Map Str CtorSpec)) (tag-ref: (Ref Int)) -> (Map Str CtorSpec)
@@ -1545,7 +1549,7 @@
   (match (map-get (str-pool-ctors pool) hn)
     (None) (Err (str-concat "unknown constructor " hn))
     (Some spec)
-      (if (= (ast-list-length args) (ctor-spec-arity spec))
+      (if (= (length args) (ctor-spec-arity spec))
         (result-bind (lower-args args env b funcs noop pool)
           (fn (avs)
             (do
@@ -1559,7 +1563,7 @@
   (match (builtin-ctor-tag-of hn)
     (None) (Err (str-concat "unknown constructor " hn))
     (Some tag)
-      (if (= (ast-list-length args) (ctor-arity-of hn pool))
+      (if (= (length args) (ctor-arity-of hn pool))
         (result-bind (lower-args args env b funcs noop pool)
           (fn (avs)
             (do
@@ -1571,7 +1575,7 @@
 
 (defn lower-ctor (hn: Str) (args: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (if (is-builtin-ctor hn)
-    (if (= (ast-list-length args) (ctor-arity-of hn pool))
+    (if (= (length args) (ctor-arity-of hn pool))
       (result-bind (lower-args args env b funcs noop pool)
         (fn (avs) (Ok (emit-call-words! b (ctor-extern-abs hn (str-pool-count pool)) avs))))
       (Err (str-concat "arity mismatch constructing " hn)))
@@ -1616,6 +1620,7 @@
   "mn-env-set"
   "compare"
   "sb-length"
+  "sb-to-str"
   "dump"
   "spawn"
   "spawn-capture"
@@ -1735,12 +1740,13 @@
                                                             (if (= hn "mn-env-set") (extern-env-set-abs ns)
                                                               (if (= hn "compare") (extern-compare-abs ns)
                                                                 (if (= hn "sb-length") (extern-sb-length-abs ns)
+                                                                  (if (= hn "sb-to-str") (extern-sb-to-str-abs ns)
                                                                   (if (= hn "dump") (extern-dump-abs ns)
                                                                     (if (= hn "spawn") (extern-spawn-abs ns)
                                                                       (if (= hn "spawn-capture") (extern-spawn-capture-abs ns)
                                                                       (if (= hn "getenv") (extern-getenv-abs ns)
                                                                         (if (= hn "exists") (extern-exists-abs ns)
-                                                              (extern-rename-abs ns))))))))))))))))))))))))))))))))))))))))))))
+                                                              (extern-rename-abs ns)))))))))))))))))))))))))))))))))))))))))))))
 
 (defn runtime-op-arity (hn: Str) -> Int
   (runtime-op-arity-named (seam-menard-name hn)))
@@ -1749,14 +1755,14 @@
   (if (or (= hn "cwd") (= hn "now-ms")) 0
   (if (str-in-list hn ["isatty" "mtime" "ensure-dir" "list-dir" "realpath" "remove" "is-dir"]) 1
   (if (or (= hn "sb-new") (= hn "map-new") (= hn "mn-env-0") (= hn "arg-count")) 0
-    (if (str-in-list hn ["str-byte-length" "ref" "deref" "sb-take-str!" "map-size" "mn-env-1" "mn-env-new" "arg" "read-file" "mn-apply-0" "show" "sb-length" "dump" "spawn" "getenv" "exists"]) 1
+    (if (str-in-list hn ["str-byte-length" "ref" "deref" "sb-take-str!" "map-size" "mn-env-1" "mn-env-new" "arg" "read-file" "mn-apply-0" "show" "sb-length" "sb-to-str" "dump" "spawn" "getenv" "exists"]) 1
       (if (or (= hn "str-slice") (= hn "map-set") (= hn "mn-apply-2") (= hn "mn-env-set")) 3
         2))))))
 
 (defn lower-runtime-op (hn: Str) (args: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (if (= hn "mn-closure-new")
     (lower-closure-new args env b funcs noop pool)
-    (if (= (ast-list-length args) (runtime-op-arity hn))
+    (if (= (length args) (runtime-op-arity hn))
       (result-bind (lower-args args env b funcs noop pool)
         (fn (avs) (Ok (emit-call-words! b (runtime-op-abs hn (str-pool-count pool)) avs))))
       (Err (str-concat "arity mismatch calling " hn)))))
@@ -2279,7 +2285,7 @@
     _ (Err (str-concat "closure application supports 0–2 arguments (calling local `" name "`)"))))
 
 (defn lower-call-with-ref (fr: FuncRef) (name: Str) (arg-asts: (List Ast)) (sp: Span) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
-  (if (= (ast-list-length arg-asts) (func-ref-arity fr))
+  (if (= (length arg-asts) (func-ref-arity fr))
     (result-bind (lower-args arg-asts env b funcs noop pool) (fn (args) (Ok (emit-traced-call! b pool sp (func-ref-abs fr) (get-words! b args)))))
     (Err (str-concat "arity mismatch calling " name))))
 
@@ -2423,9 +2429,6 @@
 ; Entry point: find `main`, lower every `Int`-only top-level `defn` (in
 ; source order — this order is the module's global value numbering, see
 ; header comment), hand the result to `bc-writer.mnd`.
-
-(defn ast-list-length-lds (lds: (List LDefn)) -> Int
-  (match lds [] 0 (Cons _ rest) (+ 1 (ast-list-length-lds rest))))
 
 ; A top-level `(let stdout 1)` is a value, not a function. Uses of the name
 ; become the integer, so `(write stdout s)` lowers like `(write 1 s)`.
@@ -2613,6 +2616,7 @@
       (= hn "arg-count")
       (= hn "exists")
       (= hn "sb-length")
+      (= hn "sb-to-str")
       (= hn "dump")
       (= hn "+")
       (= hn "-")
@@ -2819,7 +2823,7 @@
 
 (defn mc-analyze (lds: (List LDefn)) -> (Map Str Bool)
   (let names (mc-seed lds))
-  (mc-propagate lds (mc-build lds names) names (ast-list-length-lds lds)))
+  (mc-propagate lds (mc-build lds names) names (length lds)))
 
 ; Imported constructors keep the tag recorded in the dependency's
 ; interface. Names already in `seeds` are not assigned again, so a leaf
@@ -2862,7 +2866,7 @@
         (Some name)
           (match (builtin-ctor-tag-of name)
             (Some _) acc
-            (None) (note-ctor acc name (ast-list-length payload) tag-ref local)))
+            (None) (note-ctor acc name (length payload) tag-ref local)))
     _ acc))
 
 (defn note-variant-ctors (ctors: (List Ast)) (acc: (Map Str CtorSpec)) (tag-ref: (Ref Int)) (local: (Ref (List CtorSeed))) -> (Map Str CtorSpec)
@@ -2878,7 +2882,7 @@
         (Some name)
           (match (builtin-ctor-tag-of name)
             (Some _) acc
-            (None) (note-ctor acc name (ast-list-length fields) tag-ref local)))
+            (None) (note-ctor acc name (length fields) tag-ref local)))
     [] acc))
 
 (defn note-ctor-named (hn: Str) (rest: (List Ast)) (acc: (Map Str CtorSpec)) (tag-ref: (Ref Int)) (local: (Ref (List CtorSeed))) -> (Map Str CtorSpec)
@@ -2929,7 +2933,7 @@
     (let specs (match (ctor-info forms seeds) (CtorTable s _) s))
     (let pool (str-pool-finalize (collect-str-pool forms paths) specs))
     (let num-strings (str-pool-count pool))
-    (let num-funcs (ast-list-length-lds word-lds2))
+    (let num-funcs (length word-lds2))
     (let nimps (imp-count imports))
     (let funcs0 (build-func-refs word-lds2 (+ num-strings extern-count nimps)))
     (let funcs (add-imp-refs imports (+ num-strings extern-count) funcs0))

@@ -1,14 +1,22 @@
 ; Path predicates. `exists` is allocation-free; `rename` returns IoError,
 ; which is defined in io.mnd.
+; @module std/fs
 
-(import "./io.mnd")
+(import std/io)
+
+; Re-export the error type so a public signature may name it.
+(pub alias IoError IoError)
 
 (extern mn_exists (path: Str) -> Bool)
 (extern mn_rename (from: Str) (to: Str) -> (Result Unit IoError))
 
+; Whether a file or directory is at path.
+; @test (exists "no-such-file")
 (pub defn exists (path: Str) -> Bool
   (mn_exists path))
 
+; Rename from to to, or an IoError.
+; @test (rename "old" "new")
 (pub defn rename (from: Str) (to: Str) -> (Result Unit IoError)
   (mn_rename from to))
 
@@ -22,29 +30,47 @@
 (extern mn_remove (path: Str) -> Bool)
 (extern mn_is_dir (path: Str) -> Bool)
 
+; Whether fd is a terminal.
+; @test (isatty 1)
 (pub defn isatty (fd: Int) -> Bool
   (mn_isatty fd))
 
+; Modification time of path in milliseconds, or 0 when missing.
+; @test (mtime "no-such-file")
 (pub defn mtime (path: Str) -> Int
   (mn_mtime path))
 
+; The process working directory.
+; @test (cwd)
 (pub defn cwd -> Str
   (mn_cwd))
 
+; Create path and any missing parents. False when creation fails.
+; @test (ensure-dir "build")
 (pub defn ensure-dir (path: Str) -> Bool
   (mn_ensure_dir path))
 
+; The names in path, joined by newlines.
+; @test (list-dir ".")
 (pub defn list-dir (path: Str) -> Str
   (mn_list_dir path))
 
+; The absolute path, or empty when it cannot be resolved.
+; @test (realpath ".")
 (pub defn realpath (path: Str) -> Str
   (mn_realpath path))
 
+; Milliseconds since the epoch.
+; @test (now-ms)
 (pub defn now-ms -> Int
   (mn_now_ms))
 
+; Remove path. False when it is missing or cannot be removed.
+; @test (remove "no-such-file")
 (pub defn remove (path: Str) -> Bool
   (mn_remove path))
 
+; Whether path names a directory.
+; @test (is-dir ".")
 (pub defn is-dir (path: Str) -> Bool
   (mn_is_dir path))

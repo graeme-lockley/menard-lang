@@ -1,0 +1,12 @@
+; Map helpers.
+
+(import std/map)
+
+(test "from-list stores the pair"
+  (= (lookup (from-list [(Pair "a" 1)]) "a") (Some 1)))
+
+(test "lookup of a missing key is none"
+  (= (lookup (from-list [(Pair "a" 1)]) "z") (None)))
+
+(test "a later pair overwrites the key"
+  (= (lookup (from-list [(Pair "a" 1) (Pair "a" 2)]) "a") (Some 2)))

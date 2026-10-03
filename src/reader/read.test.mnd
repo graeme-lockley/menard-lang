@@ -5,7 +5,7 @@
 (import "./ast.mnd")
 (import "./read.mnd")
 (import "./print.mnd")
-(import "../../stdlib/io.mnd")
+(import std/io)
 
 (defn roundtrip (path: Str) -> Bool
   (match (read-file path)

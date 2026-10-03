@@ -6,7 +6,8 @@
 ; a pipe stays plain text.
 
 (import "../reader/ast.mnd")
-(import "../../stdlib/io.mnd")
+(import std/console)
+(import std/io)
 
 (pub alias Span Span)
 
@@ -16,22 +17,6 @@
     (sb-append-byte! sb 10)
     (sb-take-str! sb)))
 
-(defn esc (codes: Str) -> Str
-  (do
-    (let sb (sb-new))
-    (sb-append-byte! sb 27)
-    (sb-append! sb codes)
-    (sb-take-str! sb)))
-
-(pub defn tty-color (fd: Int) -> Bool
-  (and (isatty fd)
-    (match (getenv "NO_COLOR")
-      (None) true
-      (Some _) false)))
-
-(pub defn paint-text (on: Bool) (code: Str) (s: Str) -> Str
-  (if on (str-concat (esc code) s (esc "[0m")) s))
-
 ; `Compiling` / `Linking` are light grey, the file name dark grey.
 ; Color follows stderr, same rule as diagnostics.
 (pub defn progress-line (verb: Str) (name: Str) (ms: Int) -> Str
@@ -40,18 +25,15 @@
     (let sb (sb-new))
     (sb-append-byte! sb 10)
     (let nl (sb-take-str! sb))
-    (str-concat (paint-text on "[38;5;248m" verb)
+    (str-concat (paint on "[38;5;248m" verb)
                 " "
-                (paint-text on "[38;5;240m" name)
+                (paint on "[38;5;240m" name)
                 " "
-                (paint-text on "[38;5;248m" (str-concat (show ms) "ms"))
+                (paint on "[38;5;248m" (str-concat (show ms) "ms"))
                 nl)))
 
 (defn color-on -> Bool
   (tty-color 2))
-
-(defn paint (on: Bool) (code: Str) (s: Str) -> Str
-  (paint-text on code s))
 
 (defn repeat-str (s: Str) (n: Int) (acc: Str) -> Str
   (if (<= n 0) acc (repeat-str s (- n 1) (str-concat acc s))))
@@ -63,9 +45,6 @@
 
 (defn digits-of (n: Int) (acc: Int) -> Int
   (if (< n 10) acc (digits-of (/ n 10) (+ acc 1))))
-
-(defn clamp (n: Int) (hi: Int) -> Int
-  (if (< n 0) 0 (if (> n hi) hi n)))
 
 ; Walk bytes up to `offset`, counting newlines. Column is 1-based.
 (defn walk-loc (src: Str) (offset: Int) (i: Int) (line: Int) (start: Int) (n: Int) -> Int
@@ -95,15 +74,15 @@
     (if (>= start end) "" (str-slice src start (- end start)))))
 
 (defn loc-line (src: Str) (offset: Int) -> Int
-  (walk-line src (clamp offset (str-byte-length src)) 0 1 (str-byte-length src)))
+  (walk-line src (clamp 0 (str-byte-length src) offset) 0 1 (str-byte-length src)))
 
 (defn loc-start (src: Str) (offset: Int) -> Int
-  (walk-loc src (clamp offset (str-byte-length src)) 0 1 0 (str-byte-length src)))
+  (walk-loc src (clamp 0 (str-byte-length src) offset) 0 1 0 (str-byte-length src)))
 
 (defn loc-col (src: Str) (offset: Int) -> Int
   (do
     (let n (str-byte-length src))
-    (let off (clamp offset n))
+    (let off (clamp 0 n offset))
     (+ (- off (loc-start src off)) 1)))
 
 ; Underline from the start column through the end column on this line.

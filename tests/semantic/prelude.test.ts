@@ -1,21 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { run } from "../../host/src/interp/index.ts";
 import { createHost, createVirtualFs } from "../../host/src/host/index.ts";
 
-describe("prelude", () => {
-  test("core.mnd loads as a module via import", () => {
-    const root = join(import.meta.dir, "../..");
-    const read = (rel: string) => new TextDecoder().decode(readFileSync(join(root, rel)));
+describe("std/basics", () => {
+  test("not is in scope without an import", () => {
     const host = createHost({
       fs: createVirtualFs({
-        "/prelude/core.mnd": read("prelude/core.mnd"),
-        "/stdlib/sys.mnd": read("stdlib/sys.mnd"),
-        "/stdlib/io.mnd": read("stdlib/io.mnd"),
-        "/stdlib/fs.mnd": read("stdlib/fs.mnd"),
-        "/stdlib/proc.mnd": read("stdlib/proc.mnd"),
-        "/main.mnd": `(import "./prelude/core.mnd")\n(not true)\n`,
+        "/main.mnd": "(not true)\n",
       }),
     });
     const src = host.readFile("/main.mnd");

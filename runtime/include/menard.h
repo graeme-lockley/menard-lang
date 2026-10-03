@@ -219,6 +219,7 @@ MnWord mn_sb_length(MnWord sb);
 MnWord mn_sb_append(MnWord sb, MnWord s);
 MnWord mn_sb_append_byte(MnWord sb, MnWord b_tagged);
 MnWord mn_sb_take_str(MnWord sb);
+MnWord mn_sb_to_str(MnWord sb);
 
 /* Loose `show` for diagnostics (Phase 3 slice H) — Int decimal or #<obj>. */
 MnWord mn_show(MnWord v);

@@ -50,15 +50,15 @@ const publishedBang = new Set([
   "set!",
   "sb-append!",
   "sb-append-byte!",
+  "sb-append-show!",
   "sb-clear!",
   "sb-take-str!",
 ]);
 
 describe("published mutation names", () => {
-  test("stdlib and prelude use only the five ! names", () => {
+  test("stdlib uses only the five ! names", () => {
     const files: string[] = [];
     mndFiles(join(ROOT, "stdlib"), files);
-    mndFiles(join(ROOT, "prelude"), files);
     const offenders: string[] = [];
     for (const file of files) {
       const text = codeOf(file);

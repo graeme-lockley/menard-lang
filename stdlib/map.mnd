@@ -1,0 +1,23 @@
+; Helpers over the builtin Map.
+; @module std/map
+
+; A pair of values. fst is the first field, snd the second.
+(pub defrec (Pair [a b])
+  (fst: a)
+  (snd: b))
+
+; Insert each pair into acc, later pairs overwriting earlier keys.
+(defn (from-list-onto [k v]) (pairs: (List (Pair k v))) (acc: (Map k v)) -> (Map k v)
+  (match pairs
+    [] acc
+    (Cons (Pair key val) rest) (from-list-onto rest (map-set acc key val))))
+
+; A map holding each pair. A repeated key keeps the last value.
+; @test (map-get (from-list [(Pair "a" 1)]) "a") => (Some 1)
+(pub defn (from-list [k v]) (pairs: (List (Pair k v))) -> (Map k v)
+  (from-list-onto pairs (map-new)))
+
+; The value stored at k2, or None when the key is absent.
+; @test (lookup (from-list [(Pair "a" 1)]) "z") => (None)
+(pub defn (lookup [k v]) (m: (Map k v)) (k2: k) -> (Maybe v)
+  (map-get m k2))

@@ -4,7 +4,7 @@
 
 (import "../reader/read.mnd")
 (import "./plan.mnd")
-(import "../../stdlib/io.mnd")
+(import std/io)
 
 (defn plan-of (path: Str) -> (Maybe Str)
   (match (read-file path)

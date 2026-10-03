@@ -19,7 +19,11 @@
 (import "../modules/graph.mnd")
 (import "../diag/report.mnd")
 (import "./cache.mnd")
-(import "../../stdlib/io.mnd")
+(import std/fs)
+(import std/io)
+(import std/list)
+(import std/proc)
+(import std/string)
 
 (defrec Ctx
   (entry: Str)
@@ -30,22 +34,22 @@
   (visiting: (Ref (Map Str Bool)))
   (order: (Ref (List Str)))
   (inits: (Ref (List Str)))
-  (quiet: Bool))
-
-(defn not (b: Bool) -> Bool (if b false true))
+  (quiet: Bool)
+  (versions: (Ref (Map Str Str))))
 
 (defn sym-str (ast: Ast) -> (Maybe Str)
   (match ast (SymNode n _) (Some n) _ (None)))
 
-(defn ctx-entry (c: Ctx) -> Str (match c (Ctx e _ _ _ _ _ _ _ _) e))
-(defn ctx-for-test (c: Ctx) -> Bool (match c (Ctx _ f _ _ _ _ _ _ _) f))
-(defn ctx-clean (c: Ctx) -> Bool (match c (Ctx _ _ k _ _ _ _ _ _) k))
-(defn ctx-triple (c: Ctx) -> Str (match c (Ctx _ _ _ t _ _ _ _ _) t))
-(defn ctx-done (c: Ctx) -> (Ref (Map Str Iface)) (match c (Ctx _ _ _ _ d _ _ _ _) d))
-(defn ctx-visiting (c: Ctx) -> (Ref (Map Str Bool)) (match c (Ctx _ _ _ _ _ v _ _ _) v))
-(defn ctx-order (c: Ctx) -> (Ref (List Str)) (match c (Ctx _ _ _ _ _ _ o _ _) o))
-(defn ctx-inits (c: Ctx) -> (Ref (List Str)) (match c (Ctx _ _ _ _ _ _ _ i _) i))
-(defn ctx-quiet (c: Ctx) -> Bool (match c (Ctx _ _ _ _ _ _ _ _ q) q))
+(defn ctx-entry (c: Ctx) -> Str (match c (Ctx e _ _ _ _ _ _ _ _ _) e))
+(defn ctx-for-test (c: Ctx) -> Bool (match c (Ctx _ f _ _ _ _ _ _ _ _) f))
+(defn ctx-clean (c: Ctx) -> Bool (match c (Ctx _ _ k _ _ _ _ _ _ _) k))
+(defn ctx-triple (c: Ctx) -> Str (match c (Ctx _ _ _ t _ _ _ _ _ _) t))
+(defn ctx-done (c: Ctx) -> (Ref (Map Str Iface)) (match c (Ctx _ _ _ _ d _ _ _ _ _) d))
+(defn ctx-visiting (c: Ctx) -> (Ref (Map Str Bool)) (match c (Ctx _ _ _ _ _ v _ _ _ _) v))
+(defn ctx-order (c: Ctx) -> (Ref (List Str)) (match c (Ctx _ _ _ _ _ _ o _ _ _) o))
+(defn ctx-inits (c: Ctx) -> (Ref (List Str)) (match c (Ctx _ _ _ _ _ _ _ i _ _) i))
+(defn ctx-quiet (c: Ctx) -> Bool (match c (Ctx _ _ _ _ _ _ _ _ q _) q))
+(defn ctx-versions (c: Ctx) -> (Ref (Map Str Str)) (match c (Ctx _ _ _ _ _ _ _ _ _ v) v))
 
 (defrec Surface (fns: (List FnRec)) (ctors: (List CtorRec)) (stubs: (List Ast)))
 
@@ -63,12 +67,6 @@
 (defn snoc-str (xs: (List Str)) (x: Str) -> (List Str)
   (append-strs xs [x]))
 
-(defn reverse-asts (xs: (List Ast)) (acc: (List Ast)) -> (List Ast)
-  (match xs [] acc (Cons x rest) (reverse-asts rest (Cons x acc))))
-
-(defn list-length (xs: (List Ast)) -> Int
-  (match xs [] 0 (Cons _ rest) (+ 1 (list-length rest))))
-
 (defn drop-n (n: Int) (xs: (List Ast)) -> (List Ast)
   (if (<= n 0) xs
     (match xs [] [] (Cons _ rest) (drop-n (- n 1) rest))))
@@ -85,17 +83,10 @@
       (if (is-head form "pub") (ParenNode rest sp) form)
     _ form))
 
-(defn str-has-from (s: Str) (needle: Str) (i: Int) -> Bool
-  (do
-    (let n (str-byte-length needle))
-    (if (> (+ i n) (str-byte-length s)) false
-      (if (= (str-slice s i n) needle) true
-        (str-has-from s needle (+ i 1))))))
-
 (defn parse-code (msg: Str) -> Str
-  (if (str-has-from msg "unclosed" 0) "E_PARSE_UNCLOSED"
-    (if (str-has-from msg "'!'" 0) "E_PARSE_BANG"
-      (if (str-has-from msg "unterminated" 0) "E_PARSE_STRING" "E_PARSE"))))
+  (if (has msg "unclosed") "E_PARSE_UNCLOSED"
+    (if (has msg "'!'") "E_PARSE_BANG"
+      (if (has msg "unterminated") "E_PARSE_STRING" "E_PARSE"))))
 
 (defn report-parse (path: Str) (src: Str) (e: ParseError) -> Unit
   (match e (ParseError sp msg) (report-span path src sp "error" (parse-code msg) msg)))
@@ -121,10 +112,10 @@
 
 (defn before-arrow (xs: (List Ast)) (acc: (List Ast)) -> (List Ast)
   (match xs
-    [] (reverse-asts acc [])
+    [] (reverse acc)
     (Cons x rest)
       (match (sym-str x)
-        (Some n) (if (= n "->") (reverse-asts acc []) (before-arrow rest (Cons x acc)))
+        (Some n) (if (= n "->") (reverse acc) (before-arrow rest (Cons x acc)))
         (None) (before-arrow rest (Cons x acc)))))
 
 (defn after-arrow (xs: (List Ast)) -> (Maybe Ast)
@@ -173,7 +164,7 @@
 
 (defn drop-tests (forms: (List Ast)) (acc: (List Ast)) -> (List Ast)
   (match forms
-    [] (reverse-asts acc [])
+    [] (reverse acc)
     (Cons f rest)
       (if (is-test-form f) (drop-tests rest acc)
         (drop-tests rest (Cons f acc)))))
@@ -185,7 +176,7 @@
 
 (defn take-tests (forms: (List Ast)) (acc: (List Ast)) -> (List Ast)
   (match forms
-    [] (reverse-asts acc [])
+    [] (reverse acc)
     (Cons f rest)
       (if (is-test-form f) (take-tests rest (take-test f acc))
         (take-tests rest acc))))
@@ -214,7 +205,7 @@
 
 (defn drop-main (forms: (List Ast)) (acc: (List Ast)) -> (List Ast)
   (match forms
-    [] (reverse-asts acc [])
+    [] (reverse acc)
     (Cons f rest)
       (match (defn-name f)
         (Some n) (if (= n "main") (drop-main rest acc) (drop-main rest (Cons f acc)))
@@ -250,7 +241,7 @@
               (blank))))))
 
 (defn fn-arity (rest: (List Ast)) -> Int
-  (- (list-length (before-arrow rest [])) 1))
+  (- (length (before-arrow rest [])) 1))
 
 (defn push-fn (fns: (List FnRec)) (name: Str) (link: Str) (arity: Int) -> (List FnRec)
   (match fns
@@ -282,7 +273,7 @@
             (if (= n "defrec")
               (match rest
                 (Cons name _)
-                  (match (sym-str name)
+                  (match (bare-name name)
                     (Some dn) (Cons dn acc)
                     (None) acc)
                 [] acc)
@@ -347,7 +338,9 @@
           (Cons (unwrap-pub form) (Cons (variant-forward form) stubs)))
         (if (or (= k "defrec") (= k "alias") (= k "extern"))
           (collect-exports rest path fns (ctor-names-of form names) (Cons (unwrap-pub form) stubs))
-          (collect-exports rest path fns names stubs))))))
+          (if (= k "let")
+            (collect-exports rest path fns names (Cons (unwrap-pub form) stubs))
+            (collect-exports rest path fns names stubs)))))))
 
 (defn empty-surface -> Surface (Surface [] [] []))
 
@@ -479,7 +472,7 @@
 
 (defn finish-fresh (abs: Str) (iface: Iface) (ctx: Ctx) -> (Result Iface Str)
   (match ctx
-    (Ctx _ _ _ _ done _ order inits _)
+    (Ctx _ _ _ _ done _ order inits _ _)
       (match iface
         (Iface _ _ init _ _ _ _ _)
           (do
@@ -503,11 +496,37 @@
           (Ok iface) (do (note-compiling abs ctx (since started)) (Ok iface))
           (Err e) (Err e)))))
 
+; A `(pub let stdin 0)` is a value, not a type. It has to stay in the
+; importer's body so the lowerer can fold it; the other stubs are types
+; and externs, present only while typechecking.
+(defn is-let-form (ast: Ast) -> Bool
+  (match (unwrap-pub ast)
+    (ParenNode (Cons h _) _)
+      (match (sym-str h) (Some n) (= n "let") (None) false)
+    _ false))
+
+(defn lets-only (xs: (List Ast)) (acc: (List Ast)) -> (List Ast)
+  (match xs
+    [] (reverse acc)
+    (Cons f rest)
+      (if (is-let-form f) (lets-only rest (Cons f acc))
+        (lets-only rest acc))))
+
+(defn drop-let-forms (xs: (List Ast)) (acc: (List Ast)) -> (List Ast)
+  (match xs
+    [] (reverse acc)
+    (Cons f rest)
+      (if (is-let-form f) (drop-let-forms rest acc)
+        (drop-let-forms rest (Cons f acc)))))
+
 (defn compile-checked (abs: Str) (src: Str) (display: Str) (body: (List Ast)) (exported: Export) (direct: (List DepRec)) (fns: (List FnRec)) (ctors: (List CtorRec)) (stubs: (List Ast)) (for-test: Bool) (ctx: Ctx) (started: Int) -> (Result Iface Str)
-  (match (typecheck-forms (append-asts stubs body))
-    (Err es) (do (note-compiling abs ctx (since started)) (report-types display src es) (Err ""))
-    (Ok checked)
-      (compile-lower abs src display (drop-n (list-length stubs) checked) exported direct fns ctors for-test ctx started)))
+  (do
+    (let types (drop-let-forms stubs []))
+    (let body1 (append-asts (lets-only stubs []) body))
+    (match (typecheck-forms (append-asts types body1))
+      (Err es) (do (note-compiling abs ctx (since started)) (report-types display src es) (Err ""))
+      (Ok checked)
+        (compile-lower abs src display (drop-n (length types) checked) exported direct fns ctors for-test ctx started))))
 
 (defn compile-lower (abs: Str) (src: Str) (display: Str) (body: (List Ast)) (exported: Export) (direct: (List DepRec)) (fns: (List FnRec)) (ctors: (List CtorRec)) (for-test: Bool) (ctx: Ctx) (started: Int) -> (Result Iface Str)
   (do
@@ -538,7 +557,7 @@
             (let main-sym (if (> (str-byte-length main-ret) 0) main-name ""))
             (let iface
               (Iface (bytes-hash src) direct init main-sym main-ret fns
-                (filter-ctors local names []) (reverse-asts stubs [])))
+                (filter-ctors local names []) (reverse stubs)))
             (if (write-bytes (object-path abs) bytes)
               (if (write-iface abs iface)
                 (finish-fresh abs iface ctx)
@@ -594,9 +613,12 @@
   (compile-file-read abs ctx))
 
 (defn compile-file-read (abs: Str) (ctx: Ctx) -> (Result Iface Str)
+  (match (ensure-module-file abs)
+    (Err e) (Err e)
+    (Ok _)
   (match (read-file abs)
     (Err _) (Err (str-concat "module not found: " (display-path abs)))
-    (Ok src) (compile-src abs src ctx)))
+    (Ok src) (compile-src abs src ctx))))
 
 (defn compile-src (abs: Str) (src: Str) (ctx: Ctx) -> (Result Iface Str)
   (do
@@ -617,14 +639,19 @@
     (Ok desugared)
       (do
         (let stamped (stamp-spans desugared src 0))
-        (let specs (canon-specs abs (import-specs stamped)))
-        (match (ensure-list specs ctx)
-          (Ok _) (compile-forms abs src display stamped (dep-recs specs) ctx)
-          (Err e) (Err e)))))
+        (let raw-specs (specs-with-basics abs (import-specs stamped)))
+        (match (note-versions (ctx-versions ctx) raw-specs)
+          (Err e) (Err e)
+          (Ok _)
+            (do
+              (let specs (canon-specs abs raw-specs))
+              (match (ensure-list specs ctx)
+                (Ok _) (compile-forms abs src display stamped (dep-recs specs) ctx)
+                (Err e) (Err e)))))))
 
 (defn ensure-mod (abs: Str) (ctx: Ctx) -> (Result Iface Str)
   (match ctx
-    (Ctx _ _ clean _ done visiting _ _ _)
+    (Ctx _ _ clean _ done visiting _ _ _ _)
       (match (map-get (deref done) abs)
         (Some iface) (Ok iface)
         (None)
@@ -663,7 +690,7 @@
       (if (= (str-byte-length main-sym) 0)
         (Err "program has no top-level `defn main`")
         (match ctx
-          (Ctx _ _ _ triple _ _ order inits _)
+          (Ctx _ _ _ triple _ _ order inits _ _)
             (do
               (let unit (= main-ret "Unit"))
               (let syms (snoc-str (deref inits) main-sym))
@@ -692,7 +719,7 @@
   (do
     (let abs (canonical-path entry))
     (let triple (triple-from-clang cc))
-    (let ctx (Ctx abs for-test clean triple (ref (map-new)) (ref (map-new)) (ref []) (ref []) quiet))
+    (let ctx (Ctx abs for-test clean triple (ref (map-new)) (ref (map-new)) (ref []) (ref []) quiet (ref (map-new))))
     (match (ensure-mod abs ctx)
       (Ok iface)
         (if do-link

@@ -1,7 +1,7 @@
 ; User record and variant. `show` must print the same text on the
 ; interpreter and on a native binary.
 
-(import "../stdlib/io.mnd")
+(import std/io)
 
 (defrec Point (x: Int) (y: Int))
 

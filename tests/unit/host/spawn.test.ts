@@ -29,7 +29,9 @@ describe("spawn helpers", () => {
 describe("spawn", () => {
   test("disabled host returns Unsupported", () => {
     const host = createHost({ spawnEnabled: false });
-    const r = run(`(spawn ${listStr("/bin/true")})`, { host });
+    const src = `(import std/proc)\n(spawn ${listStr("/bin/true")})`;
+    host.writeFile("/main.mnd", new TextEncoder().encode(src));
+    const r = run(src, { path: "/main.mnd", host });
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "variant") {
       expect(r.value.ctor).toBe("Err");
@@ -40,9 +42,12 @@ describe("spawn", () => {
   });
 
   test("spawn and spawn-capture typecheck", () => {
-    const diags = diagnose(`(do
+    const host = createHost();
+    const src = `(import std/proc)\n(do
   (spawn (Cons "x" (Nil)))
-  (spawn-capture (Cons "x" (Nil)) ""))`);
+  (spawn-capture (Cons "x" (Nil)) ""))`;
+    host.writeFile("/main.mnd", new TextEncoder().encode(src));
+    const diags = diagnose(src, { path: "/main.mnd", host });
     expect(diags).toEqual([]);
   });
 });

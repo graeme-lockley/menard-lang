@@ -70,6 +70,7 @@ describe("build-host bench", () => {
       fs: createVirtualFs({
         "/lib.mnd": `(pub defn twice (n: Int) -> Int (* n 2))\n`,
         "/main.mnd": `(import "./lib.mnd")
+(import std/io)
 (let data (read-file "/in.txt"))
 (match data
   (Ok s) (do (write-file "/out.txt" s) (twice 21))

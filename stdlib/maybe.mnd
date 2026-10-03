@@ -1,0 +1,23 @@
+; Helpers over the language Maybe type.
+; @module std/maybe
+
+; Apply f to a Some value and leave None in place.
+; @test (map (fn (n) (+ n 1)) (Some 1)) => (Some 2)
+(pub defn (map [a b]) (f: (Fn a -> b)) (m: (Maybe a)) -> (Maybe b)
+  (match m
+    (Some v) (Some (f v))
+    (None) (None)))
+
+; Replace a Some value with the Maybe that f returns.
+; @test (and-then (fn (n) (Some (+ n 1))) (Some 1)) => (Some 2)
+(pub defn (and-then [a b]) (f: (Fn a -> (Maybe b))) (m: (Maybe a)) -> (Maybe b)
+  (match m
+    (Some v) (f v)
+    (None) (None)))
+
+; The Some value, or default when m is None.
+; @test (unwrap-or (None) 0) => 0
+(pub defn (unwrap-or [a]) (m: (Maybe a)) (default: a) -> a
+  (match m
+    (Some v) v
+    (None) default))

@@ -10,6 +10,10 @@
 (import "../reader/read.mnd")
 (import "../reader/print.mnd")
 (import "../modules/graph.mnd")
+(import std/fs)
+(import std/io)
+(import std/string)
+(import std/sys)
 
 (pub defrec DepRec (hash: Int) (path: Str))
 (pub defrec FnRec (name: Str) (link: Str) (arity: Int))
@@ -31,11 +35,6 @@
 
 (defn quote-str (s: Str) -> Str
   (print-form (StrNode s (blank))))
-
-(defn starts-with (s: Str) (prefix: Str) -> Bool
-  (do
-    (let n (str-byte-length prefix))
-    (and (>= (str-byte-length s) n) (= (str-slice s 0 n) prefix))))
 
 (defn dirname-of (path: Str) -> Str
   (do

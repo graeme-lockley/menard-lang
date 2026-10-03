@@ -1,3 +1,6 @@
+import * as nodeFs from "node:fs";
+import * as nodePath from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Ast } from "../reader/ast.ts";
 import { nameEquals } from "../reader/ast.ts";
 import type { Diagnostic } from "../diagnostic/diagnostic.ts";
@@ -11,6 +14,20 @@ import { desugarAll } from "../desugar/index.ts";
 import { packRest, restExportSigs } from "../desugar/rest.ts";
 import type { Host } from "../host/host.ts";
 import type { Span } from "../reader/span.ts";
+import {
+  decodeBytes,
+  ensureGithubTree,
+  isBasicsPath,
+  isBasicsSpec,
+  noteGithubVersion,
+  parseGithubSpec,
+  resolveImportPath,
+  versionClashMessage,
+} from "./imports.ts";
+
+export { resolveImportPath } from "./imports.ts";
+
+const moduleDir = nodePath.dirname(fileURLToPath(import.meta.url));
 
 const SEAM_SUFFIXES = [
   "/stdlib/sys.mnd",
@@ -26,36 +43,6 @@ const SEAM_SUFFIXES = [
 export function isSeamModule(path: string): boolean {
   const p = path.startsWith("/") ? path : "/" + path;
   return SEAM_SUFFIXES.some((s) => p === s || p.endsWith(s));
-}
-
-/** Resolve import spec relative to the importing module path (no absolute canonicalisation). */
-export function resolveImportPath(fromPath: string, spec: string): string {
-  if (spec.startsWith("/")) return normalizeRel(spec);
-  const fromDir = dirname(fromPath);
-  const joined =
-    fromDir === "." || fromDir === "" ? spec : `${fromDir}/${spec}`;
-  return normalizeRel(joined);
-}
-
-function dirname(path: string): string {
-  const i = path.lastIndexOf("/");
-  if (i < 0) return ".";
-  if (i === 0) return "/";
-  return path.slice(0, i);
-}
-
-function normalizeRel(path: string): string {
-  const abs = path.startsWith("/");
-  const parts = path.split("/").filter((p) => p && p !== ".");
-  const out: string[] = [];
-  for (const p of parts) {
-    if (p === "..") {
-      if (out.length) out.pop();
-    } else out.push(p);
-  }
-  const s = out.join("/");
-  if (abs) return "/" + s;
-  return s || ".";
 }
 
 export type PreparedModule = {
@@ -78,7 +65,7 @@ type RawModule = {
   path: string;
   forms: Ast[];
   exports: Set<string>;
-  imports: { path: string; span: Span }[];
+  imports: { path: string; spec: string; span: Span }[];
   /** Import paths whose exports are also exports of this module. */
   reexports: string[];
 };
@@ -86,6 +73,33 @@ type RawModule = {
 /**
  * Load the entry module and its import closure through Host.
  */
+function readModuleBytes(
+  host: Host,
+  path: string,
+): { ok: true; bytes: Uint8Array } | { ok: false } {
+  const file = host.readFile(path);
+  if (file.ok) return file;
+  // `std/…` resolves to a cwd-relative `stdlib/…` path. A virtual host does
+  // not contain the shipped library, so fall back to the real tree.
+  if (path.startsWith("stdlib/")) {
+    const roots = [
+      process.cwd(),
+      nodePath.resolve(moduleDir, "../../.."),
+    ];
+    for (const root of roots) {
+      try {
+        return {
+          ok: true,
+          bytes: new Uint8Array(nodeFs.readFileSync(nodePath.join(root, path))),
+        };
+      } catch {
+        // try the next root
+      }
+    }
+  }
+  return { ok: false };
+}
+
 export function loadModuleGraph(
   entryPath: string,
   entrySource: Uint8Array,
@@ -93,6 +107,8 @@ export function loadModuleGraph(
 ): LoadResult {
   const diagnostics: Diagnostic[] = [];
   const raw = new Map<string, RawModule>();
+  const versions = new Map<string, string>();
+  const home = host.getenv("HOME");
 
   function readModule(path: string, source: Uint8Array): void {
     if (raw.has(path)) return;
@@ -116,7 +132,7 @@ export function loadModuleGraph(
       return;
     }
 
-    const imports: { path: string; span: Span }[] = [];
+    const imports: { path: string; spec: string; span: Span }[] = [];
     const reexports: string[] = [];
     const exports = new Set<string>();
     const body: Ast[] = [];
@@ -130,14 +146,27 @@ export function loadModuleGraph(
               severity: "error",
               category: "semantic",
               code: "E_IMPORT",
-              message: "import path must be a string",
+              message: "import path must be a string or a name",
               span: imp.span,
             }),
           );
           continue;
         }
-        const resolved = resolveImportPath(path, imp.spec);
-        imports.push({ path: resolved, span: imp.span });
+        const clash = noteGithubVersion(versions, imp.spec);
+        if (clash) {
+          diagnostics.push(
+            diagnostic({
+              severity: "error",
+              category: "semantic",
+              code: "E_IMPORT_VERSION",
+              message: versionClashMessage(clash),
+              span: imp.span,
+            }),
+          );
+          continue;
+        }
+        const resolved = resolveImportPath(path, imp.spec, home);
+        imports.push({ path: resolved, spec: imp.spec, span: imp.span });
         if (imp.reexport) reexports.push(resolved);
         continue;
       }
@@ -161,11 +190,35 @@ export function loadModuleGraph(
       body.push(pub.form);
     }
 
+    if (!isBasicsPath(path) && !imports.some((imp) => isBasicsSpec(imp.spec) || isBasicsPath(imp.path))) {
+      imports.unshift({
+        path: resolveImportPath(path, "std/basics", home),
+        spec: "std/basics",
+        span: { start: 0, end: 0 },
+      });
+    }
+
     raw.set(path, { path, forms: body, exports, imports, reexports });
 
     for (const imp of imports) {
       if (raw.has(imp.path)) continue;
-      const file = host.readFile(imp.path);
+      const gh = parseGithubSpec(imp.spec);
+      if (gh && !host.exists(imp.path)) {
+        const ensured = ensureGithubTree(gh, home);
+        if (!ensured.ok) {
+          diagnostics.push(
+            diagnostic({
+              severity: "error",
+              category: "semantic",
+              code: "E_IMPORT_MISSING",
+              message: ensured.message,
+              span: imp.span,
+            }),
+          );
+          continue;
+        }
+      }
+      const file = readModuleBytes(host, imp.path);
       if (!file.ok) {
         diagnostics.push(
           diagnostic({
@@ -193,7 +246,8 @@ export function loadModuleGraph(
     d.code === "E_PARSE" ||
     d.code.startsWith("E_PARSE") ||
     d.code === "E_CASING" ||
-    d.code === "E_IMPORT"
+    d.code === "E_IMPORT" ||
+    d.code === "E_IMPORT_VERSION"
   )) {
     return { ok: false, diagnostics };
   }
@@ -350,8 +404,9 @@ function parseImport(form: Ast): { spec: string; span: Span; reexport: boolean }
   if (h.tag !== "sym" || !nameEquals(h.name, "import")) return null;
   form = node;
   const spec = form.elems[1]!;
-  if (spec.tag !== "str") return { spec: "", span: form.span, reexport };
-  return { spec: new TextDecoder().decode(spec.bytes), span: form.span, reexport };
+  if (spec.tag === "str") return { spec: decodeBytes(spec.bytes), span: form.span, reexport };
+  if (spec.tag === "sym") return { spec: decodeBytes(spec.name), span: form.span, reexport };
+  return { spec: "", span: form.span, reexport };
 }
 
 function unwrapPub(form: Ast): { form: Ast; exported: boolean } {

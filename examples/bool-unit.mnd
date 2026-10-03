@@ -2,7 +2,7 @@
 ; Prints one line per value: t, f, is-pos, and the Unit from touch.
 ; Run with: `./mn run examples/bool-unit.mnd`
 
-(import "../stdlib/io.mnd")
+(import std/io)
 
 (defn is-pos (n: Int) -> Bool
   (> n 0))

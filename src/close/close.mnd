@@ -48,6 +48,7 @@
 ;   free-var scan as before.
 
 (import "../reader/ast.mnd")
+(import std/list)
 
 (pub alias Ast Ast)
 
@@ -59,9 +60,6 @@
 
 (defn is-sym (ast: Ast) (name: Str) -> Bool
   (match (sym-str ast) (Some n) (= n name) (None) false))
-
-(defn not (b: Bool) -> Bool
-  (if b false true))
 
 (defn strip-trailing-colon (raw: Str) -> Str
   (let n (str-byte-length raw))
@@ -78,11 +76,6 @@
   (match xs
     [] ys
     (Cons x rest) (Cons x (append-str-list rest ys))))
-
-(defn str-list-contains (xs: (List Str)) (x: Str) -> Bool
-  (match xs
-    [] false
-    (Cons h rest) (if (= h x) true (str-list-contains rest x))))
 
 ; ---------------------------------------------------------------------------
 ; Free-symbol collection (naive over-approximation).
@@ -343,7 +336,7 @@
     (Cons s rest) (free-vars-in-scope-order-cons s rest used exclude)))
 
 (defn free-vars-in-scope-order-cons (s: Str) (rest: (List Str)) (used: (List Str)) (exclude: (List Str)) -> (List Str)
-  (if (and (str-list-contains used s) (not (str-list-contains exclude s)))
+  (if (and (contains used s) (not (contains exclude s)))
     (Cons s (free-vars-in-scope-order rest used exclude))
     (free-vars-in-scope-order rest used exclude)))
 

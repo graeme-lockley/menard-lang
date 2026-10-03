@@ -27,6 +27,7 @@
 (import "../reader/ast.mnd")
 (import "../desugar/rest.mnd")
 (import "./types.mnd")
+(import std/list)
 
 ; Re-export shim — see reader/casing.mnd for why this is needed: a `pub`
 ; signature (typecheck-forms, below) may not mention a private nominal
@@ -130,11 +131,6 @@
     (None) (None)
     (Some s) (Some (strip-trailing-colon s))))
 
-(defn str-list-contains (xs: (List Str)) (x: Str) -> Bool
-  (match xs
-    [] false
-    (Cons h rest) (if (= h x) true (str-list-contains rest x))))
-
 ; ---------------------------------------------------------------------------
 ; Builtins (§2.8.1/§2.8.2): the Int/Bool/Str ops, intrinsics, Map,
 ; StringBuffer, Maybe/Result/List and the Tier-0 host seam that the
@@ -229,96 +225,6 @@
     (value-set env "Nil" (Scheme ["a"] (t-fn [] (t-list (TParam "a")))))
     (value-set env "Cons" (Scheme ["a"] (t-fn [(TParam "a") (t-list (TParam "a"))] (t-list (TParam "a")))))))
 
-(defn register-io-error-ctor (env: TypeEnv) (name: Str) (payloads: (List Type)) -> Unit
-  (do
-    (ctor-set env name (CtorInfo "IoError" payloads []))
-    (value-set env name (Scheme [] (t-fn payloads (t-nominal "IoError" [] "variant"))))))
-
-(defn install-io-error (env: TypeEnv) -> Unit
-  (do
-    (type-set env "IoError"
-      (VariantDef "IoError" []
-        [
-  (VariantCtor "NotFound" (Nil))
-  (VariantCtor "Permission" (Nil))
-  (VariantCtor "Exists" (Nil))
-  (VariantCtor "IsADirectory" (Nil))
-  (VariantCtor "NotADirectory" (Nil))
-  (VariantCtor "InvalidPath" (Nil))
-  (VariantCtor "TooLarge" (Nil))
-  (VariantCtor "Other" (Cons (t-int) (Nil)))]))
-    (register-io-error-ctor env "NotFound" [])
-    (register-io-error-ctor env "Permission" [])
-    (register-io-error-ctor env "Exists" [])
-    (register-io-error-ctor env "IsADirectory" [])
-    (register-io-error-ctor env "NotADirectory" [])
-    (register-io-error-ctor env "InvalidPath" [])
-    (register-io-error-ctor env "TooLarge" [])
-    (register-io-error-ctor env "Other" [(t-int)])))
-
-(defn install-spawn-status (env: TypeEnv) -> Unit
-  (do
-    (type-set env "SpawnStatus"
-      (VariantDef "SpawnStatus" []
-        [(VariantCtor "Exited" (Cons (t-int) (Nil))) (VariantCtor "Signalled" (Cons (t-int) (Nil)))]))
-    (ctor-set env "Exited" (CtorInfo "SpawnStatus" [(t-int)] []))
-    (ctor-set env "Signalled" (CtorInfo "SpawnStatus" [(t-int)] []))
-    (value-set env "Exited" (Scheme [] (t-fn [(t-int)] (t-nominal "SpawnStatus" [] "variant"))))
-    (value-set env "Signalled" (Scheme [] (t-fn [(t-int)] (t-nominal "SpawnStatus" [] "variant"))))))
-
-; SpawnOutput tag 32 and the SpawnError-only tags live in the runtime.
-; NotFound and Permission stay IoError constructors.
-(defn install-spawn-capture (env: TypeEnv) -> Unit
-  (do
-    (let status (t-nominal "SpawnStatus" [] "variant"))
-    (let err-ty (t-nominal "SpawnError" [] "variant"))
-    (let out-ty (t-nominal "SpawnOutput" [] "record"))
-    (type-set env "SpawnError"
-      (VariantDef "SpawnError" []
-        [(VariantCtor "NotFound" [])
-         (VariantCtor "NotExecutable" [])
-         (VariantCtor "Permission" [])
-         (VariantCtor "InvalidArgument" [])
-         (VariantCtor "TooManyArguments" [])
-         (VariantCtor "Unsupported" [])]))
-    (ctor-set env "NotExecutable" (CtorInfo "SpawnError" [] []))
-    (ctor-set env "InvalidArgument" (CtorInfo "SpawnError" [] []))
-    (ctor-set env "TooManyArguments" (CtorInfo "SpawnError" [] []))
-    (ctor-set env "Unsupported" (CtorInfo "SpawnError" [] []))
-    (value-set env "NotExecutable" (Scheme [] (t-fn [] err-ty)))
-    (value-set env "InvalidArgument" (Scheme [] (t-fn [] err-ty)))
-    (value-set env "TooManyArguments" (Scheme [] (t-fn [] err-ty)))
-    (value-set env "Unsupported" (Scheme [] (t-fn [] err-ty)))
-    (type-set env "SpawnOutput"
-      (RecordDef "SpawnOutput" []
-        [(RecordField "status" status) (RecordField "stdout" (t-str)) (RecordField "stderr" (t-str))]))
-    (ctor-set env "SpawnOutput" (CtorInfo "SpawnOutput" [status (t-str) (t-str)] []))
-    (value-set env "SpawnOutput" (Scheme [] (t-fn [status (t-str) (t-str)] out-ty)))
-    (value-set env "spawn-capture"
-      (Scheme [] (t-fn [(t-list (t-str)) (t-str)] (t-result out-ty err-ty))))))
-
-(defn install-host-seam (env: TypeEnv) -> Unit
-  (do
-    (value-set env "exit" (Scheme [] (t-fn [(t-int)] (t-unit))))
-    (value-set env "arg-count" (Scheme [] (t-fn [] (t-int))))
-    (value-set env "arg" (Scheme [] (t-fn [(t-int)] (t-str))))
-    (value-set env "write" (Scheme [] (t-fn [(t-int) (t-str)] (t-result (t-unit) (t-nominal "IoError" [] "variant")))))
-    (value-set env "read-file" (Scheme [] (t-fn [(t-str)] (t-result (t-str) (t-nominal "IoError" [] "variant")))))
-    (value-set env "write-file" (Scheme [] (t-fn [(t-str) (t-str)] (t-result (t-unit) (t-nominal "IoError" [] "variant")))))
-    (value-set env "spawn" (Scheme [] (t-fn [(t-list (t-str))] (t-result (t-nominal "SpawnStatus" [] "variant") (t-nominal "IoError" [] "variant")))))
-    (value-set env "getenv" (Scheme [] (t-fn [(t-str)] (t-maybe (t-str)))))
-    (value-set env "exists" (Scheme [] (t-fn [(t-str)] (t-bool))))
-    (value-set env "rename" (Scheme [] (t-fn [(t-str) (t-str)] (t-result (t-unit) (t-nominal "IoError" [] "variant")))))
-    (value-set env "isatty" (Scheme [] (t-fn [(t-int)] (t-bool))))
-    (value-set env "mtime" (Scheme [] (t-fn [(t-str)] (t-int))))
-    (value-set env "cwd" (Scheme [] (t-fn [] (t-str))))
-    (value-set env "ensure-dir" (Scheme [] (t-fn [(t-str)] (t-bool))))
-    (value-set env "list-dir" (Scheme [] (t-fn [(t-str)] (t-str))))
-    (value-set env "realpath" (Scheme [] (t-fn [(t-str)] (t-str))))
-    (value-set env "now-ms" (Scheme [] (t-fn [] (t-int))))
-    (value-set env "remove" (Scheme [] (t-fn [(t-str)] (t-bool))))
-    (value-set env "is-dir" (Scheme [] (t-fn [(t-str)] (t-bool))))))
-
 (defn install-builtins (env: TypeEnv) -> Unit
   (do
     (install-arith env)
@@ -329,11 +235,7 @@
     (install-sb-ops env)
     (install-maybe env)
     (install-result env)
-    (install-list-type env)
-    (install-io-error env)
-    (install-spawn-status env)
-    (install-spawn-capture env)
-    (install-host-seam env)))
+    (install-list-type env)))
 
 (defn empty-env -> TypeEnv
   (do
@@ -464,14 +366,14 @@
     _ (unify-mismatch env (t-fn pa ra) tb span)))
 
 (defn unify-fn-params (env: TypeEnv) (pa: (List Type)) (pb: (List Type)) (ra: Type) (rb: Type) (span: Span) -> Bool
-  (if (= (list-length pa) (list-length pb))
+  (if (= (length pa) (length pb))
     (if (unify-list-pairwise env pa pb span) (unify env ra rb span) false)
     (do
       (err! env "E_TYPE_ARITY"
         (str-concat "function arity mismatch: expected "
-                    (show (list-length pa))
+                    (show (length pa))
                     ", found "
-                    (show (list-length pb)))
+                    (show (length pb)))
         span)
       false)))
 
@@ -490,7 +392,7 @@
 
 (defn unify-nominal-same (env: TypeEnv) (na: Str) (aa: (List Type)) (ka: Str) (nb: Str) (ab: (List Type)) (kb: Str) (span: Span) -> Bool
   (if (= na nb)
-    (if (= (list-length aa) (list-length ab))
+    (if (= (length aa) (length ab))
       (unify-list-pairwise env aa ab span)
       (do (err! env "E_TYPE_MISMATCH" (str-concat "type argument count mismatch for " na) span) false))
     (unify-mismatch env (TNominal na aa ka) (TNominal nb ab kb) span)))
@@ -583,7 +485,7 @@
     _ (do (err! env "E_TYPE_EXPR" "invalid type expression" (ast-span ast)) (fresh-var-anon env))))
 
 (defn parse-type-expr-sym (env: TypeEnv) (name: Str) (sp: Span) (params: (List Str)) -> Type
-  (if (str-list-contains params name) (TParam name)
+  (if (contains params name) (TParam name)
     (parse-type-expr-sym-prim env name sp)))
 
 (defn parse-type-expr-sym-prim (env: TypeEnv) (name: Str) (sp: Span) -> Type
@@ -1188,12 +1090,12 @@
           (do (expect-type env (infer env a local) e (ast-span a)) (check-recur-args env arest erest local)))))
 
 (defn check-recur-arity (env: TypeEnv) (args: (List Ast)) (expected: (List Type)) (sp: Span) -> Unit
-  (if (= (list-length args) (list-length expected)) ()
+  (if (= (length args) (length expected)) ()
     (err! env "E_TYPE_ARITY"
       (str-concat "recur expects "
-                  (show (list-length expected))
+                  (show (length expected))
                   " argument(s), got "
-                  (show (list-length args)))
+                  (show (length args)))
       sp)))
 
 (defn infer-recur-with (env: TypeEnv) (args: (List Ast)) (expected: (List Type)) (sp: Span) (local: (Map Str Type)) -> Type
@@ -1392,7 +1294,7 @@
 (defn check-ctor-covered (env: TypeEnv) (c: VariantCtor) (covered: (List Str)) (sp: Span) -> Unit
   (match c
     (VariantCtor name _)
-      (if (str-list-contains covered name) ()
+      (if (contains covered name) ()
         (err! env "E_TYPE_EXHAUSTIVE" (str-concat "non-exhaustive match: missing " name) sp))))
 
 (defn check-ctors-covered (env: TypeEnv) (ctors: (List VariantCtor)) (covered: (List Str)) (sp: Span) -> Unit

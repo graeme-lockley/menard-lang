@@ -25,6 +25,7 @@
 ; matches the interpreter for `Int`.
 
 (import "../reader/ast.mnd")
+(import std/list)
 
 ; Re-export shim: a `pub` signature may not mention a private nominal
 ; type (ADR 27), even one imported `pub` from elsewhere — see
@@ -43,12 +44,6 @@
 
 (defn is-sym (ast: Ast) (name: Str) -> Bool
   (match (sym-str ast) (Some n) (= n name) (None) false))
-
-(defn list-length (xs: (List Str)) -> Int
-  (match xs [] 0 (Cons _ rest) (+ 1 (list-length rest))))
-
-(defn ast-length (xs: (List Ast)) -> Int
-  (match xs [] 0 (Cons _ rest) (+ 1 (ast-length rest))))
 
 (defn append-ast (xs: (List Ast)) (ys: (List Ast)) -> (List Ast)
   (match xs [] ys (Cons x rest) (Cons x (append-ast rest ys))))
@@ -303,7 +298,7 @@
           (match (sym-str name-ast)
             (None) (variant-ctors rest ty ctors acc)
             (Some cname)
-              (Cons (DeriveCtor cname (ast-length payloads)) (variant-ctors rest ty ctors acc)))
+              (Cons (DeriveCtor cname (length payloads)) (variant-ctors rest ty ctors acc)))
         _ (variant-ctors rest ty ctors acc))))
 
 (defn remember-variant (cs: (List Ast)) (ty: Str) (ctors: (Map Str Str)) -> (Map Str Str)
@@ -345,7 +340,7 @@
       (Cons name-ast fields)
         (match (take-name name-ast)
           (None) acc
-          (Some name) (acc-add-defrec acc name (ast-length fields)))
+          (Some name) (acc-add-defrec acc name (length fields)))
       [] acc)
     (if (= hn "variant")
       (match rest

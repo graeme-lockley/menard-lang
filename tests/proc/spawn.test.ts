@@ -1,7 +1,18 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../../host/src/interp/pipeline.ts";
-import { createRealHost } from "../../host/src/host/index.ts";
+import { createRealHost, type Host } from "../../host/src/host/index.ts";
+
+const scratch = mkdtempSync(join(tmpdir(), "menard-spawn-"));
+
+function runProc(src: string, host: Host) {
+  const path = join(scratch, "main.mnd");
+  const text = `(import std/proc)\n${src}`;
+  writeFileSync(path, text);
+  return run(text, { path, host });
+}
 
 const stub = join(import.meta.dir, "../../stub-child/main.ts");
 const bun = process.execPath;
@@ -17,7 +28,7 @@ function listStr(...xs: string[]): string {
 describe("spawn (real child)", () => {
   test("empty argv is InvalidArgument", () => {
     const real = createRealHost({ spawnEnabled: true });
-    const r = run(`(spawn (Nil))`, { host: real });
+    const r = runProc(`(spawn (Nil))`, real);
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "variant") {
       expect(r.value.ctor).toBe("Err");
@@ -28,13 +39,13 @@ describe("spawn (real child)", () => {
 
   test("NUL in an argument is InvalidArgument", () => {
     const real = createRealHost({ spawnEnabled: true });
-    const r = run(
+    const r = runProc(
       `(let sb (sb-new)
          (do
            (sb-append! sb "a")
            (sb-append-byte! sb 0)
            (spawn (Cons (sb-to-str sb) (Nil)))))`,
-      { host: real },
+      real,
     );
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "variant") {
@@ -46,9 +57,7 @@ describe("spawn (real child)", () => {
 
   test("missing argv[0] is NotFound", () => {
     const real = createRealHost({ spawnEnabled: true });
-    const r = run(`(spawn ${listStr("./no-such-menard-child-xyz")})`, {
-      host: real,
-    });
+    const r = runProc(`(spawn ${listStr("./no-such-menard-child-xyz")})`, real);
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "variant") {
       expect(r.value.ctor).toBe("Err");
@@ -59,7 +68,7 @@ describe("spawn (real child)", () => {
 
   test("spawn stub-child exit status", () => {
     const real = createRealHost({ spawnEnabled: true });
-    const r = run(`(spawn ${listStr(bun, stub, "exit", "42")})`, { host: real });
+    const r = runProc(`(spawn ${listStr(bun, stub, "exit", "42")})`, real);
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "variant") {
       expect(r.value.ctor).toBe("Ok");
@@ -74,9 +83,7 @@ describe("spawn (real child)", () => {
 
   test("spawn-capture feeds stdin and captures stdout", () => {
     const real = createRealHost({ spawnEnabled: true });
-    const r = run(`(spawn-capture ${listStr(bun, stub, "cat-stdin")} "hi")`, {
-      host: real,
-    });
+    const r = runProc(`(spawn-capture ${listStr(bun, stub, "cat-stdin")} "hi")`, real);
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "variant" && r.value.ctor === "Ok") {
       const out = r.value.payloads[0];

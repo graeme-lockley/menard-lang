@@ -9,7 +9,8 @@
 (import "../reader/ast.mnd")
 (import "../reader/read.mnd")
 (import "../reader/print.mnd")
-(import "../../stdlib/io.mnd")
+(import std/io)
+(import std/sys)
 
 (defn nl -> Str
   (do

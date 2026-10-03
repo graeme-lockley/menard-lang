@@ -1,0 +1,32 @@
+; The functions every file has without an import.
+; @module std/basics
+
+; Returns its argument unchanged.
+; @test (id 1) => 1
+(pub defn (id [a]) (x: a) -> a
+  x)
+
+; Logical negation.
+; @test (not true) => false
+(pub defn not (b: Bool) -> Bool
+  (if b false true))
+
+; The smaller of x and y.
+; @test (min 2 5) => 2
+(pub defn min (x: Int) (y: Int) -> Int
+  (if (< x y) x y))
+
+; The larger of x and y.
+; @test (max 2 5) => 5
+(pub defn max (x: Int) (y: Int) -> Int
+  (if (> x y) x y))
+
+; Absolute value of n.
+; @test (abs -3) => 3
+(pub defn abs (n: Int) -> Int
+  (if (< n 0) (- n) n))
+
+; n limited to the inclusive range lo through hi.
+; @test (clamp 0 10 15) => 10
+(pub defn clamp (lo: Int) (hi: Int) (n: Int) -> Int
+  (min hi (max lo n)))

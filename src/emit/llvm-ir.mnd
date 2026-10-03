@@ -167,7 +167,7 @@
 ; Order: mn_write_stdout, mn_print_i64, mn_write_stderr, mn_alloc,
 ; heap helpers (3C), mn_print_str, Str/Ref/SB (3D), Map (3F), closures (3E),
 ; tier-0 I/O (3G: mn_init … mn_exit).
-(pub let extern-count 83)
+(pub let extern-count 84)
 
 (pub defn extern-write-stdout-abs (num-strings: Int) -> Int num-strings)
 (pub defn extern-print-i64-abs (num-strings: Int) -> Int (+ num-strings 1))
@@ -252,6 +252,7 @@
 (pub defn extern-now-ms-abs (num-strings: Int) -> Int (+ num-strings 80))
 (pub defn extern-remove-abs (num-strings: Int) -> Int (+ num-strings 81))
 (pub defn extern-is-dir-abs (num-strings: Int) -> Int (+ num-strings 82))
+(pub defn extern-sb-to-str-abs (num-strings: Int) -> Int (+ num-strings 83))
 
 ; Builtin constructor tags — must match runtime/src/variants.c.
 (pub let tag-nil 0)

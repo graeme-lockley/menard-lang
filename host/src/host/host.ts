@@ -1,6 +1,10 @@
 import * as nodeFs from "node:fs";
 import { spawnSync } from "node:child_process";
 import * as os from "node:os";
+import * as nodePath from "node:path";
+import { fileURLToPath } from "node:url";
+
+const hostDir = nodePath.dirname(fileURLToPath(import.meta.url));
 
 export type IoError =
   | { tag: "NotFound" }
@@ -339,10 +343,11 @@ function realOs(): Pick<
       }
     },
     realpath(path) {
+      const shipped = shippedStdlib(path);
       try {
-        return nodeFs.realpathSync(path);
+        return nodeFs.realpathSync(shipped ?? path);
       } catch {
-        return "";
+        return shipped ?? "";
       }
     },
     nowMs() {
@@ -561,6 +566,17 @@ export function createLiveHost(
   };
 }
 
+/** A shipped `stdlib/…` file, from the working directory or beside this repo. */
+function shippedStdlib(path: string): string | null {
+  if (!path.startsWith("stdlib/")) return null;
+  const roots = [process.cwd(), nodePath.resolve(hostDir, "../../..")];
+  for (const root of roots) {
+    const full = nodePath.join(root, path);
+    if (nodeFs.existsSync(full)) return full;
+  }
+  return null;
+}
+
 /**
  * Real-filesystem host for stage0 — paths are OS paths, no virtual normalize.
  */
@@ -604,8 +620,9 @@ export function createRealHost(
       }
     },
     readFile(path) {
+      const resolved = shippedStdlib(path) ?? path;
       try {
-        return { ok: true, bytes: new Uint8Array(nodeFs.readFileSync(path)) };
+        return { ok: true, bytes: new Uint8Array(nodeFs.readFileSync(resolved)) };
       } catch (e) {
         return { ok: false, error: mapNodeErrno((e as NodeJS.ErrnoException).code) };
       }
@@ -631,6 +648,7 @@ export function createRealHost(
       return v === undefined ? null : v;
     },
     exists(path) {
+      if (shippedStdlib(path)) return true;
       try {
         nodeFs.statSync(path);
         return true;

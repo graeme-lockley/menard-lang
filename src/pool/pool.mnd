@@ -54,6 +54,7 @@
 ; is what knows their bytes").
 
 (import "../reader/ast.mnd")
+(import std/list)
 
 ; Re-export shim — see `reader/casing.mnd`'s header comment for why this
 ; is needed: a `pub` signature (`pool-summary`, below) may not mention a
@@ -69,16 +70,6 @@
 
 (defn is-sym (ast: Ast) (name: Str) -> Bool
   (match (sym-str ast) (Some n) (= n name) (None) false))
-
-(defn list-length (xs: (List Ast)) -> Int
-  (match xs
-    [] 0
-    (Cons _ rest) (+ 1 (list-length rest))))
-
-(defn str-list-contains (xs: (List Str)) (x: Str) -> Bool
-  (match xs
-    [] false
-    (Cons h rest) (if (= h x) true (str-list-contains rest x))))
 
 ; `main` or `(f [a])` — the type-parameter list (if any) is irrelevant
 ; here, only the bare declared name is.
@@ -129,7 +120,7 @@
 
 (defn register-one-variant-ctor-arity (c: Ast) (acc: (Map Str Int)) -> (Map Str Int)
   (match c
-    (ParenNode (Cons cname-ast payload-asts) _) (register-ctor-arity cname-ast (list-length payload-asts) acc)
+    (ParenNode (Cons cname-ast payload-asts) _) (register-ctor-arity cname-ast (length payload-asts) acc)
     _ acc))
 
 (defn register-variant-ctor-arities (ctor-asts: (List Ast)) (acc: (Map Str Int)) -> (Map Str Int)
@@ -150,7 +141,7 @@
 (defn collect-defrec-decl-arities-named (name-part: Ast) (fields: (List Ast)) (acc: (Map Str Int)) -> (Map Str Int)
   (match (decl-name-of name-part)
     (None) acc
-    (Some type-name) (map-set acc type-name (list-length fields))))
+    (Some type-name) (map-set acc type-name (length fields))))
 
 (defn collect-arities-named (hn: Str) (rest: (List Ast)) (acc: (Map Str Int)) -> (Map Str Int)
   (if (= hn "variant") (collect-variant-decl-arities rest acc)
@@ -290,7 +281,7 @@
     (Cons h rest) (str-insert-sorted h (sort-strs rest))))
 
 (defn insert-distinct (x: Str) (xs: (List Str)) -> (List Str)
-  (if (str-list-contains xs x) xs (Cons x xs)))
+  (if (contains xs x) xs (Cons x xs)))
 
 (defn dedup-list (xs: (List Str)) -> (List Str)
   (match xs

@@ -2,7 +2,7 @@
 ; Prints a label, then the fixture text.
 ; Run with: `./mn run examples/echo-file.mnd` (cwd = repo root).
 
-(import "../stdlib/io.mnd")
+(import std/io)
 
 (defn main -> Int
   (match (read-file "examples/fixtures/echo-input.txt")

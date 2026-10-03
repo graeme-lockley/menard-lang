@@ -1,6 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { diagnose, run } from "../../../host/src/interp/pipeline.ts";
 import { createHost, createVirtualFs } from "../../../host/src/host/index.ts";
 
@@ -69,7 +67,7 @@ describe("modules", () => {
 
   test("extern is allowed in seam module path", () => {
     const host = hostWith({
-      "/stdlib/io.mnd": `(pub extern write (fd: Int) (s: Str) -> (Result Unit IoError))\n`,
+      "/stdlib/io.mnd": `(pub variant IoError (NotFound))\n(pub extern write (fd: Int) (s: Str) -> (Result Unit IoError))\n`,
       "/main.mnd": `(import "./stdlib/io.mnd")\n(write 1 "ok")\n`,
     });
     const src = host.readFile("/main.mnd");
@@ -94,16 +92,9 @@ describe("modules", () => {
     expect(diags.some((d) => d.code === "E_PUB_PRIVATE_TYPE")).toBe(true);
   });
 
-  test("prelude loads via import", () => {
-    const root = join(import.meta.dir, "../../..");
-    const read = (rel: string) => new TextDecoder().decode(readFileSync(join(root, rel)));
+  test("std/basics is in scope without an import", () => {
     const host = hostWith({
-      "/prelude/core.mnd": read("prelude/core.mnd"),
-      "/stdlib/sys.mnd": read("stdlib/sys.mnd"),
-      "/stdlib/io.mnd": read("stdlib/io.mnd"),
-      "/stdlib/fs.mnd": read("stdlib/fs.mnd"),
-      "/stdlib/proc.mnd": read("stdlib/proc.mnd"),
-      "/main.mnd": `(import "./prelude/core.mnd")\n(not true)\n`,
+      "/main.mnd": "(not true)\n",
     });
     const src = host.readFile("/main.mnd");
     if (!src.ok) return;

@@ -1,0 +1,15 @@
+; String helpers.
+
+(import std/string)
+
+(test "starts-with matches the prefix" (= (starts-with "hello" "he") true))
+
+(test "ends-with matches the suffix" (= (ends-with "hello" "lo") true))
+
+(test "has finds a substring" (= (has "hello" "ell") true))
+
+(test "has rejects a missing needle" (= (has "hello" "x") false))
+
+(test "join inserts the separator" (= (join "," ["a" "b"]) "a,b"))
+
+(test "join of nothing is empty" (= (join "," []) ""))

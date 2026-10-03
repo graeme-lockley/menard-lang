@@ -6,7 +6,7 @@
 (import "../reader/read.mnd")
 (import "../desugar/desugar.mnd")
 (import "./check.mnd")
-(import "../../stdlib/io.mnd")
+(import std/io)
 
 (defn read-forms (path: Str) -> (Maybe (List Ast))
   (match (read-file path)

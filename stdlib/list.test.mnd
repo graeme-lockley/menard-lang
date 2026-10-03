@@ -1,0 +1,26 @@
+; List operations.
+
+(import std/list)
+
+(test "length of three" (= (length [1 2 3]) 3))
+
+(test "nth returns the element" (= (nth [10 20] 1) (Some 20)))
+
+(test "nth past the end is none" (= (nth [10] 3) (None)))
+
+(test "append joins two lists" (= (append [1] [2 3]) [1 2 3]))
+
+(test "reverse flips the order" (= (reverse [1 2 3]) [3 2 1]))
+
+(test "map adds one" (= (map (fn (n) (+ n 1)) [1 2]) [2 3]))
+
+(test "filter keeps the larger ints" (= (filter (fn (n) (> n 1)) [1 2 3]) [2 3]))
+
+(test "fold sums" (= (fold (fn (a n) (+ a n)) 0 [1 2 3]) 6))
+
+(test "zip pairs until the shorter list ends"
+  (= (zip [1 2] ["a" "b"]) [(Pair 1 "a") (Pair 2 "b")]))
+
+(test "contains finds an element" (= (contains [1 2 3] 2) true))
+
+(test "sort orders ints" (= (sort [3 1 2]) [1 2 3]))

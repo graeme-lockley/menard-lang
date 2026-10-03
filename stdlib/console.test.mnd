@@ -1,0 +1,9 @@
+(import std/console)
+
+(test "paint is a no-op when color is off" (= (paint false "[31m" "hi") "hi"))
+
+(test "paint wraps the text when color is on"
+  (and (has-color (paint true "[31m" "hi")) true))
+
+(defn has-color (s: Str) -> Bool
+  (and (> (str-byte-length s) 2) (= (str-byte s 0) 27)))

@@ -10,119 +10,18 @@
 (import "../reader/read.mnd")
 (import "../cache/cache.mnd")
 (import "../cache/sep.mnd")
-(import "../../stdlib/io.mnd")
-
-(defn not (b: Bool) -> Bool (if b false true))
-
-(defrec Counts (passed: Int) (failed: Int))
+(import std/console)
+(import std/fs)
+(import std/io)
+(import std/proc)
+(import std/string)
+(import std/test)
 
 (defn nl -> Str
   (do
     (let sb (sb-new))
     (sb-append-byte! sb 10)
     (sb-take-str! sb)))
-
-(defn starts-with (s: Str) (prefix: Str) -> Bool
-  (do
-    (let n (str-byte-length prefix))
-    (and (>= (str-byte-length s) n) (= (str-slice s 0 n) prefix))))
-
-(defn ends-with (s: Str) (suffix: Str) -> Bool
-  (do
-    (let sn (str-byte-length s))
-    (let un (str-byte-length suffix))
-    (and (>= sn un) (= (str-slice s (- sn un) un) suffix))))
-
-(defn join-path (dir: Str) (name: Str) -> Str
-  (if (or (= dir "") (= dir ".")) name
-    (if (= dir "/") (str-concat "/" name)
-      (str-concat dir "/" name))))
-
-(defn skip-name (name: Str) -> Bool
-  (or (starts-with name ".") (= name "node_modules") (= name "build") (= name "target")))
-
-(defn insert-str (x: Str) (xs: (List Str)) -> (List Str)
-  (match xs
-    [] [x]
-    (Cons y rest)
-      (if (<= (compare x y) 0) (Cons x xs)
-        (Cons y (insert-str x rest)))))
-
-(defn sort-strs (xs: (List Str)) (acc: (List Str)) -> (List Str)
-  (match xs
-    [] acc
-    (Cons x rest) (sort-strs rest (insert-str x acc))))
-
-(defn test-at-bol -> Str
-  (do
-    (let sb (sb-new))
-    (sb-append-byte! sb 10)
-    (sb-append! sb "(test \"")
-    (sb-take-str! sb)))
-
-(defn contains-test (path: Str) -> Bool
-  (match (read-file path)
-    (Err _) false
-    (Ok src)
-      (or (starts-with src "(test \"")
-        (str-has-from src (test-at-bol) 0))))
-
-; A recursive search is one frame per byte. `lower.mnd` is large enough
-; that `./mn test` overflowed the stack inside it.
-(defn bytes-eq (s: Str) (i: Int) (pat: Str) (j: Int) (n: Int) -> Bool
-  (if (>= j n) true
-    (if (= (str-byte s (+ i j)) (str-byte pat j))
-      (bytes-eq s i pat (+ j 1) n)
-      false)))
-
-(defn str-has-from (s: Str) (needle: Str) (i: Int) -> Bool
-  (do
-    (let n (str-byte-length needle))
-    (let sn (str-byte-length s))
-    (loop ((j i))
-      (if (> (+ j n) sn) false
-        (if (bytes-eq s j needle 0 n) true
-          (recur (+ j 1)))))))
-
-(defn is-test-file (path: Str) -> Bool
-  (if (ends-with path ".test.mnd") true
-    (if (ends-with path ".mnd") (contains-test path) false)))
-
-(defn walk (dir: Str) (acc: (List Str)) -> (List Str)
-  (walk-names dir (sort-strs (split-lines (list-dir dir)) []) acc))
-
-(defn walk-names (dir: Str) (names: (List Str)) (acc: (List Str)) -> (List Str)
-  (match names
-    [] acc
-    (Cons name rest)
-      (if (skip-name name) (walk-names dir rest acc)
-        (walk-child dir (join-path dir name) rest acc))))
-
-(defn walk-child (dir: Str) (child: Str) (rest: (List Str)) (acc: (List Str)) -> (List Str)
-  (if (is-dir child)
-    (walk-names dir rest (walk child acc))
-    (if (is-test-file child)
-      (walk-names dir rest (Cons child acc))
-      (walk-names dir rest acc))))
-
-(defn discover (path: Str) -> (List Str)
-  (if (is-dir path) (reverse-strs (walk path []) [])
-    (if (is-test-file path) [path] [])))
-
-(defn reverse-strs (xs: (List Str)) (acc: (List Str)) -> (List Str)
-  (match xs [] acc (Cons x rest) (reverse-strs rest (Cons x acc))))
-
-(defn count-line (line: Str) (c: Counts) -> Counts
-  (match c
-    (Counts p f)
-      (if (starts-with line "pass ") (Counts (+ p 1) f)
-        (if (starts-with line "fail ") (Counts p (+ f 1))
-          c))))
-
-(defn count-lines (lines: (List Str)) (c: Counts) -> Counts
-  (match lines
-    [] c
-    (Cons line rest) (count-lines rest (count-line line c))))
 
 (defn print-verbose (lines: (List Str)) (on: Bool) -> Unit
   (match lines
@@ -134,8 +33,8 @@
             (write stdout "  ")
             (write stdout
               (if (starts-with line "pass ")
-                (paint-text on "[32m" line)
-                (paint-text on "[31m" line)))
+                (paint on "[32m" line)
+                (paint on "[31m" line)))
             (write stdout (nl))
             ())
           ())
@@ -219,12 +118,9 @@
   (do
     (write stdout path)
     (write stdout " ... ")
-    (write stdout (if ok (paint-text on "[32m" "ok") (paint-text on "[31m" "FAILED")))
+    (write stdout (if ok (paint on "[32m" "ok") (paint on "[31m" "FAILED")))
     (write stdout (nl))
     ()))
-
-(defn exit-code (st: SpawnStatus) -> Int
-  (match st (Exited n) n (Signalled n) (+ 128 n)))
 
 (defn run-file (path: Str) (clean: Bool) (verbose: Bool) (quiet: Bool) (cc: Str) (runtime: Str) (on: Bool) -> Counts
   (do
@@ -246,11 +142,11 @@
             (do
               (let lines (split-lines text))
               (if verbose (print-verbose lines on) ())
-              (let counted (count-lines lines (Counts 0 0)))
+              (let counted (count-lines lines))
               (match counted
                 (Counts p f)
                   (do
-                    (let bad (or (> f 0) (not (= (exit-code st) 0))))
+                    (let bad (or (> f 0) (not (= (status->exit-code st) 0))))
                     (file-line path (not bad) on)
                     (if (> f 0) (explain-file path lines) ())
                     (if (and bad (> (str-byte-length err) 0))
@@ -266,21 +162,6 @@
         (Counts p fai)
           (match acc
             (Counts ap af) (run-files rest clean verbose quiet cc runtime on (Counts (+ ap p) (+ af fai)))))))
-
-(defn summary (c: Counts) (ms: Int) (on: Bool) -> Unit
-  (match c
-    (Counts p f)
-      (do
-        (if (> f 0)
-          (do
-            (write stdout (paint-text on "[31m" (str-concat (show f) " failed")))
-            (write stdout ", ")
-            ())
-          ())
-        (write stdout (paint-text on "[32m" (str-concat (show p) " passed")))
-        (write stdout (str-concat " (" (show ms) "ms)"))
-        (write stdout (nl))
-        ())))
 
 (pub defn run-suite (path: Str) (clean: Bool) (verbose: Bool) (quiet: Bool) (cc: Str) (runtime: Str) -> Int
   (do

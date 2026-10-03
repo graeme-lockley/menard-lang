@@ -1,0 +1,11 @@
+; Maybe helpers.
+
+(import std/maybe)
+
+(test "map changes a some" (= (map (fn (n) (+ n 1)) (Some 1)) (Some 2)))
+
+(test "map leaves none" (= (map (fn (n) (+ n 1)) (None)) (None)))
+
+(test "and-then chains some" (= (and-then (fn (n) (Some (+ n 1))) (Some 1)) (Some 2)))
+
+(test "unwrap-or returns the default" (= (unwrap-or (None) 0) 0))

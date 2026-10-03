@@ -1,8 +1,8 @@
 ; Interpreter and native `spawn-capture` both return the child's stdout.
 ; `/bin/echo` and `/bin/cat` are absolute paths, so there is no PATH search.
 
-(import "../../../stdlib/io.mnd")
-(import "../../../stdlib/proc.mnd")
+(import std/io)
+(import std/proc)
 
 (defn main -> Int
   (match (spawn-capture ["/bin/echo" "hi"] "")

@@ -19,11 +19,6 @@
 (defn (mk-err [a]) (start: Int) (end: Int) (message: Str) -> (Result a ParseError)
   (Err (ParseError (Span start end 0 0) message)))
 
-; `not` is prelude, not a builtin (see prelude/core.mnd) — restated locally
-; rather than importing the prelude, to keep the reader dependency-free.
-(defn not (b: Bool) -> Bool
-  (if b false true))
-
 ; ---------------------------------------------------------------------------
 ; Byte classes
 

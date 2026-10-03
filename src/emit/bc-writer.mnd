@@ -81,10 +81,11 @@
 ; `type/check.mnd`'s equivalent header note — means these are restated
 ; here rather than imported).
 
-; 2^n, for n small (every call site here passes n <= 32): the "shift" half
-; of the no-bitwise-operators translation in the header comment.
+; 2^n for n in 0..32. A loop, not `(* 2 (pow2 (- n 1)))`: that recursion
+; was one call per bit on every bitstream write.
 (defn pow2 (n: Int) -> Int
-  (if (<= n 0) 1 (* 2 (pow2 (- n 1)))))
+  (loop ((i 0) (acc 1))
+    (if (>= i n) acc (recur (+ i 1) (* acc 2)))))
 
 (defn int-list-length (xs: (List Int)) -> Int
   (match xs
@@ -121,14 +122,22 @@
 
 ; Flush every whole byte currently pending (`pending-bits >= 8`) into
 ; `buf`. Bits above the flushed byte survive in `pending`, shifted down.
-(defn bitsink-flush! (s: BitSink) -> Unit
-  (if (>= (deref (sink-pending-bits s)) 8)
+; The field walker is the hot path: matching `BitSink` once, then
+; touching the refs directly, instead of re-matching on every deref.
+(defn bitsink-flush-fields! (buf: StringBuffer) (pending: (Ref Int)) (pending-bits: (Ref Int)) -> Unit
+  (if (>= (deref pending-bits) 8)
     (do
-      (sb-append-byte! (sink-buf s) (% (deref (sink-pending s)) 256))
-      (set! (sink-pending s) (/ (deref (sink-pending s)) 256))
-      (set! (sink-pending-bits s) (- (deref (sink-pending-bits s)) 8))
-      (bitsink-flush! s))
+      (let p (deref pending))
+      (sb-append-byte! buf (% p 256))
+      (set! pending (/ p 256))
+      (set! pending-bits (- (deref pending-bits) 8))
+      (bitsink-flush-fields! buf pending pending-bits))
     ()))
+
+(defn bitsink-flush! (s: BitSink) -> Unit
+  (match s
+    (BitSink buf pending pending-bits)
+      (bitsink-flush-fields! buf pending pending-bits)))
 
 ; Write the low `width` bits of `value` (unsigned, `value < 2^width`).
 ; `value`'s bits occupy positions [pending-bits, pending-bits+width) and
@@ -136,12 +145,15 @@
 ; `+` here is exactly bitwise OR (see the header comment's no-bitwise-ops
 ; note).
 (defn bitsink-write-fixed! (s: BitSink) (value: Int) (width: Int) -> Unit
-  (if (= width 0)
-    ()
-    (do
-      (set! (sink-pending s) (+ (deref (sink-pending s)) (* value (pow2 (deref (sink-pending-bits s))))))
-      (set! (sink-pending-bits s) (+ (deref (sink-pending-bits s)) width))
-      (bitsink-flush! s))))
+  (match s
+    (BitSink buf pending pending-bits)
+      (if (= width 0) ()
+        (do
+          (let shift (deref pending-bits))
+          (let p (deref pending))
+          (set! pending (+ p (* value (pow2 shift))))
+          (set! pending-bits (+ shift width))
+          (bitsink-flush-fields! buf pending pending-bits)))))
 
 ; VBR(width): `value` split into (width-1)-bit chunks, least-significant
 ; chunk first, each chunk's high bit set iff another chunk follows.
@@ -458,7 +470,8 @@
     (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_realpath
     (write-extern-decl! m (func-type-idx-for-arity 0)) ; mn_now_ms
     (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_remove
-    (write-extern-decl! m (func-type-idx-for-arity 1)))) ; mn_is_dir
+    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_is_dir
+    (write-extern-decl! m (func-type-idx-for-arity 1)))) ; mn_sb_to_str
 
 (defn write-import-decls! (m: BitSink) (imps: (List Imp)) -> Unit
   (match imps
@@ -761,7 +774,8 @@
     (write-record! v vst-code-entry (Cons (extern-realpath-abs num-strings) (str-byte-ops "mn_realpath")))
     (write-record! v vst-code-entry (Cons (extern-now-ms-abs num-strings) (str-byte-ops "mn_now_ms")))
     (write-record! v vst-code-entry (Cons (extern-remove-abs num-strings) (str-byte-ops "mn_remove")))
-    (write-record! v vst-code-entry (Cons (extern-is-dir-abs num-strings) (str-byte-ops "mn_is_dir")))))
+    (write-record! v vst-code-entry (Cons (extern-is-dir-abs num-strings) (str-byte-ops "mn_is_dir")))
+    (write-record! v vst-code-entry (Cons (extern-sb-to-str-abs num-strings) (str-byte-ops "mn_sb_to_str")))))
 
 (defn lfunc-list-length (fs: (List LFunc)) -> Int
   (match fs [] 0 (Cons _ rest) (+ 1 (lfunc-list-length rest))))

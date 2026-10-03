@@ -1,0 +1,7 @@
+; Path predicates.
+
+(import std/fs)
+
+(test "a missing path does not exist" (= (exists "no-such-file-menard") false))
+
+(test "the working directory is a directory" (= (is-dir ".") true))

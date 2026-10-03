@@ -1,6 +1,6 @@
 ; Floats are bytes objects. -0.0 stays distinct from 0.0.
 
-(import "../stdlib/io.mnd")
+(import std/io)
 
 (defn main -> Int
   (do

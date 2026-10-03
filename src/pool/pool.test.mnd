@@ -5,7 +5,7 @@
 
 (import "../reader/read.mnd")
 (import "./pool.mnd")
-(import "../../stdlib/io.mnd")
+(import std/io)
 
 (defn nl -> Str
   (do

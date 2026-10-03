@@ -1,0 +1,23 @@
+; Helpers over the language Result type.
+; @module std/result
+
+; Apply f to an Ok value and leave Err in place.
+; @test (map (fn (n) (+ n 1)) (Ok 1)) => (Ok 2)
+(pub defn (map [a b e]) (f: (Fn a -> b)) (r: (Result a e)) -> (Result b e)
+  (match r
+    (Ok v) (Ok (f v))
+    (Err e) (Err e)))
+
+; Replace an Ok value with the Result that f returns.
+; @test (and-then (fn (n) (Ok (+ n 1))) (Ok 1)) => (Ok 2)
+(pub defn (and-then [a b e]) (f: (Fn a -> (Result b e))) (r: (Result a e)) -> (Result b e)
+  (match r
+    (Ok v) (f v)
+    (Err e) (Err e)))
+
+; The Ok value, or default when r is Err.
+; @test (unwrap-or (Err "x") 0) => 0
+(pub defn (unwrap-or [a e]) (r: (Result a e)) (default: a) -> a
+  (match r
+    (Ok v) v
+    (Err _) default))

@@ -2,7 +2,7 @@
 ; Prints: built hi! (3 bytes)
 ; Run with: `./mn run examples/stringbuffer.mnd`
 
-(import "../stdlib/io.mnd")
+(import std/io)
 
 (defn main -> Int
   (let sb (sb-new))

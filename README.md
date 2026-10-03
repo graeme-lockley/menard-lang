@@ -205,7 +205,7 @@ other yet.
 | `host/src/builtins/` | Map, StringBuffer (TS) |
 | `host/src/host/` | Virtual + real FS Host, live sinks |
 | `host/src/cli/` | `check` / `run` CLI |
-| `prelude/` | Minimal Menard prelude |
+| `stdlib/` | Standard library: implicit `std/basics`, plus list, map, string, io, fs, proc, sys, console, cli, and test |
 | `src/` | Compiler (Menard) — Phase 2. See [`src/README.md`](src/README.md) for the module layout and the stage0 command |
 | `runtime/` | C11 runtime: nursery collector, shadow stack, and the `mn_*` seam |
 | `tests/` | Unit, corpus, semantic, negative, io |

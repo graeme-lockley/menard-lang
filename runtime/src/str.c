@@ -261,6 +261,27 @@ MnWord mn_sb_take_str(MnWord sb) {
   return (MnWord)str;
 }
 
+MnWord mn_sb_to_str(MnWord sb) {
+  if (mn_is_immediate(sb)) {
+    mn_panic("mn_sb_to_str: expected StringBuffer");
+  }
+  MnWord held;
+  mn_root_push(&held);
+  held = sb;
+  MnWord *obj = (MnWord *)(uintptr_t)held;
+  int64_t len = (int64_t)obj[2];
+  int64_t total = HDR + 8 + len;
+  MnWord *str = (MnWord *)mn_alloc(total, &shape_str);
+  obj = (MnWord *)(uintptr_t)held;
+  len = (int64_t)obj[2];
+  str[1] = (MnWord)len;
+  if (len > 0) {
+    memcpy((uint8_t *)(str + 2), (uint8_t *)(uintptr_t)obj[1], (size_t)len);
+  }
+  mn_root_pop();
+  return (MnWord)str;
+}
+
 static MnWord box_float(double d) {
   MnWord *obj = (MnWord *)mn_alloc(16, &shape_float);
   memcpy(&obj[1], &d, sizeof(d));

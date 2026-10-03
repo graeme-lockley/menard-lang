@@ -2,7 +2,10 @@
 ; Run from the repo root: ./mn run examples/host-seam.mnd
 ; `println` only prints string literals, so computed text goes through `write`.
 
-(import "../stdlib/io.mnd")
+(import std/fs)
+(import std/io)
+(import std/proc)
+(import std/sys)
 
 (defn nl -> Str
   (do

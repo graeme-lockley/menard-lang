@@ -130,7 +130,7 @@ projects like this.
 - `str-chars` (§2.8.2)
 - character literals — `Char` has no reader syntax; `char->str` is the conversion that exists
 - `map-entries` (§2.8.2). `map-keys` is accepted by both typers and runs in the interpreter; the native runtime does not provide it
-- the prelude function `find-on-path` (§2.8.3)
+- the library function `find-on-path` (§2.8.3)
 
 ---
 
@@ -798,7 +798,27 @@ instantiation. Instantiation is a typechecker concern only — see §3.3 and §7
 
 ### 2.7 Modules, exports and foreign functions
 
-- One file = one module, explicit `import`, **no import cycles**.
+- One file = one module, explicit `import`, **no import cycles**. `/` and `:` are
+  identifier characters, so a bare import spec is one symbol. A string is still a
+  path. There are three forms:
+
+```lisp
+(import std/list)                         ; stdlib/list.mnd, cwd-relative
+(import "./lexer.mnd")                    ; beside the importing file
+(import github:owner/repo@v1.2.0/console) ; ~/.menard/deps/owner/repo/v1.2.0/console.mnd
+```
+
+  - `std/name` maps to `stdlib/name.mnd`. The path does not depend on the
+    importing file. A missing `.mnd` suffix is added; a hyphen in the name stays
+    in the filename.
+  - `github:owner/repo@version/module` maps into `~/.menard/deps` (or
+    `.menard/deps` when `HOME` is unset). A cache miss downloads that tag's
+    tarball. A second version of the same `owner/repo` in one program is an
+    error. The module path may contain slashes and may not contain `..`.
+  - Anything else is a path relative to the importing file.
+
+  Every module is loaded as if it imported `std/basics`, except `basics` itself.
+  `std/basics` defines its own names and does not re-export other libraries.
 - **`extern` binds a C symbol.** The declared name *is* the link-time symbol, so
   it must be a legal C identifier: no `!`, no `-`. Higher-level names live on
   ordinary Menard wrappers (§2.15):
@@ -915,7 +935,7 @@ the static pool can be deduplicated.
 
 Everything a reader might expect here and does not find — `length`, `map`,
 `fold`, `sort`, `contains`, `append` — is expressible with `match` and `recur`,
-so it lives in the prelude.
+so it lives in `std/list` (§2.8.3).
 
 **None of the six carries a `!`** (§2.15). `print`, `println` and `dump` touch a
 stream, but a stream is not a value you hold, so their effect is not *mutation* —
@@ -1051,34 +1071,50 @@ to stdout with `write` (§2.15), needing no buffer at all — the OS buffers.
 `StringBuffer` is an optimisation for programs that assemble before writing,
 which the emitter does.
 
-#### 2.8.3 The prelude
+#### 2.8.3 The standard library
 
-The prelude is ordinary Menard, ~1,500 lines, and it is where everything
-expressible in the language goes: **all list operations** (`length`, `nth`,
-`append`, `reverse`, `take`, `drop`, `map`, `filter`, `fold`, `zip`, `contains`,
-`sort`), string and character helpers, `parse`, combinators, `map-entries` →
-pairs, `sb-append-show!`, and the compiler itself. It is itself a substantial
-test of the language.
+The standard library is ordinary Menard under `stdlib/`. It is where everything
+expressible in the language goes. There is no prelude barrel: `std/basics` is
+the only module brought in implicitly, and it publishes a short set of names
+(`id`, `not`, `min`, `max`, `abs`, `clamp`). Every other module is an explicit
+import (§2.7).
+
+| Import | Publishes |
+|---|---|
+| `std/basics` | `id`, `not`, `min`, `max`, `abs`, `clamp` (implicit) |
+| `std/list` | `length`, `nth`, `append`, `reverse`, `map`, `filter`, `fold`, `zip`, `contains`, `sort` |
+| `std/map` | `Pair`, `from-list`, `lookup` |
+| `std/string` | `starts-with`, `ends-with`, `has`, `join` |
+| `std/string-buffer` | `sb-append-show!` |
+| `std/result`, `std/maybe` | `map`, `and-then`, `unwrap-or` |
+| `std/io`, `std/fs`, `std/proc`, `std/sys` | the host-seam wrappers (§2.15) |
+| `std/console` | `tty-color`, `paint` |
+| `std/cli` | flag and positional parsing over an argument list |
+| `std/test` | discovery, pass/fail counts, the summary line |
+
+Names are flat. `std/string` publishes `has` rather than `contains`, because
+`std/list` already publishes `contains`. `map` on lists, results, and maybes is
+the same name in three modules; a program imports one of them.
 
 **`sort` takes no comparator.** It uses the derived canonical order — with
 `compare` if a Menard-level comparator is wanted internally, but there is no
 caller-supplied predicate anywhere in an output path (§2.11.O).
 
 ```lisp
-;; expressible, so prelude rather than built-in. Carries ! because it mutates its argument.
+; expressible, so a library function rather than a built-in. Carries ! because it mutates its argument.
 (defn (sb-append-show! [a]) (sb: StringBuffer) (v: a) -> Unit
   (sb-append! sb (show v)))                ; requires showable a
 ```
 
-Two more prelude members earn a mention because §2.15 depends on them:
+Two more library functions earn a mention because §2.15 depends on them:
 
 ```lisp
-;; Specified, not in this version (§1.4). prelude/core.mnd does not define it.
+;; Specified, not in this version (§1.4).
 ;; The driver's own search in src/mn.mnd is not this function.
 (defn (find-on-path) (name: Str) -> (Maybe Str)
   ... reads (getenv "PATH") and probes candidate paths ...)
 
-;; A process status as an exit code, folding signal death the way a shell does.
+;; std/proc. A process status as an exit code, folding signal death the way a shell does.
 (defn (status->exit-code) (s: SpawnStatus) -> Int
   (match s
     (Exited n)    n
@@ -1612,14 +1648,15 @@ thing.**
 | Operation | `!`? | Why |
 |---|---|---|
 | `set!` | **yes** | The anchor case |
-| `sb-append!`, `sb-append-byte!`, `sb-clear!`, `sb-take-str!` | **yes** | The buffer is visible through the argument |
+| `sb-append!`, `sb-append-byte!`, `sb-clear!`, `sb-take-str!`, `sb-append-show!` | **yes** | The buffer is visible through the argument |
 | `sb-to-str` | **no** | Non-destructive — the sharp distinction from `sb-take-str!` |
 | `print`, `println`, `write`, `dump`, `read-file`, `write-file`, `exit`, `spawn`, … | **no** | They touch the OS, not an argument |
 
-The published surface — `stdlib/` and `prelude/` — therefore uses `!` on
-**one special form and four functions**. Applying the rule there is a decision
-about five names, not a judgement call on every I/O call. A lint checks that
-surface. The compiler's own helpers (`emit!`, `bitsink-flush!`, and the rest)
+The published surface — `stdlib/` — therefore uses `!` on **one special form and
+five functions**. Applying the rule there is a decision about six names, not a
+judgement call on every I/O call. A lint checks that surface. `sb-append-show!`
+is the fifth function: it lives in `std/string-buffer` and mutates the buffer it
+is given (§2.8.3). The compiler's own helpers (`emit!`, `bitsink-flush!`, and the rest)
 are local imperative names, and this convention does not propagate into them.
 The transitive case — "this calls something that mutates its argument" — is an
 effect system, which stays out. The mitigation is the size of the published list.
@@ -1658,22 +1695,24 @@ tier over the **real** filesystem as well as the virtual one, because stage0 is
 the compiler running on the interpreter (§3.5): it reads real source files, takes
 real arguments, writes real IR and sets a real exit code.
 
+These names are **module exports**, not part of the global environment.
+`print`, `println`, and `dump` stay ambient (§2.8.1). `IoError`, the spawn
+types, and `write` / `exit` / `read-file` exist only by importing the module
+that publishes them. The interpreter still implements the `mn_*` symbols behind
+the wrappers.
+
 ```lisp
-; menard/sys.mnd
+; std/sys
 (exit)      (code: Int) -> Unit
 (arg-count) () -> Int
 (arg)       (i: Int) -> Str
+(getenv)    (name: Str) -> (Maybe Str)
 
-; menard/io.mnd — named streams, not the raw descriptor numbers
+; std/io — named streams, not the raw descriptor numbers
 (pub let stdin 0)
 (pub let stdout 1)
 (pub let stderr 2)
-(write)     (fd: Int) (s: Str) -> (Result Unit IoError)   ; raw bytes to any fd
-(print)     (a: …) -> Unit                                ; variadic stdout (§2.8.1)
-(println)   (a: …) -> Unit                                ; print, then 0x0a
-(dump)      [a] (v: a) -> Unit                            ; loose debug text, fd 2 only (§2.16)
-
-; menard/fs.mnd — whole-file is the primitive; streaming is v2
+(write)      (fd: Int) (s: Str) -> (Result Unit IoError)   ; raw bytes to any fd
 (read-file)  (path: Str) -> (Result Str IoError)
 (write-file) (path: Str) (data: Str) -> (Result Unit IoError)
 ```
@@ -1727,7 +1766,7 @@ compiler can see, type-check, print and diff. The strongest argument against
 exec-ing is an argument against the **string** form.
 
 ```lisp
-; menard/proc.mnd
+; std/proc
 (spawn)         (argv: (List Str)) -> (Result SpawnStatus SpawnError)
 (spawn-capture) (argv: (List Str)) (stdin: Str) -> (Result SpawnOutput SpawnError)
 
@@ -2535,9 +2574,9 @@ menard/
     src/cli/       menard check | run — and the entry point that runs stage0
   src/             THE compiler, written in Menard — the only one
   src/driver/      mn: emit / check / build / run  (§2.15)
-  prelude/         standard library in Menard (lists, strings, parse, which, status)
-  stdlib/          sys / io / fs / proc wrappers over extern (§2.15) — the
-                   only modules permitted to declare an extern
+  stdlib/          standard library in Menard (§2.8.3). std/basics is implicit.
+                   std/io, std/fs, std/proc, and std/sys are the only modules
+                   permitted to declare an extern (§2.15)
   runtime/         C11 runtime: alloc, GC, shadow stack, strings, maps, buffers, posix_spawn
   tests/
     unit/
@@ -2858,7 +2897,7 @@ The failure modes this design is most exposed to, and what holds each one off.
 | **`dump` output compared byte-for-byte, or `dump` called from a diagnostic path** (§2.16) | Medium | A flaky suite that looks like a determinism bug, or diagnostics that differ between the interpreter and a native build | §2.16 states the two-kinds-of-stderr rule; `dump` is captured on fd 2 and asserted structurally (§3.7) |
 | **Debug text routed to fd 1**, or stderr merged into the artifact | Low | Directly breaks the fixed point — the one way §2.16's isolation fails | `dump` has no value form and no accessor (§2.16); §3.6 requires the gate to compare the artifact alone |
 | **An ambient call is missed in an audit** (§2.15) | Medium | A path or environment value reaches emitted bytes with no signal to the reader | The boundary is the `extern` confinement in four named modules — checkable by lint (§2.7, §3.6); `find-on-path` keeps `PATH` lookup in visible code |
-| **The `!` convention is over-read** — taken for a checkable guarantee rather than a naming habit | Low | A reader trusts a marker nothing enforces | §2.15 limits the check to the five published names in `stdlib/` and `prelude/`; it does not propagate |
+| **The `!` convention is over-read** — taken for a checkable guarantee rather than a naming habit | Low | A reader trusts a marker nothing enforces | §2.15 limits the check to the six published names in `stdlib/`; it does not propagate |
 | **A shell-string escape hatch appears** ("just let me run this command") (§2.15) | Medium | Unbounded ambient state in one string: quoting, globbing, `PATH`, expansion — invisible in the source and untestable | The argv form is a strict superset for every build use, and the refusal is permanent; the temptation is recorded so it is recognised |
 | **`spawn` silently gets a `PATH` search**, or the toolchain is "whatever is on `PATH`" | Medium | The build depends on ambient state that no Menard source mentions; "which `clang` did I get?" | §2.15 rule 2: no implicit lookup; `find-on-path` in visible prelude code; `mn --print-toolchain` |
 | **A child inherits fd 1 while fd 1 carries the artifact** | Low | Interleaved garbage in emitted IR — a fixed-point failure with no compiler bug behind it | The driver's streaming path spawns nothing; §3.6 row |
@@ -3021,11 +3060,11 @@ in two well-understood places.
 - [ ] **There is no `null`**: no operation returns one, no `deref` needs a null
       check, and the empty word appears in no Menard type, no canonical text form
       (§2.13), and no `dump` output (§2.16).
-- [x] **On the published surface (`stdlib/` and `prelude/`), `!` appears on
-      exactly one special form and four functions** — `set!` and the four
-      `StringBuffer` operations that mutate — and on nothing that merely touches
-      the OS or the filesystem. The compiler's local helpers are outside that
-      surface.
+- [x] **On the published surface (`stdlib/`), `!` appears on exactly one
+      special form and five functions** — `set!`, the four `StringBuffer`
+      operations that mutate, and `sb-append-show!` — and on nothing that merely
+      touches the OS or the filesystem. The compiler's local helpers are outside
+      that surface.
 - [x] **Every ambient operation is `extern`-backed and lives in one of four
       `stdlib` modules**, and the confinement is enforced by a lint, so §2.11.B's
       audit does not rest on a naming habit.

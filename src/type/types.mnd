@@ -74,15 +74,6 @@
 (pub defn t-nominal (name: Str) (args: (List Type)) (kind: Str) -> Type (TNominal name args kind))
 
 ; ---------------------------------------------------------------------------
-; List helpers, restated locally rather than importing the prelude — see
-; reader/read.mnd's header comment for why src/ modules do this.
-
-(pub defn (list-length [a]) (xs: (List a)) -> Int
-  (match xs
-    [] 0
-    (Cons _ rest) (+ 1 (list-length rest))))
-
-; ---------------------------------------------------------------------------
 ; Structural equality (ignores display names on TVar, exactly as host's
 ; typeEqual does — a variable's spelling is not part of its identity).
 

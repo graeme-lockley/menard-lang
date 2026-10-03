@@ -1,0 +1,26 @@
+; ANSI color for a terminal, and plain text everywhere else.
+; @module std/console
+
+(import std/fs)
+(import std/sys)
+
+; The escape sequence for codes, which already includes the leading bracket.
+(defn esc (codes: Str) -> Str
+  (do
+    (let sb (sb-new))
+    (sb-append-byte! sb 27)
+    (sb-append! sb codes)
+    (sb-take-str! sb)))
+
+; True when fd is a terminal and NO_COLOR is unset.
+; @test (tty-color 1)
+(pub defn tty-color (fd: Int) -> Bool
+  (and (isatty fd)
+    (match (getenv "NO_COLOR")
+      (None) true
+      (Some _) false)))
+
+; s wrapped in an ANSI sequence when on is true, otherwise s unchanged.
+; @test (paint false "[31m" "hi") => "hi"
+(pub defn paint (on: Bool) (code: Str) (s: Str) -> Str
+  (if on (str-concat (esc code) s (esc "[0m")) s))

@@ -41,7 +41,13 @@
 (import "./cache/cache.mnd")
 (import "./cache/sep.mnd")
 (import "./test/run.mnd")
-(import "../stdlib/io.mnd")
+(import std/cli)
+(import std/fs)
+(import std/io)
+(import std/list)
+(import std/proc)
+(import std/string)
+(import std/sys)
 
 (defn nl -> Str
   (do
@@ -55,119 +61,45 @@
     (write fd (nl))
     ()))
 
-; ---------------------------------------------------------------------------
-; argv: mode, file, [out] are positional; --dump-after=reader and
-; --dump-after=desugar are flags and are skipped when counting/indexing
-; positional arguments.
+; Flags the driver understands. A valued flag consumes the next word.
+(defn mn-flags -> (List Flag)
+  [
+  (Flag "--dump-after=reader" false)
+  (Flag "--dump-after=desugar" false)
+  (Flag "--dump-after=type" false)
+  (Flag "--dump-after=close" false)
+  (Flag "--dump-after=root" false)
+  (Flag "--dump-after=derive" false)
+  (Flag "--show-result" false)
+  (Flag "--clean" false)
+  (Flag "--verbose" false)
+  (Flag "--quiet" false)
+  (Flag "-o" true)
+  (Flag "--cc" true)
+  (Flag "--runtime" true)])
 
-(defn is-dump-after-reader (s: Str) -> Bool
-  (= s "--dump-after=reader"))
+(defn argv-onto (i: Int) (n: Int) (acc: (List Str)) -> (List Str)
+  (if (>= i n) (reverse acc)
+    (argv-onto (+ i 1) n (Cons (arg i) acc))))
 
-(defn is-dump-after-desugar (s: Str) -> Bool
-  (= s "--dump-after=desugar"))
+(defn argv -> (List Str)
+  (argv-onto 0 (arg-count) []))
 
-(defn is-dump-after-type (s: Str) -> Bool
-  (= s "--dump-after=type"))
+(defn has-dump-after-reader -> Bool (has-flag (argv) "--dump-after=reader"))
+(defn has-dump-after-desugar -> Bool (has-flag (argv) "--dump-after=desugar"))
+(defn has-dump-after-type -> Bool (has-flag (argv) "--dump-after=type"))
+(defn has-dump-after-close -> Bool (has-flag (argv) "--dump-after=close"))
+(defn has-dump-after-root -> Bool (has-flag (argv) "--dump-after=root"))
+(defn has-dump-after-derive -> Bool (has-flag (argv) "--dump-after=derive"))
+(defn has-show-result -> Bool (has-flag (argv) "--show-result"))
+(defn has-clean -> Bool (has-flag (argv) "--clean"))
+(defn has-verbose -> Bool (has-flag (argv) "--verbose"))
+(defn has-quiet -> Bool (has-flag (argv) "--quiet"))
 
-(defn is-dump-after-close (s: Str) -> Bool
-  (= s "--dump-after=close"))
+(defn opt (name: Str) -> Str (flag-value (argv) name))
 
-(defn is-dump-after-root (s: Str) -> Bool
-  (= s "--dump-after=root"))
-
-(defn is-dump-after-derive (s: Str) -> Bool
-  (= s "--dump-after=derive"))
-
-(defn is-dump-flag (s: Str) -> Bool
-  (or (is-dump-after-reader s)
-      (is-dump-after-desugar s)
-      (is-dump-after-type s)
-      (is-dump-after-close s)
-      (is-dump-after-root s)
-      (is-dump-after-derive s)))
-
-(defn is-bare-flag (s: Str) -> Bool
-  (or (is-dump-flag s)
-      (= s "--show-result")
-      (= s "--clean")
-      (= s "--verbose")
-      (= s "--quiet")))
-
-(defn is-valued-flag (s: Str) -> Bool
-  (or (= s "-o") (= s "--cc") (= s "--runtime")))
-
-(defn has-dump-after-reader-from (i: Int) (n: Int) -> Bool
-  (if (>= i n)
-    false
-    (if (is-dump-after-reader (arg i)) true (has-dump-after-reader-from (+ i 1) n))))
-
-(defn has-dump-after-reader -> Bool
-  (has-dump-after-reader-from 0 (arg-count)))
-
-(defn has-dump-after-desugar-from (i: Int) (n: Int) -> Bool
-  (if (>= i n)
-    false
-    (if (is-dump-after-desugar (arg i)) true (has-dump-after-desugar-from (+ i 1) n))))
-
-(defn has-dump-after-desugar -> Bool
-  (has-dump-after-desugar-from 0 (arg-count)))
-
-(defn has-dump-after-type-from (i: Int) (n: Int) -> Bool
-  (if (>= i n)
-    false
-    (if (is-dump-after-type (arg i)) true (has-dump-after-type-from (+ i 1) n))))
-
-(defn has-dump-after-type -> Bool
-  (has-dump-after-type-from 0 (arg-count)))
-
-(defn has-dump-after-close-from (i: Int) (n: Int) -> Bool
-  (if (>= i n)
-    false
-    (if (is-dump-after-close (arg i)) true (has-dump-after-close-from (+ i 1) n))))
-
-(defn has-dump-after-close -> Bool
-  (has-dump-after-close-from 0 (arg-count)))
-
-(defn has-dump-after-root-from (i: Int) (n: Int) -> Bool
-  (if (>= i n)
-    false
-    (if (is-dump-after-root (arg i)) true (has-dump-after-root-from (+ i 1) n))))
-
-(defn has-dump-after-root -> Bool
-  (has-dump-after-root-from 0 (arg-count)))
-
-(defn has-dump-after-derive-from (i: Int) (n: Int) -> Bool
-  (if (>= i n)
-    false
-    (if (is-dump-after-derive (arg i)) true (has-dump-after-derive-from (+ i 1) n))))
-
-(defn has-dump-after-derive -> Bool
-  (has-dump-after-derive-from 0 (arg-count)))
-
-(defn has-show-result-from (i: Int) (n: Int) -> Bool
-  (if (>= i n)
-    false
-    (if (= (arg i) "--show-result") true (has-show-result-from (+ i 1) n))))
-
-(defn has-show-result -> Bool
-  (has-show-result-from 0 (arg-count)))
-
-(defn has-flag-from (name: Str) (i: Int) (n: Int) -> Bool
-  (if (>= i n) false
-    (if (= (arg i) name) true (has-flag-from name (+ i 1) n))))
-
-(defn has-clean -> Bool
-  (has-flag-from "--clean" 0 (arg-count)))
-
-(defn has-verbose -> Bool
-  (has-flag-from "--verbose" 0 (arg-count)))
-
-(defn has-quiet -> Bool
-  (has-flag-from "--quiet" 0 (arg-count)))
-
-; Progress is for a person watching a terminal. A captured stderr — tests,
-; pipes, CI logs — stays empty unless something actually failed. `--quiet`
-; suppresses it even on a tty.
+; Progress is for a person watching a terminal. A captured stderr stays
+; empty unless something failed. `--quiet` suppresses it even on a tty.
 (defn note-compiling (path: Str) (ms: Int) -> Unit
   (if (has-quiet) ()
     (if (isatty 2)
@@ -177,58 +109,26 @@
       ())))
 
 (defn explicit-out -> Bool
-  (> (str-byte-length (flag-value "-o")) 0))
-
-(defn positional-count-from (i: Int) (n: Int) (acc: Int) -> Int
-  (if (>= i n)
-    acc
-    (if (is-bare-flag (arg i))
-      (positional-count-from (+ i 1) n acc)
-      (if (is-valued-flag (arg i))
-        (positional-count-from (+ i 2) n acc)
-        (if (= (arg i) "--")
-          acc
-          (positional-count-from (+ i 1) n (+ acc 1)))))))
-
-(defn positional-count -> Int
-  (positional-count-from 0 (arg-count) 0))
-
-(defn positional-arg-from (want: Int) (i: Int) (seen: Int) (n: Int) -> Str
-  (if (>= i n)
-    ""
-    (if (is-bare-flag (arg i))
-      (positional-arg-from want (+ i 1) seen n)
-      (if (is-valued-flag (arg i))
-        (positional-arg-from want (+ i 2) seen n)
-        (if (= (arg i) "--")
-          ""
-          (if (= seen want)
-            (arg i)
-            (positional-arg-from want (+ i 1) (+ seen 1) n)))))))
+  (> (str-byte-length (opt "-o")) 0))
 
 (defn positional-arg (want: Int) -> Str
-  (positional-arg-from want 0 0 (arg-count)))
+  (positional (argv) (mn-flags) want))
+
+(defn positional-count -> Int
+  (length (positionals (argv) (mn-flags))))
+
+(defn prog-args -> (List Str)
+  (args-after (argv)))
 
 ; ---------------------------------------------------------------------------
 ; Diagnostics. Line and column come from the source bytes. `origin` on a
 ; span selects the file in the path list, so an error in an import names
 ; that file.
 
-(defn str-has-from (s: Str) (needle: Str) (i: Int) -> Bool
-  (do
-    (let n (str-byte-length needle))
-    (let sn (str-byte-length s))
-    (if (> (+ i n) sn) false
-      (if (= (str-slice s i n) needle) true
-        (str-has-from s needle (+ i 1))))))
-
-(defn str-has (s: Str) (needle: Str) -> Bool
-  (str-has-from s needle 0))
-
 (defn parse-code (msg: Str) -> Str
-  (if (str-has msg "unclosed") "E_PARSE_UNCLOSED"
-    (if (str-has msg "'!'") "E_PARSE_BANG"
-      (if (str-has msg "unterminated") "E_PARSE_STRING"
+  (if (has msg "unclosed") "E_PARSE_UNCLOSED"
+    (if (has msg "'!'") "E_PARSE_BANG"
+      (if (has msg "unterminated") "E_PARSE_STRING"
         "E_PARSE"))))
 
 (defn report-parse-error (path: Str) (src: Str) (e: ParseError) -> Unit
@@ -383,12 +283,6 @@
 ; ---------------------------------------------------------------------------
 ; emit
 
-(defn ends-with (s: Str) (suffix: Str) -> Bool
-  (do
-    (let sn (str-byte-length s))
-    (let un (str-byte-length suffix))
-    (and (>= sn un) (= (str-slice s (- sn un) un) suffix))))
-
 (defn default-output-path (path: Str) -> Str
   (if (ends-with path ".mnd")
     (str-concat (str-slice path 0 (- (str-byte-length path) 4)) ".bc")
@@ -454,7 +348,7 @@
   (match (spawn-capture [cc "-S" "-emit-llvm" "-o" "-" "-x" "c" "-"] "int x;")
     (Err _) ""
     (Ok (SpawnOutput st text _))
-      (if (= (status-exit-code st) 0) (triple-or-fail text) "")))
+      (if (= (status->exit-code st) 0) (triple-or-fail text) "")))
 
 (defn write-module (out: Str) (forms: (List Ast)) (paths: (List Str)) -> Unit
   (match (emit-program-bc forms (clang-target-triple (chosen-cc "")) paths)
@@ -481,7 +375,7 @@
 ; ---------------------------------------------------------------------------
 ; Driver. `cc` and the runtime directory are recorded paths (or flags),
 ; never a PATH search inside `spawn`. `find-on-path` is the visible
-; search a caller can opt into. `status-exit-code` folds `Signalled n`
+; search a caller can opt into. `status->exit-code` folds `Signalled n`
 ; to `128 + n` here, not in the primitive.
 
 (defn recorded-cc -> Str "/usr/bin/clang")
@@ -501,34 +395,6 @@
 
 (defn chosen-runtime (flag: Str) -> Str
   (if (> (str-byte-length flag) 0) flag (recorded-runtime)))
-
-(defn status-exit-code (st: SpawnStatus) -> Int
-  (match st
-    (Exited n) n
-    (Signalled n) (+ 128 n)))
-
-(defn flag-value-from (name: Str) (i: Int) (n: Int) -> Str
-  (if (>= i n) ""
-    (if (= (arg i) "--") ""
-      (if (= (arg i) name)
-        (if (< (+ i 1) n) (arg (+ i 1)) "")
-        (flag-value-from name (+ i 1) n)))))
-
-(defn flag-value (name: Str) -> Str
-  (flag-value-from name 0 (arg-count)))
-
-(defn collect-args (i: Int) (n: Int) -> (List Str)
-  (if (>= i n) []
-    (Cons (arg i) (collect-args (+ i 1) n))))
-
-(defn prog-args-from (i: Int) (n: Int) -> (List Str)
-  (if (>= i n) []
-    (if (= (arg i) "--")
-      (collect-args (+ i 1) n)
-      (prog-args-from (+ i 1) n))))
-
-(defn prog-args -> (List Str)
-  (prog-args-from 0 (arg-count)))
 
 (defn last-slash-from (s: Str) (i: Int) (last: Int) (n: Int) -> Int
   (if (>= i n) last
@@ -590,7 +456,7 @@
     (Err _) (fail-spawn cc)
     (Ok st)
       (do
-        (let code (status-exit-code st))
+        (let code (status->exit-code st))
         (if (= code 0)
           (match (rename link-out bin)
             (Ok _) ()
@@ -600,7 +466,7 @@
 (defn run-built (bin: Str) -> Unit
   (match (spawn (Cons bin (prog-args)))
     (Err _) (fail-spawn bin)
-    (Ok st) (exit (status-exit-code st))))
+    (Ok st) (exit (status->exit-code st))))
 
 (defn accept-build (cc: Str) (runtime: Str) (bin: Str) (and-run: Bool) (forms: (List Ast)) (paths: (List Str)) -> Unit
   (do
@@ -695,7 +561,7 @@
         (fail-spawn "bun")
         (match (spawn (inter-argv bun file (has-show-result) (prog-args)))
           (Err _) (fail-spawn bun)
-          (Ok st) (exit (status-exit-code st)))))
+          (Ok st) (exit (status->exit-code st)))))
     (fail-cannot-read file)))
 
 ; ---------------------------------------------------------------------------
@@ -711,8 +577,8 @@
 
 (defn run-cached-existing (file: Str) (bin: Str) (do-link: Bool) (and-run: Bool) -> Unit
   (do
-    (let cc (chosen-cc (flag-value "--cc")))
-    (let runtime (chosen-runtime (flag-value "--runtime")))
+    (let cc (chosen-cc (opt "--cc")))
+    (let runtime (chosen-runtime (opt "--runtime")))
     (match (build-program file (has-clean) false cc runtime bin do-link (has-quiet))
       (Ok out)
         (if and-run
@@ -744,7 +610,7 @@
             (if (explicit-out) bin (cache-bin (canonical-path file)))
             true true)
           (if (= mode "test")
-            (exit (run-suite (if (> (str-byte-length file) 0) file ".") (has-clean) (has-verbose) (has-quiet) (chosen-cc (flag-value "--cc")) (chosen-runtime (flag-value "--runtime"))))
+            (exit (run-suite (if (> (str-byte-length file) 0) file ".") (has-clean) (has-verbose) (has-quiet) (chosen-cc (opt "--cc")) (chosen-runtime (opt "--runtime"))))
             (if (= mode "inter")
               (run-inter file)
               (usage))))))))
@@ -757,7 +623,7 @@
       (do
         (let mode mode0)
         (let file (if (>= n 2) (positional-arg 1) ""))
-        (let o-flag (flag-value "-o"))
+        (let o-flag (opt "-o"))
         (let bin (if (> (str-byte-length o-flag) 0) o-flag (default-bin file)))
         (dispatch
           mode

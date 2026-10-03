@@ -24,6 +24,12 @@
 (import "../reader/casing.mnd")
 (import "../desugar/desugar.mnd")
 (import "../util/result.mnd")
+(import std/fs)
+(import std/io)
+(import std/list)
+(import std/proc)
+(import std/string)
+(import std/sys)
 
 ; Re-export shim — see `emit/bitcode.mnd` / `reader/casing.mnd`.
 (pub alias Ast Ast)
@@ -56,35 +62,56 @@
 (defn line-starts (src: Str) -> (List Int)
   (reverse-ints (collect-line-starts src 0 (str-byte-length src) [0]) []))
 
-; 1-based line: count of starts at or before `offset`.
-(defn line-number (starts: (List Int)) (offset: Int) (line: Int) -> Int
+; Index → offset, so a span's line is a binary search instead of a scan
+; from the first line. One scan per AST node was quadratic in a file
+; the size of `lower.mnd`.
+(defn index-line-starts (starts: (List Int)) (i: Int) (m: (Map Int Int)) -> (Map Int Int)
   (match starts
-    [] line
-    (Cons s rest)
-      (if (> s offset) line
-        (line-number rest offset (+ line 1)))))
+    [] m
+    (Cons s rest) (index-line-starts rest (+ i 1) (map-set m i s))))
 
-(defn span-at (sp: Span) (origin: Int) (starts: (List Int)) -> Span
-  (let line (line-number starts (span-start sp) 0))
+(defn line-start-count (starts: (List Int)) -> Int
+  (match starts
+    [] 0
+    (Cons _ rest) (+ 1 (line-start-count rest))))
+
+; Smallest index whose start is past `offset`: the count of starts at or
+; before it. That is the 1-based line, since index 0 is byte 0.
+(defn line-search (m: (Map Int Int)) (lo: Int) (hi: Int) (offset: Int) -> Int
+  (if (>= lo hi) lo
+    (line-search-mid m lo hi offset (/ (+ lo hi) 2))))
+
+(defn line-search-mid (m: (Map Int Int)) (lo: Int) (hi: Int) (offset: Int) (mid: Int) -> Int
+  (match (map-get m mid)
+    (None) lo
+    (Some s)
+      (if (> s offset)
+        (line-search m lo mid offset)
+        (line-search m (+ mid 1) hi offset))))
+
+(defn span-at (sp: Span) (origin: Int) (m: (Map Int Int)) (n: Int) -> Span
+  (let line (line-search m 0 n (span-start sp)))
   (Span (span-start sp) (span-end sp) origin (if (< line 1) 1 line)))
 
 (defn stamp-forms (forms: (List Ast)) (src: Str) (origin: Int) -> (List Ast)
-  (stamp-form-list forms origin (line-starts src)))
+  (do
+    (let starts (line-starts src))
+    (stamp-form-list forms origin (index-line-starts starts 0 (map-new)) (line-start-count starts))))
 
-(defn stamp-form-list (forms: (List Ast)) (origin: Int) (starts: (List Int)) -> (List Ast)
+(defn stamp-form-list (forms: (List Ast)) (origin: Int) (m: (Map Int Int)) (n: Int) -> (List Ast)
   (match forms
     [] []
-    (Cons a rest) (Cons (stamp-ast a origin starts) (stamp-form-list rest origin starts))))
+    (Cons a rest) (Cons (stamp-ast a origin m n) (stamp-form-list rest origin m n))))
 
-(defn stamp-ast (a: Ast) (origin: Int) (starts: (List Int)) -> Ast
+(defn stamp-ast (a: Ast) (origin: Int) (m: (Map Int Int)) (n: Int) -> Ast
   (match a
-    (ParenNode xs sp) (ParenNode (stamp-form-list xs origin starts) (span-at sp origin starts))
-    (BracketNode xs sp) (BracketNode (stamp-form-list xs origin starts) (span-at sp origin starts))
-    (SymNode n sp) (SymNode n (span-at sp origin starts))
-    (IntNode n sp) (IntNode n (span-at sp origin starts))
-    (FloatNode n sp) (FloatNode n (span-at sp origin starts))
-    (StrNode n sp) (StrNode n (span-at sp origin starts))
-    (BoolNode n sp) (BoolNode n (span-at sp origin starts))))
+    (ParenNode xs sp) (ParenNode (stamp-form-list xs origin m n) (span-at sp origin m n))
+    (BracketNode xs sp) (BracketNode (stamp-form-list xs origin m n) (span-at sp origin m n))
+    (SymNode nsp sp) (SymNode nsp (span-at sp origin m n))
+    (IntNode k sp) (IntNode k (span-at sp origin m n))
+    (FloatNode f sp) (FloatNode f (span-at sp origin m n))
+    (StrNode s sp) (StrNode s (span-at sp origin m n))
+    (BoolNode b sp) (BoolNode b (span-at sp origin m n))))
 
 (pub defn stamp-spans (forms: (List Ast)) (src: Str) (origin: Int) -> (List Ast)
   (stamp-forms forms src origin))
@@ -143,9 +170,6 @@
         (if (= start i) acc (normalize-push acc (str-slice s start (- i start)))))
       (split-segments-from s (+ i 1) n start acc))))
 
-(defn reverse-strs (xs: (List Str)) (acc: (List Str)) -> (List Str)
-  (match xs [] acc (Cons x rest) (reverse-strs rest (Cons x acc))))
-
 (defn join-segments (xs: (List Str)) (abs: Bool) -> Str
   (match xs
     [] (if abs "/" ".")
@@ -162,18 +186,208 @@
     (let abs (path-is-abs path))
     (let n (str-byte-length path))
     (let segs-rev (split-segments-from path 0 n 0 []))
-    (let segs (reverse-strs segs-rev []))
+    (let segs (reverse segs-rev))
     (join-segments segs abs)))
 
+; s without a leading prefix. The caller has already checked the prefix.
+(defn drop-prefix (s: Str) (n: Int) -> Str
+  (str-slice s n (- (str-byte-length s) n)))
+
+; Index of byte b at or after i, or -1.
+(defn index-of-byte (s: Str) (b: Int) (i: Int) -> Int
+  (if (>= i (str-byte-length s)) (- 1)
+    (if (= (str-byte s i) b) i
+      (index-of-byte s b (+ i 1)))))
+
+; name.mnd when name does not already end in .mnd.
+(defn ensure-mnd (name: Str) -> Str
+  (if (ends-with name ".mnd") name (str-concat name ".mnd")))
+
+; `std/list` → `stdlib/list.mnd`, independent of the importing file.
+(defn std-path (spec: Str) -> Str
+  (str-concat "stdlib/" (ensure-mnd (drop-prefix spec 4))))
+
+; Cache root for github: imports. HOME/.menard/deps, or .menard/deps.
+(defn deps-root -> Str
+  (match (getenv "HOME")
+    (Some h) (if (> (str-byte-length h) 0) (str-concat h "/.menard/deps") ".menard/deps")
+    (None) ".menard/deps"))
+
+; `github:owner/repo@version/module` → the cached file, or spec when it
+; does not parse. module may contain slashes.
+(defn github-cache-path (spec: Str) -> Str
+  (do
+    (let rest (drop-prefix spec 7))
+    (let at (index-of-byte rest 64 0))
+    (if (< at 1) spec
+      (do
+        (let owner-repo (str-slice rest 0 at))
+        (let slash (index-of-byte owner-repo 47 0))
+        (let after (drop-prefix rest (+ at 1)))
+        (let vslash (index-of-byte after 47 0))
+        (if (or (< slash 1) (< vslash 1)) spec
+          (do
+            (let owner (str-slice owner-repo 0 slash))
+            (let repo (drop-prefix owner-repo (+ slash 1)))
+            (let version (str-slice after 0 vslash))
+            (let module (drop-prefix after (+ vslash 1)))
+            (str-concat (deps-root) "/" owner "/" repo "/" version "/" (ensure-mnd module))))))))
+
 (defn resolve-import-path (from-path: Str) (spec: Str) -> Str
-  (path-normalize (path-join (path-dirname from-path) spec)))
+  (if (starts-with spec "std/")
+    (std-path spec)
+    (if (starts-with spec "github:")
+      (github-cache-path spec)
+      (path-normalize (path-join (path-dirname from-path) spec)))))
+
+; True when path is inside the github dependency cache.
+(defn in-deps (path: Str) -> Bool
+  (or (starts-with path ".menard/deps")
+      (starts-with path "/.menard/deps")
+      (>= (index-of-from path "/.menard/deps/") 0)))
+
+(defn index-of-from (s: Str) (needle: Str) -> Int
+  (index-of-from-at s needle 0))
+
+(defn index-of-from-at (s: Str) (needle: Str) (i: Int) -> Int
+  (do
+    (let n (str-byte-length needle))
+    (let sn (str-byte-length s))
+    (if (> (+ i n) sn) (- 1)
+      (if (= (str-slice s i n) needle) i
+        (index-of-from-at s needle (+ i 1))))))
+
+(defn spawn-ok (st: SpawnStatus) -> Bool
+  (match st (Exited n) (= n 0) (Signalled _) false))
+
+; owner, repo, and version parsed out of a cache path.
+(defrec DepSpec (owner: Str) (repo: Str) (version: Str))
+
+; The three segments after `/.menard/deps/` or `.menard/deps/`.
+(defn dep-spec-of (path: Str) -> (Maybe DepSpec)
+  (do
+    (let mark "/.menard/deps/")
+    (let rel (if (starts-with path ".menard/deps/") (drop-prefix path 13)
+              (do
+                (let i (index-of-from path mark))
+                (if (< i 0) "" (drop-prefix path (+ i (str-byte-length mark)))))))
+    (let s1 (index-of-byte rel 47 0))
+    (if (< s1 1) (None)
+      (do
+        (let s2 (index-of-byte rel 47 (+ s1 1)))
+        (if (< s2 0) (None)
+          (do
+            (let s3 (index-of-byte rel 47 (+ s2 1)))
+            (if (< s3 0) (None)
+              (Some (DepSpec
+                (str-slice rel 0 s1)
+                (str-slice rel (+ s1 1) (- s2 s1 1))
+                (str-slice rel (+ s2 1) (- s3 s2 1)))))))))))
+
+; Download the tag archive into the cache directory when the module file
+; is not already there. Tests seed the cache and do not reach this.
+(defn fetch-dep (spec: DepSpec) -> (Result Unit Str)
+  (match spec
+    (DepSpec owner repo version)
+      (do
+        (let dir (str-concat (deps-root) "/" owner "/" repo "/" version))
+        (if (ensure-dir dir)
+          (do
+            (let tgz (str-concat dir "/.src.tgz"))
+            (let url
+              (str-concat "https://codeload.github.com/"
+                owner "/" repo "/tar.gz/refs/tags/" version))
+            (match (spawn ["/usr/bin/curl" "-fsSL" "-o" tgz url])
+              (Err _) (Err (str-concat "cannot fetch " url))
+              (Ok st)
+                (if (spawn-ok st)
+                  (match (spawn ["/usr/bin/tar" "-xzf" tgz "-C" dir "--strip-components=1"])
+                    (Err _) (Err (str-concat "cannot extract " url))
+                    (Ok st2)
+                      (if (spawn-ok st2)
+                        (do (remove tgz) (Ok ()))
+                        (Err (str-concat "cannot extract " url))))
+                  (Err (str-concat "cannot fetch " url)))))
+          (Err (str-concat "cannot create " dir))))))
+
+; Make a github cache path exist. Other paths are left for read-file.
+(pub defn ensure-module-file (path: Str) -> (Result Unit Str)
+  (if (exists path) (Ok ())
+    (if (in-deps path)
+      (match (dep-spec-of path)
+        (None) (Err (str-concat "bad dependency path: " path))
+        (Some spec) (fetch-dep spec))
+      (Ok ()))))
+
+; `owner/repo` and the version, from a github: specifier.
+(defrec GithubVer (key: Str) (version: Str))
+
+(defn github-ver (spec: Str) -> (Maybe GithubVer)
+  (if (starts-with spec "github:")
+    (do
+      (let rest (drop-prefix spec 7))
+      (let at (index-of-byte rest 64 0))
+      (if (< at 1) (None)
+        (do
+          (let owner-repo (str-slice rest 0 at))
+          (let after (drop-prefix rest (+ at 1)))
+          (let vslash (index-of-byte after 47 0))
+          (if (< vslash 1) (None)
+            (Some (GithubVer owner-repo (str-slice after 0 vslash)))))))
+    (None)))
+
+; Record owner/repo → version. A second version is an error.
+(defn note-version (versions: (Ref (Map Str Str))) (spec: Str) -> (Result Unit Str)
+  (match (github-ver spec)
+    (None) (Ok ())
+    (Some (GithubVer key version))
+      (match (map-get (deref versions) key)
+        (None)
+          (do
+            (set! versions (map-set (deref versions) key version))
+            (Ok ()))
+        (Some prev)
+          (if (= prev version) (Ok ())
+            (Err (str-concat "two versions of " key ": " prev " and " version))))))
+
+(pub defn note-versions (versions: (Ref (Map Str Str))) (specs: (List Str)) -> (Result Unit Str)
+  (match specs
+    [] (Ok ())
+    (Cons spec rest)
+      (result-bind (note-version versions spec)
+        (fn (_) (note-versions versions rest)))))
+
+(defn is-basics-path (path: Str) -> Bool
+  (or (= path "stdlib/basics.mnd") (ends-with path "/stdlib/basics.mnd")))
+
+(defn is-basics-spec (spec: Str) -> Bool
+  (or (= spec "std/basics") (= spec "std/basics.mnd")))
+
+(defn specs-have-basics (specs: (List Str)) -> Bool
+  (match specs
+    [] false
+    (Cons s rest) (if (is-basics-spec s) true (specs-have-basics rest))))
+
+; Every module except basics itself imports std/basics.
+(pub defn specs-with-basics (path: Str) (specs: (List Str)) -> (List Str)
+  (if (or (is-basics-path path) (specs-have-basics specs))
+    specs
+    (Cons "std/basics" specs)))
+
+(defn spec-text (spec: Ast) -> (Maybe Str)
+  (match spec
+    (StrNode s _) (Some s)
+    (SymNode s _) (Some s)
+    _ (None)))
 
 (defn parse-import-spec (form: Ast) -> (Maybe Str)
   (match form
-    (ParenNode [head spec] _)
-      (if (is-sym head "import")
-        (match spec (StrNode s _) (Some s) _ (None))
-        (None))
+    (ParenNode (Cons head rest) sp)
+      (if (is-sym head "pub")
+        (parse-import-spec (ParenNode rest sp))
+        (if (is-sym head "import")
+          (match rest (Cons spec _) (spec-text spec) [] (None))
+          (None)))
     _ (None)))
 
 (defn unwrap-pub-form (form: Ast) -> Ast
@@ -184,12 +398,9 @@
         form)
     _ form))
 
-(defn reverse-asts (xs: (List Ast)) (acc: (List Ast)) -> (List Ast)
-  (match xs [] acc (Cons x rest) (reverse-asts rest (Cons x acc))))
-
 (defn strip-imports-and-pub (forms: (List Ast)) (acc: (List Ast)) -> (List Ast)
   (match forms
-    [] (reverse-asts acc [])
+    [] (reverse acc)
     (Cons f rest)
       (match (parse-import-spec f)
         (Some _) (strip-imports-and-pub rest acc)
@@ -197,7 +408,7 @@
 
 (defn collect-import-specs (forms: (List Ast)) (acc: (List Str)) -> (List Str)
   (match forms
-    [] (reverse-strs acc [])
+    [] (reverse acc)
     (Cons f rest)
       (match (parse-import-spec f)
         (Some spec) (collect-import-specs rest (Cons spec acc))
@@ -459,7 +670,7 @@
 
 (defn partition-body (forms: (List Ast)) (kept: (List Ast)) (init: (List Ast)) -> SplitBody
   (match forms
-    [] (SplitBody (reverse-asts kept []) (reverse-asts init []))
+    [] (SplitBody (reverse kept) (reverse init))
     (Cons f rest)
       (if (or (is-kept-decl f) (is-int-let f))
         (partition-body rest (Cons f kept) init)
@@ -554,56 +765,60 @@
 ; ---------------------------------------------------------------------------
 ; Module graph load
 
-(defn load-module-into (path: Str) (entry-path: Str) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) (paths: (Ref (List Str))) (sources: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) -> (Result Unit Str)
+(defn load-module-into (path: Str) (entry-path: Str) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) (paths: (Ref (List Str))) (sources: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) (versions: (Ref (Map Str Str))) -> (Result Unit Str)
   (match (map-get (deref visited) path)
     (Some _) (Ok ())
     (None)
       (do
         (set! visited (map-set (deref visited) path true))
-        (match (read-file path)
-          (Err _) (Err (str-concat "module not found: " path))
-          (Ok src) (load-module-source path entry-path src visited acc mid exports paths sources inits entry)))))
+        (result-bind (ensure-module-file path)
+          (fn (_)
+            (match (read-file path)
+              (Err _) (Err (str-concat "module not found: " path))
+              (Ok src) (load-module-source path entry-path src visited acc mid exports paths sources inits entry versions)))))))
 
-(defn load-module-source (path: Str) (entry-path: Str) (src: Str) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) (paths: (Ref (List Str))) (sources: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) -> (Result Unit Str)
+(defn load-module-source (path: Str) (entry-path: Str) (src: Str) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) (paths: (Ref (List Str))) (sources: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) (versions: (Ref (Map Str Str))) -> (Result Unit Str)
   (do
     (set! sources (map-set (deref sources) path src))
     (match (read-all src)
       (Err e) (Err (str-concat "parse error in " path))
-      (Ok forms) (load-module-casing path entry-path forms visited acc mid exports paths sources inits entry))))
+      (Ok forms) (load-module-casing path entry-path forms visited acc mid exports paths sources inits entry versions))))
 
-(defn load-module-casing (path: Str) (entry-path: Str) (forms: (List Ast)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) (paths: (Ref (List Str))) (sources: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) -> (Result Unit Str)
+(defn load-module-casing (path: Str) (entry-path: Str) (forms: (List Ast)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) (paths: (Ref (List Str))) (sources: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) (versions: (Ref (Map Str Str))) -> (Result Unit Str)
   (match (check-casing-all forms)
     (Err _) (Err (str-concat "casing error in " path))
-    (Ok _) (load-module-desugar path entry-path forms visited acc mid exports paths sources inits entry)))
+    (Ok _) (load-module-desugar path entry-path forms visited acc mid exports paths sources inits entry versions)))
 
-(defn load-module-desugar (path: Str) (entry-path: Str) (forms: (List Ast)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) (paths: (Ref (List Str))) (sources: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) -> (Result Unit Str)
+(defn load-module-desugar (path: Str) (entry-path: Str) (forms: (List Ast)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) (paths: (Ref (List Str))) (sources: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) (versions: (Ref (Map Str Str))) -> (Result Unit Str)
   (match (desugar-all forms)
     (Err _) (Err (str-concat "desugar error in " path))
-    (Ok desugared) (load-module-deps path entry-path desugared visited acc mid exports paths sources inits entry)))
+    (Ok desugared) (load-module-deps path entry-path desugared visited acc mid exports paths sources inits entry versions)))
 
-(defn load-module-deps (path: Str) (entry-path: Str) (forms: (List Ast)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) (paths: (Ref (List Str))) (sources: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) -> (Result Unit Str)
+(defn load-module-deps (path: Str) (entry-path: Str) (forms: (List Ast)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) (paths: (Ref (List Str))) (sources: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) (versions: (Ref (Map Str Str))) -> (Result Unit Str)
   (do
-    (let specs (collect-import-specs forms []))
-    (result-bind (load-deps-list path entry-path specs visited acc mid exports paths sources inits entry)
+    (let specs (specs-with-basics path (collect-import-specs forms [])))
+    (result-bind (note-versions versions specs)
       (fn (_)
-        (do
-          (let id (deref mid))
-          (set! mid (+ id 1))
-          (set! paths (snoc-str (deref paths) path))
-          (let src (match (map-get (deref sources) path) (Some s) s (None) ""))
-          (let stamped (stamp-forms forms src id))
-          (result-bind (uniquify-module-body path entry-path id stamped exports inits entry)
-            (fn (body)
-              (do
-                (set! acc (append-asts (deref acc) body))
-                (Ok ())))))))))
+        (result-bind (load-deps-list path entry-path specs visited acc mid exports paths sources inits entry versions)
+          (fn (_)
+            (do
+              (let id (deref mid))
+              (set! mid (+ id 1))
+              (set! paths (snoc-str (deref paths) path))
+              (let src (match (map-get (deref sources) path) (Some s) s (None) ""))
+              (let stamped (stamp-forms forms src id))
+              (result-bind (uniquify-module-body path entry-path id stamped exports inits entry)
+                (fn (body)
+                  (do
+                    (set! acc (append-asts (deref acc) body))
+                    (Ok ())))))))))))
 
-(defn load-deps-list (from: Str) (entry-path: Str) (specs: (List Str)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) (paths: (Ref (List Str))) (sources: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) -> (Result Unit Str)
+(defn load-deps-list (from: Str) (entry-path: Str) (specs: (List Str)) (visited: (Ref (Map Str Bool))) (acc: (Ref (List Ast))) (mid: (Ref Int)) (exports: (Ref (Map Str Str))) (paths: (Ref (List Str))) (sources: (Ref (Map Str Str))) (inits: (Ref (List Str))) (entry: (Ref EntryMain)) (versions: (Ref (Map Str Str))) -> (Result Unit Str)
   (match specs
     [] (Ok ())
     (Cons spec rest)
-      (result-bind (load-module-into (resolve-import-path from spec) entry-path visited acc mid exports paths sources inits entry)
-        (fn (_) (load-deps-list from entry-path rest visited acc mid exports paths sources inits entry)))))
+      (result-bind (load-module-into (resolve-import-path from spec) entry-path visited acc mid exports paths sources inits entry versions)
+        (fn (_) (load-deps-list from entry-path rest visited acc mid exports paths sources inits entry versions)))))
 
 ; Public entry: flatten `entry-path` (already read as `src`) into forms plus
 ; the path of each module id, dependency-first. When the entry defines
@@ -618,8 +833,9 @@
     (let sources (ref (map-new)))
     (let inits (ref []))
     (let entry (ref (EntryMain "" false false)))
+    (let versions (ref (map-new)))
     (set! visited (map-set (deref visited) entry-path true))
-    (result-bind (load-module-source entry-path entry-path src visited acc mid exports paths sources inits entry)
+    (result-bind (load-module-source entry-path entry-path src visited acc mid exports paths sources inits entry versions)
       (fn (_) (Ok (Flat (forms-with-bootstrap (deref acc) (deref inits) (deref entry)) (deref paths)))))))
 
 ; Separate compilation uses the same path hash and rename walk. The

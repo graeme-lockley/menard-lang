@@ -3,16 +3,22 @@ import { run, diagnose } from "../../../host/src/interp/pipeline.ts";
 import { createHost, createVirtualFs, mapNodeErrno } from "../../../host/src/host/index.ts";
 import { parseCliArgs } from "../../../host/src/cli/args.ts";
 
+function runSeam(src: string, host = createHost()) {
+  const text = `(import std/fs)\n(import std/io)\n(import std/sys)\n${src}`;
+  host.writeFile("/main.mnd", new TextEncoder().encode(text));
+  return run(text, { path: "/main.mnd", host });
+}
+
 describe("tier-0 host seam", () => {
   test("arg-count and arg read host argv", () => {
     const host = createHost({ argv: ["a", "bb"] });
-    const r = run(
+    const r = runSeam(
       `(do
   (let n (arg-count))
   (let a0 (arg 0))
   (let a1 (arg 1))
   (str-concat (show n) ":" a0 a1))`,
-      { host },
+      host,
     );
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "str") {
@@ -23,14 +29,14 @@ describe("tier-0 host seam", () => {
   test("read-file / write-file over virtual fs", () => {
     const fs = createVirtualFs({ "/in.txt": "hi" });
     const host = createHost({ fs });
-    const r = run(
+    const r = runSeam(
       `(do
   (let data (read-file "/in.txt"))
   (match data
     (Ok s) (write-file "/out.txt" s)
     (Err e) (Err e))
   (read-file "/out.txt"))`,
-      { host },
+      host,
     );
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "variant") {
@@ -44,7 +50,7 @@ describe("tier-0 host seam", () => {
 
   test("read-file missing path is Err NotFound", () => {
     const host = createHost();
-    const r = run(`(read-file "/nope")`, { host });
+    const r = runSeam(`(read-file "/nope")`, host);
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "variant") {
       expect(r.value.ctor).toBe("Err");
@@ -56,7 +62,7 @@ describe("tier-0 host seam", () => {
 
   test("write to fd 1 reaches stdout", () => {
     const host = createHost();
-    const r = run(`(write 1 "xy")`, { host });
+    const r = runSeam(`(write 1 "xy")`, host);
     expect(r.ok).toBe(true);
     const out = host.stdout.map((b) => new TextDecoder().decode(b)).join("");
     expect(out).toBe("xy");
@@ -64,7 +70,7 @@ describe("tier-0 host seam", () => {
 
   test("exit truncates to 8 bits and surfaces exitCode", () => {
     const host = createHost();
-    const r = run(`(exit 300)`, { host });
+    const r = runSeam(`(exit 300)`, host);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.exitCode).toBe(300 & 0xff);
   });
@@ -72,7 +78,7 @@ describe("tier-0 host seam", () => {
   test("getenv, exists, and rename match the runtime Result shapes", () => {
     const fs = createVirtualFs({ "/a.txt": "hi" });
     const host = createHost({ fs, env: { CC: "clang" } });
-    const r = run(
+    const r = runSeam(
       `(do
   (let g (getenv "CC"))
   (let missing (getenv "NO_SUCH"))
@@ -90,7 +96,7 @@ describe("tier-0 host seam", () => {
             (Err _) "bad-rename")
         _ "bad-missing")
     _ "bad-getenv"))`,
-      { host },
+      host,
     );
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "str") {
@@ -100,7 +106,7 @@ describe("tier-0 host seam", () => {
 
   test("rename of a missing path is Err NotFound", () => {
     const host = createHost();
-    const r = run(`(rename "/nope" "/elsewhere")`, { host });
+    const r = runSeam(`(rename "/nope" "/elsewhere")`, host);
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "variant") {
       expect(r.value.ctor).toBe("Err");
@@ -110,8 +116,9 @@ describe("tier-0 host seam", () => {
     }
   });
 
-  test("seam builtins typecheck", () => {
-    const diags = diagnose(`(do
+  test("seam names typecheck through their modules", () => {
+    const host = createHost();
+    const src = `(import std/fs)\n(import std/io)\n(import std/sys)\n(do
   (arg-count)
   (arg 0)
   (write 1 "x")
@@ -120,7 +127,9 @@ describe("tier-0 host seam", () => {
   (getenv "CC")
   (exists "a")
   (rename "a" "b")
-  (exit 0))`);
+  (exit 0))`;
+    host.writeFile("/main.mnd", new TextEncoder().encode(src));
+    const diags = diagnose(src, { path: "/main.mnd", host });
     expect(diags).toEqual([]);
   });
 

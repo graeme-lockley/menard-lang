@@ -1,0 +1,97 @@
+; Operations on the language List type.
+; @module std/list
+
+(import std/map)
+
+; Re-export the pair type so a public `zip` may name it.
+(pub alias Pair Pair)
+
+; Number of elements in xs.
+; @test (length [1 2 3]) => 3
+(pub defn (length [a]) (xs: (List a)) -> Int
+  (match xs
+    [] 0
+    (Cons _ t) (+ 1 (length t))))
+
+; The element at i, or None when i is past the end.
+; @test (nth [10 20] 1) => (Some 20)
+(pub defn (nth [a]) (xs: (List a)) (i: Int) -> (Maybe a)
+  (match xs
+    [] (None)
+    (Cons h t) (if (= i 0) (Some h) (nth t (- i 1)))))
+
+; The elements of xs followed by the elements of ys.
+; @test (append [1] [2 3]) => [1 2 3]
+(pub defn (append [a]) (xs: (List a)) (ys: (List a)) -> (List a)
+  (match xs
+    [] ys
+    (Cons h t) (Cons h (append t ys))))
+
+; xs reversed onto acc.
+(defn (reverse-onto [a]) (xs: (List a)) (acc: (List a)) -> (List a)
+  (match xs
+    [] acc
+    (Cons h t) (reverse-onto t (Cons h acc))))
+
+; Elements of xs from last to first.
+; @test (reverse [1 2 3]) => [3 2 1]
+(pub defn (reverse [a]) (xs: (List a)) -> (List a)
+  (reverse-onto xs []))
+
+; f applied to each element, in order.
+; @test (map (fn (n) (+ n 1)) [1 2]) => [2 3]
+(pub defn (map [a b]) (f: (Fn a -> b)) (xs: (List a)) -> (List b)
+  (match xs
+    [] []
+    (Cons h t) (Cons (f h) (map f t))))
+
+; Elements for which f returns true, in order.
+; @test (filter (fn (n) (> n 1)) [1 2 3]) => [2 3]
+(pub defn (filter [a]) (f: (Fn a -> Bool)) (xs: (List a)) -> (List a)
+  (match xs
+    [] []
+    (Cons h t)
+      (if (f h) (Cons h (filter f t)) (filter f t))))
+
+; f folded from the left, starting at acc.
+; @test (fold (fn (a n) (+ a n)) 0 [1 2 3]) => 6
+(pub defn (fold [a b]) (f: (Fn b a -> b)) (acc: b) (xs: (List a)) -> b
+  (match xs
+    [] acc
+    (Cons h t) (fold f (f acc h) t)))
+
+; Pairs of elements taken until either list ends.
+; @test (zip [1 2] ["a" "b"]) => [(Pair 1 "a") (Pair 2 "b")]
+(pub defn (zip [a b]) (xs: (List a)) (ys: (List b)) -> (List (Pair a b))
+  (match xs
+    [] []
+    (Cons x xt)
+      (match ys
+        [] []
+        (Cons y yt) (Cons (Pair x y) (zip xt yt)))))
+
+; Whether x occurs in xs, compared with =.
+; @test (contains [1 2 3] 2) => true
+(pub defn (contains [a]) (xs: (List a)) (x: a) -> Bool
+  (match xs
+    [] false
+    (Cons h t) (if (= h x) true (contains t x))))
+
+; Insert x into an already sorted list.
+(defn (insert [a]) (x: a) (xs: (List a)) -> (List a)
+  (match xs
+    [] [x]
+    (Cons y rest)
+      (if (<= (compare x y) 0) (Cons x xs)
+        (Cons y (insert x rest)))))
+
+; Insert each element of xs into the sorted accumulator.
+(defn (sort-onto [a]) (xs: (List a)) (acc: (List a)) -> (List a)
+  (match xs
+    [] acc
+    (Cons x rest) (sort-onto rest (insert x acc))))
+
+; xs in the derived order of compare.
+; @test (sort [3 1 2]) => [1 2 3]
+(pub defn (sort [a]) (xs: (List a)) -> (List a)
+  (sort-onto xs []))

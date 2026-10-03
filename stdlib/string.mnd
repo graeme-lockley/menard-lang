@@ -1,0 +1,49 @@
+; Helpers over Str bytes.
+; @module std/string
+
+; Whether s begins with prefix.
+; @test (starts-with "hello" "he") => true
+(pub defn starts-with (s: Str) (prefix: Str) -> Bool
+  (do
+    (let n (str-byte-length prefix))
+    (and (>= (str-byte-length s) n) (= (str-slice s 0 n) prefix))))
+
+; Whether s ends with suffix.
+; @test (ends-with "hello" "lo") => true
+(pub defn ends-with (s: Str) (suffix: Str) -> Bool
+  (do
+    (let sn (str-byte-length s))
+    (let un (str-byte-length suffix))
+    (and (>= sn un) (= (str-slice s (- sn un) un) suffix))))
+
+; Whether needle matches s at byte i. The needle is short, so the walk stays shallow.
+(defn bytes-eq (s: Str) (i: Int) (pat: Str) (j: Int) (n: Int) -> Bool
+  (if (>= j n) true
+    (if (= (str-byte s (+ i j)) (str-byte pat j))
+      (bytes-eq s i pat (+ j 1) n)
+      false)))
+
+; Whether s contains needle as a byte substring.
+; Named `has` so a program can import std/list, which also publishes `contains`.
+; @test (has "hello" "ell") => true
+(pub defn has (s: Str) (needle: Str) -> Bool
+  (do
+    (let n (str-byte-length needle))
+    (let sn (str-byte-length s))
+    (loop ((i 0))
+      (if (> (+ i n) sn) false
+        (if (bytes-eq s i needle 0 n) true
+          (recur (+ i 1)))))))
+
+; parts joined by sep. An empty list joins to the empty string.
+(defn join-rest (sep: Str) (acc: Str) (rest: (List Str)) -> Str
+  (match rest
+    [] acc
+    (Cons h t) (join-rest sep (str-concat acc sep h) t)))
+
+; parts joined by sep.
+; @test (join "," ["a" "b"]) => "a,b"
+(pub defn join (sep: Str) (parts: (List Str)) -> Str
+  (match parts
+    [] ""
+    (Cons h t) (join-rest sep h t)))
