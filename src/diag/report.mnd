@@ -47,22 +47,26 @@
   (if (< n 10) acc (digits-of (/ n 10) (+ acc 1))))
 
 ; Walk bytes up to `offset`, counting newlines. Column is 1-based.
+; A call per byte overflows the stack on a source the size of `lower.mnd`.
 (defn walk-loc (src: Str) (offset: Int) (i: Int) (line: Int) (start: Int) (n: Int) -> Int
-  (if (or (>= i offset) (>= i n)) start
-    (if (= (str-byte src i) 10)
-      (walk-loc src offset (+ i 1) (+ line 1) (+ i 1) n)
-      (walk-loc src offset (+ i 1) line start n))))
+  (loop ((j i) (ln line) (st start))
+    (if (or (>= j offset) (>= j n)) st
+      (if (= (str-byte src j) 10)
+        (recur (+ j 1) (+ ln 1) (+ j 1))
+        (recur (+ j 1) ln st)))))
 
 (defn walk-line (src: Str) (offset: Int) (i: Int) (line: Int) (n: Int) -> Int
-  (if (or (>= i offset) (>= i n)) line
-    (if (= (str-byte src i) 10)
-      (walk-line src offset (+ i 1) (+ line 1) n)
-      (walk-line src offset (+ i 1) line n))))
+  (loop ((j i) (ln line))
+    (if (or (>= j offset) (>= j n)) ln
+      (if (= (str-byte src j) 10)
+        (recur (+ j 1) (+ ln 1))
+        (recur (+ j 1) ln)))))
 
 (defn line-end (src: Str) (i: Int) (n: Int) -> Int
-  (if (>= i n) n
-    (if (= (str-byte src i) 10) i
-      (line-end src (+ i 1) n))))
+  (loop ((j i))
+    (if (>= j n) n
+      (if (= (str-byte src j) 10) j
+        (recur (+ j 1))))))
 
 (defn drop-cr (src: Str) (start: Int) (end: Int) -> Int
   (if (and (> end start) (= (str-byte src (- end 1)) 13)) (- end 1) end))

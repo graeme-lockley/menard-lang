@@ -53,11 +53,14 @@
   (match xs [] acc (Cons x rest) (reverse-ints rest (Cons x acc))))
 
 ; Byte offset of each line, line 1 at 0. Newline is byte 10.
+; A call per byte overflows the C stack on `lower.mnd` (~140KB). `recur`
+; is a jump, so the scan stays one frame.
 (defn collect-line-starts (src: Str) (i: Int) (n: Int) (acc: (List Int)) -> (List Int)
-  (if (>= i n) acc
-    (if (= (str-byte src i) 10)
-      (collect-line-starts src (+ i 1) n (Cons (+ i 1) acc))
-      (collect-line-starts src (+ i 1) n acc))))
+  (loop ((j i) (out acc))
+    (if (>= j n) out
+      (if (= (str-byte src j) 10)
+        (recur (+ j 1) (Cons (+ j 1) out))
+        (recur (+ j 1) out)))))
 
 (defn line-starts (src: Str) -> (List Int)
   (reverse-ints (collect-line-starts src 0 (str-byte-length src) [0]) []))
@@ -519,8 +522,9 @@
   (% (+ (* h 131) b) 2147483647))
 
 (defn hash-bytes (s: Str) (i: Int) (n: Int) (h: Int) -> Int
-  (if (>= i n) h
-    (hash-bytes s (+ i 1) n (hash-mix h (str-byte s i)))))
+  (loop ((j i) (acc h))
+    (if (>= j n) acc
+      (recur (+ j 1) (hash-mix acc (str-byte s j))))))
 
 (defn path-hash (path: Str) -> Int
   (hash-bytes path 0 (str-byte-length path) 0))
