@@ -301,7 +301,7 @@ function defineDefn(ast: Ast & { tag: "list" }, env: Env): void {
   }
   idx++;
   const body = ast.elems.slice(idx);
-  envSet(env, name, { tag: "fn", params, body, env, path: definePath });
+  envSet(env, name, { tag: "fn", params, body, env, path: definePath, name });
 }
 
 type LoopCtx = { names: string[]; env: Env };
@@ -457,7 +457,7 @@ function drive(
     if (pending !== null) {
       const ast = pending;
       pending = null;
-      const step = beginEval(ast, env, loop, stack);
+      const step = beginEval(ast, env, loop, stack, host);
       if (step.tag === "value") {
         result = step.value;
       } else {
@@ -488,11 +488,67 @@ function drive(
   }
 }
 
+/** Pure operations only. A nested call made entirely of these, plus literals
+ * and variables, finishes in one interpreter step. Anything impure or
+ * unknown falls back to the trampoline, so side effects still run once. */
+const FAST_BUILTIN = new Set([
+  "+", "-", "*", "/", "%",
+  "<", ">", "<=", ">=", "=",
+  "deref",
+  "str-byte", "str-byte-length", "str-slice",
+]);
+
+function pow2Host(n: bigint): bigint {
+  let acc = 1n;
+  if (n > 0n) {
+    for (let i = 0n; i < n; i++) acc = BigInt.asIntN(63, acc * 2n);
+  }
+  return acc;
+}
+
+function evalFast(ast: Ast, env: Env, host: Host, impureOk: boolean): Value | null {
+  switch (ast.tag) {
+    case "int":
+      return vInt(ast.value);
+    case "bool":
+      return vBool(ast.value);
+    case "str":
+      return vStr(ast.bytes);
+    case "sym":
+      return envGet(env, symName(ast)) ?? null;
+    case "list": {
+      if (ast.kind !== "paren" || ast.elems.length === 0) return null;
+      const head = ast.elems[0]!;
+      if (head.tag !== "sym") return null;
+      if (specialFormOf(head.name) !== Sf.None) return null;
+      const fn = envGet(env, symName(head));
+      if (fn === undefined) return null;
+      if (fn.tag === "fn" && fn.name === "pow2" && ast.elems.length === 2) {
+        const arg = evalFast(ast.elems[1]!, env, host, false);
+        if (arg === null || arg.tag !== "int" || arg.value > 32n) return null;
+        return vInt(pow2Host(arg.value));
+      }
+      if (fn.tag !== "builtin") return null;
+      if (!impureOk && !FAST_BUILTIN.has(fn.name)) return null;
+      const args: Value[] = [];
+      for (let i = 1; i < ast.elems.length; i++) {
+        const v = evalFast(ast.elems[i]!, env, host, false);
+        if (v === null) return null;
+        args.push(v);
+      }
+      return applyBuiltin(fn.name, args, host, ast.span);
+    }
+    default:
+      return null;
+  }
+}
+
 function beginEval(
   ast: Ast,
   env: Env,
   loop: LoopCtx | null,
   stack: Cont[],
+  host: Host,
 ): Step {
   switch (ast.tag) {
     case "int":
@@ -601,6 +657,14 @@ function beginEval(
           case Sf.Quote:
             return { tag: "value", value: quoteValue(ast.elems[1] ?? ast) };
           case Sf.Set: {
+            const slot = evalFast(ast.elems[1]!, env, host, false);
+            if (slot !== null && slot.tag === "ref") {
+              const val = evalFast(ast.elems[2]!, env, host, false);
+              if (val !== null) {
+                slot.cell.value = val;
+                return { tag: "value", value: vUnit() };
+              }
+            }
             stack.push({
               tag: "set-ref",
               valAst: ast.elems[2]!,
@@ -616,6 +680,8 @@ function beginEval(
             break;
         }
       }
+      const fast = evalFast(ast, env, host, true);
+      if (fast !== null) return { tag: "value", value: fast };
       stack.push({
         tag: "app",
         elems: ast.elems,

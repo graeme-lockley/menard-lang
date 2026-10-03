@@ -15,7 +15,7 @@ export type Value =
   | { tag: "variant"; ctor: string; payloads: Value[] }
   | { tag: "record"; name: string; fields: Value[] }
   | { tag: "ref"; cell: { value: Value } }
-  | { tag: "fn"; params: string[]; body: unknown; env: Env; path?: string }
+  | { tag: "fn"; params: string[]; body: unknown; env: Env; path?: string; name?: string }
   | { tag: "builtin"; name: string }
   | { tag: "map"; map: MenardMap }
   | { tag: "sb"; sb: StringBuffer };
@@ -32,7 +32,8 @@ export function emptyEnv(parent: Env | null = null): Env {
 export function envGet(env: Env, name: string): Value | undefined {
   let e: Env | null = env;
   while (e) {
-    if (e.bindings.has(name)) return e.bindings.get(name);
+    const v = e.bindings.get(name);
+    if (v !== undefined) return v;
     e = e.parent;
   }
   return undefined;
