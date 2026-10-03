@@ -94,9 +94,11 @@
     _ form))
 
 (defn parse-code (msg: Str) -> Str
-  (if (has msg "unclosed") "E_PARSE_UNCLOSED"
-    (if (has msg "'!'") "E_PARSE_BANG"
-      (if (has msg "unterminated") "E_PARSE_STRING" "E_PARSE"))))
+  (cond
+    ((has msg "unclosed") "E_PARSE_UNCLOSED")
+    ((has msg "'!'") "E_PARSE_BANG")
+    ((has msg "unterminated") "E_PARSE_STRING")
+    (else "E_PARSE")))
 
 (defn report-parse (path: Str) (src: Str) (e: ParseError) -> Unit
   (match e (ParseError sp msg) (report-span path src sp "error" (parse-code msg) msg)))
@@ -345,28 +347,28 @@
 (defn collect-pub (form: Ast) (rest: (List Ast)) (path: Str) (fns: (List FnRec)) (names: (List Str)) (stubs: (List Ast)) -> Export
   (do
     (let k (kind-of form))
-    (if (= k "defn")
-      (match (defn-rest form)
-        (None) (collect-exports rest path fns names stubs)
-        (Some r)
-          (match (defn-name form)
-            (None) (collect-exports rest path fns names stubs)
-            (Some n)
-              (match (extern-stub form)
-                (None) (collect-exports rest path fns names stubs)
-                (Some stub)
-                  (collect-exports rest path
-                    (push-fn fns n (link-of path n) (fn-arity r))
-                    names
-                    (Cons stub stubs)))))
-      (if (= k "variant")
+    (cond
+      ((= k "defn")
+        (match (defn-rest form)
+          (None) (collect-exports rest path fns names stubs)
+          (Some r)
+            (match (defn-name form)
+              (None) (collect-exports rest path fns names stubs)
+              (Some n)
+                (match (extern-stub form)
+                  (None) (collect-exports rest path fns names stubs)
+                  (Some stub)
+                    (collect-exports rest path
+                      (push-fn fns n (link-of path n) (fn-arity r))
+                      names
+                      (Cons stub stubs))))))
+      ((= k "variant")
         (collect-exports rest path fns (ctor-names-of form names)
-          (Cons (unwrap-pub form) (Cons (variant-forward form) stubs)))
-        (if (or (= k "defrec") (= k "alias") (= k "extern"))
-          (collect-exports rest path fns (ctor-names-of form names) (Cons (unwrap-pub form) stubs))
-          (if (= k "let")
-            (collect-exports rest path fns names (Cons (unwrap-pub form) stubs))
-            (collect-exports rest path fns names stubs)))))))
+          (Cons (unwrap-pub form) (Cons (variant-forward form) stubs))))
+      ((or (= k "defrec") (= k "alias") (= k "extern"))
+        (collect-exports rest path fns (ctor-names-of form names) (Cons (unwrap-pub form) stubs)))
+      ((= k "let") (collect-exports rest path fns names (Cons (unwrap-pub form) stubs)))
+      (else (collect-exports rest path fns names stubs)))))
 
 (defn empty-surface -> Surface (Surface [] [] []))
 
@@ -899,11 +901,11 @@
 (defn triple-marker -> Str "target triple = \"")
 
 (defn bytes-match-at (s: Str) (i: Int) (pat: Str) (j: Int) -> Bool
-  (if (>= j (str-byte-length pat)) true
-    (if (>= (+ i j) (str-byte-length s)) false
-      (if (= (str-byte s (+ i j)) (str-byte pat j))
-        (bytes-match-at s i pat (+ j 1))
-        false))))
+  (cond
+    ((>= j (str-byte-length pat)) true)
+    ((>= (+ i j) (str-byte-length s)) false)
+    ((= (str-byte s (+ i j)) (str-byte pat j)) (bytes-match-at s i pat (+ j 1)))
+    (else false)))
 
 (defn find-bytes (s: Str) (pat: Str) (i: Int) -> Int
   (if (> (+ i (str-byte-length pat)) (str-byte-length s)) (- 1)

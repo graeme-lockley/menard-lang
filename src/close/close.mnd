@@ -393,17 +393,13 @@
     _ (ExprResult (apply-subst-ast ast subst) [])))
 
 (defn close-expr-head (head: Ast) (rest: (List Ast)) (sp: Span) (orig: Ast) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprResult
-  (if (is-sym head "do")
-    (close-expr-do rest sp scope subst counter)
-    (if (or (is-sym head "fn") (is-sym head "lambda"))
-      (close-expr-lambda rest scope subst counter)
-      (if (is-sym head "match")
-        (close-expr-match rest sp scope subst counter)
-        (if (is-sym head "let")
-          (close-expr-let rest sp orig scope subst counter)
-          (if (is-sym head "loop")
-            (close-expr-loop rest sp scope subst counter)
-            (close-expr-app head rest sp scope subst counter)))))))
+  (cond
+    ((is-sym head "do") (close-expr-do rest sp scope subst counter))
+    ((or (is-sym head "fn") (is-sym head "lambda")) (close-expr-lambda rest scope subst counter))
+    ((is-sym head "match") (close-expr-match rest sp scope subst counter))
+    ((is-sym head "let") (close-expr-let rest sp orig scope subst counter))
+    ((is-sym head "loop") (close-expr-loop rest sp scope subst counter))
+    (else (close-expr-app head rest sp scope subst counter))))
 
 (defn close-expr-lambda (rest: (List Ast)) (scope: (List Str)) (subst: (Map Str LiftedInfo)) (counter: (Ref Int)) -> ExprResult
   (match rest

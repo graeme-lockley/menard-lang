@@ -31,10 +31,10 @@
   (match args
     [] ""
     (Cons a rest)
-      (if (= a "--") ""
-        (if (= a name)
-          (match rest [] "" (Cons v _) v)
-          (flag-value rest name)))))
+      (cond
+        ((= a "--") "")
+        ((= a name) (match rest [] "" (Cons v _) v))
+        (else (flag-value rest name)))))
 
 ; Positionals accumulated in reverse, stopping at `--`.
 (defn positionals-onto (args: (List Str)) (flags: (List Flag)) (acc: (List Str)) -> (List Str)

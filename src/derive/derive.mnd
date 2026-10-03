@@ -208,9 +208,11 @@
   (or (= name "show") (= name "=") (= name "compare") (= name "dump")))
 
 (defn op-prefix (name: Str) -> Str
-  (if (= name "show") "show_"
-    (if (= name "=") "eq_"
-      (if (= name "compare") "compare_" "dump_"))))
+  (cond
+    ((= name "show") "show_")
+    ((= name "=") "eq_")
+    ((= name "compare") "compare_")
+    (else "dump_")))
 
 (defn note-used (ast: Ast) (ctors: (Map Str Str)) (acc: (List Str)) -> (List Str)
   (match ast

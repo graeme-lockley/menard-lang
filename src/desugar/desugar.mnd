@@ -146,21 +146,15 @@
     _ (ParenNode (map-desugar elems diags) sp)))
 
 (defn desugar-paren-named (name: Str) (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (if (or (= name "defn") (= name "defrec") (= name "variant"))
-    (desugar-decl elems sp diags)
-    (if (= name "pub")
-      (desugar-pub elems sp diags)
-      (if (= name "and")
-        (desugar-and elems sp diags)
-        (if (= name "or")
-          (desugar-or elems sp diags)
-          (if (= name "cond")
-            (desugar-cond elems sp diags)
-            (if (= name "when")
-              (desugar-when elems sp diags)
-              (if (= name "while")
-                (desugar-while elems sp diags)
-                (desugar-operator name elems sp diags)))))))))
+  (cond
+    ((or (= name "defn") (= name "defrec") (= name "variant")) (desugar-decl elems sp diags))
+    ((= name "pub") (desugar-pub elems sp diags))
+    ((= name "and") (desugar-and elems sp diags))
+    ((= name "or") (desugar-or elems sp diags))
+    ((= name "cond") (desugar-cond elems sp diags))
+    ((= name "when") (desugar-when elems sp diags))
+    ((= name "while") (desugar-while elems sp diags))
+    (else (desugar-operator name elems sp diags))))
 
 ; ---------------------------------------------------------------------------
 ; (and) → true; (and x) → x; (and x y …) → (if x (and y …) false)
@@ -218,15 +212,12 @@
   (or (= name "<") (= name ">") (= name "<=") (= name ">=") (= name "=")))
 
 (defn desugar-operator (name: Str) (elems: (List Ast)) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
-  (if (is-fold-op name)
-    (desugar-fold name elems sp diags)
-    (if (is-sub-op name)
-      (desugar-sub name elems sp diags)
-      (if (is-div-op name)
-        (desugar-div name elems sp diags)
-        (if (is-cmp-op name)
-          (desugar-cmp name elems sp diags)
-          (ParenNode (map-desugar elems diags) sp))))))
+  (cond
+    ((is-fold-op name) (desugar-fold name elems sp diags))
+    ((is-sub-op name) (desugar-sub name elems sp diags))
+    ((is-div-op name) (desugar-div name elems sp diags))
+    ((is-cmp-op name) (desugar-cmp name elems sp diags))
+    (else (ParenNode (map-desugar elems diags) sp))))
 
 (defn desugar-arity-fail (name: Str) (how: Str) (fallback: Ast) (sp: Span) (diags: (Ref (List DesugarError))) -> Ast
   (do

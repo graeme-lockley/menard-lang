@@ -274,15 +274,15 @@
     _ []))
 
 (defn decl-names-kw (h: Ast) (name: Ast) (more: (List Ast)) -> (List Str)
-  (if (or (is-sym h "defn") (or (is-sym h "extern") (or (is-sym h "defrec") (is-sym h "alias"))))
-    (match (name-text name) (Some n) [n] (None) [])
-    (if (is-sym h "let")
-      (match (sym-of name) (Some n) [n] (None) [])
-      (if (is-sym h "variant")
-        (match (name-text name)
-          (Some n) (ctor-names more [n])
-          (None) (ctor-names more []))
-        []))))
+  (cond
+    ((or (is-sym h "defn") (or (is-sym h "extern") (or (is-sym h "defrec") (is-sym h "alias"))))
+      (match (name-text name) (Some n) [n] (None) []))
+    ((is-sym h "let") (match (sym-of name) (Some n) [n] (None) []))
+    ((is-sym h "variant")
+      (match (name-text name)
+        (Some n) (ctor-names more [n])
+        (None) (ctor-names more [])))
+    (else [])))
 
 (defn collect-names (forms: (List Ast)) (acc: (List Str)) -> (List Str)
   (match forms

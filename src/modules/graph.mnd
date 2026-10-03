@@ -449,27 +449,28 @@
     (gather-ctor-names ctors acc1)))
 
 (defn gather-decl-name-list (head: Str) (rest: (List Ast)) (acc: (List Str)) -> (List Str)
-  (if (= head "let")
-    (match rest
-      (Cons name-part _) (match (sym-str name-part) (Some n) (push-unique acc n) (None) acc)
-      [] acc)
-    (if (= head "defn")
-    (match rest
-      (Cons name-part _) (match (decl-name-of name-part) (Some n) (push-unique acc n) (None) acc)
-      [] acc)
-    (if (= head "alias")
+  (cond
+    ((= head "let")
       (match rest
         (Cons name-part _) (match (sym-str name-part) (Some n) (push-unique acc n) (None) acc)
-        [] acc)
-      (if (= head "defrec")
-        (match rest
-          (Cons name-part _) (match (decl-name-of name-part) (Some n) (push-unique acc n) (None) acc)
-          [] acc)
-        (if (= head "variant")
-          (match rest
-            (Cons name-part ctors) (gather-variant-names name-part ctors acc)
-            [] acc)
-          acc))))))
+        [] acc))
+    ((= head "defn")
+      (match rest
+        (Cons name-part _) (match (decl-name-of name-part) (Some n) (push-unique acc n) (None) acc)
+        [] acc))
+    ((= head "alias")
+      (match rest
+        (Cons name-part _) (match (sym-str name-part) (Some n) (push-unique acc n) (None) acc)
+        [] acc))
+    ((= head "defrec")
+      (match rest
+        (Cons name-part _) (match (decl-name-of name-part) (Some n) (push-unique acc n) (None) acc)
+        [] acc))
+    ((= head "variant")
+      (match rest
+        (Cons name-part ctors) (gather-variant-names name-part ctors acc)
+        [] acc))
+    (else acc)))
 
 (defn gather-form-names (form: Ast) (acc: (List Str)) -> (List Str)
   (match form

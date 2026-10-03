@@ -228,14 +228,15 @@
     (Some hn) (classify-named hn args ctors)))
 
 (defn classify-named (hn: Str) (args: (List Ast)) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
-  (if (is-int-op hn) (Some "Int")
-    (if (is-bool-op hn) (Some "Bool")
-      (if (= hn "str-concat") (Some "Str")
-        (if (= hn "char->str") (Some "Str")
-          (if (= hn "if") (classify-if args ctors)
-            (if (= hn "let") (classify-let args ctors)
-              (if (= hn "do") (classify-do args ctors)
-                (classify-ctor-call hn args ctors)))))))))
+  (cond
+    ((is-int-op hn) (Some "Int"))
+    ((is-bool-op hn) (Some "Bool"))
+    ((= hn "str-concat") (Some "Str"))
+    ((= hn "char->str") (Some "Str"))
+    ((= hn "if") (classify-if args ctors))
+    ((= hn "let") (classify-let args ctors))
+    ((= hn "do") (classify-do args ctors))
+    (else (classify-ctor-call hn args ctors))))
 
 (defn classify-if (args: (List Ast)) (ctors: (Map Str CtorMeta)) -> (Maybe Str)
   (match args

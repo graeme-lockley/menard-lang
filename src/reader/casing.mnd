@@ -168,11 +168,12 @@
     _ (mk-err whole-span "malformed alias")))
 
 (defn check-form-named (name: Str) (elems: (List Ast)) (rest: (List Ast)) (sp: Span) -> (Result Unit CasingError)
-  (if (= name "defn") (check-defn elems sp)
-    (if (= name "defrec") (check-defrec elems sp)
-      (if (= name "variant") (check-variant elems sp)
-        (if (= name "alias") (check-alias elems sp)
-          (check-all rest check-form))))))
+  (cond
+    ((= name "defn") (check-defn elems sp))
+    ((= name "defrec") (check-defrec elems sp))
+    ((= name "variant") (check-variant elems sp))
+    ((= name "alias") (check-alias elems sp))
+    (else (check-all rest check-form))))
 
 (defn check-form-nonempty (head: Ast) (rest: (List Ast)) (elems: (List Ast)) (sp: Span) -> (Result Unit CasingError)
   (match head

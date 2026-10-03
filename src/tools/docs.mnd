@@ -113,19 +113,19 @@
     (Cons raw rest)
       (do
         (let line raw)
-        (if (= line "")
-          (scan-lines rest [] module acc)
-          (if (= (str-byte line 0) 59)
-            (scan-lines rest (append docs [(comment-body line)]) (module-of (comment-body line) module) acc)
-            (if (is-defn line)
-              (do
-                (let rec (record module (defn-name line) line docs (is-pub line)))
-                (match rec
-                  (Scan text ok)
-                    (match acc
-                      (Scan prev pok)
-                        (scan-lines rest [] module (Scan (str-concat prev text) (and pok ok))))))
-              (scan-lines rest [] module acc)))))))
+        (cond
+          ((= line "") (scan-lines rest [] module acc))
+          ((= (str-byte line 0) 59)
+            (scan-lines rest (append docs [(comment-body line)]) (module-of (comment-body line) module) acc))
+          ((is-defn line)
+            (do
+              (let rec (record module (defn-name line) line docs (is-pub line)))
+              (match rec
+                (Scan text ok)
+                  (match acc
+                    (Scan prev pok)
+                      (scan-lines rest [] module (Scan (str-concat prev text) (and pok ok)))))))
+          (else (scan-lines rest [] module acc))))))
 
 ; Lines of s, keeping blanks so a blank line can end a doc comment.
 (defn split-keep (s: Str) (i: Int) (start: Int) (n: Int) (acc: (List Str)) -> (List Str)

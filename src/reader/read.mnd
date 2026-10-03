@@ -120,13 +120,12 @@
       (mk-err (deref pos) (deref pos) "malformed float exponent"))))
 
 (defn scan-number-byte (src: Str) (pos: (Ref Int)) (saw-dot: Bool) (saw-exp: Bool) (saw-digit: Bool) (b: Int) -> (Result NumScan ParseError)
-  (if (is-digit b)
-    (do (set! pos (+ (deref pos) 1)) (scan-number src pos saw-dot saw-exp true))
-    (if (and (= b 46) (not saw-dot) (not saw-exp))
-      (do (set! pos (+ (deref pos) 1)) (scan-number src pos true saw-exp saw-digit))
-      (if (and (or (= b 101) (= b 69)) (not saw-exp) saw-digit)
-        (scan-exponent src pos saw-digit)
-        (Ok (NumScan saw-dot saw-exp saw-digit))))))
+  (cond
+    ((is-digit b) (do (set! pos (+ (deref pos) 1)) (scan-number src pos saw-dot saw-exp true)))
+    ((and (= b 46) (not saw-dot) (not saw-exp))
+      (do (set! pos (+ (deref pos) 1)) (scan-number src pos true saw-exp saw-digit)))
+    ((and (or (= b 101) (= b 69)) (not saw-exp) saw-digit) (scan-exponent src pos saw-digit))
+    (else (Ok (NumScan saw-dot saw-exp saw-digit)))))
 
 (defn scan-number (src: Str) (pos: (Ref Int)) (saw-dot: Bool) (saw-exp: Bool) (saw-digit: Bool) -> (Result NumScan ParseError)
   (if (>= (deref pos) (str-byte-length src))
@@ -243,16 +242,15 @@
 
 (defn dispatch-form (src: Str) (pos: (Ref Int)) -> (Result Ast ParseError)
   (let b (str-byte src (deref pos)))
-  (if (= b 40) (read-paren src pos)
-    (if (= b 91) (read-bracket src pos)
-      (if (= b 34) (read-string src pos)
-        (if (or (= b 45) (= b 43))
-          (dispatch-sign src pos (peek-byte src (+ (deref pos) 1)))
-          (if (or (is-digit b) (and (= b 46) (is-digit (peek-byte src (+ (deref pos) 1)))))
-            (read-number src pos)
-            (if (is-ident-start b)
-              (read-sym src pos)
-              (mk-err (deref pos) (+ (deref pos) 1) (str-concat "unexpected byte " (show b)))))))))) 
+  (cond
+    ((= b 40) (read-paren src pos))
+    ((= b 91) (read-bracket src pos))
+    ((= b 34) (read-string src pos))
+    ((or (= b 45) (= b 43)) (dispatch-sign src pos (peek-byte src (+ (deref pos) 1))))
+    ((or (is-digit b) (and (= b 46) (is-digit (peek-byte src (+ (deref pos) 1)))))
+      (read-number src pos))
+    ((is-ident-start b) (read-sym src pos))
+    (else (mk-err (deref pos) (+ (deref pos) 1) (str-concat "unexpected byte " (show b))))))
 
 (defn read-form (src: Str) (pos: (Ref Int)) -> (Result Ast ParseError)
   (do

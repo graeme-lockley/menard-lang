@@ -126,10 +126,11 @@
 ; that file.
 
 (defn parse-code (msg: Str) -> Str
-  (if (has msg "unclosed") "E_PARSE_UNCLOSED"
-    (if (has msg "'!'") "E_PARSE_BANG"
-      (if (has msg "unterminated") "E_PARSE_STRING"
-        "E_PARSE"))))
+  (cond
+    ((has msg "unclosed") "E_PARSE_UNCLOSED")
+    ((has msg "'!'") "E_PARSE_BANG")
+    ((has msg "unterminated") "E_PARSE_STRING")
+    (else "E_PARSE")))
 
 (defn report-parse-error (path: Str) (src: Str) (e: ParseError) -> Unit
   (match e
@@ -314,11 +315,11 @@
 (defn triple-marker -> Str "target triple = \"")
 
 (defn bytes-match-at (s: Str) (i: Int) (pat: Str) (j: Int) -> Bool
-  (if (>= j (str-byte-length pat)) true
-    (if (>= (+ i j) (str-byte-length s)) false
-      (if (= (str-byte s (+ i j)) (str-byte pat j))
-        (bytes-match-at s i pat (+ j 1))
-        false))))
+  (cond
+    ((>= j (str-byte-length pat)) true)
+    ((>= (+ i j) (str-byte-length s)) false)
+    ((= (str-byte s (+ i j)) (str-byte pat j)) (bytes-match-at s i pat (+ j 1)))
+    (else false)))
 
 (defn find-bytes (s: Str) (pat: Str) (i: Int) -> Int
   (if (> (+ i (str-byte-length pat)) (str-byte-length s)) (- 1)
@@ -592,28 +593,27 @@
           (exit 1)))))
 
 (defn dispatch (mode: Str) (file: Str) (has-out: Bool) (out: Str) (bin: Str) (dump-after-reader: Bool) (dump-after-desugar: Bool) (dump-after-type: Bool) (dump-after-close: Bool) (dump-after-root: Bool) (dump-after-derive: Bool) -> Unit
-  (if (= mode "check")
-    (if (or dump-after-reader
-            dump-after-desugar
-            dump-after-type
-            dump-after-close
-            dump-after-root
-            dump-after-derive)
-      (run-check file dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive)
-      (run-cached file "" false false))
-    (if (= mode "emit")
-      (run-emit file has-out out dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive)
-      (if (= mode "build")
-        (run-cached file bin true false)
-        (if (= mode "run")
-          (run-cached file
-            (if (explicit-out) bin (cache-bin (canonical-path file)))
-            true true)
-          (if (= mode "test")
-            (exit (run-suite (if (> (str-byte-length file) 0) file ".") (has-clean) (has-verbose) (has-quiet) (chosen-cc (opt "--cc")) (chosen-runtime (opt "--runtime"))))
-            (if (= mode "inter")
-              (run-inter file)
-              (usage))))))))
+  (cond
+    ((= mode "check")
+      (if (or dump-after-reader
+              dump-after-desugar
+              dump-after-type
+              dump-after-close
+              dump-after-root
+              dump-after-derive)
+        (run-check file dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive)
+        (run-cached file "" false false)))
+    ((= mode "emit")
+      (run-emit file has-out out dump-after-reader dump-after-desugar dump-after-type dump-after-close dump-after-root dump-after-derive))
+    ((= mode "build") (run-cached file bin true false))
+    ((= mode "run")
+      (run-cached file
+        (if (explicit-out) bin (cache-bin (canonical-path file)))
+        true true))
+    ((= mode "test")
+      (exit (run-suite (if (> (str-byte-length file) 0) file ".") (has-clean) (has-verbose) (has-quiet) (chosen-cc (opt "--cc")) (chosen-runtime (opt "--runtime")))))
+    ((= mode "inter") (run-inter file))
+    (else (usage))))
 
 (defn main -> Unit
   (do

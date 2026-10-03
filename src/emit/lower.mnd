@@ -1205,23 +1205,27 @@
     _ (Err "closure application supports at most 2 arguments currently")))
 
 (defn lower-named (hn: Str) (rest: (List Ast)) (sp: Span) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
-  (if (= hn "if") (lower-if rest env b funcs noop pool)
-    (if (= hn "let") (lower-let-inline rest env b funcs noop pool)
-      (if (= hn "do") (lower-sequence rest env b funcs noop pool)
-        (if (= hn "loop") (lower-loop rest env b funcs noop pool)
-          (if (= hn "recur") (lower-recur rest env b funcs noop pool)
-            (if (= hn "match") (lower-match rest env b funcs noop pool)
-              (if (is-arith-binop hn) (lower-arith rest hn sp env b funcs noop pool)
-                (if (is-cmp-op hn) (lower-cmp-value rest hn env b funcs noop pool)
-                  (if (is-ctor-name hn pool) (lower-ctor hn rest env b funcs noop pool)
-                    (match (map-get funcs hn)
-                      (Some _) (lower-call hn rest sp env b funcs noop pool)
-                      (None)
-                        (if (is-runtime-op hn) (lower-runtime-op hn rest env b funcs noop pool)
-                          (if (is-effect-head hn)
-                            (result-then (lower-effect-op hn rest env b funcs noop pool) (fn () (Ok (const-unit! b))))
-                            (if (is-unsupported-form hn) (Err (str-concat "cannot lower `" hn "` with the real instruction lowerer yet"))
-                              (lower-call hn rest sp env b funcs noop pool)))))))))))))))
+  (cond
+    ((= hn "if") (lower-if rest env b funcs noop pool))
+    ((= hn "let") (lower-let-inline rest env b funcs noop pool))
+    ((= hn "do") (lower-sequence rest env b funcs noop pool))
+    ((= hn "loop") (lower-loop rest env b funcs noop pool))
+    ((= hn "recur") (lower-recur rest env b funcs noop pool))
+    ((= hn "match") (lower-match rest env b funcs noop pool))
+    ((is-arith-binop hn) (lower-arith rest hn sp env b funcs noop pool))
+    ((is-cmp-op hn) (lower-cmp-value rest hn env b funcs noop pool))
+    ((is-ctor-name hn pool) (lower-ctor hn rest env b funcs noop pool))
+    (else
+      (match (map-get funcs hn)
+        (Some _) (lower-call hn rest sp env b funcs noop pool)
+        (None)
+          (cond
+            ((is-runtime-op hn) (lower-runtime-op hn rest env b funcs noop pool))
+            ((is-effect-head hn)
+              (result-then (lower-effect-op hn rest env b funcs noop pool) (fn () (Ok (const-unit! b)))))
+            ((is-unsupported-form hn)
+              (Err (str-concat "cannot lower `" hn "` with the real instruction lowerer yet")))
+            (else (lower-call hn rest sp env b funcs noop pool)))))))
 
 ; -- if --
 
@@ -1471,28 +1475,30 @@
   (or (has-builtin-tag hn) (is-user-ctor hn pool)))
 
 (defn builtin-ctor-tag-of (hn: Str) -> (Maybe Int)
-  (if (= hn "Nil") (Some tag-nil)
-    (if (= hn "Cons") (Some tag-cons)
-      (if (= hn "None") (Some tag-none)
-        (if (= hn "Some") (Some tag-some)
-          (if (= hn "Ok") (Some tag-ok)
-            (if (= hn "Err") (Some tag-err)
-              ; IoError ctors — constructed by the runtime, matched in user code.
-              (if (= hn "NotFound") (Some 20)
-                (if (= hn "Permission") (Some 21)
-                  (if (= hn "Exists") (Some 22)
-                    (if (= hn "IsADirectory") (Some 23)
-                      (if (= hn "NotADirectory") (Some 24)
-                        (if (= hn "InvalidPath") (Some 25)
-                          (if (= hn "TooLarge") (Some 26)
-                            (if (= hn "Other") (Some 27)
-                              (if (= hn "Exited") (Some 30)
-                                (if (= hn "Signalled") (Some 31)
-                                  (if (= hn "SpawnOutput") (Some 32)
-                                    (if (= hn "NotExecutable") (Some 33)
-                                      (if (= hn "InvalidArgument") (Some 34)
-                                        (if (= hn "TooManyArguments") (Some 35)
-                                          (if (= hn "Unsupported") (Some 36) (None)))))))))))))))))))))))
+  (cond
+    ((= hn "Nil") (Some tag-nil))
+    ((= hn "Cons") (Some tag-cons))
+    ((= hn "None") (Some tag-none))
+    ((= hn "Some") (Some tag-some))
+    ((= hn "Ok") (Some tag-ok))
+    ((= hn "Err") (Some tag-err))
+    ; IoError ctors — constructed by the runtime, matched in user code.
+    ((= hn "NotFound") (Some 20))
+    ((= hn "Permission") (Some 21))
+    ((= hn "Exists") (Some 22))
+    ((= hn "IsADirectory") (Some 23))
+    ((= hn "NotADirectory") (Some 24))
+    ((= hn "InvalidPath") (Some 25))
+    ((= hn "TooLarge") (Some 26))
+    ((= hn "Other") (Some 27))
+    ((= hn "Exited") (Some 30))
+    ((= hn "Signalled") (Some 31))
+    ((= hn "SpawnOutput") (Some 32))
+    ((= hn "NotExecutable") (Some 33))
+    ((= hn "InvalidArgument") (Some 34))
+    ((= hn "TooManyArguments") (Some 35))
+    ((= hn "Unsupported") (Some 36))
+    (else (None))))
 
 (defn ctor-tag-of (hn: Str) (pool: StrPool) -> (Maybe Int)
   (match (builtin-ctor-tag-of hn)
@@ -1503,38 +1509,44 @@
         (None) (None))))
 
 (defn seam-fixed-arity (hn: Str) -> (Maybe Int)
-  (if (= hn "SpawnOutput") (Some 3)
-    (if (or (= hn "Other") (= hn "Exited") (= hn "Signalled")) (Some 1)
-      (if (or (= hn "NotFound")
-              (= hn "Permission")
-              (= hn "Exists")
-              (= hn "IsADirectory")
-              (= hn "NotADirectory")
-              (= hn "InvalidPath")
-              (= hn "TooLarge")
-              (= hn "NotExecutable")
-              (= hn "InvalidArgument")
-              (= hn "TooManyArguments")
-              (= hn "Unsupported")) (Some 0)
-        (None)))))
+  (cond
+    ((= hn "SpawnOutput") (Some 3))
+    ((or (= hn "Other") (= hn "Exited") (= hn "Signalled")) (Some 1))
+    ((or (= hn "NotFound")
+         (= hn "Permission")
+         (= hn "Exists")
+         (= hn "IsADirectory")
+         (= hn "NotADirectory")
+         (= hn "InvalidPath")
+         (= hn "TooLarge")
+         (= hn "NotExecutable")
+         (= hn "InvalidArgument")
+         (= hn "TooManyArguments")
+         (= hn "Unsupported"))
+      (Some 0))
+    (else (None))))
 
 (defn ctor-arity-of (hn: Str) (pool: StrPool) -> Int
   (match (seam-fixed-arity hn)
     (Some n) n
     (None)
-      (if (or (= hn "Nil") (= hn "None")) 0
-        (if (= hn "Cons") 2
-          (if (or (= hn "Some") (= hn "Ok") (= hn "Err")) 1
-            (match (map-get (str-pool-ctors pool) hn)
-              (Some spec) (ctor-spec-arity spec)
-              (None) (- 1)))))))
+      (cond
+        ((or (= hn "Nil") (= hn "None")) 0)
+        ((= hn "Cons") 2)
+        ((or (= hn "Some") (= hn "Ok") (= hn "Err")) 1)
+        (else
+          (match (map-get (str-pool-ctors pool) hn)
+            (Some spec) (ctor-spec-arity spec)
+            (None) (- 1))))))
 
 (defn ctor-extern-abs (hn: Str) (ns: Int) -> Int
-  (if (= hn "Nil") (extern-nil-abs ns)
-    (if (= hn "Cons") (extern-cons-abs ns)
-      (if (= hn "None") (extern-none-abs ns)
-        (if (= hn "Some") (extern-some-abs ns)
-          (if (= hn "Ok") (extern-ok-abs ns) (extern-err-abs ns)))))))
+  (cond
+    ((= hn "Nil") (extern-nil-abs ns))
+    ((= hn "Cons") (extern-cons-abs ns))
+    ((= hn "None") (extern-none-abs ns))
+    ((= hn "Some") (extern-some-abs ns))
+    ((= hn "Ok") (extern-ok-abs ns))
+    (else (extern-err-abs ns))))
 
 (defn lower-user-ctor-fill (obj: Int) (avs: (List Int)) (i: Int) (b: Builder) (pool: StrPool) -> Int
   (match avs
@@ -1662,26 +1674,30 @@
 ; `extern` declares the C symbol (`mn_exists`). Ambient compiler calls
 ; still use the Menard name (`exists`). Both lower to the same abs id.
 (defn seam-menard-name (hn: Str) -> Str
-  (if (= hn "mn_arg_count") "arg-count"
-    (if (= hn "mn_arg") "arg"
-      (if (= hn "mn_read_file") "read-file"
-        (if (= hn "mn_write_file") "write-file"
-          (if (= hn "mn_spawn") "spawn"
-            (if (= hn "mn_spawn_capture") "spawn-capture"
-            (if (= hn "mn_getenv") "getenv"
-              (if (= hn "mn_exists") "exists"
-                (if (= hn "mn_rename") "rename" (os-menard-name hn)))))))))))
+  (cond
+    ((= hn "mn_arg_count") "arg-count")
+    ((= hn "mn_arg") "arg")
+    ((= hn "mn_read_file") "read-file")
+    ((= hn "mn_write_file") "write-file")
+    ((= hn "mn_spawn") "spawn")
+    ((= hn "mn_spawn_capture") "spawn-capture")
+    ((= hn "mn_getenv") "getenv")
+    ((= hn "mn_exists") "exists")
+    ((= hn "mn_rename") "rename")
+    (else (os-menard-name hn))))
 
 (defn os-menard-name (hn: Str) -> Str
-  (if (= hn "mn_isatty") "isatty"
-    (if (= hn "mn_mtime") "mtime"
-      (if (= hn "mn_cwd") "cwd"
-        (if (= hn "mn_ensure_dir") "ensure-dir"
-          (if (= hn "mn_list_dir") "list-dir"
-            (if (= hn "mn_realpath") "realpath"
-              (if (= hn "mn_now_ms") "now-ms"
-                (if (= hn "mn_remove") "remove"
-                  (if (= hn "mn_is_dir") "is-dir" hn))))))))))
+  (cond
+    ((= hn "mn_isatty") "isatty")
+    ((= hn "mn_mtime") "mtime")
+    ((= hn "mn_cwd") "cwd")
+    ((= hn "mn_ensure_dir") "ensure-dir")
+    ((= hn "mn_list_dir") "list-dir")
+    ((= hn "mn_realpath") "realpath")
+    ((= hn "mn_now_ms") "now-ms")
+    ((= hn "mn_remove") "remove")
+    ((= hn "mn_is_dir") "is-dir")
+    (else hn)))
 
 (defn effect-alias (hn: Str) -> Str
   (if (= hn "mn_write") "write"
@@ -1691,73 +1707,77 @@
   (runtime-op-abs-named (seam-menard-name hn) ns))
 
 (defn os-op-abs (hn: Str) (ns: Int) -> Int
-  (if (= hn "isatty") (extern-isatty-abs ns)
-    (if (= hn "mtime") (extern-mtime-abs ns)
-      (if (= hn "cwd") (extern-cwd-abs ns)
-        (if (= hn "ensure-dir") (extern-ensure-dir-abs ns)
-          (if (= hn "list-dir") (extern-list-dir-abs ns)
-            (if (= hn "realpath") (extern-realpath-abs ns)
-              (if (= hn "now-ms") (extern-now-ms-abs ns)
-                (if (= hn "remove") (extern-remove-abs ns)
-                  (extern-is-dir-abs ns))))))))))
+  (cond
+    ((= hn "isatty") (extern-isatty-abs ns))
+    ((= hn "mtime") (extern-mtime-abs ns))
+    ((= hn "cwd") (extern-cwd-abs ns))
+    ((= hn "ensure-dir") (extern-ensure-dir-abs ns))
+    ((= hn "list-dir") (extern-list-dir-abs ns))
+    ((= hn "realpath") (extern-realpath-abs ns))
+    ((= hn "now-ms") (extern-now-ms-abs ns))
+    ((= hn "remove") (extern-remove-abs ns))
+    (else (extern-is-dir-abs ns))))
 
 (defn runtime-op-abs-named (hn: Str) (ns: Int) -> Int
-  (if (str-in-list hn ["isatty" "mtime" "cwd" "ensure-dir" "list-dir" "realpath" "now-ms" "remove" "is-dir"])
-    (os-op-abs hn ns)
-  (if (= hn "f+") (extern-fadd-abs ns)
-    (if (= hn "f-") (extern-fsub-abs ns)
-      (if (= hn "f*") (extern-fmul-abs ns)
-        (if (= hn "f/") (extern-fdiv-abs ns)
-  (if (= hn "str-concat") (extern-str-concat-abs ns)
-    (if (= hn "str-byte-length") (extern-str-byte-length-abs ns)
-      (if (= hn "str-byte") (extern-str-byte-abs ns)
-        (if (= hn "str-slice") (extern-str-slice-abs ns)
-          (if (= hn "ref") (extern-ref-new-abs ns)
-            (if (= hn "deref") (extern-ref-deref-abs ns)
-              (if (= hn "set!") (extern-ref-set-abs ns)
-                (if (= hn "sb-new") (extern-sb-new-abs ns)
-                  (if (= hn "sb-append!") (extern-sb-append-abs ns)
-                    (if (= hn "sb-append-byte!") (extern-sb-append-byte-abs ns)
-                      (if (= hn "sb-take-str!") (extern-sb-take-str-abs ns)
-                        (if (= hn "map-new") (extern-map-new-abs ns)
-                          (if (= hn "map-set") (extern-map-set-abs ns)
-                            (if (= hn "map-get") (extern-map-get-abs ns)
-                              (if (= hn "map-has") (extern-map-has-abs ns)
-                                (if (= hn "map-size") (extern-map-size-abs ns)
-                                  (if (= hn "mn-env-0") (extern-env-0-abs ns)
-                                    (if (= hn "mn-env-1") (extern-env-1-abs ns)
-                                      (if (= hn "mn-env-get") (extern-env-get-abs ns)
-                                        (if (= hn "mn-closure-new") (extern-closure-new-abs ns)
-                                          (if (= hn "mn-apply-0") (extern-apply-0-abs ns)
-                                            (if (= hn "mn-apply-1") (extern-apply-1-abs ns)
-                                              (if (= hn "mn-apply-2") (extern-apply-2-abs ns)
-                                                (if (= hn "arg-count") (extern-arg-count-abs ns)
-                                                  (if (= hn "arg") (extern-arg-abs ns)
-                                                    (if (= hn "read-file") (extern-read-file-abs ns)
-                                                      (if (= hn "write-file") (extern-write-file-abs ns)
-                                                        (if (= hn "show") (extern-show-abs ns)
-                                                          (if (= hn "mn-env-new") (extern-env-new-abs ns)
-                                                            (if (= hn "mn-env-set") (extern-env-set-abs ns)
-                                                              (if (= hn "compare") (extern-compare-abs ns)
-                                                                (if (= hn "sb-length") (extern-sb-length-abs ns)
-                                                                  (if (= hn "sb-to-str") (extern-sb-to-str-abs ns)
-                                                                  (if (= hn "dump") (extern-dump-abs ns)
-                                                                    (if (= hn "spawn") (extern-spawn-abs ns)
-                                                                      (if (= hn "spawn-capture") (extern-spawn-capture-abs ns)
-                                                                      (if (= hn "getenv") (extern-getenv-abs ns)
-                                                                        (if (= hn "exists") (extern-exists-abs ns)
-                                                              (extern-rename-abs ns)))))))))))))))))))))))))))))))))))))))))))))
+  (cond
+    ((str-in-list hn ["isatty" "mtime" "cwd" "ensure-dir" "list-dir" "realpath" "now-ms" "remove" "is-dir"])
+      (os-op-abs hn ns))
+    ((= hn "f+") (extern-fadd-abs ns))
+    ((= hn "f-") (extern-fsub-abs ns))
+    ((= hn "f*") (extern-fmul-abs ns))
+    ((= hn "f/") (extern-fdiv-abs ns))
+    ((= hn "str-concat") (extern-str-concat-abs ns))
+    ((= hn "str-byte-length") (extern-str-byte-length-abs ns))
+    ((= hn "str-byte") (extern-str-byte-abs ns))
+    ((= hn "str-slice") (extern-str-slice-abs ns))
+    ((= hn "ref") (extern-ref-new-abs ns))
+    ((= hn "deref") (extern-ref-deref-abs ns))
+    ((= hn "set!") (extern-ref-set-abs ns))
+    ((= hn "sb-new") (extern-sb-new-abs ns))
+    ((= hn "sb-append!") (extern-sb-append-abs ns))
+    ((= hn "sb-append-byte!") (extern-sb-append-byte-abs ns))
+    ((= hn "sb-take-str!") (extern-sb-take-str-abs ns))
+    ((= hn "map-new") (extern-map-new-abs ns))
+    ((= hn "map-set") (extern-map-set-abs ns))
+    ((= hn "map-get") (extern-map-get-abs ns))
+    ((= hn "map-has") (extern-map-has-abs ns))
+    ((= hn "map-size") (extern-map-size-abs ns))
+    ((= hn "mn-env-0") (extern-env-0-abs ns))
+    ((= hn "mn-env-1") (extern-env-1-abs ns))
+    ((= hn "mn-env-get") (extern-env-get-abs ns))
+    ((= hn "mn-closure-new") (extern-closure-new-abs ns))
+    ((= hn "mn-apply-0") (extern-apply-0-abs ns))
+    ((= hn "mn-apply-1") (extern-apply-1-abs ns))
+    ((= hn "mn-apply-2") (extern-apply-2-abs ns))
+    ((= hn "arg-count") (extern-arg-count-abs ns))
+    ((= hn "arg") (extern-arg-abs ns))
+    ((= hn "read-file") (extern-read-file-abs ns))
+    ((= hn "write-file") (extern-write-file-abs ns))
+    ((= hn "show") (extern-show-abs ns))
+    ((= hn "mn-env-new") (extern-env-new-abs ns))
+    ((= hn "mn-env-set") (extern-env-set-abs ns))
+    ((= hn "compare") (extern-compare-abs ns))
+    ((= hn "sb-length") (extern-sb-length-abs ns))
+    ((= hn "sb-to-str") (extern-sb-to-str-abs ns))
+    ((= hn "dump") (extern-dump-abs ns))
+    ((= hn "spawn") (extern-spawn-abs ns))
+    ((= hn "spawn-capture") (extern-spawn-capture-abs ns))
+    ((= hn "getenv") (extern-getenv-abs ns))
+    ((= hn "exists") (extern-exists-abs ns))
+    (else (extern-rename-abs ns))))
 
 (defn runtime-op-arity (hn: Str) -> Int
   (runtime-op-arity-named (seam-menard-name hn)))
 
 (defn runtime-op-arity-named (hn: Str) -> Int
-  (if (or (= hn "cwd") (= hn "now-ms")) 0
-  (if (str-in-list hn ["isatty" "mtime" "ensure-dir" "list-dir" "realpath" "remove" "is-dir"]) 1
-  (if (or (= hn "sb-new") (= hn "map-new") (= hn "mn-env-0") (= hn "arg-count")) 0
-    (if (str-in-list hn ["str-byte-length" "ref" "deref" "sb-take-str!" "map-size" "mn-env-1" "mn-env-new" "arg" "read-file" "mn-apply-0" "show" "sb-length" "sb-to-str" "dump" "spawn" "getenv" "exists"]) 1
-      (if (or (= hn "str-slice") (= hn "map-set") (= hn "mn-apply-2") (= hn "mn-env-set")) 3
-        2))))))
+  (cond
+    ((or (= hn "cwd") (= hn "now-ms")) 0)
+    ((str-in-list hn ["isatty" "mtime" "ensure-dir" "list-dir" "realpath" "remove" "is-dir"]) 1)
+    ((or (= hn "sb-new") (= hn "map-new") (= hn "mn-env-0") (= hn "arg-count")) 0)
+    ((str-in-list hn ["str-byte-length" "ref" "deref" "sb-take-str!" "map-size" "mn-env-1" "mn-env-new" "arg" "read-file" "mn-apply-0" "show" "sb-length" "sb-to-str" "dump" "spawn" "getenv" "exists"])
+      1)
+    ((or (= hn "str-slice") (= hn "map-set") (= hn "mn-apply-2") (= hn "mn-env-set")) 3)
+    (else 2)))
 
 (defn lower-runtime-op (hn: Str) (args: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (if (= hn "mn-closure-new")
@@ -1974,11 +1994,12 @@
     (bool-from-i1! b (emit-cmp2! b (cmp-pred-for op) (get! b av) (get! b cv)))))
 
 (defn cmp-pred-for (op: Str) -> Int
-  (if (= op "<") icmp-slt
-    (if (= op ">") icmp-sgt
-      (if (= op "<=") icmp-sle
-        (if (= op ">=") icmp-sge
-          icmp-eq)))))
+  (cond
+    ((= op "<") icmp-slt)
+    ((= op ">") icmp-sgt)
+    ((= op "<=") icmp-sle)
+    ((= op ">=") icmp-sge)
+    (else icmp-eq)))
 
 ; -- arithmetic --
 
@@ -1996,11 +2017,12 @@
   (let file-gid (file-gid-of pool (span-origin sp)))
   (let line (span-line-clamped sp))
   (let msg-gid (str-pool-get pool (div-zero-msg)))
-  (if (= op "+") (arith-add! b aw cw)
-    (if (= op "-") (arith-sub! b aw cw)
-      (if (= op "*") (arith-mul! b aw cw)
-        (if (= op "/") (arith-div! b panic-at file-gid line msg-gid aw cw)
-          (arith-rem! b panic-at file-gid line msg-gid aw cw))))))
+  (cond
+    ((= op "+") (arith-add! b aw cw))
+    ((= op "-") (arith-sub! b aw cw))
+    ((= op "*") (arith-mul! b aw cw))
+    ((= op "/") (arith-div! b panic-at file-gid line msg-gid aw cw))
+    (else (arith-rem! b panic-at file-gid line msg-gid aw cw))))
 
 ; -- let (both the inline-body form `(let n e body…)` and the bare,
 ; sequence-threading form `(let n e)` — see `lower-sequence` for the
@@ -2112,10 +2134,11 @@
   (lower-effect-known (effect-alias hn) rest env b funcs noop pool))
 
 (defn lower-effect-known (hn: Str) (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Unit Str)
-  (if (= hn "println") (lower-println rest env b funcs noop pool)
-    (if (= hn "print") (lower-print rest env b funcs noop pool)
-      (if (= hn "exit") (lower-exit rest env b funcs noop pool)
-        (lower-write rest env b funcs noop pool)))))
+  (cond
+    ((= hn "println") (lower-println rest env b funcs noop pool))
+    ((= hn "print") (lower-print rest env b funcs noop pool))
+    ((= hn "exit") (lower-exit rest env b funcs noop pool))
+    (else (lower-write rest env b funcs noop pool))))
 
 ; `(exit code)` — noreturn via `mn_exit` (tagged Int in, untagged inside).
 (defn lower-exit (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Unit Str)
@@ -2518,11 +2541,11 @@
 (defn subst-paren (elems: (List Ast)) (sp: Span) (consts: (Map Str Int)) (bound: (List Str)) -> Ast
   (match elems
     (Cons head _)
-      (if (is-sym head "quote") (ParenNode elems sp)
-        (if (is-sym head "let") (subst-let elems sp consts bound)
-          (if (or (is-sym head "defn") (is-sym head "fn"))
-            (subst-defn elems sp consts bound)
-            (ParenNode (subst-list elems consts bound) sp))))
+      (cond
+        ((is-sym head "quote") (ParenNode elems sp))
+        ((is-sym head "let") (subst-let elems sp consts bound))
+        ((or (is-sym head "defn") (is-sym head "fn")) (subst-defn elems sp consts bound))
+        (else (ParenNode (subst-list elems consts bound) sp)))
     _ (ParenNode elems sp)))
 
 (defn subst-const (ast: Ast) (consts: (Map Str Int)) (bound: (List Str)) -> Ast

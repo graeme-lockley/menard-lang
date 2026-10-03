@@ -607,13 +607,15 @@
 ; picks it) rather than a `(i64^n)->i64` family member.
 (defn write-call-void! (f: BitSink) (ma: Int) (kind: Int) (callee-rel: Int) (arg-rels: (List Int)) -> Unit
   (do
-    (let fnty (if (= kind extern-kind-write) (ty-write-sig-idx ma)
-      (if (= kind extern-kind-init) (ty-init-sig-idx ma)
-        (if (= kind extern-kind-panic) (ty-panic-sig-idx ma)
-          (if (= kind extern-kind-trace-push) (ty-write-sig-idx ma)
-            (if (= kind extern-kind-trace-pop) (ty-pop-sig-idx ma)
-              (if (= kind extern-kind-panic-at) (ty-panic-at-sig-idx ma)
-                (ty-print-sig-idx ma))))))))
+    (let fnty
+      (cond
+        ((= kind extern-kind-write) (ty-write-sig-idx ma))
+        ((= kind extern-kind-init) (ty-init-sig-idx ma))
+        ((= kind extern-kind-panic) (ty-panic-sig-idx ma))
+        ((= kind extern-kind-trace-push) (ty-write-sig-idx ma))
+        ((= kind extern-kind-trace-pop) (ty-pop-sig-idx ma))
+        ((= kind extern-kind-panic-at) (ty-panic-at-sig-idx ma))
+        (else (ty-print-sig-idx ma))))
     (write-record! f func-code-inst-call
       (Cons 0 (Cons call-cc-info (Cons fnty (Cons callee-rel arg-rels)))))))
 
