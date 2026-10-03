@@ -1,19 +1,24 @@
 /**
- * Hermetic programs under tests/corpus/ and examples/: the interpreter,
- * bitcode from stage0, and bitcode from the stage1 driver must agree.
- * Stage0 is `src/mn.mnd` on the host. Stage1 is that bitcode linked with
- * the runtime. Programs that do not define `main`, and programs that
- * call `spawn` / `spawn-capture`, are outside this set.
+ * Hermetic programs under tests/corpus/ and examples/: the interpreter
+ * and a binary compiled by stage0 must agree. When MENARD_STAGE1 is a
+ * native driver built from this same source (`make check-fixed-point`
+ * sets it to the stage1 binary), that driver's bitcode must match
+ * stage0 byte for byte.
  *
- * Stage0 is invoked through the CLI so the clang triple probe runs, the
- * same way `make check-fixed-point` emits. The programs themselves do
- * not start a child.
+ * Building stage1 is a full interpreted compile of src/mn.mnd. That
+ * stays in the fixed-point gate, which already pays for it. This test
+ * does not compile the compiler again.
+ *
+ * Programs that do not define `main`, and programs that call `spawn` /
+ * `spawn-capture`, are outside this set. Stage0 is invoked through the
+ * CLI so the clang triple probe runs. The programs themselves do not
+ * start a child.
  */
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
@@ -49,6 +54,8 @@ const RUNTIME_LIB_SRCS = [
 ].map((rel) => join(ROOT, rel));
 const RUNTIME_INCLUDE = join(ROOT, "runtime/include");
 
+const stage1 = process.env.MENARD_STAGE1 ?? "";
+
 function codeOf(rel: string): string {
   return readFileSync(join(ROOT, rel), "utf8")
     .split("\n")
@@ -82,23 +89,27 @@ function cli(args: string[]): { status: number; stdout: string; stderr: string }
   return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 
+function compileRuntime(dir: string): { status: number; stderr: string; objs: string[] } {
+  const r = spawnSync(
+    clang!,
+    ["-std=c11", "-D_DEFAULT_SOURCE", "-I", RUNTIME_INCLUDE, "-c", ...RUNTIME_LIB_SRCS],
+    { cwd: dir, encoding: "utf-8" },
+  );
+  const objs = RUNTIME_LIB_SRCS.map((src) => join(dir, basename(src).replace(/\.c$/, ".o")));
+  return { status: r.status ?? 1, stderr: r.stderr ?? "", objs };
+}
+
 describe.skipIf(clang === null)("hermetic corpus oracle", () => {
   test(
-    "interpreter, stage0 bitcode, and stage1 bitcode agree",
+    stage1.length > 0
+      ? "interpreter, stage0 bitcode, and stage1 bitcode agree"
+      : "interpreter and stage0 bitcode agree",
     () => {
       const dir = mkdtempSync(join(tmpdir(), "menard-corpus-"));
-      const stageBc = join(dir, "stage.bc");
-      const stage1 = join(dir, "stage1");
       try {
-        const built = cli(["run", "src/mn.mnd", "--", "emit", "src/mn.mnd", stageBc]);
-        expect(built.stderr).toBe("");
-        expect(built.status).toBe(0);
-        const linkStage = spawnSync(
-          clang!,
-          [stageBc, ...RUNTIME_LIB_SRCS, "-I", RUNTIME_INCLUDE, "-lm", "-o", stage1],
-          { cwd: ROOT, encoding: "utf-8" },
-        );
-        expect(linkStage.status).toBe(0);
+        const runtime = compileRuntime(dir);
+        expect(runtime.stderr).toBe("");
+        expect(runtime.status).toBe(0);
 
         const failures: string[] = [];
         for (const rel of hermeticPrograms()) {
@@ -110,25 +121,26 @@ describe.skipIf(clang === null)("hermetic corpus oracle", () => {
             failures.push(`${rel}: stage0 emit failed\n${stage0.stderr}`);
             continue;
           }
-          const stage1Emit = spawnSync(stage1, ["emit", rel, bc1], {
+          if (stage1.length > 0) {
+            const stage1Emit = spawnSync(stage1, ["emit", rel, bc1], {
+              cwd: ROOT,
+              encoding: "utf-8",
+            });
+            if ((stage1Emit.status ?? 1) !== 0) {
+              failures.push(`${rel}: stage1 emit failed\n${stage1Emit.stderr}`);
+              continue;
+            }
+            const a = readFileSync(bc0);
+            const b = readFileSync(bc1);
+            if (Buffer.compare(a, b) !== 0) {
+              failures.push(`${rel}: stage0 and stage1 bitcode differ`);
+              continue;
+            }
+          }
+          const link = spawnSync(clang!, [bc0, ...runtime.objs, "-lm", "-o", bin], {
             cwd: ROOT,
             encoding: "utf-8",
           });
-          if ((stage1Emit.status ?? 1) !== 0) {
-            failures.push(`${rel}: stage1 emit failed\n${stage1Emit.stderr}`);
-            continue;
-          }
-          const a = readFileSync(bc0);
-          const b = readFileSync(bc1);
-          if (Buffer.compare(a, b) !== 0) {
-            failures.push(`${rel}: stage0 and stage1 bitcode differ`);
-            continue;
-          }
-          const link = spawnSync(
-            clang!,
-            [bc0, ...RUNTIME_LIB_SRCS, "-I", RUNTIME_INCLUDE, "-lm", "-o", bin],
-            { cwd: ROOT, encoding: "utf-8" },
-          );
           if ((link.status ?? 1) !== 0) {
             failures.push(`${rel}: link failed\n${link.stderr}`);
             continue;
@@ -149,6 +161,6 @@ describe.skipIf(clang === null)("hermetic corpus oracle", () => {
         rmSync(dir, { recursive: true, force: true });
       }
     },
-    300000,
+    120000,
   );
 });

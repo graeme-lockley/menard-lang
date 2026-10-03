@@ -116,6 +116,8 @@ check-fixed-point:
 	$(BUILD_DIR)/fp/stage1 emit src/mn.mnd $(BUILD_DIR)/fp/bc1.bc
 	@echo "==> cmp bc0 bc1"
 	cmp $(BUILD_DIR)/fp/bc0.bc $(BUILD_DIR)/fp/bc1.bc && echo "bc0 == bc1 OK"
+	@echo "==> corpus: interpreter, stage0, and stage1"
+	cd host && MENARD_STAGE1=$(CURDIR)/$(BUILD_DIR)/fp/stage1 bun test --timeout 120000 ../tests/corpus/oracle.test.ts
 	@echo "==> link stage2"
 	cp $(BUILD_DIR)/fp/bc1.bc $(BUILD_DIR)/fp/mod.bc
 	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/fp/mod.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/fp/stage $(LDLIBS)
