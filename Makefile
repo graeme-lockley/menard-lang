@@ -25,7 +25,7 @@ BUILD_DIR := build
 
 .DEFAULT_GOAL := mn
 
-.PHONY: mn bootstrap test typecheck ci runtime-smoke runtime-clean hello-native ret-native check-fixed-point
+.PHONY: mn bootstrap test typecheck ci native-test runtime-smoke runtime-clean hello-native ret-native check-fixed-point
 
 # Full fixed-point gate: stage0 emit, stage1/stage2 link, bc0 == bc1,
 # stage1 == stage2, and the installed driver artifact. Plain `make` only
@@ -48,6 +48,12 @@ typecheck:
 	cd host && bunx tsc --noEmit -p tsconfig.json
 
 ci: typecheck test
+
+# Colocated `*.test.mnd` suite (`./mn test`). The driver must already exist
+# (`make` or `make bootstrap`). The GitHub Actions bootstrap job runs this
+# after the fixed point, so it does not rebuild ./mn.
+native-test:
+	./mn test
 
 # Standalone smoke `main` linked with the runtime (see runtime/README.md).
 runtime-smoke:

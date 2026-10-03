@@ -60,3 +60,6 @@ jobs:
 
       - name: Bootstrap fixed point
         run: make bootstrap
+
+      - name: Native Menard tests
+        run: make native-test

@@ -129,7 +129,8 @@ cd ..
 ```bash
 make test        # unit, corpus, fuzz, semantic, negative, io, build-host bench
 make typecheck   # tsc --noEmit
-make ci          # typecheck + test (mirrors GitHub Actions)
+make ci          # typecheck + test (the host job)
+make native-test # ./mn test — colocated *.test.mnd; CI runs this after bootstrap
 ```
 
 ### `mn` — the native driver
@@ -142,6 +143,7 @@ make                                 # compile src/mn.mnd → ./mn
 ./mn run   path/to/file.mnd -- a b   # build, run with argv a b
 ./mn inter path/to/file.mnd          # reference interpreter only
 ./mn inter path/to/file.mnd --show-result
+./mn test                            # colocated *.test.mnd (also `make native-test`)
 ```
 
 `make` bootstraps `./mn` with the interpreter (stage0) and links it with
