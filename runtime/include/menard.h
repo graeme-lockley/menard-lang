@@ -220,6 +220,15 @@ MnWord mn_sb_append(MnWord sb, MnWord s);
 MnWord mn_sb_append_byte(MnWord sb, MnWord b_tagged);
 MnWord mn_sb_take_str(MnWord sb);
 MnWord mn_sb_to_str(MnWord sb);
+/*
+ * Module slots. A non-integer top-level `let` is evaluated once from the
+ * module init and stored here; other functions load it by the same key.
+ * The key is the bytes of an immortal string global (pointer bits + length),
+ * the same shape `mn_str_new` takes. `mn_slot_get` panics if the key was
+ * never stored. The value word is a GC root for the life of the process.
+ */
+MnWord mn_slot_get(int64_t key_ptr_bits, int64_t len);
+MnWord mn_slot_set(int64_t key_ptr_bits, int64_t len, MnWord value);
 
 /* Loose `show` for diagnostics (Phase 3 slice H) — Int decimal or #<obj>. */
 MnWord mn_show(MnWord v);

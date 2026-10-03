@@ -552,22 +552,24 @@
 (defn loop-frame-names (lf: LoopFrame) -> (List Str) (match lf (LoopFrame _ _ _ _ n _) n))
 (defn loop-frame-root-mark (lf: LoopFrame) -> Int (match lf (LoopFrame _ _ _ _ _ m) m))
 
-(defrec Builder (closed: (Ref (List (Ref (List PendingItem))))) (cur: (Ref BB)) (next-val: (Ref Int)) (closed-count: (Ref Int)) (terminated: (Ref Bool)) (loops: (Ref (List LoopFrame))) (rooting: (Ref Bool)) (root-base: (Ref Int)) (root-ns: (Ref Int)))
+(defrec Builder (closed: (Ref (List (Ref (List PendingItem))))) (cur: (Ref BB)) (next-val: (Ref Int)) (closed-count: (Ref Int)) (terminated: (Ref Bool)) (loops: (Ref (List LoopFrame))) (rooting: (Ref Bool)) (root-base: (Ref Int)) (root-ns: (Ref Int)) (slots: (Ref (List Str))) (slot-arm: (Ref Bool)))
 
-(defn b-closed (b: Builder) -> (Ref (List (Ref (List PendingItem)))) (match b (Builder c _ _ _ _ _ _ _ _) c))
-(defn b-cur (b: Builder) -> (Ref BB) (match b (Builder _ c _ _ _ _ _ _ _) c))
-(defn b-next-val (b: Builder) -> (Ref Int) (match b (Builder _ _ n _ _ _ _ _ _) n))
-(defn b-closed-count (b: Builder) -> (Ref Int) (match b (Builder _ _ _ n _ _ _ _ _) n))
-(defn b-terminated (b: Builder) -> (Ref Bool) (match b (Builder _ _ _ _ t _ _ _ _) t))
-(defn b-loops (b: Builder) -> (Ref (List LoopFrame)) (match b (Builder _ _ _ _ _ l _ _ _) l))
-(defn b-rooting (b: Builder) -> (Ref Bool) (match b (Builder _ _ _ _ _ _ r _ _) r))
-(defn b-root-base (b: Builder) -> (Ref Int) (match b (Builder _ _ _ _ _ _ _ r _) r))
-(defn b-root-ns (b: Builder) -> (Ref Int) (match b (Builder _ _ _ _ _ _ _ _ n) n))
+(defn b-closed (b: Builder) -> (Ref (List (Ref (List PendingItem)))) (match b (Builder c _ _ _ _ _ _ _ _ _ _) c))
+(defn b-cur (b: Builder) -> (Ref BB) (match b (Builder _ c _ _ _ _ _ _ _ _ _) c))
+(defn b-next-val (b: Builder) -> (Ref Int) (match b (Builder _ _ n _ _ _ _ _ _ _ _) n))
+(defn b-closed-count (b: Builder) -> (Ref Int) (match b (Builder _ _ _ n _ _ _ _ _ _ _) n))
+(defn b-terminated (b: Builder) -> (Ref Bool) (match b (Builder _ _ _ _ t _ _ _ _ _ _) t))
+(defn b-loops (b: Builder) -> (Ref (List LoopFrame)) (match b (Builder _ _ _ _ _ l _ _ _ _ _) l))
+(defn b-rooting (b: Builder) -> (Ref Bool) (match b (Builder _ _ _ _ _ _ r _ _ _ _) r))
+(defn b-root-base (b: Builder) -> (Ref Int) (match b (Builder _ _ _ _ _ _ _ r _ _ _) r))
+(defn b-root-ns (b: Builder) -> (Ref Int) (match b (Builder _ _ _ _ _ _ _ _ n _ _) n))
+(defn b-slots (b: Builder) -> (Ref (List Str)) (match b (Builder _ _ _ _ _ _ _ _ _ s _) s))
+(defn b-slot-arm (b: Builder) -> (Ref Bool) (match b (Builder _ _ _ _ _ _ _ _ _ _ a) a))
 
 (defn new-bb -> BB (BB (ref (- 1)) (ref [])))
 
 (defn builder-new (start-val: Int) -> Builder
-  (Builder (ref []) (ref (new-bb)) (ref start-val) (ref 0) (ref false) (ref []) (ref false) (ref 0) (ref 0)))
+  (Builder (ref []) (ref (new-bb)) (ref start-val) (ref 0) (ref false) (ref []) (ref false) (ref 0) (ref 0) (ref []) (ref false)))
 
 (defn block-terminated? (b: Builder) -> Bool (deref (b-terminated b)))
 (defn mark-terminated! (b: Builder) -> Unit (set! (b-terminated b) true))
@@ -1109,13 +1111,33 @@
     (let len (const-i64! b (str-byte-length s)))
     (emit-call! b (extern-str-new-abs (str-pool-count pool)) [ptr-i64 len])))
 
+; A module slot's key is the binding's name, looked up in the string pool.
+; `mn_slot_get` / `mn_slot_set` take that global's address and byte length.
+(defn emit-slot-get! (b: Builder) (pool: StrPool) (name: Str) -> Int
+  (do
+    (let gid (str-pool-get pool name))
+    (let ptr-i64 (emit-cast! b cast-ptrtoint gid ty-i64))
+    (let len (const-i64! b (str-byte-length name)))
+    (emit-call! b (extern-slot-get-abs (str-pool-count pool)) [ptr-i64 len])))
+
+(defn emit-slot-set! (b: Builder) (pool: StrPool) (name: Str) (w: Int) -> Unit
+  (do
+    (let gid (str-pool-get pool name))
+    (let ptr-i64 (emit-cast! b cast-ptrtoint gid ty-i64))
+    (let len (const-i64! b (str-byte-length name)))
+    (emit-call! b (extern-slot-set-abs (str-pool-count pool)) [ptr-i64 len w])
+    ()))
+
 (defn lower-sym (name: Str) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (pool: StrPool) -> (Result Int Str)
   (match (map-get env name)
     (Some slot) (Ok (emit-load! b slot))
     (None)
       (match (map-get funcs name)
         (Some fr) (lower-func-as-value fr b pool)
-        (None) (lower-sym-ctor-or-err name b pool))))
+        (None)
+          (if (str-in-list name (deref (b-slots b)))
+            (Ok (emit-slot-get! b pool name))
+            (lower-sym-ctor-or-err name b pool)))))
 
 (defn lower-func-as-value (fr: FuncRef) (b: Builder) (pool: StrPool) -> (Result Int Str)
   (do
@@ -2246,11 +2268,29 @@
 
 (defn lower-sequence-let (sl: SimpleLet) (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (match sl
-    (SimpleLet name expr) (result-bind (lower-expr expr env b funcs noop pool) (fn (v) (lower-sequence-let-bind name v rest env b funcs noop pool)))))
+    (SimpleLet name expr)
+      (do
+        ; A nested let of the same name inside the initializer is a local,
+        ; not a second store of the module slot.
+        (let was (deref (b-slot-arm b)))
+        (set! (b-slot-arm b) false)
+        (result-bind (lower-expr expr env b funcs noop pool)
+          (fn (v)
+            (do
+              (set! (b-slot-arm b) was)
+              (lower-sequence-let-bind name v rest env b funcs noop pool)))))))
+
+(defn slot-store? (b: Builder) (name: Str) (env: (Map Str Int)) -> Bool
+  (if (deref (b-slot-arm b))
+    (if (str-in-list name (deref (b-slots b)))
+      (match (map-get env name) (None) true (Some _) false)
+      false)
+    false))
 
 (defn lower-sequence-let-bind (name: Str) (v: Int) (rest: (List Ast)) (env: (Map Str Int)) (b: Builder) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) -> (Result Int Str)
   (do
     (let w (get! b v))
+    (if (slot-store? b name env) (emit-slot-set! b pool name w) ())
     (let slot (root-alloca! b))
     (emit-store! b slot w)
     (lower-sequence-rest rest (map-set env name slot) b funcs noop pool w)))
@@ -2343,7 +2383,7 @@
     (let i32v (emit-cast! b cast-trunc untagged ty-i32))
     (emit-ret! b i32v)))
 
-(defn lower-one-func (ld: LDefn) (num-globals: Int) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) (mc: (Map Str Bool)) -> (Result LFunc Str)
+(defn lower-one-func (ld: LDefn) (num-globals: Int) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) (mc: (Map Str Bool)) (slots: (List Str)) -> (Result LFunc Str)
   (do
     (let is-main (= (ldefn-name ld) "main"))
     ; Native `@main` is `(i32 argc, ptr argv) -> i32` — two LLVM params that
@@ -2353,6 +2393,10 @@
     (let flag (match (map-get mc (ldefn-name ld)) (Some f) f (None) true))
     (set! (b-rooting b) flag)
     (set! (b-root-ns b) (str-pool-count pool))
+    (set! (b-slots b) slots)
+    (if (or is-main (is-module-init-name (ldefn-name ld)))
+      (set! (b-slot-arm b) true)
+      ())
     (if flag (set! (b-root-base b) (emit-root-save! b)) ())
     (let env0 (bind-params! b (lparam-names (ldefn-params ld)) num-globals 0))
     (emit-main-init-if-needed! b is-main num-globals pool)
@@ -2376,6 +2420,12 @@
 (defn is-mn-symbol (name: Str) -> Bool
   (and (>= (str-byte-length name) 3) (= (str-slice name 0 3) "mn_")))
 
+; `with-module-init` names the generated function `mn_<hash>_init`. A user
+; function named `init` is renamed to `__mN_init` and does not match.
+(defn is-module-init-name (name: Str) -> Bool
+  (let n (str-byte-length name))
+  (and (is-mn-symbol name) (and (>= n 8) (= (str-slice name (- n 5) 5) "_init"))))
+
 (defn link-symbol (name: Str) -> Str
   (if (or (= name "main") (is-mn-symbol name)) name (str-concat "menard." name)))
 
@@ -2385,14 +2435,14 @@
     (finish-builder! b)
     (Ok (LFunc (link-symbol (ldefn-name ld)) (param-arity-of (ldefn-params ld)) is-main (total-blocks b) (builder-items-ordered b)))))
 
-(defn lower-all-funcs (lds: (List LDefn)) (num-globals: Int) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) (mc: (Map Str Bool)) -> (Result (List LFunc) Str)
+(defn lower-all-funcs (lds: (List LDefn)) (num-globals: Int) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) (mc: (Map Str Bool)) (slots: (List Str)) -> (Result (List LFunc) Str)
   (match lds
     [] (Ok [])
-    (Cons ld rest) (result-bind (lower-one-func ld num-globals funcs noop pool mc)
-      (fn (lf) (lower-all-funcs-cons lf rest num-globals funcs noop pool mc)))))
+    (Cons ld rest) (result-bind (lower-one-func ld num-globals funcs noop pool mc slots)
+      (fn (lf) (lower-all-funcs-cons lf rest num-globals funcs noop pool mc slots)))))
 
-(defn lower-all-funcs-cons (lf: LFunc) (rest: (List LDefn)) (num-globals: Int) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) (mc: (Map Str Bool)) -> (Result (List LFunc) Str)
-  (result-bind (lower-all-funcs rest num-globals funcs noop pool mc) (fn (lfs) (Ok (Cons lf lfs)))))
+(defn lower-all-funcs-cons (lf: LFunc) (rest: (List LDefn)) (num-globals: Int) (funcs: (Map Str FuncRef)) (noop: (Map Str Bool)) (pool: StrPool) (mc: (Map Str Bool)) (slots: (List Str)) -> (Result (List LFunc) Str)
+  (result-bind (lower-all-funcs rest num-globals funcs noop pool mc slots) (fn (lfs) (Ok (Cons lf lfs)))))
 
 ; ---------------------------------------------------------------------------
 ; Top-level, non-`defn` forms — `hello.mnd`'s standalone `(println
@@ -2949,12 +2999,54 @@
         (Some _) (add-imp-refs rest (+ idx 1) acc)
         (None) (add-imp-refs rest (+ idx 1) (map-set acc name (FuncRef idx ar))))))
 
+; A non-integer top-level `(let name expr)`. Integer lets are already
+; folded away before this runs.
+(defn value-let-name (form: Ast) -> (Maybe Str)
+  (match (unwrap-pub form)
+    (ParenNode [head name expr] _)
+      (if (is-sym head "let")
+        (match expr (IntNode _ _) (None) _ (sym-str name))
+        (None))
+    _ (None)))
+
+(defn top-value-let-names (forms: (List Ast)) -> (List Str)
+  (match forms
+    [] []
+    (Cons f rest)
+      (match (value-let-name f)
+        (Some n) (Cons n (top-value-let-names rest))
+        (None) (top-value-let-names rest))))
+
+(defn drop-top-value-lets (forms: (List Ast)) -> (List Ast)
+  (match forms
+    [] []
+    (Cons f rest)
+      (match (value-let-name f)
+        (Some _) (drop-top-value-lets rest)
+        (None) (Cons f (drop-top-value-lets rest)))))
+
+(defn any-module-init (lds: (List LDefn)) -> Bool
+  (match lds
+    [] false
+    (Cons ld rest)
+      (if (is-module-init-name (ldefn-name ld)) true (any-module-init rest))))
+
+(defn add-slot-strs (names: (List Str)) (p: StrPool) -> StrPool
+  (match names
+    [] p
+    (Cons n rest) (add-slot-strs rest (str-pool-add p n))))
+
 (defn lower-program-build (word-lds: (List LDefn)) (all-lds: (List LDefn)) (forms: (List Ast)) (triple: Str) (paths: (List Str)) (imports: (List Imp)) (seeds: (List CtorSeed)) -> (Result Str Str)
   (do
-    (let extra (collect-non-defn-tops forms))
+    ; When a module init exists, the value let runs there. Drop the
+    ; top-level copy so bootstrap `main` does not evaluate it again.
+    ; A program with no init splices the let onto `main`, which stores it.
+    (let slots (top-value-let-names forms))
+    (let forms2 (if (any-module-init word-lds) (drop-top-value-lets forms) forms))
+    (let extra (collect-non-defn-tops forms2))
     (let word-lds2 (replace-main-body word-lds extra))
-    (let specs (match (ctor-info forms seeds) (CtorTable s _) s))
-    (let pool (str-pool-finalize (collect-str-pool forms paths) specs))
+    (let specs (match (ctor-info forms2 seeds) (CtorTable s _) s))
+    (let pool (str-pool-finalize (add-slot-strs slots (collect-str-pool forms2 paths)) specs))
     (let num-strings (str-pool-count pool))
     (let num-funcs (length word-lds2))
     (let nimps (imp-count imports))
@@ -2963,7 +3055,7 @@
     (let noop (collect-noop-names all-lds))
     (let num-globals (+ (* 2 num-strings) extern-count nimps num-funcs))
     (let mc (mc-analyze word-lds2))
-    (match (lower-all-funcs word-lds2 num-globals funcs noop pool mc)
+    (match (lower-all-funcs word-lds2 num-globals funcs noop pool mc slots)
       (Ok lfuncs) (Ok (write-module-bc (LlvmModule lfuncs (str-pool-strs pool) imports) triple))
       (Err msg) (Err (str-concat "cannot lower `main`: " msg)))))
 

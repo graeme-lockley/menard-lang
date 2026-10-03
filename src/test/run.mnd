@@ -19,7 +19,7 @@
 (import std/string)
 (import std/test)
 
-(defn nl -> Str
+(let nl
   (do
     (let sb (sb-new))
     (sb-append-byte! sb 10)
@@ -37,7 +37,7 @@
               (if (starts-with line "pass ")
                 (paint on "[32m" line)
                 (paint on "[31m" line)))
-            (write stdout (nl))
+            (write stdout nl)
             ())
           ())
         (print-verbose rest on))))
@@ -121,7 +121,7 @@
     (write stdout path)
     (write stdout " ... ")
     (write stdout (if ok (paint on "[32m" "ok") (paint on "[31m" "FAILED")))
-    (write stdout (nl))
+    (write stdout nl)
     ()))
 
 (defn rev-strs (xs: (List Str)) (acc: (List Str)) -> (List Str)
@@ -175,7 +175,7 @@
           (Counts p f)
             (do
               (if (and exit-bad (> (str-byte-length err) 0))
-                (do (write stderr err) (write stderr (nl)) ())
+                (do (write stderr err) (write stderr nl) ())
                 ())
               (Counts (+ passed p) (+ failed f)))))))
 

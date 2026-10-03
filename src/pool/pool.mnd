@@ -264,7 +264,7 @@
 ; Dedup by byte content, sort by byte content (ADR 38/§2.2.1's own two
 ; rules), then join one entry per line.
 
-(defn nl -> Str
+(let nl
   (do
     (let sb (sb-new))
     (sb-append-byte! sb 10)
@@ -292,7 +292,7 @@
   (match xs
     [] ""
     [x] x
-    (Cons x rest) (str-concat x (nl) (join-lines rest))))
+    (Cons x rest) (str-concat x nl (join-lines rest))))
 
 ; The static pool candidates `forms` mentions — every distinct `Str`
 ; literal and every distinct nullary constructor mention (see this

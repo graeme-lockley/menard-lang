@@ -96,7 +96,7 @@
     (Ok s) (bytes-hash s)
     (Err _) 0))
 
-(defn nl -> Str
+(let nl
   (do
     (let sb (sb-new))
     (sb-append-byte! sb 10)
@@ -105,7 +105,7 @@
 (defn add-line (sb: StringBuffer) (s: Str) -> Unit
   (do
     (sb-append! sb s)
-    (sb-append! sb (nl))
+    (sb-append! sb nl)
     ()))
 
 (defn write-deps (sb: StringBuffer) (deps: (List DepRec)) -> Unit

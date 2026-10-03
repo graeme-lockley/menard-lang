@@ -11,7 +11,7 @@
 
 (pub alias Span Span)
 
-(defn nl -> Str
+(let nl
   (do
     (let sb (sb-new))
     (sb-append-byte! sb 10)
@@ -123,18 +123,18 @@
                 code
                 "]: "
                 msg
-                (nl)
+                nl
                 "  |"
-                (nl)
+                nl
                 (pad-left (show line) gw)
                 " | "
                 text
-                (nl)
+                nl
                 (repeat-str " " gw "")
                 " | "
                 (repeat-str " " (- col 1) "")
                 (paint on sev-color (repeat-str "^" carets ""))
-                (nl))))
+                nl)))
 
 (pub defn report-span (path: Str) (src: Str) (sp: Span) (sev: Str) (code: Str) (msg: Str) -> Unit
   (do
@@ -145,5 +145,5 @@
   (do
     (write stderr "error: ")
     (write stderr msg)
-    (write stderr (nl))
+    (write stderr nl)
     ()))

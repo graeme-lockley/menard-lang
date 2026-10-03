@@ -231,13 +231,27 @@
       (append-asts (drop-main body []) [(test-main tests)])
       body)))
 
+(defn top-let-name (form: Ast) -> (Maybe Str)
+  (match (unwrap-pub form)
+    (ParenNode (Cons h rest) _)
+      (match (sym-str h)
+        (Some n)
+          (if (= n "let")
+            (match rest (Cons name _) (bare-name name) [] (None))
+            (None))
+        (None) (None))
+    _ (None)))
+
 (defn add-rename (forms: (List Ast)) (path: Str) (acc: (Map Str Str)) -> (Map Str Str)
   (match forms
     [] acc
     (Cons f rest)
       (match (defn-name f)
         (Some n) (add-rename rest path (map-set acc n (link-of path n)))
-        (None) (add-rename rest path acc))))
+        (None)
+          (match (top-let-name f)
+            (Some n) (add-rename rest path (map-set acc n (link-of path n)))
+            (None) (add-rename rest path acc)))))
 
 ; Closure conversion runs after defn renaming, so each module's lifted
 ; `__lamN` would otherwise link as the same `menard.__lamN`.

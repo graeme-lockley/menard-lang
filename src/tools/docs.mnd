@@ -16,7 +16,7 @@
 (defrec Scan (text: Str) (ok: Bool))
 
 ; A newline byte.
-(defn nl -> Str
+(let nl
   (do
     (let sb (sb-new))
     (sb-append-byte! sb 10)
@@ -91,18 +91,18 @@
     (let missing-test (and pub (= (length tests) 0)))
     (let note
       (if missing-summary
-        (str-concat "error: " module " " name " has no summary" (nl))
+        (str-concat "error: " module " " name " has no summary" nl)
         (if missing-test
-          (str-concat "error: " module " " name " has no @test" (nl))
+          (str-concat "error: " module " " name " has no @test" nl)
           "")))
     (let body
       (if pub
         (str-concat
-          "module: " module (nl)
-          "name: " name (nl)
-          "signature: " sig (nl)
-          "summary: " summary (nl)
-          (join (nl) tests) (nl) (nl))
+          "module: " module nl
+          "name: " name nl
+          "signature: " sig nl
+          "summary: " summary nl
+          (join nl tests) nl nl)
         ""))
     (Scan (str-concat note body) (not (or missing-summary missing-test)))))
 
@@ -137,7 +137,7 @@
 ; Scan one library file. A missing file is a failure.
 (defn scan-file (path: Str) -> Scan
   (match (read-file path)
-    (Err _) (Scan (str-concat "error: cannot read " path (nl)) false)
+    (Err _) (Scan (str-concat "error: cannot read " path nl) false)
     (Ok src)
       (scan-lines (split-keep src 0 0 (str-byte-length src) []) [] "" (Scan "" true))))
 

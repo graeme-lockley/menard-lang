@@ -11,6 +11,7 @@
 #include "gc_internal.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct RootEnt {
   MnWord *ptr;
@@ -138,5 +139,72 @@ void mn_shadow_pop(void) { mn_root_pop(); }
 void mn_shadow_visit(mn_root_visit_fn fn, void *ctx) {
   for (int i = 0; i < depth; i++) {
     fn(stack[i].ptr, ctx);
+  }
+}
+
+/*
+ * Module-level `let` slots. The key points at an LLVM string global, which
+ * never moves. The value is a Menard word and is visited with the shadow
+ * stack. `mn_root_push` is the wrong tool here: it clears the word and the
+ * init frame pops it.
+ */
+typedef struct MnSlot {
+  const char *key;
+  int64_t len;
+  MnWord value;
+} MnSlot;
+
+static MnSlot *slots = NULL;
+static int slot_n = 0;
+static int slot_cap = 0;
+
+static int slot_eq(const MnSlot *s, const char *key, int64_t len) {
+  return s->len == len && memcmp(s->key, key, (size_t)len) == 0;
+}
+
+static MnSlot *slot_find(const char *key, int64_t len) {
+  for (int i = 0; i < slot_n; i++) {
+    if (slot_eq(&slots[i], key, len)) {
+      return &slots[i];
+    }
+  }
+  return NULL;
+}
+
+MnWord mn_slot_get(int64_t key_bits, int64_t len) {
+  const char *key = (const char *)(uintptr_t)key_bits;
+  MnSlot *s = slot_find(key, len);
+  if (s == NULL) {
+    mn_panic("mn_slot_get: missing slot");
+  }
+  return s->value;
+}
+
+MnWord mn_slot_set(int64_t key_bits, int64_t len, MnWord value) {
+  const char *key = (const char *)(uintptr_t)key_bits;
+  MnSlot *s = slot_find(key, len);
+  if (s != NULL) {
+    s->value = value;
+    return MN_UNIT;
+  }
+  if (slot_n == slot_cap) {
+    int ncap = slot_cap == 0 ? 8 : slot_cap * 2;
+    MnSlot *n = (MnSlot *)realloc(slots, (size_t)ncap * sizeof(MnSlot));
+    if (n == NULL) {
+      mn_panic("mn_slot_set: oom");
+    }
+    slots = n;
+    slot_cap = ncap;
+  }
+  slots[slot_n].key = key;
+  slots[slot_n].len = len;
+  slots[slot_n].value = value;
+  slot_n++;
+  return MN_UNIT;
+}
+
+void mn_slots_visit(mn_root_visit_fn fn, void *ctx) {
+  for (int i = 0; i < slot_n; i++) {
+    fn(&slots[i].value, ctx);
   }
 }

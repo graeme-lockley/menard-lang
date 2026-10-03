@@ -22,7 +22,7 @@
   (or (starts-with name ".") (= name "node_modules") (= name "build") (= name "target")))
 
 ; A newline, as a one-byte string.
-(defn nl -> Str
+(let nl
   (do
     (let sb (sb-new))
     (sb-append-byte! sb 10)
@@ -130,5 +130,5 @@
           ())
         (write stdout (paint on "[32m" (str-concat (show p) " passed")))
         (write stdout (str-concat " (" (show ms) "ms)"))
-        (write stdout (nl))
+        (write stdout nl)
         ())))

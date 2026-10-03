@@ -353,7 +353,7 @@
 ; plan's text is deterministic (spec §2.11) rather than dependent on
 ; `Map`/traversal order.
 
-(defn nl -> Str
+(let nl
   (do
     (let sb (sb-new))
     (sb-append-byte! sb 10)
@@ -411,7 +411,7 @@
   (match type-names
     [] ""
     [t] (render-line t usages)
-    (Cons t rest) (str-concat (render-line t usages) (nl) (render-lines rest usages))))
+    (Cons t rest) (str-concat (render-line t usages) nl (render-lines rest usages))))
 
 (defn render-usages (usages: (List Usage)) -> Str
   (render-lines (sort-strs (collect-type-names usages)) usages))

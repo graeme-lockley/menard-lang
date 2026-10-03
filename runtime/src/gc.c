@@ -299,6 +299,7 @@ static void verify_heap(void) {
   mn_old_clear_marks();
   work_n = 0;
   mn_shadow_visit(verify_root, NULL);
+  mn_slots_visit(verify_root, NULL);
   size_t i = 0;
   while (i < work_n) {
     verify_object(work[i]);
@@ -312,6 +313,7 @@ static void minor_collect(void) {
   copied_bytes = 0;
   work_n = 0;
   mn_shadow_visit(visit_root, NULL);
+  mn_slots_visit(visit_root, NULL);
   for (size_t i = 0; i < remembered_n; i++) {
     void *obj = remembered[i];
     if (mn_ptr_in_old(obj) && !mn_old_is_free(obj)) {
@@ -375,6 +377,7 @@ static void major_collect(void) {
   mn_old_clear_marks();
   work_n = 0;
   mn_shadow_visit(major_root, NULL);
+  mn_slots_visit(major_root, NULL);
   size_t i = 0;
   while (i < work_n) {
     major_scan(work[i]);

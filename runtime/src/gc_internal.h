@@ -53,6 +53,7 @@ void mn_gc_relocate_slot(MnWord *slot);
 
 typedef void (*mn_root_visit_fn)(MnWord *slot, void *ctx);
 void mn_shadow_visit(mn_root_visit_fn fn, void *ctx);
+void mn_slots_visit(mn_root_visit_fn fn, void *ctx);
 
 int mn_gc_stress(void);
 int mn_gc_verify(void);

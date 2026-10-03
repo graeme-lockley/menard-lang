@@ -662,12 +662,23 @@
   (or (= k "defn") (= k "defrec") (= k "variant") (= k "alias") (= k "extern")))
 
 ; Integer `(let name N)` stays at module scope so constant substitution
-; still sees it. Every other top-level expression runs from the init.
+; still sees it. A non-integer `(let name expr)` stays there too, so
+; typechecking still binds the name for later `defn`s, and is copied into
+; the module init so it runs once. Every other top-level expression runs
+; from the init only.
 (defn is-int-let (form: Ast) -> Bool
   (match form
     (ParenNode [head _ expr] _)
       (if (is-sym head "let")
         (match expr (IntNode _ _) true _ false)
+        false)
+    _ false))
+
+(defn is-value-let (form: Ast) -> Bool
+  (match form
+    (ParenNode [head _ expr] _)
+      (if (is-sym head "let")
+        (match expr (IntNode _ _) false _ true)
         false)
     _ false))
 
@@ -679,7 +690,9 @@
     (Cons f rest)
       (if (or (is-kept-decl f) (is-int-let f))
         (partition-body rest (Cons f kept) init)
-        (partition-body rest kept (Cons f init)))))
+        (if (is-value-let f)
+          (partition-body rest (Cons f kept) (Cons f init))
+          (partition-body rest kept (Cons f init))))))
 
 (defn init-defn (name: Str) (body: (List Ast)) -> Ast
   (defn-form name "Unit" (append-asts body [(unit-form)])))

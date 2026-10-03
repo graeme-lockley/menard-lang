@@ -471,7 +471,9 @@
     (write-extern-decl! m (func-type-idx-for-arity 0)) ; mn_now_ms
     (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_remove
     (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_is_dir
-    (write-extern-decl! m (func-type-idx-for-arity 1)))) ; mn_sb_to_str
+    (write-extern-decl! m (func-type-idx-for-arity 1)) ; mn_sb_to_str
+    (write-extern-decl! m (func-type-idx-for-arity 2)) ; mn_slot_get
+    (write-extern-decl! m (func-type-idx-for-arity 3)))) ; mn_slot_set
 
 (defn write-import-decls! (m: BitSink) (imps: (List Imp)) -> Unit
   (match imps
@@ -777,7 +779,9 @@
     (write-record! v vst-code-entry (Cons (extern-now-ms-abs num-strings) (str-byte-ops "mn_now_ms")))
     (write-record! v vst-code-entry (Cons (extern-remove-abs num-strings) (str-byte-ops "mn_remove")))
     (write-record! v vst-code-entry (Cons (extern-is-dir-abs num-strings) (str-byte-ops "mn_is_dir")))
-    (write-record! v vst-code-entry (Cons (extern-sb-to-str-abs num-strings) (str-byte-ops "mn_sb_to_str")))))
+    (write-record! v vst-code-entry (Cons (extern-sb-to-str-abs num-strings) (str-byte-ops "mn_sb_to_str")))
+    (write-record! v vst-code-entry (Cons (extern-slot-get-abs num-strings) (str-byte-ops "mn_slot_get")))
+    (write-record! v vst-code-entry (Cons (extern-slot-set-abs num-strings) (str-byte-ops "mn_slot_set")))))
 
 (defn lfunc-list-length (fs: (List LFunc)) -> Int
   (match fs [] 0 (Cons _ rest) (+ 1 (lfunc-list-length rest))))

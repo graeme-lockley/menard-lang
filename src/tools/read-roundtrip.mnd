@@ -12,7 +12,7 @@
 (import std/io)
 (import std/sys)
 
-(defn nl -> Str
+(let nl
   (do
     (let sb (sb-new))
     (sb-append-byte! sb 10)
@@ -21,7 +21,7 @@
 (defn fail (msg: Str) -> Unit
   (do
     (write stderr msg)
-    (write stderr (nl))
+    (write stderr nl)
     (exit 1)))
 
 (defn fail-parse (path: Str) (e: ParseError) -> Unit

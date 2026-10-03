@@ -49,7 +49,7 @@
 (import std/string)
 (import std/sys)
 
-(defn nl -> Str
+(let nl
   (do
     (let sb (sb-new))
     (sb-append-byte! sb 10)
@@ -58,7 +58,7 @@
 (defn write-line (fd: Int) (s: Str) -> Unit
   (do
     (write fd s)
-    (write fd (nl))
+    (write fd nl)
     ()))
 
 ; Flags the driver understands. A valued flag consumes the next word.
