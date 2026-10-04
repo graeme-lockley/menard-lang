@@ -89,6 +89,29 @@ mk(20000)`;
     if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(20000n);
   }, 60_000);
 
+  test("record field projection", () => {
+    const src = `record Pair {
+  a: Int
+  b: Int
+}
+let fst(p: Pair) -> Int =
+  match (p)
+    | Pair(a, _) -> a
+fst(Pair(3, 4))`;
+    const r = run(src);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(3n);
+  });
+
+  test("a user lex-peek is not the compiler lexer", () => {
+    const src = `let lex-peek(x: Int) -> Int =
+  x + 1
+lex-peek(1)`;
+    const r = run(src);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(2n);
+  });
+
   test("builds and sizes a 10k-element list", () => {
     const src = `let mk(n: Int) -> List Int =
   if n == 0 -> Nil()

@@ -31,6 +31,7 @@ import type { Host } from "../host/host.ts";
 import { ExitSignal, type IoError, type SpawnError, type SpawnStatus } from "../host/host.ts";
 import { showValue, equalValue, compareValue, dumpValue } from "./derive.ts";
 import { decodeSymBytes, specialFormOf, Sf } from "./resolve.ts";
+import { accelFor, getAccel, runAccel, setAccel } from "./accel.ts";
 
 export type PanicFrame = { path: string; span: Span };
 
@@ -301,7 +302,10 @@ function defineDefn(ast: Ast & { tag: "list" }, env: Env): void {
   }
   idx++;
   const body = ast.elems.slice(idx);
-  envSet(env, name, { tag: "fn", params, body, env, path: definePath, name });
+  const fn: Value & { tag: "fn" } = { tag: "fn", params, body, env, path: definePath, name };
+  const accel = accelFor(definePath, name, params, body);
+  if (accel) setAccel(fn, accel);
+  envSet(env, name, fn);
 }
 
 type LoopCtx = { names: string[]; env: Env };
@@ -523,10 +527,23 @@ function evalFast(ast: Ast, env: Env, host: Host, impureOk: boolean): Value | nu
       if (specialFormOf(head.name) !== Sf.None) return null;
       const fn = envGet(env, symName(head));
       if (fn === undefined) return null;
-      if (fn.tag === "fn" && fn.name === "pow2" && ast.elems.length === 2) {
-        const arg = evalFast(ast.elems[1]!, env, host, false);
-        if (arg === null || arg.tag !== "int" || arg.value > 32n) return null;
-        return vInt(pow2Host(arg.value));
+      if (fn.tag === "fn") {
+        const accel = getAccel(fn);
+        if (accel) {
+          if (!impureOk && accel.impure) return null;
+          const args: Value[] = [];
+          for (let i = 1; i < ast.elems.length; i++) {
+            const v = evalFast(ast.elems[i]!, env, host, false);
+            if (v === null) return null;
+            args.push(v);
+          }
+          return runAccel(accel, args);
+        }
+        if (fn.name === "pow2" && ast.elems.length === 2) {
+          const arg = evalFast(ast.elems[1]!, env, host, false);
+          if (arg === null || arg.tag !== "int" || arg.value > 32n) return null;
+          return vInt(pow2Host(arg.value));
+        }
       }
       if (fn.tag !== "builtin") return null;
       if (!impureOk && !FAST_BUILTIN.has(fn.name)) return null;
@@ -894,6 +911,13 @@ function applyNow(
 ): Step {
   if (callee.tag === "builtin") {
     return { tag: "value", value: applyBuiltin(callee.name, args, host, span) };
+  }
+  if (callee.tag === "fn") {
+    const accel = getAccel(callee);
+    if (accel) {
+      const fast = runAccel(accel, args);
+      if (fast !== null) return { tag: "value", value: fast };
+    }
   }
   if (callee.tag !== "fn") {
     throw new PanicError("attempted to call non-function", span);
