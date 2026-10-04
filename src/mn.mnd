@@ -200,10 +200,7 @@ let form-is-import(form: Ast) -> Bool =
     | _ -> false
 
 let has-import(forms: List Ast) -> Bool =
-  match (forms)
-    | [] -> false
-    | f :: rest ->
-      if (form-is-import(f)) -> true | has-import(rest)
+  any(form-is-import, forms)
 
 let front-end(path: Str, src: Str, dump-after-reader: Bool, dump-after-desugar: Bool, dump-after-type: Bool, dump-after-close: Bool, dump-after-root: Bool, dump-after-derive: Bool, on-ok: (List Ast, List Str) -> Unit) -> Unit =
   match (read-all(src))
