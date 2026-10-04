@@ -21,3 +21,9 @@ pub let unwrap-or[a](m: Maybe a, default: a) -> a =
   match (m)
     | Some(v) -> v
     | None -> default
+
+; Return the Some value, using default when m is None.
+; @test with-default(100, Some(42)) => 42
+; @test with-default(100, None()) => 100
+pub let with-default[a](default: a, m: Maybe a) -> a =
+  unwrap-or(m, default)

@@ -2,6 +2,7 @@
 ; @module std/list
 
 import std/pair
+import std/maybe as Maybe
 
 ; Number of elements in xs.
 ; @test length([1, 2, 3]) => 3
@@ -16,7 +17,16 @@ pub let nth[a](xs: List a, i: Int) -> Maybe a =
   match (xs)
     | [] -> None()
     | h :: t ->
-      if (i == 0) -> Some(h) | nth(t, i - 1)
+      if (i <= 0) -> Some(h) | nth(t, i - 1)
+
+; The element at zero-based i, or default when xs is empty or i is past the end.
+; Non-positive indices select the first element.
+; @test nth-with-default([10, 20], 1, 0) => 20
+; @test nth-with-default([10, 20], 2, 0) => 0
+; @test nth-with-default([], 0, 42) => 42
+; @test nth-with-default([10, 20], -1, 0) => 10
+pub let nth-with-default[a](xs: List a, i: Int, default: a) -> a =
+  Maybe.with-default(default, nth(xs, i))
 
 ; The elements of xs followed by the elements of ys.
 ; @test append([1], [2, 3]) => [1, 2, 3]
@@ -48,8 +58,7 @@ pub let map[a, b](f: (a) -> b, xs: List a) -> List b =
 pub let filter[a](f: (a) -> Bool, xs: List a) -> List a =
   match (xs)
     | [] -> []
-    | h :: t ->
-      if (f(h)) -> h :: filter(f, t) | filter(f, t)
+    | h :: t -> if (f(h)) -> h :: filter(f, t) | filter(f, t)
 
 ; f folded from the left, starting at acc.
 ; @test fold(fn (a, n) = a + n, 0, [1, 2, 3]) => 6

@@ -3,7 +3,7 @@
 ; timestamp; both live only here.
 ;
 ; An interface is a list of forms the reader accepts:
-;   mni(2)
+;   mni(3)
 ;   src(HASH)
 ;   dep(HASH, "abs")
 ;   init("sym") or init("-")
@@ -22,8 +22,8 @@ import std/io
 import std/string
 import std/sys
 
-; Version 2 invalidates objects that lowered write as Unit instead of Result.
-let iface-version = 2
+; Version 3 invalidates objects compiled with unscoped qualified imports.
+let iface-version = 3
 
 pub record DepRec {
   hash: Int

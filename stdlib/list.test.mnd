@@ -1,7 +1,9 @@
 ; List operations.
 
 import std/list
+import std/maybe as Maybe
 import std/pair
+import std/result as Result
 
 test "length of three" = length([1, 2, 3]) == 3
 
@@ -9,11 +11,33 @@ test "nth returns the element" = nth([10, 20], 1) == Some(20)
 
 test "nth past the end is none" = nth([10], 3) == None()
 
+test "nth-with-default returns an element" = nth-with-default([10, 20], 1, 0) == 20
+
+test "nth-with-default uses the default past the end" = nth-with-default([10, 20], 2, 0) == 0
+
+test "nth-with-default uses the default for an empty list" = nth-with-default([], 0, 42) == 42
+
+test "nth-with-default selects the first element for a negative index" = nth-with-default([10, 20], -1, 0) == 10
+
+test "nth-with-default works with strings" = nth-with-default(["first", "second"], 1, "fallback") == "second"
+
 test "append joins two lists" = append([1], [2, 3]) == [1, 2, 3]
 
 test "reverse flips the order" = reverse([1, 2, 3]) == [3, 2, 1]
 
 test "map adds one" = map(fn (n) = n + 1, [1, 2]) == [2, 3]
+
+test "qualified Maybe.map does not replace List.map" = {
+  let optional = Maybe.map(fn (n) = n + 1, Some(1))
+  let items = map(fn (n) = n + 1, [1, 2])
+  optional == Some(2) && items == [2, 3]
+}
+
+test "qualified maps from two modules stay distinct" = {
+  let optional = Maybe.map(fn (n) = n + 1, Some(1))
+  let result = Result.map(fn (n) = n + 2, Ok(1))
+  optional == Some(2) && result == Ok(3)
+}
 
 test "filter keeps the larger ints" = filter(fn (n) = n > 1, [1, 2, 3]) == [2, 3]
 

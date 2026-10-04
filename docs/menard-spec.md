@@ -833,6 +833,11 @@ import github:owner/repo@v1.2.0/console ; ~/.menard/deps/owner/repo/v1.2.0/conso
   export, not a method. `pair.fst` is the same `.` on a record value: the
   field is selected by declaration order.
 
+  Qualified exports have distinct function bindings in separate compilation,
+  so `Maybe.map` can coexist with `map` from a bare `std/list` import.
+  Direct bare imports take precedence over transitive value bindings; their
+  type signatures and native link targets must select the same export.
+
   - `std/name` maps to `stdlib/name.mnd`. The path does not depend on the
     importing file. A missing `.mnd` suffix is added; a hyphen in the name stays
     in the filename.

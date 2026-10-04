@@ -442,20 +442,20 @@ let collect-pub(form: Ast, rest: List Ast, path: Str, fns: List FnRec, names: Li
 let empty-surface() -> Surface =
   Surface([], [], [])
 
-let surface-has-fn(fns: List FnRec, name: Str) -> Bool =
+let surface-drop-fn(fns: List FnRec, name: Str) -> List FnRec =
   match (fns)
-    | [] -> false
-    | FnRec(n, _, _) :: rest ->
-      if (n == name) -> true | surface-has-fn(rest, name)
+    | [] -> []
+    | FnRec(n, link, ar) :: rest ->
+      if (n == name) -> surface-drop-fn(rest, name) | FnRec(n, link, ar) :: surface-drop-fn(rest, name)
 
 let surface-add-fns(fns: List FnRec, acc: List FnRec) -> List FnRec =
   match (fns)
     | [] -> acc
     | FnRec(n, link, ar) :: rest ->
-      if (surface-has-fn(acc, n)) -> surface-add-fns(rest, acc) | surface-add-fns(rest, FnRec(n, link, ar) :: acc)
+      surface-add-fns(rest, FnRec(n, link, ar) :: surface-drop-fn(acc, n))
 
-          ; Stubs are typechecked in this order, so a dependency's variant
-          ; has to precede the alias that names it.
+; Stubs are typechecked in this order, so a dependency's variant
+; has to precede the alias that names it.
 let surface-add(iface: Iface, acc: Surface) -> Surface =
   match (iface)
     | Iface(_, _, _, _, _, fns, ctors, stubs) ->
@@ -489,6 +489,100 @@ let walk-dep-list(deps: List DepRec, done: Map Str Iface, seen: Ref (Map Str Boo
 
 let surface-of(deps: List DepRec, done: Map Str Iface) -> Surface =
   walk-dep-list(deps, done, ref(map-new()), empty-surface())
+
+let bare-import-paths(from: Str, forms: List Ast) -> List Str =
+  match (forms)
+    | [] -> []
+    | form :: rest ->
+      match (module-import-alias(form))
+        | Some(_) -> bare-import-paths(from, rest)
+        | None ->
+          match (import-specs([form]))
+            | spec :: _ -> canonical-path(resolve-import(from, spec)) :: bare-import-paths(from, rest)
+            | [] -> bare-import-paths(from, rest)
+
+; Direct function signatures and links must override transitive names together.
+let direct-surfaces(paths: List Str, done: Map Str Iface, acc: Surface) -> Surface =
+  match (paths)
+    | [] -> acc
+    | path :: rest ->
+      match (map-get(done, path))
+        | None -> direct-surfaces(rest, done, acc)
+        | Some(Iface(_, _, _, _, _, fns, _, stubs)) ->
+          match (acc)
+            | Surface(af, ac, as) -> {
+              let values = value-stubs(stubs)
+              let previous = drop-shadowed-values(as, qualified-renames(values, "", map-new()))
+              direct-surfaces(rest, done, Surface(surface-add-fns(fns, af), ac, append-asts(previous, values)))
+            }
+
+let value-stubs(stubs: List Ast) -> List Ast =
+  match (stubs)
+    | [] -> []
+    | stub :: rest ->
+      if (is-head(stub, "extern") || is-head(stub, "let")) -> stub :: value-stubs(rest) | value-stubs(rest)
+
+let qualified-fns(fns: List FnRec, prefix: Str) -> List FnRec =
+  match (fns)
+    | [] -> []
+    | FnRec(n, link, ar) :: rest ->
+      FnRec(str-concat(prefix, n), link, ar) :: qualified-fns(rest, prefix)
+
+let qualified-renames(stubs: List Ast, prefix: Str, acc: Map Str Str) -> Map Str Str =
+  match (stubs)
+    | [] -> acc
+    | stub :: rest ->
+      match (unwrap-pub(stub))
+        | ParenNode(_ :: name :: _, _) ->
+          match (bare-name(name))
+            | Some(n) -> qualified-renames(rest, prefix, map-set(acc, n, str-concat(prefix, n)))
+            | None -> qualified-renames(rest, prefix, acc)
+        | _ -> qualified-renames(rest, prefix, acc)
+
+let drop-shadowed-values(stubs: List Ast, names: Map Str Str) -> List Ast =
+  match (stubs)
+    | [] -> []
+    | stub :: rest ->
+      if ((is-head(stub, "extern") || is-head(stub, "let")) && stub-name-shadowed(stub, names)) -> drop-shadowed-values(rest, names) | stub :: drop-shadowed-values(rest, names)
+
+let stub-name-shadowed(stub: Ast, names: Map Str Str) -> Bool =
+  match (unwrap-pub(stub))
+    | ParenNode(_ :: name :: _, _) ->
+      match (bare-name(name))
+        | Some(n) ->
+          match (map-get(names, n))
+            | Some(_) -> true
+            | None -> false
+        | None -> false
+    | _ -> false
+
+; Alias values use the dependency's own interface, never a transitive namesake.
+let alias-surfaces(from: Str, forms: List Ast, done: Map Str Iface, acc: Surface) -> Surface =
+  match (forms)
+    | [] -> acc
+    | form :: rest ->
+      match (module-import-alias(form))
+        | None -> alias-surfaces(from, rest, done, acc)
+        | Some(name) ->
+          match (import-specs([form]))
+            | spec :: _ ->
+              match (map-get(done, canonical-path(resolve-import(from, spec))))
+                | None -> alias-surfaces(from, rest, done, acc)
+                | Some(Iface(_, _, _, _, _, fns, _, stubs)) ->
+                  match (acc)
+                    | Surface(af, ac, as) ->
+                      {
+                        let prefix = import-alias-prefix(name)
+                        let values = value-stubs(stubs)
+                        let renamed = rename-module-forms(values, qualified-renames(values, prefix, map-new()))
+                        alias-surfaces(from, rest, done, Surface(append-fns(qualified-fns(fns, prefix), af), ac, append-asts(as, renamed)))
+                      }
+            | [] -> alias-surfaces(from, rest, done, acc)
+
+let append-fns(xs: List FnRec, ys: List FnRec) -> List FnRec =
+  match (xs)
+    | [] -> ys
+    | x :: rest -> x :: append-fns(rest, ys)
 
 let fns-to-imps(fns: List FnRec) -> List Imp =
   match (fns)
@@ -578,7 +672,8 @@ let compile-forms(abs: Str, src: Str, display: Str, forms: List Ast, direct: Lis
   let for-test = suite-member(ctx, abs) || ctx-for-test(ctx) && abs == ctx-entry(ctx)
   let exported = collect-exports(forms, abs, [], [], [])
   let body0 = prepare-body(strip-module-forms(forms), for-test)
-  let surface = surface-of(direct, deref(ctx-done(ctx)))
+  let done = deref(ctx-done(ctx))
+  let surface = alias-surfaces(abs, forms, done, direct-surfaces(bare-import-paths(abs, forms), done, surface-of(direct, done)))
   match (surface)
     | Surface(fns, ctors, stubs) ->
       match (compile-checked(abs, src, display, body0, exported, direct, fns, ctors, stubs, for-test, ctx, started))

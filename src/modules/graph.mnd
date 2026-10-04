@@ -968,7 +968,7 @@ let rewrite-qual-project(obj: Ast, field: Ast, sp: Span, aliases: Map Str Str, q
         | Some(path) ->
           match (sym-str(field2))
             | Some(field-name) ->
-              if (qualify) -> SymNode(str-concat(qualified-prefix(path), field-name), sp) | field2
+              if (qualify) -> SymNode(str-concat(qualified-prefix(path), field-name), sp) | SymNode(str-concat(import-alias-prefix(name), field-name), sp)
             | None -> field2
         | None -> ParenNode([SymNode("project", sp), obj2, field2], sp)
     | None -> ParenNode([SymNode("project", sp), obj2, field2], sp)
@@ -994,9 +994,16 @@ let rewrite-qual-forms(forms: List Ast, aliases: Map Str Str, qualify: Bool) -> 
     | [] -> []
     | f :: rest -> rewrite-qual-ast(f, aliases, qualify) :: rewrite-qual-forms(rest, aliases, qualify)
 
-; Replace qualified import projections with their exported names.
+; Replace qualified import projections with module-local import names.
 pub let rewrite-import-aliases(from: Str, forms: List Ast) -> List Ast =
   rewrite-qual-forms(forms, qualified-import-paths(from, forms, map-new()), false)
+
+; Separate compilation binds qualified exports under module-local names.
+pub let import-alias-prefix(name: Str) -> Str =
+  str-concat("__import_", name, "_")
+
+pub let module-import-alias(form: Ast) -> Maybe Str =
+  import-alias-of(form)
 
 let rewrite-flat-import-aliases(from: Str, forms: List Ast) -> List Ast =
   rewrite-qual-forms(forms, qualified-import-paths(from, forms, map-new()), true)

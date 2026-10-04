@@ -149,10 +149,7 @@ let report-desugar-errors(path: Str, src: Str, es: List DesugarError) -> Unit =
       }
 
 let nth-path(paths: List Str, i: Int, fallback: Str) -> Str =
-  match (paths)
-    | [] -> fallback
-    | p :: rest ->
-      if (i <= 0) -> p | nth-path(rest, i - 1, fallback)
+  nth-with-default(paths, i, fallback)
 
 let report-type-errors(paths: List Str, es: List TypeError) -> Unit =
   match (es)

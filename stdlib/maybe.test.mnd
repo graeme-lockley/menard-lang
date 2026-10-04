@@ -9,3 +9,11 @@ test "map leaves none" = map(fn (n) = n + 1, None()) == None()
 test "and-then chains some" = and-then(fn (n) = Some(n + 1), Some(1)) == Some(2)
 
 test "unwrap-or returns the default" = unwrap-or(None(), 0) == 0
+
+test "with-default returns the some value" = with-default(100, Some(42)) == 42
+
+test "with-default returns the default for none" = with-default(100, None()) == 100
+
+test "with-default preserves a some string" = with-default("unknown", Some("known")) == "known"
+
+test "with-default supports a string default" = with-default("unknown", None()) == "unknown"
