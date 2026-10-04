@@ -816,7 +816,7 @@ let iface-main(iface: Iface) -> Str =
 ; A suite member's object has to export `main`. An interface left by a
 ; non-test compile of the same file does not, so it is not reusable.
 let reusable(ctx: Ctx, abs: Str, iface: Iface) -> Bool =
-  iface-fresh(abs, iface) && not(suite-member(ctx, abs)) || str-byte-length(iface-main(iface)) > 0
+  iface-fresh(abs, iface) && (not(suite-member(ctx, abs)) || str-byte-length(iface-main(iface)) > 0)
 
 let ensure-body(abs: Str, ctx: Ctx) -> Result Iface Str =
   match (read-iface(abs))

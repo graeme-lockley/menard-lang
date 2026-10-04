@@ -178,7 +178,7 @@ function printCtor(a: Ast): string {
 }
 
 function printExtern(ast: Ast & { tag: "list" }): string {
-  const name = printAtom(ast.elems[1]!);
+  const name = printDefnName(ast.elems[1]!);
   const params: string[] = [];
   let i = 2;
   while (i < ast.elems.length && txt(ast.elems[i]!) !== "->") {

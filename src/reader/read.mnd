@@ -1588,15 +1588,18 @@ let parse-extern(ps: Ps) -> Result Ast ParseError {
     | else ->
       {
         advance(ps)
-        match (parse-param-list(ps))
+        match (parse-tparams-opt(ps))
           | Err(e) -> Err(e)
-          | Ok(params) ->
-            match (eat(ps, "->"))
-              | None -> perr(peek(ps), "expected ->")
-              | Some(_) ->
-                match (parse-type(ps))
-                  | Err(e) -> Err(e)
-                  | Ok(ret) -> Ok(paren-at(defn-like("extern", kw, sym-at(tok-text(name), tok-span(name)), params, ret), span-join(tok-span(kw), ast-span(ret))))
+          | Ok(tp) ->
+            match (parse-param-list(ps))
+              | Err(e) -> Err(e)
+              | Ok(params) ->
+                match (eat(ps, "->"))
+                  | None -> perr(peek(ps), "expected ->")
+                  | Some(_) ->
+                    match (parse-type(ps))
+                      | Err(e) -> Err(e)
+                      | Ok(ret) -> Ok(paren-at(defn-like("extern", kw, name-ast(name, tp), params, ret), span-join(tok-span(kw), ast-span(ret))))
       }
 }
 

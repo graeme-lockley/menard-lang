@@ -2,9 +2,16 @@
 ; absolute source path. Bitcode itself never stores that path or a
 ; timestamp; both live only here.
 ;
-; An interface is a list of forms:
-;   (mni 1) (src HASH) (dep HASH "abs") (init "sym"|-) (main "sym" "Ret"|-)
-;   (fn "name" "link" ARITY) (ctor "name" TAG ARITY) (stub <decl>)
+; An interface is a list of forms the reader accepts:
+;   mni(1)
+;   src(HASH)
+;   dep(HASH, "abs")
+;   init("sym") or init("-")
+;   main("sym", "Ret") or main("-", "-")
+;   fn-rec("name", "link", ARITY)
+;   ctor("name", TAG, ARITY)
+;   then each stub as its own declaration. `fn` is a keyword, so the
+;   function record is `fn-rec`.
 
 import "../reader/ast.mnd"
 import "../reader/read.mnd"
@@ -129,12 +136,21 @@ let add-line(sb: StringBuffer, s: Str) -> Unit {
   ()
 }
 
+let call1(name: Str, arg: Str) -> Str =
+  str-concat(name, str-concat("(", str-concat(arg, ")")))
+
+let call2(name: Str, a: Str, b: Str) -> Str =
+  str-concat(name, str-concat("(", str-concat(a, str-concat(", ", str-concat(b, ")")))))
+
+let call3(name: Str, a: Str, b: Str, c: Str) -> Str =
+  str-concat(name, str-concat("(", str-concat(a, str-concat(", ", str-concat(b, str-concat(", ", str-concat(c, ")")))))))
+
 let write-deps(sb: StringBuffer, deps: List DepRec) -> Unit =
   match (deps)
     | [] -> ()
     | DepRec(h, p) :: rest ->
       {
-        add-line(sb, str-concat("(dep ", show(h), " ", quote-str(p), ")"))
+        add-line(sb, call2("dep", show(h), quote-str(p)))
         write-deps(sb, rest)
       }
 
@@ -143,7 +159,7 @@ let write-fns(sb: StringBuffer, fns: List FnRec) -> Unit =
     | [] -> ()
     | FnRec(name, link, ar) :: rest ->
       {
-        add-line(sb, str-concat("(fn ", quote-str(name), " ", quote-str(link), " ", show(ar), ")"))
+        add-line(sb, call3("fn-rec", quote-str(name), quote-str(link), show(ar)))
         write-fns(sb, rest)
       }
 
@@ -152,16 +168,19 @@ let write-ctors(sb: StringBuffer, ctors: List CtorRec) -> Unit =
     | [] -> ()
     | CtorRec(name, tag, ar) :: rest ->
       {
-        add-line(sb, str-concat("(ctor ", quote-str(name), " ", show(tag), " ", show(ar), ")"))
+        add-line(sb, call3("ctor", quote-str(name), show(tag), show(ar)))
         write-ctors(sb, rest)
       }
 
+; A stub is the declaration itself. Wrapping it in parentheses made the
+; reader see a prefix list, which it no longer accepts, so the next run
+; treated every cached module as missing.
 let write-stubs(sb: StringBuffer, stubs: List Ast) -> Unit =
   match (stubs)
     | [] -> ()
     | f :: rest ->
       {
-        add-line(sb, str-concat("(stub ", print-form(f), ")"))
+        add-line(sb, print-form(f))
         write-stubs(sb, rest)
       }
 
@@ -173,11 +192,11 @@ let iface-text(iface: Iface) -> Str =
     | Iface(src, deps, init, main-sym, main-ret, fns, ctors, stubs) ->
       {
         let sb = sb-new()
-        add-line(sb, "(mni 1)")
-        add-line(sb, str-concat("(src ", show(src), ")"))
+        add-line(sb, "mni(1)")
+        add-line(sb, call1("src", show(src)))
         write-deps(sb, deps)
-        add-line(sb, str-concat("(init ", quote-str(dash(init)), ")"))
-        add-line(sb, str-concat("(main ", quote-str(dash(main-sym)), " ", quote-str(dash(main-ret)), ")"))
+        add-line(sb, call1("init", quote-str(dash(init))))
+        add-line(sb, call2("main", quote-str(dash(main-sym)), quote-str(dash(main-ret))))
         write-fns(sb, fns)
         write-ctors(sb, ctors)
         write-stubs(sb, stubs)
@@ -266,12 +285,10 @@ let take-form(a: Ast, src-hash: Ref Int, deps: Ref (List DepRec), init: Ref Str,
               set!(main-ret, undash(elem-str(elems, 2)))
               ()
             }
-          | h == "fn" -> set!(fns, FnRec(elem-str(elems, 1), elem-str(elems, 2), elem-int(elems, 3)) :: deref(fns))
+          | h == "fn-rec" -> set!(fns, FnRec(elem-str(elems, 1), elem-str(elems, 2), elem-int(elems, 3)) :: deref(fns))
           | h == "ctor" -> set!(ctors, CtorRec(elem-str(elems, 1), elem-int(elems, 2), elem-int(elems, 3)) :: deref(ctors))
-          | h == "stub" ->
-            match (elem-ast(elems, 1))
-              | Some(inner) -> set!(stubs, inner :: deref(stubs))
-              | None -> ()
+          | h == "mni" -> ()
+          | else -> set!(stubs, a :: deref(stubs))
         ()
       }
     | _ -> ()
@@ -321,7 +338,7 @@ let stamps-fresh(abs: Str) -> Bool {
 
 pub let iface-fresh(abs: Str, iface: Iface) -> Bool =
   match (iface)
-    | Iface(src, deps, _, _, _, _, _, _) -> exists(object-path(abs)) && deps-match(deps) && stamps-fresh(abs) || hash-file(abs) == src
+    | Iface(src, deps, _, _, _, _, _, _) -> exists(object-path(abs)) && deps-match(deps) && (stamps-fresh(abs) || hash-file(abs) == src)
 
 pub let remove-cache(abs: Str) -> Unit {
   remove(iface-path(abs))

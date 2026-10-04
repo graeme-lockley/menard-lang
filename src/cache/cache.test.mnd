@@ -1,0 +1,61 @@
+; Interface files have to parse with the current reader, or the next
+; `mn test` compiles every module again.
+
+import "./cache.mnd"
+import "../reader/print.mnd"
+import "../reader/read.mnd"
+import std/string
+
+let forms-of(src: Str) -> List Ast =
+  match (read-all(src))
+    | Ok(fs) -> fs
+    | Err(_) -> []
+
+let sample() -> Iface = {
+  let stubs = forms-of("extern id[a](x: a) -> a
+record Pair[a, b] {
+  fst: a
+  snd: b
+}
+")
+  Iface(41, [DepRec(7, "/tmp/dep.mnd")], "init-sym", "main-sym", "Int", [FnRec("id", "mn_id", 1)], [CtorRec("Ok", 4, 1)], stubs)
+}
+
+let round-path() -> Str =
+  "/tmp/menard-iface-roundtrip.mnd"
+
+let dep-ok(deps: List DepRec) -> Bool =
+  match (deps)
+    | DepRec(h, p) :: [] -> h == 7 && p == "/tmp/dep.mnd"
+    | _ -> false
+
+let fn-ok(fns: List FnRec) -> Bool =
+  match (fns)
+    | FnRec(name, link, ar) :: [] -> name == "id" && link == "mn_id" && ar == 1
+    | _ -> false
+
+let ctor-ok(ctors: List CtorRec) -> Bool =
+  match (ctors)
+    | CtorRec(name, tag, ar) :: [] -> name == "Ok" && tag == 4 && ar == 1
+    | _ -> false
+
+let stubs-ok(stubs: List Ast) -> Bool =
+  match (stubs)
+    | a :: b :: [] -> starts-with(print-form(a), "extern id[a]") && starts-with(print-form(b), "record Pair")
+    | _ -> false
+
+let same(got: Iface) -> Bool =
+  match (got)
+    | Iface(h, deps, init, main-sym, main-ret, fns, ctors, stubs) ->
+      h == 41 && dep-ok(deps) && init == "init-sym" && main-sym == "main-sym" && main-ret == "Int" && fn-ok(fns) && ctor-ok(ctors) && stubs-ok(stubs)
+
+test "an interface file round-trips" =
+  {
+    let path = round-path()
+    cond
+      | not(write-iface(path, sample())) -> false
+      | else ->
+        match (read-iface(path))
+          | Some(got) -> same(got)
+          | None -> false
+  }

@@ -154,12 +154,17 @@ class P {
     const name = this.cur();
     if (name.kind !== "ident") return this.err(name, "expected an extern name");
     this.i++;
+    const tparams = this.parseTParamsOpt();
+    if (!tparams.ok) return tparams;
     const params = this.parseParamList();
     if (!params.ok) return params;
     if (!this.eat("->")) return this.err(this.cur(), "expected ->");
     const ret = this.parseType();
     if (!ret.ok) return ret;
-    const elems: Ast[] = [sym("extern", kw.span), sym(name.text, name.span), ...params.asts, sym("->", ret.ast.span), ret.ast];
+    const nameAst = tparams.ast
+      ? paren([sym(name.text, name.span), tparams.ast], join(name.span, tparams.ast.span))
+      : sym(name.text, name.span);
+    const elems: Ast[] = [sym("extern", kw.span), nameAst, ...params.asts, sym("->", ret.ast.span), ret.ast];
     return { ok: true, ast: paren(elems, join(kw.span, ret.ast.span)) };
   }
 

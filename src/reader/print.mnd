@@ -289,8 +289,8 @@ let print-extern(a: Ast) -> Str =
       {
         let params = params-before(rest, [])
         match (after-arrow(rest))
-          | ret :: _ -> str-concat("extern ", str-concat(print-atom(name), str-concat("(", str-concat(join(params, ", "), str-concat(") -> ", print-type(ret))))))
-          | [] -> str-concat("extern ", print-atom(name))
+          | ret :: _ -> str-concat("extern ", str-concat(print-defn-name(name), str-concat("(", str-concat(join(params, ", "), str-concat(") -> ", print-type(ret))))))
+          | [] -> str-concat("extern ", print-defn-name(name))
       }
     | _ -> "extern"
 
