@@ -1,7 +1,6 @@
 ; Map helpers.
 
 import std/map
-
 import std/pair
 
 test "from-list stores the pair" = lookup(from-list([Pair("a", 1)]), "a") == Some(1)

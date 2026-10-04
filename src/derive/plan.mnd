@@ -55,7 +55,6 @@
 ; work, deferred rather than half-done here.
 
 import "../reader/ast.mnd"
-
 import std/list
 
 ; Re-export shim — see `reader/casing.mnd`'s header comment for why this

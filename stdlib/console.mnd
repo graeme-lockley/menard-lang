@@ -2,7 +2,6 @@
 ; @module std/console
 
 import std/fs
-
 import std/sys
 
 ; The escape sequence for codes, which already includes the leading bracket.

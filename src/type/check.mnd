@@ -25,11 +25,8 @@
 ;     un-desugared forms directly will see `E_TYPE_UNBOUND` on those heads.
 
 import "../reader/ast.mnd"
-
 import "../desugar/rest.mnd"
-
 import "./types.mnd"
-
 import std/list
 
 ; Re-export shim — see reader/casing.mnd for why this is needed: a `pub`

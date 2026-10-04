@@ -3,11 +3,8 @@
 ; `println` only prints string literals, so computed text goes through `write`.
 
 import std/fs
-
 import std/io
-
 import std/proc
-
 import std/sys
 
 let nl =

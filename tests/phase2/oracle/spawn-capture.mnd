@@ -2,7 +2,6 @@
 ; `/bin/echo` and `/bin/cat` are absolute paths, so there is no PATH search.
 
 import std/io
-
 import std/proc
 
 let main() -> Int =

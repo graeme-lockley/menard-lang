@@ -1,5 +1,4 @@
 import std/list
-
 import std/test
 
 test "count-lines tallies pass and fail" = count-lines(["pass a", "fail b", "noise", "pass c"]) == Counts(2, 1)

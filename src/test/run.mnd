@@ -8,25 +8,15 @@
 ; Green and red only when stdout is a terminal and `NO_COLOR` is unset.
 
 import "../diag/report.mnd"
-
 import "../reader/ast.mnd"
-
 import "../reader/read.mnd"
-
 import "../cache/cache.mnd"
-
 import "../cache/sep.mnd"
-
 import std/console
-
 import std/fs
-
 import std/io
-
 import std/proc
-
 import std/string
-
 import std/test
 
 let nl =

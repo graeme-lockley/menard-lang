@@ -7,19 +7,12 @@
 ;   (fn "name" "link" ARITY) (ctor "name" TAG ARITY) (stub <decl>)
 
 import "../reader/ast.mnd"
-
 import "../reader/read.mnd"
-
 import "../reader/print.mnd"
-
 import "../modules/graph.mnd"
-
 import std/fs
-
 import std/io
-
 import std/string
-
 import std/sys
 
 pub record DepRec {

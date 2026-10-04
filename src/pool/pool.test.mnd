@@ -4,9 +4,7 @@
 ; `emit` still running collection stays in tests/phase2/pool.test.ts.
 
 import "../reader/read.mnd"
-
 import "./pool.mnd"
-
 import std/io
 
 let nl =

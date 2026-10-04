@@ -1,7 +1,6 @@
 ; List operations.
 
 import std/list
-
 import std/pair
 
 test "length of three" = length([1, 2, 3]) == 3

@@ -20,25 +20,15 @@
 ; the entry module's mangled main. That bootstrap is the only C `main`.
 
 import "../reader/ast.mnd"
-
 import "../reader/read.mnd"
-
 import "../reader/casing.mnd"
-
 import "../desugar/desugar.mnd"
-
 import "../util/result.mnd"
-
 import std/fs
-
 import std/io
-
 import std/list
-
 import std/proc
-
 import std/string
-
 import std/sys
 
 ; Re-export shim — see `emit/bitcode.mnd` / `reader/casing.mnd`.

@@ -27,47 +27,26 @@
 ; declared type.
 
 import "./reader/ast.mnd"
-
 import "./reader/read.mnd"
-
 import "./reader/casing.mnd"
-
 import "./desugar/desugar.mnd"
-
 import "./type/check.mnd"
-
 import "./close/close.mnd"
-
 import "./root/root.mnd"
-
 import "./derive/derive.mnd"
-
 import "./derive/plan.mnd"
-
 import "./emit/bitcode.mnd"
-
 import "./modules/graph.mnd"
-
 import "./diag/report.mnd"
-
 import "./cache/cache.mnd"
-
 import "./cache/sep.mnd"
-
 import "./test/run.mnd"
-
 import std/cli
-
 import std/fs
-
 import std/io
-
 import std/list
-
 import std/proc
-
 import std/string
-
 import std/sys
 
 let nl =

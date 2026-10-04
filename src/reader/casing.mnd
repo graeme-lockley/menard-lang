@@ -2,7 +2,6 @@
 ; Mirrors host/src/reader/casing.ts.
 
 import "./ast.mnd"
-
 import "../util/result.mnd"
 
 ; Re-export shim: the current host typer (host/src/type/check.ts,

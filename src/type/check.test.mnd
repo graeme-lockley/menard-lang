@@ -4,11 +4,8 @@
 ; tests/phase2/typecheck.test.ts.
 
 import "../reader/read.mnd"
-
 import "../desugar/desugar.mnd"
-
 import "./check.mnd"
-
 import std/io
 
 let read-forms(path: Str) -> Maybe (List Ast) =

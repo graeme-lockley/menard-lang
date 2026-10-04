@@ -2,13 +2,9 @@
 ; leaves as the repo root. CLI dump flags stay in tests/phase2/desugar.test.ts.
 
 import "../reader/read.mnd"
-
 import "../reader/print.mnd"
-
 import "./desugar.mnd"
-
 import std/io
-
 import std/string
 
 let has-head(text: Str, name: Str) -> Bool =

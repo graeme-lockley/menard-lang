@@ -41,7 +41,6 @@
 ;   free-var scan as before.
 
 import "../reader/ast.mnd"
-
 import std/list
 
 pub alias Ast = Ast

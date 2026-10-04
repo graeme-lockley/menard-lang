@@ -8,39 +8,22 @@
 ; the fixed-point gate stays a single deterministic bitcode file.
 
 import "../reader/ast.mnd"
-
 import "../reader/read.mnd"
-
 import "../reader/casing.mnd"
-
 import "../desugar/desugar.mnd"
-
 import "../type/check.mnd"
-
 import "../close/close.mnd"
-
 import "../root/root.mnd"
-
 import "../derive/derive.mnd"
-
 import "../emit/llvm-ir.mnd"
-
 import "../emit/lower.mnd"
-
 import "../modules/graph.mnd"
-
 import "../diag/report.mnd"
-
 import "./cache.mnd"
-
 import std/fs
-
 import std/io
-
 import std/list
-
 import std/proc
-
 import std/string
 
 record Ctx {

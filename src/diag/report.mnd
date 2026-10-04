@@ -6,9 +6,7 @@
 ; a pipe stays plain text.
 
 import "../reader/ast.mnd"
-
 import std/console
-
 import std/io
 
 pub alias Span = Span

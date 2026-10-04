@@ -7,13 +7,9 @@
 ; The same summary is src/pool/pool.test.mnd.
 
 import "../reader/ast.mnd"
-
 import "../reader/read.mnd"
-
 import "../pool/pool.mnd"
-
 import std/io
-
 import std/sys
 
 let nl =

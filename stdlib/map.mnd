@@ -2,7 +2,6 @@
 ; @module std/map
 
 import std/pair
-
 import std/list
 
 ; Insert each pair into acc, later pairs overwriting earlier keys.

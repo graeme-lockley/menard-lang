@@ -93,11 +93,15 @@ pub let print-form-all(xs: List Ast) -> Str {
   if (body == "") -> "" | str-concat(body, nl())
 }
 
+; Consecutive imports have no blank line between them. Every other pair of forms keeps one.
+let form-sep(left: Ast, right: Ast) -> Str =
+  if (is-head(left, "import") && is-head(right, "import")) -> nl() | str-concat(nl(), nl())
+
 let join-forms(xs: List Ast) -> Str =
   match (xs)
     | [] -> ""
     | h :: [] -> print-form(h)
-    | h :: t -> str-concat(print-form(h), str-concat(str-concat(nl(), nl()), join-forms(t)))
+    | h :: next :: rest -> str-concat(print-form(h), str-concat(form-sep(h, next), join-forms(next :: rest)))
 
 let print-form-at(a: Ast, ind: Int) -> Str =
   cond

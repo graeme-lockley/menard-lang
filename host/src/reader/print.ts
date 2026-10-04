@@ -60,7 +60,15 @@ export function print(ast: Ast): Uint8Array {
 }
 
 export function printAll(forms: Ast[]): Uint8Array {
-  const body = forms.map((f) => printForm(f, 0)).join("\n\n");
+  const parts: string[] = [];
+  for (let i = 0; i < forms.length; i++) {
+    if (i > 0) {
+      const tight = head(forms[i - 1]!) === "import" && head(forms[i]!) === "import";
+      parts.push(tight ? "\n" : "\n\n");
+    }
+    parts.push(printForm(forms[i]!, 0));
+  }
+  const body = parts.join("");
   return encode(body.length ? body + "\n" : "");
 }
 

@@ -3,9 +3,7 @@
 ; tests/phase2/derive.test.ts.
 
 import "../reader/read.mnd"
-
 import "./plan.mnd"
-
 import std/io
 
 let plan-of(path: Str) -> Maybe Str =

@@ -181,15 +181,10 @@
 ;   undefined, so the check has to be explicit.
 
 import "../reader/ast.mnd"
-
 import "../pool/pool.mnd"
-
 import "../util/result.mnd"
-
 import "./llvm-ir.mnd"
-
 import "./bc-writer.mnd"
-
 import std/list
 
 pub alias Ast = Ast

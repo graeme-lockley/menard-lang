@@ -3,11 +3,8 @@
 ; as the repo root. `check` / `emit` stay in tests/phase2/reader-roundtrip.test.ts.
 
 import "./ast.mnd"
-
 import "./read.mnd"
-
 import "./print.mnd"
-
 import std/io
 
 let roundtrip(path: Str) -> Bool =

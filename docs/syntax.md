@@ -151,6 +151,9 @@ body        = "=" expr / block
 `...` is legal only on the last parameter, and that parameter's type must be
 a `List`. A lambda cannot take `...`.
 
+Imports in one file sit on consecutive lines. A blank line separates that
+block from the next declaration.
+
 ```
 import std/list
 import "./lexer.mnd" as Lexer

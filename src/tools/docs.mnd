@@ -8,13 +8,9 @@
 ; Prints one record per published function. Exits 1 when a check fails.
 
 import std/fs
-
 import std/io
-
 import std/list
-
 import std/string
-
 import std/sys
 
 record Scan {
