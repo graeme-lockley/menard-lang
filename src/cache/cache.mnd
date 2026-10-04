@@ -126,12 +126,11 @@ pub let hash-file(path: Str) -> Int =
     | Ok(s) -> bytes-hash(s)
     | Err(_) -> 0
 
-let nl =
-  {
-    let sb = sb-new()
-    sb-append-byte!(sb, 10)
-    sb-take-str!(sb)
-  }
+let nl = {
+  let sb = sb-new()
+  sb-append-byte!(sb, 10)
+  sb-take-str!(sb)
+}
 
 let add-line(sb: StringBuffer, s: Str) -> Unit {
   sb-append!(sb, s)

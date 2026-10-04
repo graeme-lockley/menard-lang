@@ -26,12 +26,11 @@ let skip-name(name: Str) -> Bool =
   starts-with(name, ".") || name == "node_modules" || name == "build" || name == "target"
 
 ; A newline, as a one-byte string.
-let nl =
-  {
-    let sb = sb-new()
-    sb-append-byte!(sb, 10)
-    sb-take-str!(sb)
-  }
+let nl = {
+  let sb = sb-new()
+  sb-append-byte!(sb, 10)
+  sb-take-str!(sb)
+}
 
 ; Split s on newline bytes, dropping empty lines.
 let split-acc(s: Str, i: Int, start: Int, n: Int, acc: List Str) -> List Str =

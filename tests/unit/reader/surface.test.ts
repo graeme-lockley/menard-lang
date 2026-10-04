@@ -24,6 +24,23 @@ function sym(ast: ReturnType<typeof mustRead>): string {
 }
 
 describe("infix surface", () => {
+  test("binding and test blocks put the opening brace after equals", () => {
+    const source = `let value = {
+  let inner = {
+    41
+  }
+  inner + 1
+}
+
+test "block value" = {
+  value == 42
+}
+`;
+    const forms = mustAll(source);
+    expect(text(printAll(forms))).toBe(source);
+    expect(mustAll(text(printAll(forms))).every((f, i) => astEqual(f, forms[i]!))).toBe(true);
+  });
+
   test("arithmetic lowers left-associative with precedence", () => {
     const a = mustRead("1 + 2 * 3");
     expect(text(print(a))).toBe("1 + 2 * 3");

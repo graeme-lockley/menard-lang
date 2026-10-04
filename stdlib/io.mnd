@@ -40,12 +40,11 @@ pub let write(fd: Int, data: Str) -> Result Unit IoError =
   mn_write(fd, data)
 
 ; A single newline string.
-let nl =
-  {
-    let sb = sb-new()
-    sb-append-byte!(sb, 10)
-    sb-take-str!(sb)
-  }
+let nl = {
+  let sb = sb-new()
+  sb-append-byte!(sb, 10)
+  sb-take-str!(sb)
+}
 
 ; Write data and a newline to fd, or an IoError from either write.
 ; @test write-line(stdout, "hi")

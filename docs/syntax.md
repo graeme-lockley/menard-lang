@@ -230,6 +230,21 @@ to that lifted function inside its own body.
 
 Braces terminate blocks. An arm list is terminated by indentation.
 
+When a binding or test uses a block after `=`, put the opening brace on
+the same line as `=`. Indent the block contents two spaces further than
+the declaration and align the closing brace with the declaration:
+
+```
+let nl = {
+  let sb = sb-new()
+  sb-append-byte!(sb, 10)
+  sb-take-str!(sb)
+}
+```
+
+This is a layout idiom, not a grammar restriction; the reader also accepts
+an opening brace on the following line.
+
 The *introducer* of a `cond`, a `match`, or a `type` is the line containing
 that keyword, or the `=` of the `type`. Each arm is a line whose first token
 is `|`, indented strictly further than its introducer. The list ends at the

@@ -471,6 +471,7 @@ let print-let(rest: List Ast, ind: Int) -> Str =
 
 let placed(a: Ast, ind: Int) -> Str =
   cond
+    | is-head(a, "do") -> str-concat(" ", print-expr(a, ind - 2))
     | laid-out(a) -> str-concat(nl(), str-concat(pad(ind), print-expr(a, ind)))
     | else ->
       {

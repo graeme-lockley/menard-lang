@@ -19,12 +19,11 @@ record Scan {
 }
 
 ; A newline byte.
-let nl =
-  {
-    let sb = sb-new()
-    sb-append-byte!(sb, 10)
-    sb-take-str!(sb)
-  }
+let nl = {
+  let sb = sb-new()
+  sb-append-byte!(sb, 10)
+  sb-take-str!(sb)
+}
 
 ; Drop one leading space when the comment has one.
 let comment-body(line: Str) -> Str {

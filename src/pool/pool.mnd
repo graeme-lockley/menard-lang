@@ -274,12 +274,11 @@ let walk-top-forms(forms: List Ast, arities: Map Str Int, entries: Ref (List Str
 ; Dedup by byte content, sort by byte content (ADR 38/§2.2.1's own two
 ; rules), then join one entry per line.
 
-let nl =
-  {
-    let sb = sb-new()
-    sb-append-byte!(sb, 10)
-    sb-take-str!(sb)
-  }
+let nl = {
+  let sb = sb-new()
+  sb-append-byte!(sb, 10)
+  sb-take-str!(sb)
+}
 
 let str-insert-sorted(x: Str, xs: List Str) -> List Str =
   match (xs)

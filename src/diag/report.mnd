@@ -11,12 +11,11 @@ import std/io
 
 pub alias Span = Span
 
-let nl =
-  {
-    let sb = sb-new()
-    sb-append-byte!(sb, 10)
-    sb-take-str!(sb)
-  }
+let nl = {
+  let sb = sb-new()
+  sb-append-byte!(sb, 10)
+  sb-take-str!(sb)
+}
 
 ; `Compiling` / `Linking` are light grey, the file name dark grey.
 ; Color follows stderr, same rule as diagnostics.

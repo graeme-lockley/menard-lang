@@ -50,31 +50,29 @@ let same(got: Iface) -> Bool =
     | Iface(h, deps, init, main-sym, main-ret, fns, ctors, stubs) ->
       h == 41 && dep-ok(deps) && init == "init-sym" && main-sym == "main-sym" && main-ret == "Int" && fn-ok(fns) && ctor-ok(ctors) && stubs-ok(stubs)
 
-test "an interface file round-trips" =
-  {
-    let path = round-path()
-    cond
-      | not(write-iface(path, sample())) -> false
-      | else ->
-        match (read-iface(path))
-          | Some(got) -> same(got)
-          | None -> false
-  }
+test "an interface file round-trips" = {
+  let path = round-path()
+  cond
+    | not(write-iface(path, sample())) -> false
+    | else ->
+      match (read-iface(path))
+        | Some(got) -> same(got)
+        | None -> false
+}
 
-test "an old write ABI interface is not reused" =
-  {
-    let path = round-path()
-    match (write-file(iface-path(path), "mni(1)
+test "an old write ABI interface is not reused" = {
+  let path = round-path()
+  match (write-file(iface-path(path), "mni(1)
 src(41)
 "))
-      | Err(_) -> false
-      | Ok(_) ->
-        {
-          let rejected =
-            match (read-iface(path))
-              | Some(_) -> false
-              | None -> true
-          remove-cache(path)
-          rejected
-        }
-  }
+    | Err(_) -> false
+    | Ok(_) ->
+      {
+        let rejected =
+          match (read-iface(path))
+            | Some(_) -> false
+            | None -> true
+        remove-cache(path)
+        rejected
+      }
+}

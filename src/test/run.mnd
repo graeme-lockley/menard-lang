@@ -19,12 +19,11 @@ import std/proc
 import std/string
 import std/test
 
-let nl =
-  {
-    let sb = sb-new()
-    sb-append-byte!(sb, 10)
-    sb-take-str!(sb)
-  }
+let nl = {
+  let sb = sb-new()
+  sb-append-byte!(sb, 10)
+  sb-take-str!(sb)
+}
 
 let print-verbose(lines: List Str, on: Bool) -> Unit =
   match (lines)

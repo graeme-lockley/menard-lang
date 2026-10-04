@@ -25,3 +25,20 @@ test "round-trips comments-and-bools.mnd" = roundtrip("tests/corpus/comments-and
 test "round-trips spec-examples.mnd" = roundtrip("tests/corpus/spec-examples.mnd")
 
 test "round-trips invalid-utf8.mnd" = roundtrip("tests/corpus/invalid-utf8.mnd")
+
+test "binding and test blocks put the opening brace after equals" = {
+  let src = "let value = {
+  let inner = {
+    41
+  }
+  inner + 1
+}
+
+test \"block value\" = {
+  value == 42
+}
+"
+  match (read-all(src))
+    | Err(_) -> false
+    | Ok(forms) -> print-form-all(forms) == src
+}

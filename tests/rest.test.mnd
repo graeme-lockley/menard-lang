@@ -23,45 +23,39 @@ test "one element" = sum(4) == 4
 
 test "empty rest" = sum() == 0
 
-test "splice a list" =
-  {
-    let xs = [1, 2, 3]
-    sum(...xs) == 6
-  }
+test "splice a list" = {
+  let xs = [1, 2, 3]
+  sum(...xs) == 6
+}
 
-test "element then splice" =
-  {
-    let xs = [2, 3]
-    sum(1, ...xs) == 6
-  }
+test "element then splice" = {
+  let xs = [2, 3]
+  sum(1, ...xs) == 6
+}
 
-test "splice then element" =
-  {
-    let xs = [1, 2]
-    sum(...xs, 3) == 6
-  }
+test "splice then element" = {
+  let xs = [1, 2]
+  sum(...xs, 3) == 6
+}
 
-test "two splices" =
+test "two splices" = {
+  let xs = [1]
   {
-    let xs = [1]
-    {
-      let ys = [2, 3]
-      sum(...xs, ...ys) == 6
-    }
+    let ys = [2, 3]
+    sum(...xs, ...ys) == 6
   }
+}
 
 test "join literals" = join(", ", "a", "b", "c") == "a, b, c"
 
 test "join with no parts" = join(", ") == ""
 
-test "join splice" =
-  {
-    let xs = ["a", "b"]
-    join(":", ...xs) == "a:b"
-  }
+test "join splice" = {
+  let xs = ["a", "b"]
+  join(":", ...xs) == "a:b"
+}
 
-test "join fixed, splice, and a following element" =
-  {
-    let xs = ["b"]
-    join("-", "a", ...xs, "c") == "a-b-c"
-  }
+test "join fixed, splice, and a following element" = {
+  let xs = ["b"]
+  join("-", "a", ...xs, "c") == "a-b-c"
+}

@@ -252,6 +252,7 @@ function laidOut(a: Ast): boolean {
 
 /** Print `a` inline, or on the next line at `ind`, when it has layout bars. */
 function placed(a: Ast, ind: number): string {
+  if (head(a) === "do") return ` ${printExpr(a, ind - 2)}`;
   if (laidOut(a)) return `\n${pad(ind)}${printExpr(a, ind)}`;
   const text = printExpr(a, ind);
   if (text.includes("\n")) return `\n${pad(ind)}${text}`;

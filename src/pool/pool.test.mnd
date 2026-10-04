@@ -7,12 +7,11 @@ import "../reader/read.mnd"
 import "./pool.mnd"
 import std/io
 
-let nl =
-  {
-    let sb = sb-new()
-    sb-append-byte!(sb, 10)
-    sb-take-str!(sb)
-  }
+let nl = {
+  let sb = sb-new()
+  sb-append-byte!(sb, 10)
+  sb-take-str!(sb)
+}
 
 let read-forms(path: Str) -> Maybe (List Ast) =
   match (read-file(path))
