@@ -9,12 +9,12 @@ let adder(n: Int) -> (Int) -> Int =
 let map[a](f: (a) -> a, xs: List a) -> List a =
   match (xs)
     | [] -> []
-    | Cons(h, t) -> Cons(f(h), map(f, t))
+    | h :: t -> f(h) :: map(f, t)
 
 let print-elems(xs: List Int) -> Int =
   match (xs)
     | [] -> 0
-    | Cons(h, t) ->
+    | h :: t ->
       {
         print(h)
         match (t)

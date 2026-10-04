@@ -5,8 +5,7 @@
 let main() -> Unit {
   let a = str-concat("a", "b")
   let b = "ab"
-  if a == b -> println("concatenated strings are equal")
-   | else -> println("concatenated strings differ")
+  if (a == b) -> println("concatenated strings are equal") | println("concatenated strings differ")
   println("compare \"a\" \"b\" = ", compare("a", "b"))
   println("compare \"b\" \"a\" = ", compare("b", "a"))
 }

@@ -13,3 +13,15 @@ test "has rejects a missing needle" = has("hello", "x") == false
 test "join inserts the separator" = join(",", ["a", "b"]) == "a,b"
 
 test "join of nothing is empty" = join(",", []) == ""
+
+test "split breaks on the separator" = split("a,b,c", ",") == ["a", "b", "c"]
+
+test "split keeps an empty piece" = split("a,,b", ",") == ["a", "", "b"]
+
+test "lines break on newline" = {
+  let sb = sb-new()
+  sb-append-byte!(sb, 97)
+  sb-append-byte!(sb, 10)
+  sb-append-byte!(sb, 98)
+  lines(sb-to-str(sb)) == ["a", "b"]
+}

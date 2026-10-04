@@ -6,18 +6,16 @@
 let list-sum(xs: List Int) -> Int =
   match (xs)
     | [] -> 0
-    | Cons(h, t) -> h + list-sum(t)
+    | h :: t -> h + list-sum(t)
 
 let build-list(n: Int) -> List Int =
   loop (i = n, acc = [])
-    if i == 0 -> acc
-     | else -> recur(i - 1, Cons(i, acc))
+    if (i == 0) -> acc | recur(i - 1, i :: acc)
 
 let fill-map(n: Int) -> Int {
   let m =
     loop (i = 0, acc = map-new())
-      if i == n -> acc
-       | else -> recur(i + 1, map-set(acc, i, i * 2))
+      if (i == n) -> acc | recur(i + 1, map-set(acc, i, i * 2))
   match (map-get(m, n - 1))
     | Some(v) -> v
     | None -> 0
@@ -26,12 +24,13 @@ let fill-map(n: Int) -> Int {
 let grow(n: Int) -> Int {
   let sb = sb-new()
   loop (i = 0)
-    if i == n -> str-byte-length(sb-take-str!(sb))
-     | else ->
-      {
-        sb-append-byte!(sb, 97)
-        recur(i + 1)
-      }
+    cond
+      | i == n -> str-byte-length(sb-take-str!(sb))
+      | else ->
+        {
+          sb-append-byte!(sb, 97)
+          recur(i + 1)
+        }
 }
 
 let adder(n: Int) -> (Int) -> Int =

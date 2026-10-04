@@ -34,6 +34,10 @@ export type TypeEnv = {
   displayAlias: Map<string, string>;
   /** types of current loop bindings in order; null when not inside a loop */
   loopBindings: Type[] | null;
+  /** qualified import alias → that module's exports */
+  modules: Map<string, ImportBundle>;
+  /** nominals brought in by import, so a pub signature may name them */
+  importedTypes: Set<string>;
 };
 
 export function emptyEnv(): TypeEnv {
@@ -46,6 +50,8 @@ export function emptyEnv(): TypeEnv {
     diagnostics: [],
     displayAlias: new Map(),
     loopBindings: null,
+    modules: new Map(),
+    importedTypes: new Set(),
   };
   installBuiltins(env);
   return env;
@@ -552,6 +558,8 @@ export function typecheckForms(
   opts: {
     /** Schemes/types from imported modules, applied after builtins. */
     imports?: ImportBundle[];
+    /** Qualified imports: values stay behind the alias; types are in scope. */
+    qualified?: { alias: string; bundle: ImportBundle }[];
     /** If set, pub signatures may not mention private nominals of this module. */
     exports?: Set<string>;
   } = {},
@@ -564,6 +572,9 @@ export function typecheckForms(
   const env = emptyEnv();
   for (const b of opts.imports ?? []) {
     mergeImportBundle(env, b);
+  }
+  for (const q of opts.qualified ?? []) {
+    bindQualified(env, q.alias, q.bundle);
   }
   for (const f of forms) {
     collectDef(env, f);
@@ -595,7 +606,19 @@ export type ImportBundle = {
 
 function mergeImportBundle(env: TypeEnv, b: ImportBundle): void {
   for (const [k, v] of b.values) env.values.set(k, v);
-  for (const [k, v] of b.types) env.types.set(k, v);
+  mergeImportTypes(env, b);
+}
+
+function bindQualified(env: TypeEnv, alias: string, b: ImportBundle): void {
+  env.modules.set(alias, b);
+  mergeImportTypes(env, b);
+}
+
+function mergeImportTypes(env: TypeEnv, b: ImportBundle): void {
+  for (const [k, v] of b.types) {
+    env.types.set(k, v);
+    env.importedTypes.add(k);
+  }
   for (const [k, v] of b.ctors) env.ctors.set(k, v);
   for (const [k, v] of b.aliases) {
     env.aliases.set(k, v);
@@ -652,6 +675,7 @@ function checkPubPrivateTypes(env: TypeEnv, forms: Ast[], exports: Set<string>):
       (n) =>
         env.types.has(n) &&
         !exports.has(n) &&
+        !env.importedTypes.has(n) &&
         !BUILTIN_NOMINALS.has(n),
     );
     if (leaked.length > 0) {
@@ -1029,6 +1053,7 @@ function infer(
       if (hn === "quote") {
         return inferQuote(ast.elems[1] ?? ast);
       }
+      if (hn === "project") return inferProject(env, ast, local, subst);
       if (hn === "set!") {
         // (set! r v)
         if (ast.elems.length !== 3) {
@@ -1046,6 +1071,52 @@ function infer(
       return inferApp(env, ast, local, subst);
     }
   }
+}
+
+function inferProject(
+  env: TypeEnv,
+  ast: Ast & { tag: "list" },
+  local: Map<string, Type>,
+  subst: Subst,
+): Type {
+  const obj = ast.elems[1];
+  const fieldAst = ast.elems[2];
+  if (!obj || fieldAst?.tag !== "sym") {
+    err(env, "E_TYPE_ARITY", "project expects a value and a field", ast.span);
+    return freshVar(env);
+  }
+  const field = symStr(fieldAst)!;
+  if (obj.tag === "sym") {
+    const bundle = env.modules.get(symStr(obj)!);
+    if (bundle) {
+      const scheme = bundle.values.get(field);
+      if (!scheme) {
+        err(env, "E_TYPE_UNBOUND", `unknown export ${field}`, fieldAst.span);
+        return freshVar(env);
+      }
+      return instantiate(env, scheme);
+    }
+  }
+  const objTy = applySubst(infer(env, obj, local, subst), subst);
+  if (objTy.tag !== "nominal" || objTy.kind !== "record") {
+    err(env, "E_TYPE_MISMATCH", `expected a record, found ${typeShow(objTy)}`, obj.span);
+    return freshVar(env);
+  }
+  const def = env.types.get(objTy.name);
+  if (!def || def.kind !== "record") {
+    err(env, "E_TYPE_UNBOUND", `unknown record ${objTy.name}`, obj.span);
+    return freshVar(env);
+  }
+  const found = def.fields.findIndex((f) => f.name === field);
+  if (found < 0) {
+    err(env, "E_TYPE_UNBOUND", `unknown field ${field}`, fieldAst.span);
+    return freshVar(env);
+  }
+  const map = new Map<string, Type>();
+  def.params.forEach((p, i) => {
+    map.set(p, objTy.args[i] ?? { tag: "param", name: p });
+  });
+  return replaceParams(def.fields[found]!.type, map);
 }
 
 function inferQuote(ast: Ast): Type {
@@ -1101,7 +1172,7 @@ function inferLet(
     err(env, "E_TYPE_LET", "let name must be a symbol", ast.elems[1]!.span);
     return freshVar(env);
   }
-  const t = infer(env, ast.elems[2]!, local, subst);
+  const t = inferNamedExpr(env, name, ast.elems[2]!, local, subst);
   const next = new Map(local);
   next.set(name, t);
   if (ast.elems.length === 3) return t;
@@ -1138,7 +1209,7 @@ function inferSequence(
       e.elems.length === 3
     ) {
       const n = symStr(e.elems[1]!);
-      const t = infer(env, e.elems[2]!, loc, subst);
+      const t = n ? inferNamedExpr(env, n, e.elems[2]!, loc, subst) : infer(env, e.elems[2]!, loc, subst);
       if (n) loc.set(n, t);
       last = t;
       continue;
@@ -1205,6 +1276,24 @@ function inferRecur(
     expectType(env, infer(env, args[i]!, local, subst), expected[i]!, subst, args[i]!.span);
   }
   return freshVar(env);
+}
+
+function inferNamedExpr(
+  env: TypeEnv,
+  name: string,
+  expr: Ast,
+  local: Map<string, Type>,
+  subst: Subst,
+): Type {
+  if (expr.tag === "list" && (symStr(expr.elems[0]!) === "fn" || symStr(expr.elems[0]!) === "lambda")) {
+    const tv = freshVar(env, name);
+    const loc = new Map(local);
+    loc.set(name, tv);
+    const t = infer(env, expr, loc, subst);
+    unify(env, tv, t, subst, expr.span);
+    return applySubst(t, subst);
+  }
+  return infer(env, expr, local, subst);
 }
 
 function inferLambda(

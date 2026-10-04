@@ -24,8 +24,7 @@ let line(s: Str) -> Unit {
 }
 
 let main() -> Int {
-  if exists("examples/fixtures/echo-input.txt") -> println("fixture exists")
-   | else -> println("fixture missing")
+  if (exists("examples/fixtures/echo-input.txt")) -> println("fixture exists") | println("fixture missing")
   match (getenv("PATH"))
     | Some(_) -> println("PATH is set")
     | None -> println("PATH is unset")
@@ -41,7 +40,6 @@ let main() -> Int {
   match (rename("build/rename-src.txt", "build/rename-dst.txt"))
     | Ok(_) -> println("renamed")
     | Err(_) -> println("rename failed")
-  if exists("build/rename-dst.txt") -> println("renamed file exists")
-   | else -> println("renamed file missing")
+  if (exists("build/rename-dst.txt")) -> println("renamed file exists") | println("renamed file missing")
   0
 }

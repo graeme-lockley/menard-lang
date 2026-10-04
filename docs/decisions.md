@@ -32,7 +32,7 @@ bearing choices; everything in the specification follows from them.
 
 | # | Decision | Reason | Cost if wrong |
 |---|---|---|---|
-| 1 | Infix surface, layout for arms, closed syntax | Readable declarations and operators; one reader shared by both front ends | Sugar lowers into a second form the compiler must keep |
+| 1 | Infix surface, `cond` for laid-out tests, `if` for an inline value, one `.` for fields and qualified imports | A four-letter keyword lines the bar up with the guard; an inline test has no newline so it is parenthesized; `:` is already the type separator so cons is `::`; `Pair` is not owned by `Map` | Two readers must lower to the same core, or the fixed point fails |
 | 2 | Statically typed | Types drive the showable/orderable/equatable checks and exhaustive matching | Larger typer |
 | 3 | `Int` = 63-bit tagged, **one integer type** | The tag bit makes uniform one-word values possible, and is load-bearing for the collector too (§2.2, §4.3); narrow buys no speed, wide costs boxing; a second type doubles the ways the interpreter and the backend can disagree | Range limit; boxed `BigInt` eventually |
 | 4 | `Float` boxed in a **`bytes` payload**, **no unboxed fields** | The payload is arbitrary bits, so it must never be scanned as slots; NaN-boxing would *narrow* `Int`; unboxing would break the collector's invariants (§4.3) | Allocation churn on float-heavy code |
@@ -74,14 +74,45 @@ bearing choices; everything in the specification follows from them.
 | 40 | **The compiler emits LLVM bitcode (`.bc`), never textual `.ll` as the product** | Textual IR is a second spelling of the same module and invites non-determinism (whitespace, type printing); bitcode is the binary artifact the gate and the driver consume; `llvm-dis` stays a debug aid only | A Menard bitcode writer (~subset of LLVM encoding) must stay deterministic and in sync with the pinned LLVM/clang |
 ---
 
+## 2026-10-04 — `cond`, projection, and `Pair` (amends ADR 1)
+
+### The decision
+
+`cond` is the laid-out conditional. `if` is the inline value, written
+`if (test) -> then | else`. Both lower to the nested core `(if test then else)`.
+The one-column bar rule is gone. `::` is right-associative cons, in
+expressions and in patterns, because `:` is already the type separator.
+`.` is field projection on a record and export selection on `import path as Name`.
+There is no method call. `Pair` lives in `std/pair`, not in `std/map`.
+
+### Why
+
+A multi-arm `if` whose bars sat one column past a two-letter keyword did not
+line up, and a test without a newline had no place to end. `cond` is four
+letters so a two-space bar sits under the word and the guard starts in the
+column after it. Parentheses end an inline test. One `.` covers a field and
+a module alias; name resolution decides which, so the call stays a call.
+`Map` was the wrong owner for a pair that lists and maps both use.
+
+### Cost
+
+Both readers, both printers, both typers, and both module loaders move
+together. Every `.mnd` file that used the one-column `if` or `Cons(...)` as
+its spelling moves with them. A qualified import does not merge its values
+into the unqualified environment.
+
+---
+
 ## 2026-10-03 — Infix surface (ADR 1)
 
 ### The decision
 
 Source is the surface in `docs/syntax.md`: `let` for declarations, `{ }` for
-blocks, infix operators with whitespace on both sides, and layout for `if`,
-`match`, and `type`. Both front ends lower that surface into the same core
-heads. There is no second reader for an older spelling.
+blocks, infix operators with whitespace on both sides, and layout for `cond`,
+`match`, and `type`. `if` is the parenthesized inline form. Both front ends
+lower that surface into the same core heads. There is no second reader for an
+older spelling. The 2026-10-04 entry amends the conditional, projection, and
+`Pair` parts of this decision.
 
 ADR 1 in the index is this decision. It replaces the earlier choice of a
 parenthesized surface with no operators.

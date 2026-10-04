@@ -30,9 +30,8 @@ let desugared(path: Str) -> Maybe (List Ast) =
 let type-codes-have(es: List TypeError, code: Str) -> Bool =
   match (es)
     | [] -> false
-    | Cons(TypeError(_, c, _), rest) ->
-      if c == code -> true
-       | else -> type-codes-have(rest, code)
+    | TypeError(_, c, _) :: rest ->
+      if (c == code) -> true | type-codes-have(rest, code)
 
 let type-has-code(path: Str, code: Str) -> Bool =
   match (desugared(path))
@@ -44,7 +43,7 @@ let type-has-code(path: Str, code: Str) -> Bool =
 
 let is-defn(form: Ast) -> Bool =
   match (form)
-    | ParenNode(Cons(h, _), _) ->
+    | ParenNode(h :: _, _) ->
       match (h)
         | SymNode(n, _) -> n == "defn"
         | _ -> false
@@ -53,9 +52,8 @@ let is-defn(form: Ast) -> Bool =
 let count-defns(forms: List Ast) -> Int =
   match (forms)
     | [] -> 0
-    | Cons(f, rest) ->
-      if is-defn(f) -> 1 + count-defns(rest)
-       | else -> count-defns(rest)
+    | f :: rest ->
+      if (is-defn(f)) -> 1 + count-defns(rest) | count-defns(rest)
 
 test "a well-typed defn typechecks" =
   match (desugared("tests/phase2/fixtures/type-ok.mnd"))

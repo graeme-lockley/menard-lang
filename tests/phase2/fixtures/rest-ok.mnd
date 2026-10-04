@@ -1,7 +1,7 @@
 let sum(...xs: List Int) -> Int =
   match (xs)
     | [] -> 0
-    | Cons(h, t) -> h + sum(...t)
+    | h :: t -> h + sum(...t)
 
 let main() -> Int {
   {

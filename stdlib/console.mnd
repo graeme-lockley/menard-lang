@@ -23,5 +23,4 @@ pub let tty-color(fd: Int) -> Bool =
 ; s wrapped in an ANSI sequence when on is true, otherwise s unchanged.
 ; @test paint(false, "[31m", "hi") => "hi"
 pub let paint(on: Bool, code: Str, s: Str) -> Str =
-  if on -> str-concat(esc(code), s, esc("[0m"))
-   | else -> s
+  if (on) -> str-concat(esc(code), s, esc("[0m")) | s

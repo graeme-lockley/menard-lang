@@ -9,26 +9,22 @@ pub let id[a](x: a) -> a =
 ; Logical negation.
 ; @test not(true) => false
 pub let not(b: Bool) -> Bool =
-  if b -> false
-   | else -> true
+  if (b) -> false | true
 
 ; The smaller of x and y.
 ; @test min(2, 5) => 2
 pub let min(x: Int, y: Int) -> Int =
-  if x < y -> x
-   | else -> y
+  if (x < y) -> x | y
 
 ; The larger of x and y.
 ; @test max(2, 5) => 5
 pub let max(x: Int, y: Int) -> Int =
-  if x > y -> x
-   | else -> y
+  if (x > y) -> x | y
 
 ; Absolute value of n.
 ; @test abs(-3) => 3
 pub let abs(n: Int) -> Int =
-  if n < 0 -> -n
-   | else -> n
+  if (n < 0) -> -n | n
 
 ; n limited to the inclusive range lo through hi.
 ; @test clamp(0, 10, 15) => 10

@@ -18,8 +18,7 @@ function timed(fn: () => void): number {
 describe("build-host bench", () => {
   test("deep non-tail recursion ≥ 100k frames", () => {
     const src = `let mk(n: Int) -> Int =
-  if n == 0 -> 0
-   | else -> 1 + mk(n - 1)
+  if (n == 0) -> 0 | 1 + mk(n - 1)
 mk(100000)`;
     const ms = timed(() => {
       const r = run(src);
@@ -32,8 +31,7 @@ mk(100000)`;
   test("loop/recur walks 100k steps", () => {
     const src = `let sum-to(n: Int) -> Int =
   loop (i = 0, acc = 0)
-    if i > n -> acc
-     | else -> recur(i + 1, acc + i)
+    if (i > n) -> acc | recur(i + 1, acc + i)
 sum-to(100000)`;
     const ms = timed(() => {
       const r = run(src);

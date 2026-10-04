@@ -2,7 +2,6 @@
 ; E_TYPE_MISMATCH, matching host/src/type/check.ts's `inferIf`.
 
 let f() -> Int =
-  if 1 -> 2
-   | else -> 3
+  if (1) -> 2 | 3
 
 println(show(f()))

@@ -13,7 +13,8 @@ export type Value =
   | { tag: "unit" }
   | { tag: "list"; elems: Value[] } // runtime list as array; Cons/Nil also as variants
   | { tag: "variant"; ctor: string; payloads: Value[] }
-  | { tag: "record"; name: string; fields: Value[] }
+  | { tag: "record"; name: string; fields: Value[]; fieldNames: string[] }
+  | { tag: "module"; exports: Map<string, Value> }
   | { tag: "ref"; cell: { value: Value } }
   | { tag: "fn"; params: string[]; body: unknown; env: Env; path?: string; name?: string }
   | { tag: "builtin"; name: string }

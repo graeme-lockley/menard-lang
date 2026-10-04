@@ -3,10 +3,11 @@
 let main() -> Int {
   let c = ref(0)
   loop (i = 0)
-    if i > 10 -> deref(c)
-     | else ->
-      {
-        set!(c, deref(c) + i)
-        recur(i + 1)
-      }
+    cond
+      | i > 10 -> deref(c)
+      | else ->
+        {
+          set!(c, deref(c) + i)
+          recur(i + 1)
+        }
 }

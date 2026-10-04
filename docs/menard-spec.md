@@ -495,7 +495,8 @@ Rules:
   canonical order and equality are derived by the compiler (§2.12), never
   supplied by the user.
 - **No subtyping and no row polymorphism.** A record's field set is exactly what
-  it declares.
+  it declares. `pair.fst` reads the field in declaration order. The same `.`
+  selects an export of `import path as Name`. Neither form is a method call.
 - Signatures on top-level `defn` are mandatory; `let` bindings and lambda
   parameters infer locally.
 - **No implicit conversions, no truthiness.** Conditions are `Bool`, always.
@@ -639,20 +640,24 @@ choice.
 
 ### 2.4 Control flow
 
-**Everything is an expression.** `if`, `match` and `loop` yield values; a
-block and `while` exist for effect and yield the last expression, or `Unit`
-for `while`.
+**Everything is an expression.** `cond`, `if`, `match` and `loop` yield
+values; a block and `while` exist for effect and yield the last expression,
+or `Unit` for `while`. `cond` is the laid-out test. `if` is the inline
+value, with a parenthesized test because that test has no newline to end it.
 
 ```
 let sign(n: Int) -> Str =
-  if n < 0 -> "negative"
-   | n == 0 -> "zero"
-   | else -> "positive"
+  cond
+    | n < 0 -> "negative"
+    | n == 0 -> "zero"
+    | else -> "positive"
+
+let abs(n: Int) -> Int =
+  if (n < 0) -> -n | n
 
 let sum-to(n: Int) -> Int =
   loop (i = 0, acc = 0)
-    if i > n -> acc
-     | else -> recur(i + 1, acc + i)
+    if (i > n) -> acc | recur(i + 1, acc + i)
 
 let tree-size[a](t: Tree a) -> Int =
   match (t)
@@ -710,9 +715,11 @@ ref   deref   set!     quote   fn
 `while` and `&&` / `||` (lowered to `and` / `or`) are sugar over `if` and
 `loop`, expanded during desugaring (before typing). `[e1, e2, …]` and `[]`
 are sugar for a `Cons` / `Nil` chain, in expression position and in `match`
-patterns. A bracket list on a `let`, `record`, or `type` name is a
-type-parameter list and is not expanded. `Cons(h, t)` remains the open list
-pattern.
+patterns. `h :: t` is the same chain, associating to the right, in
+expressions and in patterns. A bracket list on a `let`, `record`, or `type`
+name is a type-parameter list and is not expanded. `h :: t` is the open list
+pattern. `expr.field` lowers to a field slot. `import path as Name` binds
+`Name` to that module's exports, and `Name.f` is a call of the export.
 
 Infix `+`, `*`, `-`, `/`, and the calls `f+`, `f*`, `f-`, `f/`, and
 `str-concat` lower to binary intrinsics, left-associative, so `a + b + c`
@@ -812,13 +819,19 @@ instantiation. Instantiation is a typechecker concern only — see §3.3 and §7
 
 - One file = one module, explicit `import`, **no import cycles**. `/` and `:` are
   identifier characters, so a bare import spec is one symbol. A string is still a
-  path. There are three forms:
+  path. There are three path forms, and a qualified form that binds a name
+  to the module's exports instead of merging those values:
 
 ```
 import std/list                         ; stdlib/list.mnd, cwd-relative
 import "./lexer.mnd"                    ; beside the importing file
+import "./lexer.mnd" as Lexer           ; Lexer.read resolves read in that module
 import github:owner/repo@v1.2.0/console ; ~/.menard/deps/owner/repo/v1.2.0/console.mnd
 ```
+
+  `as` is special only after the path. `Lexer.read(src)` is a call of the
+  export, not a method. `pair.fst` is the same `.` on a record value: the
+  field is selected by declaration order.
 
   - `std/name` maps to `stdlib/name.mnd`. The path does not depend on the
     importing file. A missing `.mnd` suffix is added; a hyphen in the name stays
@@ -1094,9 +1107,10 @@ import (§2.7).
 | Import | Publishes |
 |---|---|
 | `std/basics` | `id`, `not`, `min`, `max`, `abs`, `clamp` (implicit) |
-| `std/list` | `length`, `nth`, `append`, `reverse`, `map`, `filter`, `fold`, `zip`, `contains`, `sort` |
-| `std/map` | `Pair`, `from-list`, `lookup` |
-| `std/string` | `starts-with`, `ends-with`, `has`, `join` |
+| `std/pair` | `Pair` |
+| `std/list` | `length`, `nth`, `append`, `reverse`, `map`, `filter`, `fold`, `zip`, `contains`, `sort`, `find`, `any`, `all`, `concat`, `flat-map`, `take`, `drop`, `sort-by` |
+| `std/map` | `from-list`, `lookup`, `to-list`, `remove`, `merge` |
+| `std/string` | `starts-with`, `ends-with`, `has`, `join`, `split`, `lines` |
 | `std/string-buffer` | `sb-append-show!` |
 | `std/result`, `std/maybe` | `map`, `and-then`, `unwrap-or` |
 | `std/io`, `std/fs`, `std/proc`, `std/sys` | the host-seam wrappers (§2.15) |

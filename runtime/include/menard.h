@@ -251,6 +251,7 @@ MnWord mn_map_set(MnWord m, MnWord k, MnWord v);
 MnWord mn_map_get(MnWord m, MnWord k); /* → (Maybe v) as Some/None */
 MnWord mn_map_has(MnWord m, MnWord k); /* → Bool */
 MnWord mn_map_size(MnWord m);          /* → Int */
+MnWord mn_map_keys(MnWord m);          /* → List k, in key order */
 
 /* Heap closures (`runtime/src/closure.c`, Phase 3 slice E). */
 MnWord mn_env_0(void);

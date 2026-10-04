@@ -199,10 +199,10 @@ pub let type-list-equal(xs: List Type, ys: List Type) -> Bool =
       match (ys)
         | [] -> true
         | _ -> false
-    | Cons(x, xrest) ->
+    | x :: xrest ->
       match (ys)
         | [] -> false
-        | Cons(y, yrest) -> type-equal(x, y) && type-list-equal(xrest, yrest)
+        | y :: yrest -> type-equal(x, y) && type-list-equal(xrest, yrest)
 
 ; ---------------------------------------------------------------------------
 ; Diagnostic spelling — not a pretty-printer, "canonical enough to read in
@@ -219,8 +219,7 @@ pub let type-show(t: Type) -> Str =
     | TUnit -> "Unit"
     | TStringBuffer -> "StringBuffer"
     | TVar(id, name) ->
-      if name == "" -> str-concat("a", show(id))
-       | else -> name
+      if (name == "") -> str-concat("a", show(id)) | name
     | TParam(name) -> name
     | TList(elem) -> str-concat("(List ", type-show(elem), ")")
     | TMap(k, v) -> str-concat("(Map ", type-show(k), " ", type-show(v), ")")
@@ -239,7 +238,7 @@ let type-show-list(xs: List Type) -> Str =
   match (xs)
     | [] -> ""
     | [x] -> type-show(x)
-    | Cons(x, rest) -> str-concat(type-show(x), " ", type-show-list(rest))
+    | x :: rest -> str-concat(type-show(x), " ", type-show-list(rest))
 
 ; ---------------------------------------------------------------------------
 ; Showable / orderable (§2.12), evaluated on expanded types. `Ref`,
@@ -269,7 +268,7 @@ pub let is-showable(t: Type) -> Bool =
 let type-list-all-showable(xs: List Type) -> Bool =
   match (xs)
     | [] -> true
-    | Cons(x, rest) -> is-showable(x) && type-list-all-showable(rest)
+    | x :: rest -> is-showable(x) && type-list-all-showable(rest)
 
 pub let is-orderable(t: Type) -> Bool =
   match (t)
@@ -294,4 +293,4 @@ pub let is-orderable(t: Type) -> Bool =
 let type-list-all-orderable(xs: List Type) -> Bool =
   match (xs)
     | [] -> true
-    | Cons(x, rest) -> is-orderable(x) && type-list-all-orderable(rest)
+    | x :: rest -> is-orderable(x) && type-list-all-orderable(rest)

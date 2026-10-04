@@ -34,6 +34,7 @@ const OP_PREC: Record<string, number> = {
 function rootPrec(a: Ast): number | null {
   const h = head(a);
   if (!h || !isList(a)) return null;
+  if (h === "Cons" && a.elems.length === 3) return 4;
   if (h === "or") return 1;
   if (h === "and") return 2;
   if (h === "not" && a.elems.length === 2 && head(a.elems[1]!) === "=") return 3;
@@ -72,7 +73,7 @@ function printForm(ast: Ast, ind: number): string {
   if (h === "defrec" && isList(ast)) return printRecord(ast, ind);
   if (h === "variant" && isList(ast)) return printVariant(ast, ind);
   if (h === "alias" && isList(ast)) return `alias ${printExpr(ast.elems[1]!, ind)} = ${printType(ast.elems[2]!)}`;
-  if (h === "import" && isList(ast)) return `import ${printAtom(ast.elems[1]!)}`;
+  if (h === "import" && isList(ast)) return printImport(ast);
   if (h === "extern" && isList(ast)) return printExtern(ast);
   if (h === "test" && isList(ast)) return `test ${printAtom(ast.elems[1]!)} =${placed(ast.elems[2]!, ind + 2)}`;
   return printExpr(ast, ind);
@@ -223,6 +224,8 @@ function printExpr(a: Ast, ind: number): string {
     const eq = a.elems[1] as Ast & { tag: "list" };
     return `${wrapOperand(3, eq.elems[1]!, false, ind)} != ${wrapOperand(3, eq.elems[2]!, true, ind)}`;
   }
+  if (h === "project" && a.elems.length === 3) return printProject(a, ind);
+  if (h === "Cons" && a.elems.length === 3) return printCons(a, ind);
   if (h && OPS.has(h) && a.elems.length >= 3) return printOp(a, h, ind);
   if (h === "-") {
     if (a.elems.length === 2) return `-${wrapOperand(6, a.elems[1]!, true, ind)}`;
@@ -245,6 +248,39 @@ function placed(a: Ast, ind: number): string {
   const text = printExpr(a, ind);
   if (text.includes("\n")) return `\n${pad(ind)}${text}`;
   return ` ${text}`;
+}
+
+function printImport(ast: Ast & { tag: "list" }): string {
+  const path = printAtom(ast.elems[1]!);
+  const alias = ast.elems[2];
+  if (alias?.tag === "sym") return `import ${path} as ${nameText(dec.decode(alias.name))}`;
+  return `import ${path}`;
+}
+
+function printProject(a: Ast & { tag: "list" }, ind: number): string {
+  return `${projectLeft(a.elems[1]!, ind)}.${printAtom(a.elems[2]!)}`;
+}
+
+function projectLeft(obj: Ast, ind: number): string {
+  if (obj.tag !== "list" || head(obj) === "project") return printExpr(obj, ind);
+  const h = head(obj);
+  if (
+    h === "if" ||
+    h === "cond" ||
+    h === "match" ||
+    h === "and" ||
+    h === "or" ||
+    h === "Cons" ||
+    h === "-" ||
+    (h !== null && OPS.has(h))
+  ) {
+    return `(${printExpr(obj, ind)})`;
+  }
+  return printExpr(obj, ind);
+}
+
+function printCons(a: Ast & { tag: "list" }, ind: number): string {
+  return `${wrapOperand(4, a.elems[1]!, true, ind)} :: ${wrapOperand(4, a.elems[2]!, false, ind)}`;
 }
 
 function printOp(a: Ast & { tag: "list" }, op: string, ind: number): string {
@@ -319,14 +355,35 @@ function arrowBody(body: Ast, ind: number): string {
   return ` ${text}`;
 }
 
+function isHeavy(body: Ast): boolean {
+  const h = head(body);
+  return h === "do" || h === "match" || h === "if" || h === "loop" || h === "while";
+}
+
+function useCond(arms: { test: Ast | null; body: Ast }[]): boolean {
+  if (arms.length >= 3) return true;
+  if (arms.some((a) => a.test !== null && arms.indexOf(a) > 0)) return true;
+  return arms.some((a) => isHeavy(a.body));
+}
+
 function printIf(a: Ast & { tag: "list" }, ind: number): string {
   const arms = flattenIf(a);
-  const lines = arms.map((arm, i) => {
-    const body = arrowBody(arm.body, ind + 2);
-    if (i === 0) return `if ${printExpr(arm.test!, ind)} ->${body}`;
-    if (arm.test === null) return `${pad(ind)} | else ->${body}`;
-    return `${pad(ind)} | ${printExpr(arm.test, ind)} ->${body}`;
-  });
+  if (useCond(arms)) return printCondArms(arms, ind);
+  const first = arms[0]!;
+  const then = arrowBody(first.body, ind + 2);
+  const test = printExpr(first.test!, ind);
+  if (arms.length === 1 || arms[1]!.test !== null) return `if (${test}) ->${then}`;
+  const els = printExpr(arms[1]!.body, ind);
+  return `if (${test}) ->${then} | ${els}`;
+}
+
+function printCondArms(arms: { test: Ast | null; body: Ast }[], ind: number): string {
+  const lines = ["cond"];
+  for (const arm of arms) {
+    const body = arrowBody(arm.body, ind + 4);
+    if (arm.test === null) lines.push(`${pad(ind + 2)}| else ->${body}`);
+    else lines.push(`${pad(ind + 2)}| ${printExpr(arm.test, ind + 2)} ->${body}`);
+  }
   return lines.join("\n");
 }
 
@@ -348,23 +405,18 @@ function isUnit(a: Ast): boolean {
 
 function printCond(a: Ast & { tag: "list" }, ind: number): string {
   const clauses = a.elems.slice(1);
-  const lines: string[] = [];
-  clauses.forEach((c, idx) => {
-    if (!isList(c)) return;
+  const lines: string[] = ["cond"];
+  for (const c of clauses) {
+    if (!isList(c)) continue;
     const test = c.elems[0]!;
     const body: Ast =
       c.elems.length === 2
         ? c.elems[1]!
         : { tag: "list", kind: "paren", elems: [symDo(), ...c.elems.slice(1)], span: c.span };
-    const b = arrowBody(body, ind + 2);
-    if (txt(test) === "else") {
-      lines.push(`${pad(ind)} | else ->${b}`);
-    } else if (idx === 0) {
-      lines.push(`if ${printExpr(test, ind)} ->${b}`);
-    } else {
-      lines.push(`${pad(ind)} | ${printExpr(test, ind)} ->${b}`);
-    }
-  });
+    const b = arrowBody(body, ind + 4);
+    if (txt(test) === "else") lines.push(`${pad(ind + 2)}| else ->${b}`);
+    else lines.push(`${pad(ind + 2)}| ${printExpr(test, ind + 2)} ->${b}`);
+  }
   return lines.join("\n");
 }
 
@@ -380,7 +432,7 @@ function printWhen(a: Ast & { tag: "list" }, ind: number): string {
     rest.length === 1
       ? rest[0]!
       : { tag: "list", kind: "paren", elems: [symDo(), ...rest], span: a.span };
-  return `if ${printExpr(test, ind)} ->${arrowBody(body, ind + 2)}`;
+  return `if (${printExpr(test, ind)}) ->${arrowBody(body, ind + 2)}`;
 }
 
 function printMatch(a: Ast & { tag: "list" }, ind: number): string {
@@ -396,6 +448,13 @@ function printPat(a: Ast): string {
   if (a.tag !== "list") return printAtom(a);
   if (a.kind === "bracket") return `[${a.elems.map(printPat).join(", ")}]`;
   if (a.elems.length === 0) return "()";
+  if (txt(a.elems[0]!) === "Cons" && a.elems.length === 3) {
+    const leftAst = a.elems[1]!;
+    const left = printPat(leftAst);
+    const right = printPat(a.elems[2]!);
+    const wrapped = leftAst.tag === "list" && txt(leftAst.elems[0]!) === "Cons" ? `(${left})` : left;
+    return `${wrapped} :: ${right}`;
+  }
   if (a.elems.length === 1 && a.elems[0]!.tag === "sym") {
     const n = txt(a.elems[0]!)!;
     if (n[0]! >= "A" && n[0]! <= "Z") return n;

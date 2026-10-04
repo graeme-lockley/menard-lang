@@ -271,3 +271,53 @@ MnWord mn_map_size(MnWord m) {
   MnWord root = ((MnWord *)(uintptr_t)m)[1];
   return mn_int_to_word(node_size(root));
 }
+
+static void fill_keys(MnWord n, MnWord *out, int *i) {
+  if (n == MN_EMPTY) {
+    return;
+  }
+  NodeView *nv = node_view(n);
+  fill_keys(nv->left, out, i);
+  out[(*i)++] = nv->key;
+  fill_keys(nv->right, out, i);
+}
+
+MnWord mn_map_keys(MnWord m) {
+  if (mn_is_immediate(m)) {
+    mn_panic("mn_map_keys: expected Map");
+  }
+  MnWord root = ((MnWord *)(uintptr_t)m)[1];
+  int64_t n = node_size(root);
+  if (n == 0) {
+    return mn_nil();
+  }
+  MnWord *buf = (MnWord *)malloc((size_t)n * sizeof(MnWord));
+  if (!buf) {
+    mn_panic("mn_map_keys: out of memory");
+  }
+  int filled = 0;
+  fill_keys(root, buf, &filled);
+  MnWord *rooted = (MnWord *)malloc((size_t)n * sizeof(MnWord));
+  if (!rooted) {
+    free(buf);
+    mn_panic("mn_map_keys: out of memory");
+  }
+  for (int64_t i = 0; i < n; i++) {
+    mn_root_push(&rooted[i]);
+    rooted[i] = buf[i];
+  }
+  free(buf);
+  MnWord acc;
+  mn_root_push(&acc);
+  acc = mn_nil();
+  for (int64_t i = n - 1; i >= 0; i--) {
+    acc = mn_cons(rooted[i], acc);
+  }
+  MnWord out = acc;
+  mn_root_pop();
+  for (int64_t i = n - 1; i >= 0; i--) {
+    mn_root_pop();
+  }
+  free(rooted);
+  return out;
+}

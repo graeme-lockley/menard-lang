@@ -167,7 +167,7 @@ function byteAt(bytes: Uint8Array, i: bigint): number | null {
 }
 
 const KEYWORDS = new Set([
-  "alias", "else", "extern", "fn", "if", "import", "let", "loop", "match",
+  "alias", "cond", "else", "extern", "fn", "if", "import", "let", "loop", "match",
   "panic", "pub", "record", "recur", "ref", "deref", "return", "set!",
   "type", "while", "when",
 ]);
@@ -275,6 +275,7 @@ function matchOp(lx: Value | undefined): Value | null {
   if (b0 === 38 && b1 === 38 && afterWs(at2)) return opStr("&&");
   if (b0 === 124 && b1 === 124 && afterWs(at2)) return opStr("||");
   if (b0 === 45 && b1 === 62 && afterWs(at2)) return opStr("->");
+  if (b0 === 58 && b1 === 58 && afterWs(at2)) return opStr("::");
   if (b0 === 43 && afterWs(b1)) return opStr("+");
   if (b0 === 45 && afterWs(b1)) return opStr("-");
   if (b0 === 42 && afterWs(b1)) return opStr("*");
@@ -468,7 +469,7 @@ export function runAccel(accel: Accel, args: Value[]): Value | null {
       if (args.length !== 1 || !args[0] || args[0].tag !== "str") return null;
       const s = asciiOf(args[0]);
       if (s === null) return vInt(1n);
-      const two = s === "==" || s === "!=" || s === "<=" || s === ">=" || s === "&&" || s === "||" || s === "->";
+      const two = s === "==" || s === "!=" || s === "<=" || s === ">=" || s === "&&" || s === "||" || s === "->" || s === "::";
       return vInt(two ? 2n : 1n);
     }
     case "bitsink-flush-fields": {

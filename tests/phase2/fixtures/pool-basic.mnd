@@ -7,8 +7,7 @@ let greeting() -> Str {
   let a = "hello"
   let b = "hello"
   let c = "world"
-  if a == b -> c
-   | else -> a
+  if (a == b) -> c | a
 }
 
 let nothing() -> Maybe Int =

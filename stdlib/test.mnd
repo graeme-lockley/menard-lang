@@ -20,9 +20,10 @@ pub record Counts {
 
 ; Join dir and name with a slash.
 let join-path(dir: Str, name: Str) -> Str =
-  if dir == "" || dir == "." -> name
-   | dir == "/" -> str-concat("/", name)
-   | else -> str-concat(dir, "/", name)
+  cond
+    | dir == "" || dir == "." -> name
+    | dir == "/" -> str-concat("/", name)
+    | else -> str-concat(dir, "/", name)
 
 ; Hidden names, dependencies, and build output are not test roots.
 let skip-name(name: Str) -> Bool =
@@ -38,11 +39,11 @@ let nl =
 
 ; Split s on newline bytes, dropping empty lines.
 let split-acc(s: Str, i: Int, start: Int, n: Int, acc: List Str) -> List Str =
-  if i > n -> acc
-   | i == n || str-byte(s, i) == 10 ->
-    if i == start -> split-acc(s, i + 1, i + 1, n, acc)
-     | else -> split-acc(s, i + 1, i + 1, n, Cons(str-slice(s, start, i - start), acc))
-   | else -> split-acc(s, i + 1, start, n, acc)
+  cond
+    | i > n -> acc
+    | i == n || str-byte(s, i) == 10 ->
+      if (i == start) -> split-acc(s, i + 1, i + 1, n, acc) | split-acc(s, i + 1, i + 1, n, str-slice(s, start, i - start) :: acc)
+    | else -> split-acc(s, i + 1, start, n, acc)
 
 ; The lines of s.
 let lines-of(s: Str) -> List Str =
@@ -64,9 +65,10 @@ let contains-test(path: Str) -> Bool =
 
 ; A `*.test.mnd` file, or any other `*.mnd` file that contains `(test …)`.
 let is-test-file(path: Str) -> Bool =
-  if ends-with(path, ".test.mnd") -> true
-   | ends-with(path, ".mnd") -> contains-test(path)
-   | else -> false
+  cond
+    | ends-with(path, ".test.mnd") -> true
+    | ends-with(path, ".mnd") -> contains-test(path)
+    | else -> false
 
 ; Walk dir, collecting test files onto acc.
 let walk(dir: Str, acc: List Str) -> List Str =
@@ -76,36 +78,38 @@ let walk(dir: Str, acc: List Str) -> List Str =
 let walk-names(dir: Str, names: List Str, acc: List Str) -> List Str =
   match (names)
     | [] -> acc
-    | Cons(name, rest) ->
-      if skip-name(name) -> walk-names(dir, rest, acc)
-       | else -> walk-child(dir, join-path(dir, name), rest, acc)
+    | name :: rest ->
+      if (skip-name(name)) -> walk-names(dir, rest, acc) | walk-child(dir, join-path(dir, name), rest, acc)
 
 ; A child path: descend into directories, keep test files.
 let walk-child(dir: Str, child: Str, rest: List Str, acc: List Str) -> List Str =
-  if is-dir(child) -> walk-names(dir, rest, walk(child, acc))
-   | is-test-file(child) -> walk-names(dir, rest, Cons(child, acc))
-   | else -> walk-names(dir, rest, acc)
+  cond
+    | is-dir(child) -> walk-names(dir, rest, walk(child, acc))
+    | is-test-file(child) -> walk-names(dir, rest, child :: acc)
+    | else -> walk-names(dir, rest, acc)
 
 ; Test files under path, or a one-element list when path itself is a test file.
 ; @test contains(discover("stdlib/basics.test.mnd"), "stdlib/basics.test.mnd") => true
 pub let discover(path: Str) -> List Str =
-  if is-dir(path) -> reverse(walk(path, []))
-   | is-test-file(path) -> [path]
-   | else -> []
+  cond
+    | is-dir(path) -> reverse(walk(path, []))
+    | is-test-file(path) -> [path]
+    | else -> []
 
 ; Add one output line to the counts.
 let count-line(line: Str, c: Counts) -> Counts =
   match (c)
     | Counts(p, f) ->
-      if starts-with(line, "pass ") -> Counts(p + 1, f)
-       | starts-with(line, "fail ") -> Counts(p, f + 1)
-       | else -> c
+      cond
+        | starts-with(line, "pass ") -> Counts(p + 1, f)
+        | starts-with(line, "fail ") -> Counts(p, f + 1)
+        | else -> c
 
 ; Fold count-line over lines.
 let count-onto(lines: List Str, c: Counts) -> Counts =
   match (lines)
     | [] -> c
-    | Cons(line, rest) -> count-onto(rest, count-line(line, c))
+    | line :: rest -> count-onto(rest, count-line(line, c))
 
 ; Pass and fail totals from a test process's stdout lines.
 ; @test count-lines(["pass a", "fail b", "noise"]) => Counts(1, 1)
@@ -117,8 +121,7 @@ pub let count-lines(lines: List Str) -> Counts =
 pub let summary-text(c: Counts, ms: Int) -> Str =
   match (c)
     | Counts(p, f) ->
-      if f > 0 -> str-concat(show(f), " failed, ", show(p), " passed (", show(ms), "ms)")
-       | else -> str-concat(show(p), " passed (", show(ms), "ms)")
+      if (f > 0) -> str-concat(show(f), " failed, ", show(p), " passed (", show(ms), "ms)") | str-concat(show(p), " passed (", show(ms), "ms)")
 
 ; Write the summary line. Failures are red and passes green when on is true.
 ; @test summary(Counts(1, 0), 1, false)
@@ -126,12 +129,13 @@ pub let summary(c: Counts, ms: Int, on: Bool) -> Unit =
   match (c)
     | Counts(p, f) ->
       {
-        if f > 0 ->
-          {
-            write(stdout, paint(on, "[31m", str-concat(show(f), " failed")))
-            write(stdout, ", ")
-            ()
-          }
+        cond
+          | f > 0 ->
+            {
+              write(stdout, paint(on, "[31m", str-concat(show(f), " failed")))
+              write(stdout, ", ")
+              ()
+            }
         write(stdout, paint(on, "[32m", str-concat(show(p), " passed")))
         write(stdout, str-concat(" (", show(ms), "ms)"))
         write(stdout, nl)

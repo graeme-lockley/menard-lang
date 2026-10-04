@@ -9,7 +9,7 @@ let first-plus-rest-flag(xs: List Int) -> Int =
         println("empty list, total 0")
         0
       }
-    | Cons(h, rest) ->
+    | h :: rest ->
       (fn () {
         let flag =
           match (rest)
@@ -18,16 +18,17 @@ let first-plus-rest-flag(xs: List Int) -> Int =
         let total = h + flag
         print("head ")
         print(h)
-        if flag == 0 ->
-          {
-            print(", rest is empty")
-            0
-          }
-         | else ->
-          {
-            print(", rest is non-empty")
-            0
-          }
+        cond
+          | flag == 0 ->
+            {
+              print(", rest is empty")
+              0
+            }
+          | else ->
+            {
+              print(", rest is non-empty")
+              0
+            }
         print(", total ")
         println(total)
         total

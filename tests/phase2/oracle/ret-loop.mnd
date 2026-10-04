@@ -3,8 +3,7 @@
 
 let sum-to(n: Int) -> Int =
   loop (i = 0, acc = 0)
-    if i > n -> acc
-     | else -> recur(i + 1, acc + i)
+    if (i > n) -> acc | recur(i + 1, acc + i)
 
 let main() -> Int =
   sum-to(10)

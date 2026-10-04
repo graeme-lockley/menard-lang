@@ -5,8 +5,7 @@ let flag(b: Bool) -> Bool =
   b
 
 let pick(c: Bool) -> Int =
-  if c -> 1
-   | else -> 0
+  if (c) -> 1 | 0
 
 let both(a: Bool, b: Bool) -> Bool =
   a && b

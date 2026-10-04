@@ -262,11 +262,17 @@ function defineTop(ast: Ast, env: Env): void {
           : null;
     if (!name) return;
     if (envGet(env, name)) return;
-    const fieldCount = Math.max(0, ast.elems.length - 2);
+    const fieldNames: string[] = [];
+    for (let i = 2; i < ast.elems.length; i++) {
+      const fe = ast.elems[i]!;
+      if (fe.tag !== "list" || fe.elems[0]?.tag !== "sym") continue;
+      const raw = symName(fe.elems[0]);
+      fieldNames.push(raw.endsWith(":") ? raw.slice(0, -1) : raw);
+    }
     envSet(env, name, {
       tag: "fn",
-      params: Array.from({ length: fieldCount }, (_, j) => `f${j}`),
-      body: { __record: name, arity: fieldCount },
+      params: Array.from({ length: fieldNames.length }, (_, j) => `f${j}`),
+      body: { __record: name, arity: fieldNames.length, fieldNames },
       env,
     });
   }
@@ -360,7 +366,8 @@ type Cont =
       span?: Span;
     }
   | { tag: "panic"; span?: Span }
-  | { tag: "call"; callerPath: string; span: Span };
+  | { tag: "call"; callerPath: string; span: Span }
+  | { tag: "project"; field: string; span?: Span };
 
 type Step =
   | { tag: "value"; value: Value }
@@ -395,7 +402,7 @@ function openFn(
   const body = fn.body as
     | Ast[]
     | { __variant: string; arity: number }
-    | { __record: string; arity: number };
+    | { __record: string; arity: number; fieldNames?: string[] };
   if (body && typeof body === "object" && !Array.isArray(body) && "__variant" in body) {
     if (args.length !== body.arity) {
       throw new PanicError(
@@ -414,7 +421,12 @@ function openFn(
     }
     return {
       tag: "value",
-      value: { tag: "record", name: body.__record, fields: args },
+      value: {
+        tag: "record",
+        name: body.__record,
+        fields: args,
+        fieldNames: body.fieldNames ?? [],
+      },
     };
   }
   if (args.length !== fn.params.length) {
@@ -613,14 +625,15 @@ function beginEval(
           }
           case Sf.Let: {
             const name = symName(ast.elems[1]!);
+            const recEnv = emptyEnv(env);
             stack.push({
               tag: "let",
               name,
               rest: ast.elems.length > 3 ? ast.elems.slice(3) : EMPTY_AST,
-              env,
+              env: recEnv,
               loop,
             });
-            return { tag: "eval", ast: ast.elems[2]!, env, loop };
+            return { tag: "eval", ast: ast.elems[2]!, env: recEnv, loop };
           }
           case Sf.Do: {
             const forms = ast.elems.slice(1);
@@ -673,6 +686,14 @@ function beginEval(
             return { tag: "value", value: evalLambda(ast, env) };
           case Sf.Quote:
             return { tag: "value", value: quoteValue(ast.elems[1] ?? ast) };
+          case Sf.Project: {
+            const field = ast.elems[2];
+            if (!ast.elems[1] || field?.tag !== "sym") {
+              throw new PanicError("project expects a value and a field", ast.span);
+            }
+            stack.push({ tag: "project", field: symName(field), span: ast.span });
+            return { tag: "eval", ast: ast.elems[1], env, loop };
+          }
           case Sf.Set: {
             const slot = evalFast(ast.elems[1]!, env, host, false);
             if (slot !== null && slot.tag === "ref") {
@@ -751,8 +772,24 @@ function beginLoop(ast: Ast & { tag: "list" }, env: Env, stack: Cont[]): Step {
   return { tag: "eval", ast: inits[0]!, env, loop: null };
 }
 
+function projectField(value: Value, field: string, span?: Span): Value {
+  if (value.tag === "module") {
+    const found = value.exports.get(field);
+    if (!found) throw new PanicError(`unknown export ${field}`, span);
+    return found;
+  }
+  if (value.tag === "record") {
+    const i = value.fieldNames.indexOf(field);
+    if (i < 0) throw new PanicError(`unknown field ${field}`, span);
+    return value.fields[i]!;
+  }
+  throw new PanicError(`cannot project ${field} from ${value.tag}`, span);
+}
+
 function resume(c: Cont, value: Value, stack: Cont[], host: Host): Step {
   switch (c.tag) {
+    case "project":
+      return { tag: "value", value: projectField(value, c.field, c.span) };
     case "seq": {
       // Finished forms[c.i]. Binding-style (let x e) extends the sequence env.
       let e = c.env;
@@ -789,14 +826,13 @@ function resume(c: Cont, value: Value, stack: Cont[], host: Host): Step {
       };
     }
     case "let": {
-      const child = emptyEnv(c.env);
-      envSet(child, c.name, value);
+      envSet(c.env, c.name, value);
       if (c.rest.length === 0) return { tag: "value", value };
       if (c.rest.length === 1) {
-        return { tag: "eval", ast: c.rest[0]!, env: child, loop: c.loop };
+        return { tag: "eval", ast: c.rest[0]!, env: c.env, loop: c.loop };
       }
-      stack.push({ tag: "seq", forms: c.rest, i: 0, env: child, loop: c.loop });
-      return { tag: "eval", ast: c.rest[0]!, env: child, loop: c.loop };
+      stack.push({ tag: "seq", forms: c.rest, i: 0, env: c.env, loop: c.loop });
+      return { tag: "eval", ast: c.rest[0]!, env: c.env, loop: c.loop };
     }
     case "list": {
       const acc = c.acc;
@@ -1219,7 +1255,10 @@ function applyBuiltin(
     }
     case "map-keys": {
       const m = args[0] as { map: ReturnType<typeof mapNew> };
-      return { tag: "list", elems: mapKeys(m.map) };
+      const keys = mapKeys(m.map);
+      let out: Value = vVariant("Nil");
+      for (let i = keys.length - 1; i >= 0; i--) out = vVariant("Cons", [keys[i]!, out]);
+      return out;
     }
     case "sb-new":
       return { tag: "sb", sb: sbNew() };
@@ -1368,6 +1407,7 @@ function applyBuiltin(
         tag: "record",
         name: "SpawnOutput",
         fields: [spawnStatusToValue(r.status), vStr(r.stdout), vStr(r.stderr)],
+        fieldNames: ["status", "stdout", "stderr"],
       });
     }
     case "NotFound":
@@ -1391,6 +1431,7 @@ function applyBuiltin(
         tag: "record",
         name: "SpawnOutput",
         fields: [args[0]!, args[1]!, args[2]!],
+        fieldNames: ["status", "stdout", "stderr"],
       };
     case "Other":
       return vVariant("Other", [args[0]!]);

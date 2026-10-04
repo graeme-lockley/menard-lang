@@ -214,8 +214,7 @@ let is-sym(ast: Ast, name: Str) -> Bool =
 
 let strip-trailing-colon(raw: Str) -> Str {
   let n = str-byte-length(raw)
-  if n > 0 && str-byte(raw, n - 1) == 58 -> str-slice(raw, 0, n - 1)
-   | else -> raw
+  if (n > 0 && str-byte(raw, n - 1) == 58) -> str-slice(raw, 0, n - 1) | raw
 }
 
 ; ---------------------------------------------------------------------------
@@ -263,12 +262,12 @@ let ldefn-body(ld: LDefn) -> List Ast =
 let param-arity-of(ps: List LParam) -> Int =
   match (ps)
     | [] -> 0
-    | Cons(_, rest) -> 1 + param-arity-of(rest)
+    | _ :: rest -> 1 + param-arity-of(rest)
 
 let lparam-names(ps: List LParam) -> List Str =
   match (ps)
     | [] -> []
-    | Cons(p, rest) -> Cons(lparam-name(p), lparam-names(rest))
+    | p :: rest -> lparam-name(p) :: lparam-names(rest)
 
 record ArrowSplit {
   before: List Ast
@@ -278,16 +277,15 @@ record ArrowSplit {
 let find-arrow(elems: List Ast) -> Maybe ArrowSplit =
   match (elems)
     | [] -> None()
-    | Cons(e, rest) -> find-arrow-cons(e, rest)
+    | e :: rest -> find-arrow-cons(e, rest)
 
 let find-arrow-cons(e: Ast, rest: List Ast) -> Maybe ArrowSplit =
-  if is-sym(e, "->") -> Some(ArrowSplit([], rest))
-   | else -> find-arrow-cons-recurse(e, rest)
+  if (is-sym(e, "->")) -> Some(ArrowSplit([], rest)) | find-arrow-cons-recurse(e, rest)
 
 let find-arrow-cons-recurse(e: Ast, rest: List Ast) -> Maybe ArrowSplit =
   match (find-arrow(rest))
     | None -> None()
-    | Some(split) -> Some(ArrowSplit(Cons(e, arrow-split-before(split)), arrow-split-after(split)))
+    | Some(split) -> Some(ArrowSplit(e :: arrow-split-before(split), arrow-split-after(split)))
 
 let arrow-split-before(s: ArrowSplit) -> List Ast =
   match (s)
@@ -299,7 +297,7 @@ let arrow-split-after(s: ArrowSplit) -> List Ast =
 
 let param-of(ast: Ast) -> Maybe LParam =
   match (ast)
-    | ParenNode(Cons(name-ast, Cons(ty-ast, _)), _) -> param-of-named(name-ast, ty-ast)
+    | ParenNode(name-ast :: ty-ast :: _, _) -> param-of-named(name-ast, ty-ast)
     | _ -> None()
 
 let param-of-named(name-ast: Ast, ty-ast: Ast) -> Maybe LParam =
@@ -310,11 +308,11 @@ let param-of-named(name-ast: Ast, ty-ast: Ast) -> Maybe LParam =
 let params-of(elems: List Ast) -> List LParam =
   match (elems)
     | [] -> []
-    | Cons(e, rest) -> params-of-cons(e, rest)
+    | e :: rest -> params-of-cons(e, rest)
 
 let params-of-cons(e: Ast, rest: List Ast) -> List LParam =
   match (param-of(e))
-    | Some(p) -> Cons(p, params-of(rest))
+    | Some(p) -> p :: params-of(rest)
     | None -> params-of(rest)
 
 ; `main` or `(f [a])` — the type-parameter list (if any) is irrelevant
@@ -322,12 +320,12 @@ let params-of-cons(e: Ast, rest: List Ast) -> List LParam =
 let defn-name-of(name-part: Ast) -> Maybe Str =
   match (name-part)
     | SymNode(n, _) -> Some(n)
-    | ParenNode(Cons(n-ast, _), _) -> sym-str(n-ast)
+    | ParenNode(n-ast :: _, _) -> sym-str(n-ast)
     | _ -> None()
 
 let parse-ldefn(elems: List Ast) -> Maybe LDefn =
   match (elems)
-    | Cons(_, Cons(name-part, rest)) -> parse-ldefn-named(name-part, rest)
+    | _ :: name-part :: rest -> parse-ldefn-named(name-part, rest)
     | _ -> None()
 
 let parse-ldefn-named(name-part: Ast, rest: List Ast) -> Maybe LDefn =
@@ -342,7 +340,7 @@ let parse-ldefn-header(name: Str, rest: List Ast) -> Maybe LDefn =
 
 let parse-ldefn-ret(name: Str, params: List LParam, after: List Ast) -> Maybe LDefn =
   match (after)
-    | Cons(ret-ast, body) -> Some(LDefn(name, params, ret-ast, body))
+    | ret-ast :: body -> Some(LDefn(name, params, ret-ast, body))
     | [] -> None()
 
 ; `(pub defn …)` — strip the `pub` wrapper; every other top-level shape
@@ -350,31 +348,29 @@ let parse-ldefn-ret(name: Str, params: List LParam, after: List Ast) -> Maybe LD
 ; is simply not a lowering-relevant form.
 let unwrap-pub(ast: Ast) -> Ast =
   match (ast)
-    | ParenNode(Cons(head, rest), sp) -> unwrap-pub-head(head, rest, sp, ast)
+    | ParenNode(head :: rest, sp) -> unwrap-pub-head(head, rest, sp, ast)
     | _ -> ast
 
 let unwrap-pub-head(head: Ast, rest: List Ast, sp: Span, ast: Ast) -> Ast =
-  if is-sym(head, "pub") -> unwrap-pub(ParenNode(rest, sp))
-   | else -> ast
+  if (is-sym(head, "pub")) -> unwrap-pub(ParenNode(rest, sp)) | ast
 
 let top-form-ldefn(ast: Ast) -> Maybe LDefn =
   match (unwrap-pub(ast))
-    | ParenNode(Cons(head, rest), _) -> top-form-ldefn-named(head, rest)
+    | ParenNode(head :: rest, _) -> top-form-ldefn-named(head, rest)
     | _ -> None()
 
 let top-form-ldefn-named(head: Ast, rest: List Ast) -> Maybe LDefn =
-  if is-sym(head, "defn") -> parse-ldefn(Cons(head, rest))
-   | else -> None()
+  if (is-sym(head, "defn")) -> parse-ldefn(head :: rest) | None()
 
 let collect-ldefns-all(forms: List Ast) -> List LDefn =
   match (forms)
     | [] -> []
-    | Cons(f, rest) -> collect-ldefns-all-cons(f, rest)
+    | f :: rest -> collect-ldefns-all-cons(f, rest)
 
 let collect-ldefns-all-cons(f: Ast, rest: List Ast) -> List LDefn =
   match (top-form-ldefn(f))
     | None -> collect-ldefns-all(rest)
-    | Some(ld) -> Cons(ld, collect-ldefns-all(rest))
+    | Some(ld) -> ld :: collect-ldefns-all(rest)
 
 ; ---------------------------------------------------------------------------
 ; Which top-level `defn`s this module actually lowers — see header
@@ -412,19 +408,20 @@ let is-raw-upper-name(n: Str) -> Bool =
 ; `__m12_Foo` → `Foo`; otherwise identity.
 let strip-uniq-prefix(n: Str) -> Str {
   let len = str-byte-length(n)
-  if len >= 4 && str-byte(n, 0) == 95 && str-byte(n, 1) == 95 && str-byte(n, 2) == 109 -> strip-uniq-prefix-digits(n, 3, len)
-   | else -> n
+  if (len >= 4 && str-byte(n, 0) == 95 && str-byte(n, 1) == 95 && str-byte(n, 2) == 109) -> strip-uniq-prefix-digits(n, 3, len) | n
 }
 
 let strip-uniq-prefix-digits(n: Str, i: Int, len: Int) -> Str =
-  if i >= len -> n
-   | else ->
-    {
-      let b = str-byte(n, i)
-      if b >= 48 && b <= 57 -> strip-uniq-prefix-digits(n, i + 1, len)
-       | b == 95 -> str-slice(n, i + 1, len - (i + 1))
-       | else -> n
-    }
+  cond
+    | i >= len -> n
+    | else ->
+      {
+        let b = str-byte(n, i)
+        cond
+          | b >= 48 && b <= 57 -> strip-uniq-prefix-digits(n, i + 1, len)
+          | b == 95 -> str-slice(n, i + 1, len - (i + 1))
+          | else -> n
+      }
 
 let is-upper-type-name(n: Str) -> Bool =
   is-raw-upper-name(strip-uniq-prefix(n))
@@ -432,7 +429,7 @@ let is-upper-type-name(n: Str) -> Bool =
 let is-heap-type(ast: Ast) -> Bool =
   match (ast)
     | SymNode(n, _) -> is-upper-type-name(n)
-    | ParenNode(Cons(head, _), _) -> is-heap-type-head(head)
+    | ParenNode(head :: _, _) -> is-heap-type-head(head)
     | _ -> false
 
 let is-heap-type-head(head: Ast) -> Bool =
@@ -464,22 +461,20 @@ let is-value-type(ast: Ast) -> Bool =
 let all-params-value(ps: List LParam) -> Bool =
   match (ps)
     | [] -> true
-    | Cons(p, rest) -> is-value-type(lparam-ty(p)) && all-params-value(rest)
+    | p :: rest -> is-value-type(lparam-ty(p)) && all-params-value(rest)
 
 ; Empty Unit no-ops (`shadow-push`/`shadow-pop`) stay out of the emitted
 ; function list — see `is-unit-noop-ldefn` below.
 let is-word-ldefn(ld: LDefn) -> Bool =
-  if is-unit-noop-ldefn(ld) -> false
-   | else -> is-value-type(ldefn-ret(ld)) && all-params-value(ldefn-params(ld))
+  if (is-unit-noop-ldefn(ld)) -> false | is-value-type(ldefn-ret(ld)) && all-params-value(ldefn-params(ld))
 
 let filter-word-ldefns(lds: List LDefn) -> List LDefn =
   match (lds)
     | [] -> []
-    | Cons(ld, rest) -> filter-word-ldefns-cons(ld, rest)
+    | ld :: rest -> filter-word-ldefns-cons(ld, rest)
 
 let filter-word-ldefns-cons(ld: LDefn, rest: List LDefn) -> List LDefn =
-  if is-word-ldefn(ld) -> Cons(ld, filter-word-ldefns(rest))
-   | else -> filter-word-ldefns(rest)
+  if (is-word-ldefn(ld)) -> ld :: filter-word-ldefns(rest) | filter-word-ldefns(rest)
 
 ; `root/root.mnd`'s `shadow-helper-defn` builds exactly `(defn NAME ->
 ; Unit ())` — a single-form body that is itself the empty-parens `Unit`
@@ -495,27 +490,26 @@ let is-unit-literal-body(body: List Ast) -> Bool =
     | _ -> false
 
 let is-unit-noop-ldefn(ld: LDefn) -> Bool =
-  if not(is-unit-type(ldefn-ret(ld))) -> false
-   | else ->
-    match (ldefn-params(ld))
-      | [] -> is-unit-literal-body(ldefn-body(ld))
-      | _ -> false
+  cond
+    | not(is-unit-type(ldefn-ret(ld))) -> false
+    | else ->
+      match (ldefn-params(ld))
+        | [] -> is-unit-literal-body(ldefn-body(ld))
+        | _ -> false
 
 let collect-noop-names(lds: List LDefn) -> Map Str Bool =
   match (lds)
     | [] -> map-new()
-    | Cons(ld, rest) -> collect-noop-names-cons(ld, rest)
+    | ld :: rest -> collect-noop-names-cons(ld, rest)
 
 let collect-noop-names-cons(ld: LDefn, rest: List LDefn) -> Map Str Bool =
-  if is-unit-noop-ldefn(ld) -> map-set(collect-noop-names(rest), ldefn-name(ld), true)
-   | else -> collect-noop-names(rest)
+  if (is-unit-noop-ldefn(ld)) -> map-set(collect-noop-names(rest), ldefn-name(ld), true) | collect-noop-names(rest)
 
 let find-ldefn-named(lds: List LDefn, name: Str) -> Maybe LDefn =
   match (lds)
     | [] -> None()
-    | Cons(ld, rest) ->
-      if ldefn-name(ld) == name -> Some(ld)
-       | else -> find-ldefn-named(rest, name)
+    | ld :: rest ->
+      if (ldefn-name(ld) == name) -> Some(ld) | find-ldefn-named(rest, name)
 
 ; A resolved call target: its module-scope global value id and its
 ; declared arity (for the arity check `lower-call-with-ref` below does).
@@ -535,7 +529,7 @@ let func-ref-arity(fr: FuncRef) -> Int =
 let build-func-refs(lds: List LDefn, idx: Int) -> Map Str FuncRef =
   match (lds)
     | [] -> map-new()
-    | Cons(ld, rest) -> map-set(build-func-refs(rest, idx + 1), ldefn-name(ld), FuncRef(idx, param-arity-of(ldefn-params(ld))))
+    | ld :: rest -> map-set(build-func-refs(rest, idx + 1), ldefn-name(ld), FuncRef(idx, param-arity-of(ldefn-params(ld))))
 
 ; ---------------------------------------------------------------------------
 ; `Builder` — see header comment's "The one piece of mutable state per
@@ -732,25 +726,25 @@ let mark-terminated!(b: Builder) -> Unit =
   set!(b-terminated(b), true)
 
 let push-loop-frame!(b: Builder, lf: LoopFrame) -> Unit =
-  set!(b-loops(b), Cons(lf, deref(b-loops(b))))
+  set!(b-loops(b), lf :: deref(b-loops(b)))
 
 let pop-loop-frame!(b: Builder) -> Unit =
   set!(
     b-loops(b),
     match (deref(b-loops(b)))
       | [] -> []
-      | Cons(_, rest) -> rest
+      | _ :: rest -> rest
   )
 
 let current-loop-frame(b: Builder) -> Maybe LoopFrame =
   match (deref(b-loops(b)))
     | [] -> None()
-    | Cons(lf, _) -> Some(lf)
+    | lf :: _ -> Some(lf)
 
 let emit-pending!(b: Builder, p: PendingItem) -> Unit {
   let cur = deref(b-cur(b))
   let slot = bb-slot(cur)
-  set!(slot, Cons(p, deref(slot)))
+  set!(slot, p :: deref(slot))
 }
 
 let emit!(b: Builder, it: Item) -> Unit =
@@ -778,7 +772,7 @@ let close-current!(b: Builder) -> Unit {
   let cur = deref(b-cur(b))
   let n = deref(b-closed-count(b))
   set!(bb-idx-ref(cur), n)
-  set!(b-closed(b), Cons(bb-slot(cur), deref(b-closed(b))))
+  set!(b-closed(b), bb-slot(cur) :: deref(b-closed(b)))
   set!(b-closed-count(b), n + 1)
 }
 
@@ -806,17 +800,17 @@ let total-blocks(b: Builder) -> Int =
 let pending-reverse-onto(xs: List PendingItem, acc: List PendingItem) -> List PendingItem =
   match (xs)
     | [] -> acc
-    | Cons(x, rest) -> pending-reverse-onto(rest, Cons(x, acc))
+    | x :: rest -> pending-reverse-onto(rest, x :: acc)
 
 let blocks-reverse-onto(xs: List (Ref (List PendingItem)), acc: List (Ref (List PendingItem))) -> List (Ref (List PendingItem)) =
   match (xs)
     | [] -> acc
-    | Cons(x, rest) -> blocks-reverse-onto(rest, Cons(x, acc))
+    | x :: rest -> blocks-reverse-onto(rest, x :: acc)
 
 let append-items(xs: List Item, ys: List Item) -> List Item =
   match (xs)
     | [] -> ys
-    | Cons(x, rest) -> Cons(x, append-items(rest, ys))
+    | x :: rest -> x :: append-items(rest, ys)
 
 ; Every block's own `idx-ref` is resolved by now (`finish-builder!` has
 ; already run) — a `PBr`/`PCondBr`'s target(s) can finally be read.
@@ -829,7 +823,7 @@ let resolve-pending(p: PendingItem) -> Item =
 let resolve-pending-list(xs: List PendingItem) -> List Item =
   match (xs)
     | [] -> []
-    | Cons(x, rest) -> Cons(resolve-pending(x), resolve-pending-list(rest))
+    | x :: rest -> resolve-pending(x) :: resolve-pending-list(rest)
 
 ; `closed` accumulated blocks in closure order via Cons-prepend, so one
 ; reversal recovers that order; each block's own content was likewise
@@ -839,7 +833,7 @@ let resolve-pending-list(xs: List PendingItem) -> List Item =
 let flatten-blocks(ordered: List (Ref (List PendingItem))) -> List Item =
   match (ordered)
     | [] -> []
-    | Cons(slot, rest) -> append-items(resolve-pending-list(pending-reverse-onto(deref(slot), [])), flatten-blocks(rest))
+    | slot :: rest -> append-items(resolve-pending-list(pending-reverse-onto(deref(slot), [])), flatten-blocks(rest))
 
 let builder-items-ordered(b: Builder) -> List Item =
   flatten-blocks(blocks-reverse-onto(deref(b-closed(b)), []))
@@ -881,8 +875,7 @@ let const-unit!(b: Builder) -> Int =
   const-i64!(b, 1)
 
 let const-bool!(b: Builder, v: Bool) -> Int =
-  if v -> const-true!(b)
-   | else -> const-false!(b)
+  if (v) -> const-true!(b) | const-false!(b)
 
 ; `i1` from icmp → Bool immediate: zext to i64 (0/1) then retag → 1/3.
 let bool-from-i1!(b: Builder, cond-abs: Int) -> Int {
@@ -942,7 +935,7 @@ let emit-condbr!(b: Builder, true-bb: BB, false-bb: BB, cond-abs: Int) -> Unit {
 let rel-refs(b: Builder, xs: List Int) -> List Int =
   match (xs)
     | [] -> []
-    | Cons(x, rest) -> Cons(rel-ref(b, x), rel-refs(b, rest))
+    | x :: rest -> rel-ref(b, x) :: rel-refs(b, rest)
 
 let emit-call!(b: Builder, callee-abs: Int, arg-abs: List Int) -> Int {
   let callee-rel = rel-ref(b, callee-abs)
@@ -958,17 +951,15 @@ let is-rooting(b: Builder) -> Bool =
   deref(b-rooting(b))
 
 let keep!(b: Builder, v: Int) -> Int =
-  if not(is-rooting(b)) || block-terminated(b) -> v
-   | else -> emit-call!(b, extern-root-keep-abs(deref(b-root-ns(b))), [v])
+  if (not(is-rooting(b)) || block-terminated(b)) -> v | emit-call!(b, extern-root-keep-abs(deref(b-root-ns(b))), [v])
 
 let get!(b: Builder, v: Int) -> Int =
-  if not(is-rooting(b)) || block-terminated(b) -> v
-   | else -> emit-call!(b, extern-root-get-abs(deref(b-root-ns(b))), [v])
+  if (not(is-rooting(b)) || block-terminated(b)) -> v | emit-call!(b, extern-root-get-abs(deref(b-root-ns(b))), [v])
 
 let get-words!(b: Builder, xs: List Int) -> List Int =
   match (xs)
     | [] -> []
-    | Cons(x, rest) -> Cons(get!(b, x), get-words!(b, rest))
+    | x :: rest -> get!(b, x) :: get-words!(b, rest)
 
 let emit-call-words!(b: Builder, callee-abs: Int, arg-abs: List Int) -> Int =
   emit-call!(b, callee-abs, get-words!(b, arg-abs))
@@ -977,11 +968,12 @@ let emit-root-save!(b: Builder) -> Int =
   emit-call!(b, extern-root-save-abs(deref(b-root-ns(b))), [])
 
 let emit-root-restore!(b: Builder, depth-abs: Int) -> Unit =
-  if is-rooting(b) ->
-    {
-      emit-call!(b, extern-root-restore-abs(deref(b-root-ns(b))), [depth-abs])
-      ()
-    }
+  cond
+    | is-rooting(b) ->
+      {
+        emit-call!(b, extern-root-restore-abs(deref(b-root-ns(b))), [depth-abs])
+        ()
+      }
 
 ; Alloca whose address is on the shadow stack. The push is a real
 ; `ptr` call so LLVM cannot drop the following store or fold the slot
@@ -989,12 +981,13 @@ let emit-root-restore!(b: Builder, depth-abs: Int) -> Unit =
 ; Allocation-free functions get a plain alloca.
 let root-alloca!(b: Builder) -> Int {
   let slot = emit-alloca!(b)
-  if is-rooting(b) ->
-    {
-      emit-call-void!(b, extern-kind-write, extern-root-push-abs(deref(b-root-ns(b))), [slot, const-i64!(b, 0)])
-      slot
-    }
-   | else -> slot
+  cond
+    | is-rooting(b) ->
+      {
+        emit-call-void!(b, extern-kind-write, extern-root-push-abs(deref(b-root-ns(b))), [slot, const-i64!(b, 0)])
+        slot
+      }
+    | else -> slot
 }
 
 let emit-ret!(b: Builder, val-abs: Int) -> Unit {
@@ -1020,12 +1013,13 @@ let emit-unreachable!(b: Builder) -> Unit {
     ; does not have to be a shadow root — including when the `if` sits
     ; in a loop header.
 let maybe-store-and-br!(b: Builder, result-slot: Int, val-abs: Int, target: BB) -> Unit =
-  if block-terminated(b) -> ()
-   | else ->
-    {
-      emit-store!(b, result-slot, val-abs)
-      emit-br!(b, target)
-    }
+  cond
+    | block-terminated(b) -> ()
+    | else ->
+      {
+        emit-store!(b, result-slot, val-abs)
+        emit-br!(b, target)
+      }
 
 ; `+`/`-`: free plus a one-instruction fixup (header comment's "The
 ; tagged-`Int` ABI, literally").
@@ -1195,7 +1189,7 @@ let str-pool-count(p: StrPool) -> Int =
 let str-pool-add(p: StrPool, s: Str) -> StrPool =
   match (map-get(str-pool-by-content(p), s))
     | Some(_) -> p
-    | None -> StrPool(Cons(s, str-pool-order-rev(p)), map-set(str-pool-by-content(p), s, str-pool-next(p)), str-pool-next(p) + 1, str-pool-write-stdout-abs(p), str-pool-print-i64-abs(p), str-pool-write-stderr-abs(p), str-pool-ctors(p), str-pool-origins(p), str-pool-file-gids(p))
+    | None -> StrPool(s :: str-pool-order-rev(p), map-set(str-pool-by-content(p), s, str-pool-next(p)), str-pool-next(p) + 1, str-pool-write-stdout-abs(p), str-pool-print-i64-abs(p), str-pool-write-stderr-abs(p), str-pool-ctors(p), str-pool-origins(p), str-pool-file-gids(p))
 
 ; Always found once `str-pool-add` has run over every occurrence
 ; `collect-str-pool` sees — see that function's header comment for why
@@ -1223,14 +1217,13 @@ let str-pool-finalize(p: StrPool, ctors: Map Str CtorSpec) -> StrPool {
 let str-pool-from-list(xs: List Str, p: StrPool) -> StrPool =
   match (xs)
     | [] -> p
-    | Cons(s, rest) -> str-pool-from-list(rest, str-pool-add(p, s))
+    | s :: rest -> str-pool-from-list(rest, str-pool-add(p, s))
 
 let list-nth-str(xs: List Str, i: Int) -> Str =
   match (xs)
     | [] -> ""
-    | Cons(h, t) ->
-      if i <= 0 -> h
-       | else -> list-nth-str(t, i - 1)
+    | h :: t ->
+      if (i <= 0) -> h | list-nth-str(t, i - 1)
 
 let origin-path(pool: StrPool, origin: Int) -> Str =
   list-nth-str(str-pool-origins(pool), origin)
@@ -1245,12 +1238,11 @@ let c-str(s: Str) -> Str {
 let add-origin-cstrs(ps: List Str, p: StrPool) -> StrPool =
   match (ps)
     | [] -> str-pool-add(p, c-str(""))
-    | Cons(s, rest) -> add-origin-cstrs(rest, str-pool-add(p, c-str(s)))
+    | s :: rest -> add-origin-cstrs(rest, str-pool-add(p, c-str(s)))
 
 let span-line-clamped(sp: Span) -> Int {
   let n = span-line(sp)
-  if n < 1 -> 1
-   | else -> n
+  if (n < 1) -> 1 | n
 }
 
 let file-gid-of(pool: StrPool, origin: Int) -> Int {
@@ -1316,9 +1308,8 @@ let is-cmp-op(s: Str) -> Bool =
 let str-in-list(s: Str, xs: List Str) -> Bool =
   match (xs)
     | [] -> false
-    | Cons(x, rest) ->
-      if s == x -> true
-       | else -> str-in-list(s, rest)
+    | x :: rest ->
+      if (s == x) -> true | str-in-list(s, rest)
 
 let unsupported-form-names() -> List Str =
   ["quote"]
@@ -1377,8 +1368,7 @@ let lower-sym(name: Str, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, p
       match (map-get(funcs, name))
         | Some(fr) -> lower-func-as-value(fr, b, pool)
         | None ->
-          if str-in-list(name, deref(b-slots(b))) -> Ok(emit-slot-get!(b, pool, name))
-           | else -> lower-sym-ctor-or-err(name, b, pool)
+          if (str-in-list(name, deref(b-slots(b)))) -> Ok(emit-slot-get!(b, pool, name)) | lower-sym-ctor-or-err(name, b, pool)
 
     ; `func-ref-abs` is already the module-scope absolute id
     ; (`num-strings + extern-count + idx`).
@@ -1395,20 +1385,22 @@ let lower-sym-ctor-or-err(name: Str, b: Builder, pool: StrPool) -> Result Int St
       {
         let ns = str-pool-count(pool)
         let arity = ctor-arity-of(name, pool)
-        if arity == 0 ->
-          if is-builtin-ctor(name) -> Ok(emit-call!(b, ctor-extern-abs(name, ns), []))
-           | else ->
+        cond
+          | arity == 0 ->
+            cond
+              | is-builtin-ctor(name) -> Ok(emit-call!(b, ctor-extern-abs(name, ns), []))
+              | else ->
+                {
+                  let tag-c = const-i64!(b, tag)
+                  let ar-c = const-i64!(b, 0)
+                  Ok(emit-call!(b, extern-new-abs(ns), [tag-c, ar-c]))
+                }
+          | else ->
             {
               let tag-c = const-i64!(b, tag)
-              let ar-c = const-i64!(b, 0)
-              Ok(emit-call!(b, extern-new-abs(ns), [tag-c, ar-c]))
+              let ar-c = const-i64!(b, arity)
+              Ok(emit-call!(b, extern-ctor-closure-abs(ns), [tag-c, ar-c]))
             }
-         | else ->
-          {
-            let tag-c = const-i64!(b, tag)
-            let ar-c = const-i64!(b, arity)
-            Ok(emit-call!(b, extern-ctor-closure-abs(ns), [tag-c, ar-c]))
-          }
       }
 
 ; A reader span covers a source extent (`end` > `start`). Compiler-built
@@ -1441,13 +1433,12 @@ let emit-traced-call-at!(b: Builder, pool: StrPool, sp: Span, callee: Int, args:
 }
 
 let emit-traced-call!(b: Builder, pool: StrPool, sp: Span, callee: Int, args: List Int) -> Int =
-  if span-located(sp) -> emit-traced-call-at!(b, pool, sp, callee, args)
-   | else -> emit-call!(b, callee, args)
+  if (span-located(sp)) -> emit-traced-call-at!(b, pool, sp, callee, args) | emit-call!(b, callee, args)
 
 let lower-paren(elems: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (elems)
     | [] -> Ok(const-unit!(b))
-    | Cons(head, rest) -> lower-paren-head(head, rest, sp, env, b, funcs, noop, pool)
+    | head :: rest -> lower-paren-head(head, rest, sp, env, b, funcs, noop, pool)
 
 let lower-paren-head(head: Ast, rest: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (sym-str(head))
@@ -1465,25 +1456,44 @@ let lower-apply-clo(clo: Int, args: List Ast, sp: Span, env: Map Str Int, b: Bui
     | _ -> Err("closure application supports at most 2 arguments currently")
 
 let lower-named(hn: Str, rest: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  if hn == "if" -> lower-if(rest, env, b, funcs, noop, pool)
-   | hn == "let" -> lower-let-inline(rest, env, b, funcs, noop, pool)
-   | hn == "do" -> lower-sequence(rest, env, b, funcs, noop, pool)
-   | hn == "loop" -> lower-loop(rest, env, b, funcs, noop, pool)
-   | hn == "recur" -> lower-recur(rest, env, b, funcs, noop, pool)
-   | hn == "match" -> lower-match(rest, env, b, funcs, noop, pool)
-   | is-arith-binop(hn) -> lower-arith(rest, hn, sp, env, b, funcs, noop, pool)
-   | is-cmp-op(hn) -> lower-cmp-value(rest, hn, env, b, funcs, noop, pool)
-   | is-ctor-name(hn, pool) -> lower-ctor(hn, rest, env, b, funcs, noop, pool)
-   | else ->
-    match (map-get(funcs, hn))
-      | Some(_) -> lower-call(hn, rest, sp, env, b, funcs, noop, pool)
-      | None ->
-        if is-runtime-op(hn) -> lower-runtime-op(hn, rest, env, b, funcs, noop, pool)
-         | is-effect-head(hn) -> result-then(lower-effect-op(hn, rest, env, b, funcs, noop, pool), fn () = Ok(const-unit!(b)))
-         | is-unsupported-form(hn) -> Err(str-concat("cannot lower `", hn, "` with the real instruction lowerer yet"))
-         | else -> lower-call(hn, rest, sp, env, b, funcs, noop, pool)
+  cond
+    | hn == "if" -> lower-if(rest, env, b, funcs, noop, pool)
+    | hn == "let" -> lower-let-inline(rest, env, b, funcs, noop, pool)
+    | hn == "do" -> lower-sequence(rest, env, b, funcs, noop, pool)
+    | hn == "loop" -> lower-loop(rest, env, b, funcs, noop, pool)
+    | hn == "recur" -> lower-recur(rest, env, b, funcs, noop, pool)
+    | hn == "match" -> lower-match(rest, env, b, funcs, noop, pool)
+    | hn == "slot" -> lower-slot(rest, env, b, funcs, noop, pool)
+    | is-arith-binop(hn) -> lower-arith(rest, hn, sp, env, b, funcs, noop, pool)
+    | is-cmp-op(hn) -> lower-cmp-value(rest, hn, env, b, funcs, noop, pool)
+    | is-ctor-name(hn, pool) -> lower-ctor(hn, rest, env, b, funcs, noop, pool)
+    | else ->
+      match (map-get(funcs, hn))
+        | Some(_) -> lower-call(hn, rest, sp, env, b, funcs, noop, pool)
+        | None ->
+          cond
+            | is-runtime-op(hn) -> lower-runtime-op(hn, rest, env, b, funcs, noop, pool)
+            | is-effect-head(hn) -> result-then(lower-effect-op(hn, rest, env, b, funcs, noop, pool), fn () = Ok(const-unit!(b)))
+            | is-unsupported-form(hn) -> Err(str-concat("cannot lower `", hn, "` with the real instruction lowerer yet"))
+            | else -> lower-call(hn, rest, sp, env, b, funcs, noop, pool)
 
 ; -- if --
+
+; A record field is the payload slot chosen by the typer.
+let lower-slot(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
+  match (rest)
+    | obj :: idx :: _ -> lower-slot-index(obj, idx, env, b, funcs, noop, pool)
+    | _ -> Err("slot requires a value and an index")
+
+; Load payload slot `n` from the lowered receiver.
+let lower-slot-index(obj: Ast, idx: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
+  match (idx)
+    | IntNode(n, _) ->
+      result-bind(
+        lower-expr(obj, env, b, funcs, noop, pool),
+        fn (val) = Ok(emit-call!(b, extern-slot-abs(str-pool-count(pool)), [val, const-i64!(b, n)]))
+      )
+    | _ -> Err("slot index must be an integer")
 
 let lower-if(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (rest)
@@ -1554,7 +1564,7 @@ let list-reverse-str(xs: List Str) -> List Str =
 let list-reverse-str-onto(xs: List Str, acc: List Str) -> List Str =
   match (xs)
     | [] -> acc
-    | Cons(x, rest) -> list-reverse-str-onto(rest, Cons(x, acc))
+    | x :: rest -> list-reverse-str-onto(rest, x :: acc)
 
 let list-reverse-int(xs: List Int) -> List Int =
   list-reverse-int-onto(xs, [])
@@ -1562,7 +1572,7 @@ let list-reverse-int(xs: List Int) -> List Int =
 let list-reverse-int-onto(xs: List Int, acc: List Int) -> List Int =
   match (xs)
     | [] -> acc
-    | Cons(x, rest) -> list-reverse-int-onto(rest, Cons(x, acc))
+    | x :: rest -> list-reverse-int-onto(rest, x :: acc)
 
 let lower-loop-with-pairs(pairs: List Ast, body: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str {
   let result-slot = emit-alloca!(b)
@@ -1572,7 +1582,7 @@ let lower-loop-with-pairs(pairs: List Ast, body: Ast, env: Map Str Int, b: Build
 let lower-loop-bind-all(pairs: List Ast, body: Ast, result-slot: Int, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool, names-acc: List Str, slots-acc: List Int, env-acc: Map Str Int) -> Result Int Str =
   match (pairs)
     | [] -> lower-loop-run(body, result-slot, list-reverse-str(names-acc), list-reverse-int(slots-acc), env-acc, b, funcs, noop, pool)
-    | Cons(pair, rest) ->
+    | pair :: rest ->
       match (binding-pair-of(pair))
         | None -> Err("each loop binding must be (name init)")
         | Some([name-ast, init-ast]) ->
@@ -1584,7 +1594,7 @@ let lower-loop-bind-all(pairs: List Ast, body: Ast, result-slot: Int, env: Map S
                 fn (v) {
                   let slot = root-alloca!(b)
                   emit-store!(b, slot, get!(b, v))
-                  lower-loop-bind-all(rest, body, result-slot, env, b, funcs, noop, pool, Cons(name, names-acc), Cons(slot, slots-acc), map-set(env-acc, name, slot))
+                  lower-loop-bind-all(rest, body, result-slot, env, b, funcs, noop, pool, name :: names-acc, slot :: slots-acc, map-set(env-acc, name, slot))
                 }
               )
         | _ -> Err("each loop binding must be (name init)")
@@ -1595,8 +1605,7 @@ let lower-loop-run(body: Ast, result-slot: Int, names: List Str, slots: List Int
   let header = fresh-bb!(b)
   let exit-bb = fresh-bb!(b)
   let mark =
-    if is-rooting(b) -> emit-root-save!(b)
-     | else -> 0
+    if (is-rooting(b)) -> emit-root-save!(b) | 0
   emit-br!(b, header)
   switch-to!(b, header)
   push-loop-frame!(b, LoopFrame(header, exit-bb, result-slot, slots, names, mark))
@@ -1623,7 +1632,7 @@ let lower-recur(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str Fun
 let lower-recur-eval-all(args: List Ast, vals-acc: List Int, slots: List Int, header: BB, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (args)
     | [] -> lower-recur-store-all(list-reverse-int(vals-acc), slots, header, b)
-    | Cons(a, rest) -> result-bind(lower-expr(a, env, b, funcs, noop, pool), fn (v) = lower-recur-eval-all(rest, Cons(v, vals-acc), slots, header, env, b, funcs, noop, pool))
+    | a :: rest -> result-bind(lower-expr(a, env, b, funcs, noop, pool), fn (v) = lower-recur-eval-all(rest, v :: vals-acc, slots, header, env, b, funcs, noop, pool))
 
 let lower-recur-store-all(vals: List Int, slots: List Int, header: BB, b: Builder) -> Result Int Str =
   match (vals)
@@ -1638,10 +1647,10 @@ let lower-recur-store-all(vals: List Int, slots: List Int, header: BB, b: Builde
             Ok(const-tagged!(b, 0))
           }
         | _ -> Err("recur argument count does not match loop bindings")
-    | Cons(v, rest-vals) ->
+    | v :: rest-vals ->
       match (slots)
         | [] -> Err("recur argument count does not match loop bindings")
-        | Cons(slot, rest-slots) ->
+        | slot :: rest-slots ->
           {
             emit-store!(b, slot, get!(b, v))
             lower-recur-store-all(rest-vals, rest-slots, header, b)
@@ -1656,7 +1665,7 @@ let user-ctor-tag-base = 1000
 let decl-name-of(name-part: Ast) -> Maybe Str =
   match (name-part)
     | SymNode(n, _) -> Some(n)
-    | ParenNode(Cons(n-ast, _), _) -> sym-str(n-ast)
+    | ParenNode(n-ast :: _, _) -> sym-str(n-ast)
     | _ -> None()
 
 let register-ctor-spec(acc: Map Str CtorSpec, name: Str, arity: Int, tag-ref: Ref Int) -> Map Str CtorSpec {
@@ -1667,7 +1676,7 @@ let register-ctor-spec(acc: Map Str CtorSpec, name: Str, arity: Int, tag-ref: Re
 
 let register-one-variant-ctor(c: Ast, acc: Map Str CtorSpec, tag-ref: Ref Int) -> Map Str CtorSpec =
   match (c)
-    | ParenNode(Cons(cname-ast, payload-asts), _) ->
+    | ParenNode(cname-ast :: payload-asts, _) ->
       match (sym-str(cname-ast))
         | None -> acc
         | Some(cname) -> register-variant-ctor-name(cname, payload-asts, acc, tag-ref)
@@ -1684,16 +1693,16 @@ let register-variant-ctor-name(cname: Str, payload-asts: List Ast, acc: Map Str 
 let register-variant-ctors(ctors: List Ast, acc: Map Str CtorSpec, tag-ref: Ref Int) -> Map Str CtorSpec =
   match (ctors)
     | [] -> acc
-    | Cons(c, rest) -> register-variant-ctors(rest, register-one-variant-ctor(c, acc, tag-ref), tag-ref)
+    | c :: rest -> register-variant-ctors(rest, register-one-variant-ctor(c, acc, tag-ref), tag-ref)
 
 let collect-variant-decl(rest: List Ast, acc: Map Str CtorSpec, tag-ref: Ref Int) -> Map Str CtorSpec =
   match (rest)
-    | Cons(_name-part, ctors) -> register-variant-ctors(ctors, acc, tag-ref)
+    | _name-part :: ctors -> register-variant-ctors(ctors, acc, tag-ref)
     | [] -> acc
 
 let collect-defrec-decl(rest: List Ast, acc: Map Str CtorSpec, tag-ref: Ref Int) -> Map Str CtorSpec =
   match (rest)
-    | Cons(name-part, fields) ->
+    | name-part :: fields ->
       match (decl-name-of(name-part))
         | None -> acc
         | Some(name) ->
@@ -1703,13 +1712,14 @@ let collect-defrec-decl(rest: List Ast, acc: Map Str CtorSpec, tag-ref: Ref Int)
     | [] -> acc
 
 let collect-ctors-named(hn: Str, rest: List Ast, acc: Map Str CtorSpec, tag-ref: Ref Int) -> Map Str CtorSpec =
-  if hn == "variant" -> collect-variant-decl(rest, acc, tag-ref)
-   | hn == "defrec" -> collect-defrec-decl(rest, acc, tag-ref)
-   | else -> acc
+  cond
+    | hn == "variant" -> collect-variant-decl(rest, acc, tag-ref)
+    | hn == "defrec" -> collect-defrec-decl(rest, acc, tag-ref)
+    | else -> acc
 
 let collect-ctors-form(ast: Ast, acc: Map Str CtorSpec, tag-ref: Ref Int) -> Map Str CtorSpec =
   match (unwrap-pub(ast))
-    | ParenNode(Cons(head, rest), _) ->
+    | ParenNode(head :: rest, _) ->
       match (sym-str(head))
         | None -> acc
         | Some(hn) -> collect-ctors-named(hn, rest, acc, tag-ref)
@@ -1718,7 +1728,7 @@ let collect-ctors-form(ast: Ast, acc: Map Str CtorSpec, tag-ref: Ref Int) -> Map
 let collect-ctors-forms(forms: List Ast, acc: Map Str CtorSpec, tag-ref: Ref Int) -> Map Str CtorSpec =
   match (forms)
     | [] -> acc
-    | Cons(f, rest) -> collect-ctors-forms(rest, collect-ctors-form(f, acc, tag-ref), tag-ref)
+    | f :: rest -> collect-ctors-forms(rest, collect-ctors-form(f, acc, tag-ref), tag-ref)
 
 let collect-user-ctors(forms: List Ast) -> Map Str CtorSpec {
   let tag-ref = ref(user-ctor-tag-base)
@@ -1743,28 +1753,29 @@ let is-ctor-name(hn: Str, pool: StrPool) -> Bool =
 
     ; IoError ctors — constructed by the runtime, matched in user code.
 let builtin-ctor-tag-of(hn: Str) -> Maybe Int =
-  if hn == "Nil" -> Some(tag-nil)
-   | hn == "Cons" -> Some(tag-cons)
-   | hn == "None" -> Some(tag-none)
-   | hn == "Some" -> Some(tag-some)
-   | hn == "Ok" -> Some(tag-ok)
-   | hn == "Err" -> Some(tag-err)
-   | hn == "NotFound" -> Some(20)
-   | hn == "Permission" -> Some(21)
-   | hn == "Exists" -> Some(22)
-   | hn == "IsADirectory" -> Some(23)
-   | hn == "NotADirectory" -> Some(24)
-   | hn == "InvalidPath" -> Some(25)
-   | hn == "TooLarge" -> Some(26)
-   | hn == "Other" -> Some(27)
-   | hn == "Exited" -> Some(30)
-   | hn == "Signalled" -> Some(31)
-   | hn == "SpawnOutput" -> Some(32)
-   | hn == "NotExecutable" -> Some(33)
-   | hn == "InvalidArgument" -> Some(34)
-   | hn == "TooManyArguments" -> Some(35)
-   | hn == "Unsupported" -> Some(36)
-   | else -> None()
+  cond
+    | hn == "Nil" -> Some(tag-nil)
+    | hn == "Cons" -> Some(tag-cons)
+    | hn == "None" -> Some(tag-none)
+    | hn == "Some" -> Some(tag-some)
+    | hn == "Ok" -> Some(tag-ok)
+    | hn == "Err" -> Some(tag-err)
+    | hn == "NotFound" -> Some(20)
+    | hn == "Permission" -> Some(21)
+    | hn == "Exists" -> Some(22)
+    | hn == "IsADirectory" -> Some(23)
+    | hn == "NotADirectory" -> Some(24)
+    | hn == "InvalidPath" -> Some(25)
+    | hn == "TooLarge" -> Some(26)
+    | hn == "Other" -> Some(27)
+    | hn == "Exited" -> Some(30)
+    | hn == "Signalled" -> Some(31)
+    | hn == "SpawnOutput" -> Some(32)
+    | hn == "NotExecutable" -> Some(33)
+    | hn == "InvalidArgument" -> Some(34)
+    | hn == "TooManyArguments" -> Some(35)
+    | hn == "Unsupported" -> Some(36)
+    | else -> None()
 
 let ctor-tag-of(hn: Str, pool: StrPool) -> Maybe Int =
   match (builtin-ctor-tag-of(hn))
@@ -1775,35 +1786,38 @@ let ctor-tag-of(hn: Str, pool: StrPool) -> Maybe Int =
         | None -> None()
 
 let seam-fixed-arity(hn: Str) -> Maybe Int =
-  if hn == "SpawnOutput" -> Some(3)
-   | hn == "Other" || hn == "Exited" || hn == "Signalled" -> Some(1)
-   | hn == "NotFound" || hn == "Permission" || hn == "Exists" || hn == "IsADirectory" || hn == "NotADirectory" || hn == "InvalidPath" || hn == "TooLarge" || hn == "NotExecutable" || hn == "InvalidArgument" || hn == "TooManyArguments" || hn == "Unsupported" -> Some(0)
-   | else -> None()
+  cond
+    | hn == "SpawnOutput" -> Some(3)
+    | hn == "Other" || hn == "Exited" || hn == "Signalled" -> Some(1)
+    | hn == "NotFound" || hn == "Permission" || hn == "Exists" || hn == "IsADirectory" || hn == "NotADirectory" || hn == "InvalidPath" || hn == "TooLarge" || hn == "NotExecutable" || hn == "InvalidArgument" || hn == "TooManyArguments" || hn == "Unsupported" -> Some(0)
+    | else -> None()
 
 let ctor-arity-of(hn: Str, pool: StrPool) -> Int =
   match (seam-fixed-arity(hn))
     | Some(n) -> n
     | None ->
-      if hn == "Nil" || hn == "None" -> 0
-       | hn == "Cons" -> 2
-       | hn == "Some" || hn == "Ok" || hn == "Err" -> 1
-       | else ->
-        match (map-get(str-pool-ctors(pool), hn))
-          | Some(spec) -> ctor-spec-arity(spec)
-          | None -> -1
+      cond
+        | hn == "Nil" || hn == "None" -> 0
+        | hn == "Cons" -> 2
+        | hn == "Some" || hn == "Ok" || hn == "Err" -> 1
+        | else ->
+          match (map-get(str-pool-ctors(pool), hn))
+            | Some(spec) -> ctor-spec-arity(spec)
+            | None -> -1
 
 let ctor-extern-abs(hn: Str, ns: Int) -> Int =
-  if hn == "Nil" -> extern-nil-abs(ns)
-   | hn == "Cons" -> extern-cons-abs(ns)
-   | hn == "None" -> extern-none-abs(ns)
-   | hn == "Some" -> extern-some-abs(ns)
-   | hn == "Ok" -> extern-ok-abs(ns)
-   | else -> extern-err-abs(ns)
+  cond
+    | hn == "Nil" -> extern-nil-abs(ns)
+    | hn == "Cons" -> extern-cons-abs(ns)
+    | hn == "None" -> extern-none-abs(ns)
+    | hn == "Some" -> extern-some-abs(ns)
+    | hn == "Ok" -> extern-ok-abs(ns)
+    | else -> extern-err-abs(ns)
 
 let lower-user-ctor-fill(obj: Int, avs: List Int, i: Int, b: Builder, pool: StrPool) -> Int =
   match (avs)
     | [] -> obj
-    | Cons(v, rest) ->
+    | v :: rest ->
       {
         let idx = const-i64!(b, i)
         let obj2 = emit-call!(b, extern-set-slot-abs(str-pool-count(pool)), [obj, idx, get!(b, v)])
@@ -1814,7 +1828,7 @@ let lower-user-ctor(hn: Str, args: List Ast, env: Map Str Int, b: Builder, funcs
   match (map-get(str-pool-ctors(pool), hn))
     | None -> Err(str-concat("unknown constructor ", hn))
     | Some(spec) ->
-      if length(args) == ctor-spec-arity(spec) ->
+      if (length(args) == ctor-spec-arity(spec)) ->
         result-bind(
           lower-args(args, env, b, funcs, noop, pool),
           fn (avs) {
@@ -1823,14 +1837,13 @@ let lower-user-ctor(hn: Str, args: List Ast, env: Map Str Int, b: Builder, funcs
             let obj = emit-call!(b, extern-new-abs(str-pool-count(pool)), [tag-c, nslots])
             Ok(lower-user-ctor-fill(obj, avs, 0, b, pool))
           }
-        )
-       | else -> Err(str-concat("arity mismatch constructing ", hn))
+        ) | Err(str-concat("arity mismatch constructing ", hn))
 
 let lower-fixed-tag-ctor(hn: Str, args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (builtin-ctor-tag-of(hn))
     | None -> Err(str-concat("unknown constructor ", hn))
     | Some(tag) ->
-      if length(args) == ctor-arity-of(hn, pool) ->
+      if (length(args) == ctor-arity-of(hn, pool)) ->
         result-bind(
           lower-args(args, env, b, funcs, noop, pool),
           fn (avs) {
@@ -1839,128 +1852,135 @@ let lower-fixed-tag-ctor(hn: Str, args: List Ast, env: Map Str Int, b: Builder, 
             let obj = emit-call!(b, extern-new-abs(str-pool-count(pool)), [tag-c, nslots])
             Ok(lower-user-ctor-fill(obj, avs, 0, b, pool))
           }
-        )
-       | else -> Err(str-concat("arity mismatch constructing ", hn))
+        ) | Err(str-concat("arity mismatch constructing ", hn))
 
 let lower-ctor(hn: Str, args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  if is-builtin-ctor(hn) ->
-    if length(args) == ctor-arity-of(hn, pool) -> result-bind(lower-args(args, env, b, funcs, noop, pool), fn (avs) = Ok(emit-call-words!(b, ctor-extern-abs(hn, str-pool-count(pool)), avs)))
-     | else -> Err(str-concat("arity mismatch constructing ", hn))
-   | has-builtin-tag(hn) -> lower-fixed-tag-ctor(hn, args, env, b, funcs, noop, pool)
-   | else -> lower-user-ctor(hn, args, env, b, funcs, noop, pool)
+  cond
+    | is-builtin-ctor(hn) ->
+      if (length(args) == ctor-arity-of(hn, pool)) -> result-bind(lower-args(args, env, b, funcs, noop, pool), fn (avs) = Ok(emit-call-words!(b, ctor-extern-abs(hn, str-pool-count(pool)), avs))) | Err(str-concat("arity mismatch constructing ", hn))
+    | has-builtin-tag(hn) -> lower-fixed-tag-ctor(hn, args, env, b, funcs, noop, pool)
+    | else -> lower-user-ctor(hn, args, env, b, funcs, noop, pool)
 
 let is-runtime-op(hn: Str) -> Bool =
   str-in-list(hn, runtime-op-names())
 
 let runtime-op-names() -> List Str =
-  ["str-concat", "str-byte-length", "str-byte", "str-slice", "ref", "deref", "set!", "sb-new", "sb-append!", "sb-append-byte!", "sb-take-str!", "map-new", "map-set", "map-get", "map-has", "map-size", "mn-env-0", "mn-env-1", "mn-env-get", "mn-closure-new", "mn-apply-0", "mn-apply-1", "mn-apply-2", "arg-count", "arg", "read-file", "write-file", "show", "mn-env-new", "mn-env-set", "compare", "sb-length", "sb-to-str", "dump", "spawn", "spawn-capture", "getenv", "exists", "rename", "isatty", "mtime", "cwd", "ensure-dir", "list-dir", "realpath", "now-ms", "remove", "is-dir", "mn_isatty", "mn_mtime", "mn_cwd", "mn_ensure_dir", "mn_list_dir", "mn_realpath", "mn_now_ms", "mn_remove", "mn_is_dir", "mn_arg_count", "mn_arg", "mn_read_file", "mn_write_file", "mn_spawn", "mn_spawn_capture", "mn_getenv", "mn_exists", "mn_rename", "f+", "f-", "f*", "f/"]
+  ["str-concat", "str-byte-length", "str-byte", "str-slice", "ref", "deref", "set!", "sb-new", "sb-append!", "sb-append-byte!", "sb-take-str!", "map-new", "map-set", "map-get", "map-has", "map-size", "map-keys", "mn-env-0", "mn-env-1", "mn-env-get", "mn-closure-new", "mn-apply-0", "mn-apply-1", "mn-apply-2", "arg-count", "arg", "read-file", "write-file", "show", "mn-env-new", "mn-env-set", "compare", "sb-length", "sb-to-str", "dump", "spawn", "spawn-capture", "getenv", "exists", "rename", "isatty", "mtime", "cwd", "ensure-dir", "list-dir", "realpath", "now-ms", "remove", "is-dir", "mn_isatty", "mn_mtime", "mn_cwd", "mn_ensure_dir", "mn_list_dir", "mn_realpath", "mn_now_ms", "mn_remove", "mn_is_dir", "mn_arg_count", "mn_arg", "mn_read_file", "mn_write_file", "mn_spawn", "mn_spawn_capture", "mn_getenv", "mn_exists", "mn_rename", "f+", "f-", "f*", "f/"]
 
 ; `extern` declares the C symbol (`mn_exists`). Ambient compiler calls
 ; still use the Menard name (`exists`). Both lower to the same abs id.
 let seam-menard-name(hn: Str) -> Str =
-  if hn == "mn_arg_count" -> "arg-count"
-   | hn == "mn_arg" -> "arg"
-   | hn == "mn_read_file" -> "read-file"
-   | hn == "mn_write_file" -> "write-file"
-   | hn == "mn_spawn" -> "spawn"
-   | hn == "mn_spawn_capture" -> "spawn-capture"
-   | hn == "mn_getenv" -> "getenv"
-   | hn == "mn_exists" -> "exists"
-   | hn == "mn_rename" -> "rename"
-   | else -> os-menard-name(hn)
+  cond
+    | hn == "mn_arg_count" -> "arg-count"
+    | hn == "mn_arg" -> "arg"
+    | hn == "mn_read_file" -> "read-file"
+    | hn == "mn_write_file" -> "write-file"
+    | hn == "mn_spawn" -> "spawn"
+    | hn == "mn_spawn_capture" -> "spawn-capture"
+    | hn == "mn_getenv" -> "getenv"
+    | hn == "mn_exists" -> "exists"
+    | hn == "mn_rename" -> "rename"
+    | else -> os-menard-name(hn)
 
 let os-menard-name(hn: Str) -> Str =
-  if hn == "mn_isatty" -> "isatty"
-   | hn == "mn_mtime" -> "mtime"
-   | hn == "mn_cwd" -> "cwd"
-   | hn == "mn_ensure_dir" -> "ensure-dir"
-   | hn == "mn_list_dir" -> "list-dir"
-   | hn == "mn_realpath" -> "realpath"
-   | hn == "mn_now_ms" -> "now-ms"
-   | hn == "mn_remove" -> "remove"
-   | hn == "mn_is_dir" -> "is-dir"
-   | else -> hn
+  cond
+    | hn == "mn_isatty" -> "isatty"
+    | hn == "mn_mtime" -> "mtime"
+    | hn == "mn_cwd" -> "cwd"
+    | hn == "mn_ensure_dir" -> "ensure-dir"
+    | hn == "mn_list_dir" -> "list-dir"
+    | hn == "mn_realpath" -> "realpath"
+    | hn == "mn_now_ms" -> "now-ms"
+    | hn == "mn_remove" -> "remove"
+    | hn == "mn_is_dir" -> "is-dir"
+    | else -> hn
 
 let effect-alias(hn: Str) -> Str =
-  if hn == "mn_write" -> "write"
-   | hn == "mn_exit" -> "exit"
-   | else -> hn
+  cond
+    | hn == "mn_write" -> "write"
+    | hn == "mn_exit" -> "exit"
+    | else -> hn
 
 let runtime-op-abs(hn: Str, ns: Int) -> Int =
   runtime-op-abs-named(seam-menard-name(hn), ns)
 
 let os-op-abs(hn: Str, ns: Int) -> Int =
-  if hn == "isatty" -> extern-isatty-abs(ns)
-   | hn == "mtime" -> extern-mtime-abs(ns)
-   | hn == "cwd" -> extern-cwd-abs(ns)
-   | hn == "ensure-dir" -> extern-ensure-dir-abs(ns)
-   | hn == "list-dir" -> extern-list-dir-abs(ns)
-   | hn == "realpath" -> extern-realpath-abs(ns)
-   | hn == "now-ms" -> extern-now-ms-abs(ns)
-   | hn == "remove" -> extern-remove-abs(ns)
-   | else -> extern-is-dir-abs(ns)
+  cond
+    | hn == "isatty" -> extern-isatty-abs(ns)
+    | hn == "mtime" -> extern-mtime-abs(ns)
+    | hn == "cwd" -> extern-cwd-abs(ns)
+    | hn == "ensure-dir" -> extern-ensure-dir-abs(ns)
+    | hn == "list-dir" -> extern-list-dir-abs(ns)
+    | hn == "realpath" -> extern-realpath-abs(ns)
+    | hn == "now-ms" -> extern-now-ms-abs(ns)
+    | hn == "remove" -> extern-remove-abs(ns)
+    | else -> extern-is-dir-abs(ns)
 
 let runtime-op-abs-named(hn: Str, ns: Int) -> Int =
-  if str-in-list(hn, ["isatty", "mtime", "cwd", "ensure-dir", "list-dir", "realpath", "now-ms", "remove", "is-dir"]) -> os-op-abs(hn, ns)
-   | hn == "f+" -> extern-fadd-abs(ns)
-   | hn == "f-" -> extern-fsub-abs(ns)
-   | hn == "f*" -> extern-fmul-abs(ns)
-   | hn == "f/" -> extern-fdiv-abs(ns)
-   | hn == "str-concat" -> extern-str-concat-abs(ns)
-   | hn == "str-byte-length" -> extern-str-byte-length-abs(ns)
-   | hn == "str-byte" -> extern-str-byte-abs(ns)
-   | hn == "str-slice" -> extern-str-slice-abs(ns)
-   | hn == "ref" -> extern-ref-new-abs(ns)
-   | hn == "deref" -> extern-ref-deref-abs(ns)
-   | hn == "set!" -> extern-ref-set-abs(ns)
-   | hn == "sb-new" -> extern-sb-new-abs(ns)
-   | hn == "sb-append!" -> extern-sb-append-abs(ns)
-   | hn == "sb-append-byte!" -> extern-sb-append-byte-abs(ns)
-   | hn == "sb-take-str!" -> extern-sb-take-str-abs(ns)
-   | hn == "map-new" -> extern-map-new-abs(ns)
-   | hn == "map-set" -> extern-map-set-abs(ns)
-   | hn == "map-get" -> extern-map-get-abs(ns)
-   | hn == "map-has" -> extern-map-has-abs(ns)
-   | hn == "map-size" -> extern-map-size-abs(ns)
-   | hn == "mn-env-0" -> extern-env-0-abs(ns)
-   | hn == "mn-env-1" -> extern-env-1-abs(ns)
-   | hn == "mn-env-get" -> extern-env-get-abs(ns)
-   | hn == "mn-closure-new" -> extern-closure-new-abs(ns)
-   | hn == "mn-apply-0" -> extern-apply-0-abs(ns)
-   | hn == "mn-apply-1" -> extern-apply-1-abs(ns)
-   | hn == "mn-apply-2" -> extern-apply-2-abs(ns)
-   | hn == "arg-count" -> extern-arg-count-abs(ns)
-   | hn == "arg" -> extern-arg-abs(ns)
-   | hn == "read-file" -> extern-read-file-abs(ns)
-   | hn == "write-file" -> extern-write-file-abs(ns)
-   | hn == "show" -> extern-show-abs(ns)
-   | hn == "mn-env-new" -> extern-env-new-abs(ns)
-   | hn == "mn-env-set" -> extern-env-set-abs(ns)
-   | hn == "compare" -> extern-compare-abs(ns)
-   | hn == "sb-length" -> extern-sb-length-abs(ns)
-   | hn == "sb-to-str" -> extern-sb-to-str-abs(ns)
-   | hn == "dump" -> extern-dump-abs(ns)
-   | hn == "spawn" -> extern-spawn-abs(ns)
-   | hn == "spawn-capture" -> extern-spawn-capture-abs(ns)
-   | hn == "getenv" -> extern-getenv-abs(ns)
-   | hn == "exists" -> extern-exists-abs(ns)
-   | else -> extern-rename-abs(ns)
+  cond
+    | str-in-list(hn, ["isatty", "mtime", "cwd", "ensure-dir", "list-dir", "realpath", "now-ms", "remove", "is-dir"]) -> os-op-abs(hn, ns)
+    | hn == "f+" -> extern-fadd-abs(ns)
+    | hn == "f-" -> extern-fsub-abs(ns)
+    | hn == "f*" -> extern-fmul-abs(ns)
+    | hn == "f/" -> extern-fdiv-abs(ns)
+    | hn == "str-concat" -> extern-str-concat-abs(ns)
+    | hn == "str-byte-length" -> extern-str-byte-length-abs(ns)
+    | hn == "str-byte" -> extern-str-byte-abs(ns)
+    | hn == "str-slice" -> extern-str-slice-abs(ns)
+    | hn == "ref" -> extern-ref-new-abs(ns)
+    | hn == "deref" -> extern-ref-deref-abs(ns)
+    | hn == "set!" -> extern-ref-set-abs(ns)
+    | hn == "sb-new" -> extern-sb-new-abs(ns)
+    | hn == "sb-append!" -> extern-sb-append-abs(ns)
+    | hn == "sb-append-byte!" -> extern-sb-append-byte-abs(ns)
+    | hn == "sb-take-str!" -> extern-sb-take-str-abs(ns)
+    | hn == "map-new" -> extern-map-new-abs(ns)
+    | hn == "map-set" -> extern-map-set-abs(ns)
+    | hn == "map-get" -> extern-map-get-abs(ns)
+    | hn == "map-has" -> extern-map-has-abs(ns)
+    | hn == "map-size" -> extern-map-size-abs(ns)
+    | hn == "map-keys" -> extern-map-keys-abs(ns)
+    | hn == "mn-env-0" -> extern-env-0-abs(ns)
+    | hn == "mn-env-1" -> extern-env-1-abs(ns)
+    | hn == "mn-env-get" -> extern-env-get-abs(ns)
+    | hn == "mn-closure-new" -> extern-closure-new-abs(ns)
+    | hn == "mn-apply-0" -> extern-apply-0-abs(ns)
+    | hn == "mn-apply-1" -> extern-apply-1-abs(ns)
+    | hn == "mn-apply-2" -> extern-apply-2-abs(ns)
+    | hn == "arg-count" -> extern-arg-count-abs(ns)
+    | hn == "arg" -> extern-arg-abs(ns)
+    | hn == "read-file" -> extern-read-file-abs(ns)
+    | hn == "write-file" -> extern-write-file-abs(ns)
+    | hn == "show" -> extern-show-abs(ns)
+    | hn == "mn-env-new" -> extern-env-new-abs(ns)
+    | hn == "mn-env-set" -> extern-env-set-abs(ns)
+    | hn == "compare" -> extern-compare-abs(ns)
+    | hn == "sb-length" -> extern-sb-length-abs(ns)
+    | hn == "sb-to-str" -> extern-sb-to-str-abs(ns)
+    | hn == "dump" -> extern-dump-abs(ns)
+    | hn == "spawn" -> extern-spawn-abs(ns)
+    | hn == "spawn-capture" -> extern-spawn-capture-abs(ns)
+    | hn == "getenv" -> extern-getenv-abs(ns)
+    | hn == "exists" -> extern-exists-abs(ns)
+    | else -> extern-rename-abs(ns)
 
 let runtime-op-arity(hn: Str) -> Int =
   runtime-op-arity-named(seam-menard-name(hn))
 
 let runtime-op-arity-named(hn: Str) -> Int =
-  if hn == "cwd" || hn == "now-ms" -> 0
-   | str-in-list(hn, ["isatty", "mtime", "ensure-dir", "list-dir", "realpath", "remove", "is-dir"]) -> 1
-   | hn == "sb-new" || hn == "map-new" || hn == "mn-env-0" || hn == "arg-count" -> 0
-   | str-in-list(hn, ["str-byte-length", "ref", "deref", "sb-take-str!", "map-size", "mn-env-1", "mn-env-new", "arg", "read-file", "mn-apply-0", "show", "sb-length", "sb-to-str", "dump", "spawn", "getenv", "exists"]) -> 1
-   | hn == "str-slice" || hn == "map-set" || hn == "mn-apply-2" || hn == "mn-env-set" -> 3
-   | else -> 2
+  cond
+    | hn == "cwd" || hn == "now-ms" -> 0
+    | str-in-list(hn, ["isatty", "mtime", "ensure-dir", "list-dir", "realpath", "remove", "is-dir"]) -> 1
+    | hn == "sb-new" || hn == "map-new" || hn == "mn-env-0" || hn == "arg-count" -> 0
+    | str-in-list(hn, ["str-byte-length", "ref", "deref", "sb-take-str!", "map-size", "map-keys", "mn-env-1", "mn-env-new", "arg", "read-file", "mn-apply-0", "show", "sb-length", "sb-to-str", "dump", "spawn", "getenv", "exists"]) -> 1
+    | hn == "str-slice" || hn == "map-set" || hn == "mn-apply-2" || hn == "mn-env-set" -> 3
+    | else -> 2
 
 let lower-runtime-op(hn: Str, args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  if hn == "mn-closure-new" -> lower-closure-new(args, env, b, funcs, noop, pool)
-   | length(args) == runtime-op-arity(hn) -> result-bind(lower-args(args, env, b, funcs, noop, pool), fn (avs) = Ok(emit-call-words!(b, runtime-op-abs(hn, str-pool-count(pool)), avs)))
-   | else -> Err(str-concat("arity mismatch calling ", hn))
+  cond
+    | hn == "mn-closure-new" -> lower-closure-new(args, env, b, funcs, noop, pool)
+    | length(args) == runtime-op-arity(hn) -> result-bind(lower-args(args, env, b, funcs, noop, pool), fn (avs) = Ok(emit-call-words!(b, runtime-op-abs(hn, str-pool-count(pool)), avs)))
+    | else -> Err(str-concat("arity mismatch calling ", hn))
 
 ; `(mn-closure-new __lamN env)` — first arg is a FuncRef symbol; emit
 ; ptrtoint of that function's module-scope abs id, then call mn_closure_new.
@@ -1986,13 +2006,13 @@ let is-wildcard-pat(pat: Ast) -> Bool =
 
 let pat-ctor-name(pat: Ast) -> Maybe Str =
   match (pat)
-    | ParenNode(Cons(head, _), _) -> sym-str(head)
+    | ParenNode(head :: _, _) -> sym-str(head)
     | SymNode(n, _) -> Some(n)
     | _ -> None()
 
 let pat-payload-asts(pat: Ast) -> List Ast =
   match (pat)
-    | ParenNode(Cons(_, rest), _) -> rest
+    | ParenNode(_ :: rest, _) -> rest
     | _ -> []
 
 let is-upper-name(s: Str) -> Bool {
@@ -2012,10 +2032,11 @@ let bind-name!(name: Str, val: Int, env: Map Str Int, b: Builder) -> Map Str Int
 let bind-pat!(pat: Ast, val: Int, else-bb: BB, env: Map Str Int, b: Builder, pool: StrPool) -> Result (Map Str Int) Str =
   match (pat)
     | SymNode(n, _) ->
-      if n == "_" -> Ok(env)
-       | is-upper-name(n) -> bind-nullary-pat!(n, val, else-bb, env, b, pool)
-       | else -> Ok(bind-name!(n, val, env, b))
-    | ParenNode(Cons(head, args), _) ->
+      cond
+        | n == "_" -> Ok(env)
+        | is-upper-name(n) -> bind-nullary-pat!(n, val, else-bb, env, b, pool)
+        | else -> Ok(bind-name!(n, val, env, b))
+    | ParenNode(head :: args, _) ->
       match (sym-str(head))
         | Some(cname) -> bind-ctor-pat!(cname, args, val, else-bb, env, b, pool)
         | None -> Err("unsupported match pattern")
@@ -2034,9 +2055,9 @@ let bind-ctor-pat!(cname: Str, payloads: List Ast, val: Int, else-bb: BB, env: M
       {
         let tag-abs = emit-call!(b, extern-tag-abs(str-pool-count(pool)), [val])
         let want = const-i64!(b, want-tag)
-        let cond = emit-cmp2!(b, icmp-eq, tag-abs, want)
+        let pred = emit-cmp2!(b, icmp-eq, tag-abs, want)
         let ok-bb = fresh-bb!(b)
-        emit-condbr!(b, ok-bb, else-bb, cond)
+        emit-condbr!(b, ok-bb, else-bb, pred)
         switch-to!(b, ok-bb)
         bind-payloads!(payloads, val, 0, else-bb, env, b, pool)
       }
@@ -2044,7 +2065,7 @@ let bind-ctor-pat!(cname: Str, payloads: List Ast, val: Int, else-bb: BB, env: M
 let bind-payloads!(payloads: List Ast, val: Int, i: Int, else-bb: BB, env: Map Str Int, b: Builder, pool: StrPool) -> Result (Map Str Int) Str =
   match (payloads)
     | [] -> Ok(env)
-    | Cons(p, rest) ->
+    | p :: rest ->
       {
         let idx = const-i64!(b, i)
         let slotv = emit-call!(b, extern-slot-abs(str-pool-count(pool)), [val, idx])
@@ -2053,8 +2074,7 @@ let bind-payloads!(payloads: List Ast, val: Int, i: Int, else-bb: BB, env: Map S
 
 let bind-bool-pat!(flag: Bool, val: Int, else-bb: BB, env: Map Str Int, b: Builder) -> Result (Map Str Int) Str =
   bind-int-pat!(
-    if flag -> 1
-     | else -> 0,
+    if (flag) -> 1 | 0,
     val,
     else-bb,
     env,
@@ -2063,9 +2083,9 @@ let bind-bool-pat!(flag: Bool, val: Int, else-bb: BB, env: Map Str Int, b: Build
 
 let bind-int-pat!(n: Int, val: Int, else-bb: BB, env: Map Str Int, b: Builder) -> Result (Map Str Int) Str {
   let lit = const-tagged!(b, n)
-  let cond = emit-cmp2!(b, icmp-eq, val, lit)
+  let pred = emit-cmp2!(b, icmp-eq, val, lit)
   let ok-bb = fresh-bb!(b)
-  emit-condbr!(b, ok-bb, else-bb, cond)
+  emit-condbr!(b, ok-bb, else-bb, pred)
   switch-to!(b, ok-bb)
   Ok(env)
 }
@@ -2077,16 +2097,16 @@ let bind-str-pat!(s: Str, val: Int, else-bb: BB, env: Map Str Int, b: Builder, p
   let lit = keep!(b, emit-str-lit!(b, pool, s))
   let eqw = emit-call!(b, extern-equal-abs(str-pool-count(pool)), [get!(b, rooted), get!(b, lit)])
   let f = const-false!(b)
-  let cond = emit-cmp2!(b, icmp-ne, eqw, f)
+  let pred = emit-cmp2!(b, icmp-ne, eqw, f)
   let ok-bb = fresh-bb!(b)
-  emit-condbr!(b, ok-bb, else-bb, cond)
+  emit-condbr!(b, ok-bb, else-bb, pred)
   switch-to!(b, ok-bb)
   Ok(env)
 }
 
 let lower-match(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (rest)
-    | Cons(scrut, clauses) -> result-bind(lower-expr(scrut, env, b, funcs, noop, pool), fn (sv) = lower-match-with-scrut(sv, clauses, env, b, funcs, noop, pool))
+    | scrut :: clauses -> result-bind(lower-expr(scrut, env, b, funcs, noop, pool), fn (sv) = lower-match-with-scrut(sv, clauses, env, b, funcs, noop, pool))
     | [] -> Err("match requires a scrutinee")
 
 let lower-match-with-scrut(sv: Int, clauses: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str {
@@ -2104,9 +2124,8 @@ let lower-match-clauses(sv: Int, clauses: List Ast, result-slot: Int, join-bb: B
         switch-to!(b, join-bb)
         Ok(get!(b, emit-load!(b, result-slot)))
       }
-    | Cons(pat, Cons(body, rest-clauses)) ->
-      if is-wildcard-pat(pat) -> lower-match-wildcard-body(body, result-slot, join-bb, env, b, funcs, noop, pool)
-       | else -> lower-match-pat-clause(sv, pat, body, rest-clauses, result-slot, join-bb, env, b, funcs, noop, pool)
+    | pat :: body :: rest-clauses ->
+      if (is-wildcard-pat(pat)) -> lower-match-wildcard-body(body, result-slot, join-bb, env, b, funcs, noop, pool) | lower-match-pat-clause(sv, pat, body, rest-clauses, result-slot, join-bb, env, b, funcs, noop, pool)
     | [_] -> Err("match clause missing a body")
 
 let lower-match-wildcard-body(body: Ast, result-slot: Int, join-bb: BB, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
@@ -2146,8 +2165,7 @@ let lower-cond(ast: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, n
 let lower-cond-maybe-cmp(head: Ast, a-ast: Ast, c-ast: Ast, whole: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (sym-str(head))
     | Some(hn) ->
-      if is-cmp-op(hn) -> lower-cond-op(hn, a-ast, c-ast, env, b, funcs, noop, pool)
-       | else -> lower-cond-bool-value(whole, env, b, funcs, noop, pool)
+      if (is-cmp-op(hn)) -> lower-cond-op(hn, a-ast, c-ast, env, b, funcs, noop, pool) | lower-cond-bool-value(whole, env, b, funcs, noop, pool)
     | None -> lower-cond-bool-value(whole, env, b, funcs, noop, pool)
 
 let lower-cond-op(hn: Str, a-ast: Ast, c-ast: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
@@ -2155,13 +2173,14 @@ let lower-cond-op(hn: Str, a-ast: Ast, c-ast: Ast, env: Map Str Int, b: Builder,
 
 ; `=` is value-directed (`mn_equal`). Ordering ops stay immediate icmp.
 let lower-cond-cmp!(hn: Str, av: Int, cv: Int, b: Builder, pool: StrPool) -> Int =
-  if hn == "=" ->
-    {
-      let eqw = emit-call!(b, extern-equal-abs(str-pool-count(pool)), [get!(b, av), get!(b, cv)])
-      let f = const-false!(b)
-      emit-cmp2!(b, icmp-ne, eqw, f)
-    }
-   | else -> emit-cmp2!(b, cmp-pred-for(hn), get!(b, av), get!(b, cv))
+  cond
+    | hn == "=" ->
+      {
+        let eqw = emit-call!(b, extern-equal-abs(str-pool-count(pool)), [get!(b, av), get!(b, cv)])
+        let f = const-false!(b)
+        emit-cmp2!(b, icmp-ne, eqw, f)
+      }
+    | else -> emit-cmp2!(b, cmp-pred-for(hn), get!(b, av), get!(b, cv))
 
 let lower-cond-bool-value(ast: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   result-bind(
@@ -2179,15 +2198,15 @@ let lower-cmp-value(args: List Ast, op: Str, env: Map Str Int, b: Builder, funcs
     | _ -> Err(str-concat("comparison `", op, "` expects exactly 2 arguments"))
 
 let lower-cmp-word!(op: Str, av: Int, cv: Int, b: Builder, pool: StrPool) -> Int =
-  if op == "=" -> emit-call!(b, extern-equal-abs(str-pool-count(pool)), [get!(b, av), get!(b, cv)])
-   | else -> bool-from-i1!(b, emit-cmp2!(b, cmp-pred-for(op), get!(b, av), get!(b, cv)))
+  if (op == "=") -> emit-call!(b, extern-equal-abs(str-pool-count(pool)), [get!(b, av), get!(b, cv)]) | bool-from-i1!(b, emit-cmp2!(b, cmp-pred-for(op), get!(b, av), get!(b, cv)))
 
 let cmp-pred-for(op: Str) -> Int =
-  if op == "<" -> icmp-slt
-   | op == ">" -> icmp-sgt
-   | op == "<=" -> icmp-sle
-   | op == ">=" -> icmp-sge
-   | else -> icmp-eq
+  cond
+    | op == "<" -> icmp-slt
+    | op == ">" -> icmp-sgt
+    | op == "<=" -> icmp-sle
+    | op == ">=" -> icmp-sge
+    | else -> icmp-eq
 
 ; -- arithmetic --
 
@@ -2203,11 +2222,12 @@ let apply-arith!(b: Builder, pool: StrPool, sp: Span, op: Str, av: Int, cv: Int)
   let file-gid = file-gid-of(pool, span-origin(sp))
   let line = span-line-clamped(sp)
   let msg-gid = str-pool-get(pool, div-zero-msg())
-  if op == "+" -> arith-add!(b, aw, cw)
-   | op == "-" -> arith-sub!(b, aw, cw)
-   | op == "*" -> arith-mul!(b, aw, cw)
-   | op == "/" -> arith-div!(b, panic-at, file-gid, line, msg-gid, aw, cw)
-   | else -> arith-rem!(b, panic-at, file-gid, line, msg-gid, aw, cw)
+  cond
+    | op == "+" -> arith-add!(b, aw, cw)
+    | op == "-" -> arith-sub!(b, aw, cw)
+    | op == "*" -> arith-mul!(b, aw, cw)
+    | op == "/" -> arith-div!(b, panic-at, file-gid, line, msg-gid, aw, cw)
+    | else -> arith-rem!(b, panic-at, file-gid, line, msg-gid, aw, cw)
 }
 
 ; -- let (both the inline-body form `(let n e body…)` and the bare,
@@ -2216,7 +2236,7 @@ let apply-arith!(b: Builder, pool: StrPool, sp: Span, op: Str, av: Int, cv: Int)
 
 let lower-let-inline(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (rest)
-    | Cons(name-ast, Cons(expr-ast, body)) -> lower-let-inline-named(name-ast, expr-ast, body, env, b, funcs, noop, pool)
+    | name-ast :: expr-ast :: body -> lower-let-inline-named(name-ast, expr-ast, body, env, b, funcs, noop, pool)
     | _ -> Err("let requires a name and an expression")
 
 let lower-let-inline-named(name-ast: Ast, expr-ast: Ast, body: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
@@ -2252,11 +2272,12 @@ let as-simple-let(f: Ast) -> Maybe SimpleLet =
     | _ -> None()
 
 let as-simple-let-named(head: Ast, name-ast: Ast, expr-ast: Ast) -> Maybe SimpleLet =
-  if is-sym(head, "let") ->
-    match (sym-str(name-ast))
-      | Some(n) -> Some(SimpleLet(n, expr-ast))
-      | None -> None()
-   | else -> None()
+  cond
+    | is-sym(head, "let") ->
+      match (sym-str(name-ast))
+        | Some(n) -> Some(SimpleLet(n, expr-ast))
+        | None -> None()
+    | else -> None()
 
 let is-unit-noop-call(f: Ast, noop: Map Str Bool) -> Bool =
   match (f)
@@ -2281,7 +2302,7 @@ let is-effect-head(s: Str) -> Bool =
 
 let is-effect-call(f: Ast) -> Bool =
   match (f)
-    | ParenNode(Cons(head, _), _) -> is-effect-call-named(head)
+    | ParenNode(head :: _, _) -> is-effect-call-named(head)
     | _ -> false
 
 let is-effect-call-named(head: Ast) -> Bool =
@@ -2311,7 +2332,7 @@ let div-zero-msg() -> Str {
 
 let lower-effect(f: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
   match (f)
-    | ParenNode(Cons(head, rest), _) -> lower-effect-named(head, rest, env, b, funcs, noop, pool)
+    | ParenNode(head :: rest, _) -> lower-effect-named(head, rest, env, b, funcs, noop, pool)
     | _ -> Err("not an effect call")
 
 let lower-effect-named(head: Ast, rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
@@ -2323,10 +2344,11 @@ let lower-effect-op(hn: Str, rest: List Ast, env: Map Str Int, b: Builder, funcs
   lower-effect-known(effect-alias(hn), rest, env, b, funcs, noop, pool)
 
 let lower-effect-known(hn: Str, rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
-  if hn == "println" -> lower-println(rest, env, b, funcs, noop, pool)
-   | hn == "print" -> lower-print(rest, env, b, funcs, noop, pool)
-   | hn == "exit" -> lower-exit(rest, env, b, funcs, noop, pool)
-   | else -> lower-write(rest, env, b, funcs, noop, pool)
+  cond
+    | hn == "println" -> lower-println(rest, env, b, funcs, noop, pool)
+    | hn == "print" -> lower-print(rest, env, b, funcs, noop, pool)
+    | hn == "exit" -> lower-exit(rest, env, b, funcs, noop, pool)
+    | else -> lower-write(rest, env, b, funcs, noop, pool)
 
 ; `(exit code)` — noreturn via `mn_exit` (tagged Int in, untagged inside).
 let lower-exit(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
@@ -2342,7 +2364,7 @@ let lower-exit(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str Func
 let lower-print-args(args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
   match (args)
     | [] -> Ok(())
-    | Cons(a, rest) -> result-then(lower-print-arg(a, env, b, funcs, noop, pool), fn () = lower-print-args(rest, env, b, funcs, noop, pool))
+    | a :: rest -> result-then(lower-print-arg(a, env, b, funcs, noop, pool), fn () = lower-print-args(rest, env, b, funcs, noop, pool))
 
 let lower-print-arg(a: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
   match (a)
@@ -2381,8 +2403,7 @@ let lower-write-str(s-ast: Ast, env: Map Str Int, b: Builder, funcs: Map Str Fun
   match (s-ast)
     | StrNode(s, _) -> Ok(emit-write-str-to!(b, pool, s, callee-abs))
     | _ ->
-      if is-stdout -> result-bind(lower-expr(s-ast, env, b, funcs, noop, pool), fn (v) = Ok(emit-call-void!(b, extern-kind-print, extern-print-str-abs(str-pool-count(pool)), [get!(b, v)])))
-       | else -> lower-write-any(IntNode(2, Span(0, 0, 0, 1)), s-ast, env, b, funcs, noop, pool)
+      if (is-stdout) -> result-bind(lower-expr(s-ast, env, b, funcs, noop, pool), fn (v) = Ok(emit-call-void!(b, extern-kind-print, extern-print-str-abs(str-pool-count(pool)), [get!(b, v)]))) | lower-write-any(IntNode(2, Span(0, 0, 0, 1)), s-ast, env, b, funcs, noop, pool)
 
 let lower-write(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
   match (rest)
@@ -2395,19 +2416,21 @@ let lower-write-fd(fd-ast: Ast, s-ast: Ast, env: Map Str Int, b: Builder, funcs:
     | _ -> lower-write-any(fd-ast, s-ast, env, b, funcs, noop, pool)
 
 let lower-write-fd-n(n: Int, s-ast: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
-  if n == 1 -> lower-write-str(s-ast, env, b, funcs, noop, pool, str-pool-write-stdout-abs(pool), true)
-   | n == 2 -> lower-write-str(s-ast, env, b, funcs, noop, pool, str-pool-write-stderr-abs(pool), false)
-   | else -> Err("write's file descriptor must be the Int literal 1 or 2")
+  cond
+    | n == 1 -> lower-write-str(s-ast, env, b, funcs, noop, pool, str-pool-write-stdout-abs(pool), true)
+    | n == 2 -> lower-write-str(s-ast, env, b, funcs, noop, pool, str-pool-write-stderr-abs(pool), false)
+    | else -> Err("write's file descriptor must be the Int literal 1 or 2")
 
 let lower-sequence(forms: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (forms)
     | [] -> Err("an empty body cannot be lowered to an Int")
-    | Cons(f, rest) -> lower-sequence-step(f, rest, env, b, funcs, noop, pool)
+    | f :: rest -> lower-sequence-step(f, rest, env, b, funcs, noop, pool)
 
 let lower-sequence-step(f: Ast, rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  if is-unit-noop-call(f, noop) -> lower-sequence-after-skip(rest, env, b, funcs, noop, pool)
-   | is-effect-call(f) -> lower-sequence-effect(f, rest, env, b, funcs, noop, pool)
-   | else -> lower-sequence-step-real(f, rest, env, b, funcs, noop, pool)
+  cond
+    | is-unit-noop-call(f, noop) -> lower-sequence-after-skip(rest, env, b, funcs, noop, pool)
+    | is-effect-call(f) -> lower-sequence-effect(f, rest, env, b, funcs, noop, pool)
+    | else -> lower-sequence-step-real(f, rest, env, b, funcs, noop, pool)
 
 let lower-sequence-after-skip(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (rest)
@@ -2450,17 +2473,19 @@ let lower-sequence-let(sl: SimpleLet, rest: List Ast, env: Map Str Int, b: Build
       }
 
 let slot-store(b: Builder, name: Str, env: Map Str Int) -> Bool =
-  if deref(b-slot-arm(b)) ->
-    if str-in-list(name, deref(b-slots(b))) ->
-      match (map-get(env, name))
-        | None -> true
-        | Some(_) -> false
-     | else -> false
-   | else -> false
+  cond
+    | deref(b-slot-arm(b)) ->
+      cond
+        | str-in-list(name, deref(b-slots(b))) ->
+          match (map-get(env, name))
+            | None -> true
+            | Some(_) -> false
+        | else -> false
+    | else -> false
 
 let lower-sequence-let-bind(name: Str, v: Int, rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str {
   let w = get!(b, v)
-  if slot-store(b, name, env) -> emit-slot-set!(b, pool, name, w)
+  if (slot-store(b, name, env)) -> emit-slot-set!(b, pool, name, w)
   let slot = root-alloca!(b)
   emit-store!(b, slot, w)
   lower-sequence-rest(rest, map-set(env, name, slot), b, funcs, noop, pool, w)
@@ -2479,10 +2504,10 @@ let lower-sequence-plain(f: Ast, rest: List Ast, env: Map Str Int, b: Builder, f
 let lower-args(arg-asts: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result (List Int) Str =
   match (arg-asts)
     | [] -> Ok([])
-    | Cons(a, rest) -> result-bind(lower-expr(a, env, b, funcs, noop, pool), fn (v) = lower-args-cons(v, rest, env, b, funcs, noop, pool))
+    | a :: rest -> result-bind(lower-expr(a, env, b, funcs, noop, pool), fn (v) = lower-args-cons(v, rest, env, b, funcs, noop, pool))
 
 let lower-args-cons(v: Int, rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result (List Int) Str =
-  result-bind(lower-args(rest, env, b, funcs, noop, pool), fn (vs) = Ok(Cons(v, vs)))
+  result-bind(lower-args(rest, env, b, funcs, noop, pool), fn (vs) = Ok(v :: vs))
 
 let lower-call(name: Str, arg-asts: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (map-get(funcs, name))
@@ -2525,8 +2550,7 @@ let lower-apply-local(slot: Int, name: Str, arg-asts: List Ast, sp: Span, env: M
     | _ -> Err(str-concat("closure application supports 0–2 arguments (calling local `", name, "`)"))
 
 let lower-call-with-ref(fr: FuncRef, name: Str, arg-asts: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  if length(arg-asts) == func-ref-arity(fr) -> result-bind(lower-args(arg-asts, env, b, funcs, noop, pool), fn (args) = Ok(emit-traced-call!(b, pool, sp, func-ref-abs(fr), get-words!(b, args))))
-   | else -> Err(str-concat("arity mismatch calling ", name))
+  if (length(arg-asts) == func-ref-arity(fr)) -> result-bind(lower-args(arg-asts, env, b, funcs, noop, pool), fn (args) = Ok(emit-traced-call!(b, pool, sp, func-ref-abs(fr), get-words!(b, args)))) | Err(str-concat("arity mismatch calling ", name))
 
 ; ---------------------------------------------------------------------------
 ; One function: bind params (each its own alloca, uniformly with `let`s
@@ -2536,7 +2560,7 @@ let lower-call-with-ref(fr: FuncRef, name: Str, arg-asts: List Ast, sp: Span, en
 let bind-params!(b: Builder, names: List Str, start: Int, i: Int) -> Map Str Int =
   match (names)
     | [] -> map-new()
-    | Cons(n, rest) -> bind-params-cons!(b, n, rest, start, i)
+    | n :: rest -> bind-params-cons!(b, n, rest, start, i)
 
 let bind-params-cons!(b: Builder, n: Str, rest: List Str, start: Int, i: Int) -> Map Str Int {
   let param-abs = start + i
@@ -2547,8 +2571,7 @@ let bind-params-cons!(b: Builder, n: Str, rest: List Str, start: Int, i: Int) ->
 
 let finish-return!(b: Builder, is-main: Bool, result-abs: Int) -> Unit {
   emit-root-restore!(b, deref(b-root-base(b)))
-  if is-main -> finish-main-return!(b, result-abs)
-   | else -> emit-ret!(b, result-abs)
+  if (is-main) -> finish-main-return!(b, result-abs) | emit-ret!(b, result-abs)
 }
 
 ; spec: `main` computes a tagged `i64` `Int` like any other function,
@@ -2565,8 +2588,7 @@ let finish-main-return!(b: Builder, result-abs: Int) -> Unit {
 let lower-one-func(ld: LDefn, num-globals: Int, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool, mc: Map Str Bool, slots: List Str) -> Result LFunc Str {
   let is-main = ldefn-name(ld) == "main"
   let llvm-nparams =
-    if is-main -> 2
-     | else -> param-arity-of(ldefn-params(ld))
+    if (is-main) -> 2 | param-arity-of(ldefn-params(ld))
   let b = builder-new(num-globals + llvm-nparams)
   let flag =
     match (map-get(mc, ldefn-name(ld)))
@@ -2575,8 +2597,8 @@ let lower-one-func(ld: LDefn, num-globals: Int, funcs: Map Str FuncRef, noop: Ma
   set!(b-rooting(b), flag)
   set!(b-root-ns(b), str-pool-count(pool))
   set!(b-slots(b), slots)
-  if is-main || is-module-init-name(ldefn-name(ld)) -> set!(b-slot-arm(b), true)
-  if flag -> set!(b-root-base(b), emit-root-save!(b))
+  if (is-main || is-module-init-name(ldefn-name(ld))) -> set!(b-slot-arm(b), true)
+  if (flag) -> set!(b-root-base(b), emit-root-save!(b))
   let env0 = bind-params!(b, lparam-names(ldefn-params(ld)), num-globals, 0)
   emit-main-init-if-needed!(b, is-main, num-globals, pool)
   match (lower-sequence(ldefn-body(ld), env0, b, funcs, noop, pool))
@@ -2587,7 +2609,7 @@ let lower-one-func(ld: LDefn, num-globals: Int, funcs: Map Str FuncRef, noop: Ma
 ; Call `mn_init(argc, argv)` at the start of `main` so `arg` / `arg-count`
 ; see the process argv. Param abs ids are `num-globals` and `num-globals+1`.
 let emit-main-init-if-needed!(b: Builder, is-main: Bool, num-globals: Int, pool: StrPool) -> Unit =
-  if is-main -> emit-call-void!(b, extern-kind-init, extern-init-abs(str-pool-count(pool)), [num-globals, num-globals + 1])
+  if (is-main) -> emit-call-void!(b, extern-kind-init, extern-init-abs(str-pool-count(pool)), [num-globals, num-globals + 1])
 
 ; libc already defines `write`, `stdin`, `stdout`, and `stderr`. Menard
 ; functions keep their source names for calls; the link symbol is prefixed
@@ -2605,8 +2627,7 @@ let is-module-init-name(name: Str) -> Bool {
 }
 
 let link-symbol(name: Str) -> Str =
-  if name == "main" || is-mn-symbol(name) -> name
-   | else -> str-concat("menard.", name)
+  if (name == "main" || is-mn-symbol(name)) -> name | str-concat("menard.", name)
 
 let lower-one-func-finish(ld: LDefn, is-main: Bool, result-abs: Int, b: Builder) -> Result LFunc Str {
   finish-return!(b, is-main, result-abs)
@@ -2617,10 +2638,10 @@ let lower-one-func-finish(ld: LDefn, is-main: Bool, result-abs: Int, b: Builder)
 let lower-all-funcs(lds: List LDefn, num-globals: Int, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool, mc: Map Str Bool, slots: List Str) -> Result (List LFunc) Str =
   match (lds)
     | [] -> Ok([])
-    | Cons(ld, rest) -> result-bind(lower-one-func(ld, num-globals, funcs, noop, pool, mc, slots), fn (lf) = lower-all-funcs-cons(lf, rest, num-globals, funcs, noop, pool, mc, slots))
+    | ld :: rest -> result-bind(lower-one-func(ld, num-globals, funcs, noop, pool, mc, slots), fn (lf) = lower-all-funcs-cons(lf, rest, num-globals, funcs, noop, pool, mc, slots))
 
 let lower-all-funcs-cons(lf: LFunc, rest: List LDefn, num-globals: Int, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool, mc: Map Str Bool, slots: List Str) -> Result (List LFunc) Str =
-  result-bind(lower-all-funcs(rest, num-globals, funcs, noop, pool, mc, slots), fn (lfs) = Ok(Cons(lf, lfs)))
+  result-bind(lower-all-funcs(rest, num-globals, funcs, noop, pool, mc, slots), fn (lfs) = Ok(lf :: lfs))
 
 ; ---------------------------------------------------------------------------
 ; Top-level, non-`defn` forms — `hello.mnd`'s standalone `(println
@@ -2638,7 +2659,7 @@ let is-declaration-head(s: Str) -> Bool =
 
 let is-declaration-form(ast: Ast) -> Bool =
   match (unwrap-pub(ast))
-    | ParenNode(Cons(head, _), _) -> is-declaration-form-named(head)
+    | ParenNode(head :: _, _) -> is-declaration-form-named(head)
     | _ -> false
 
 let is-declaration-form-named(head: Ast) -> Bool =
@@ -2649,16 +2670,15 @@ let is-declaration-form-named(head: Ast) -> Bool =
 let collect-non-defn-tops(forms: List Ast) -> List Ast =
   match (forms)
     | [] -> []
-    | Cons(f, rest) -> collect-non-defn-tops-cons(f, rest)
+    | f :: rest -> collect-non-defn-tops-cons(f, rest)
 
 let collect-non-defn-tops-cons(f: Ast, rest: List Ast) -> List Ast =
-  if is-declaration-form(f) -> collect-non-defn-tops(rest)
-   | else -> Cons(f, collect-non-defn-tops(rest))
+  if (is-declaration-form(f)) -> collect-non-defn-tops(rest) | f :: collect-non-defn-tops(rest)
 
 let append-asts(xs: List Ast, ys: List Ast) -> List Ast =
   match (xs)
     | [] -> ys
-    | Cons(x, rest) -> Cons(x, append-asts(rest, ys))
+    | x :: rest -> x :: append-asts(rest, ys)
 
 ; Splices `extra` onto the *front* of `main`'s own body — `main`'s last
 ; form (its real `Int` result) stays last; `extra`'s forms (run purely
@@ -2667,11 +2687,10 @@ let append-asts(xs: List Ast, ys: List Ast) -> List Ast =
 let replace-main-body(lds: List LDefn, extra: List Ast) -> List LDefn =
   match (lds)
     | [] -> []
-    | Cons(ld, rest) -> replace-main-body-cons(ld, rest, extra)
+    | ld :: rest -> replace-main-body-cons(ld, rest, extra)
 
 let replace-main-body-cons(ld: LDefn, rest: List LDefn, extra: List Ast) -> List LDefn =
-  if ldefn-name(ld) == "main" -> Cons(LDefn(ldefn-name(ld), ldefn-params(ld), ldefn-ret(ld), append-asts(extra, ldefn-body(ld))), rest)
-   | else -> Cons(ld, replace-main-body(rest, extra))
+  if (ldefn-name(ld) == "main") -> LDefn(ldefn-name(ld), ldefn-params(ld), ldefn-ret(ld), append-asts(extra, ldefn-body(ld))) :: rest | ld :: replace-main-body(rest, extra)
 
 ; ---------------------------------------------------------------------------
 ; Entry point: find `main`, lower every `Int`-only top-level `defn` (in
@@ -2683,8 +2702,7 @@ let replace-main-body-cons(ld: LDefn, rest: List LDefn, extra: List Ast) -> List
 let add-int-constant(ast: Ast, acc: Map Str Int) -> Map Str Int =
   match (unwrap-pub(ast))
     | ParenNode([head, name-ast, expr], _) ->
-      if is-sym(head, "let") -> add-int-constant-named(name-ast, expr, acc)
-       | else -> acc
+      if (is-sym(head, "let")) -> add-int-constant-named(name-ast, expr, acc) | acc
     | _ -> acc
 
 let add-int-constant-named(name-ast: Ast, expr: Ast, acc: Map Str Int) -> Map Str Int =
@@ -2698,7 +2716,7 @@ let add-int-constant-named(name-ast: Ast, expr: Ast, acc: Map Str Int) -> Map St
 let collect-int-constants-from(forms: List Ast, acc: Map Str Int) -> Map Str Int =
   match (forms)
     | [] -> acc
-    | Cons(f, rest) -> collect-int-constants-from(rest, add-int-constant(f, acc))
+    | f :: rest -> collect-int-constants-from(rest, add-int-constant(f, acc))
 
 let collect-int-constants(forms: List Ast) -> Map Str Int =
   collect-int-constants-from(forms, map-new())
@@ -2706,21 +2724,21 @@ let collect-int-constants(forms: List Ast) -> Map Str Int =
 let name-is-bound(name: Str, bound: List Str) -> Bool =
   match (bound)
     | [] -> false
-    | Cons(b, rest) ->
-      if name == b -> true
-       | else -> name-is-bound(name, rest)
+    | b :: rest ->
+      if (name == b) -> true | name-is-bound(name, rest)
 
 let subst-list(xs: List Ast, consts: Map Str Int, bound: List Str) -> List Ast =
   match (xs)
     | [] -> []
-    | Cons(x, rest) -> Cons(subst-const(x, consts, bound), subst-list(rest, consts, bound))
+    | x :: rest -> subst-const(x, consts, bound) :: subst-list(rest, consts, bound)
 
 let subst-sym(name: Str, sp: Span, consts: Map Str Int, bound: List Str) -> Ast =
-  if name-is-bound(name, bound) -> SymNode(name, sp)
-   | else ->
-    match (map-get(consts, name))
-      | Some(k) -> IntNode(k, sp)
-      | None -> SymNode(name, sp)
+  cond
+    | name-is-bound(name, bound) -> SymNode(name, sp)
+    | else ->
+      match (map-get(consts, name))
+        | Some(k) -> IntNode(k, sp)
+        | None -> SymNode(name, sp)
 
 let let-bound-name(name-ast: Ast) -> Str =
   match (sym-str(name-ast))
@@ -2732,19 +2750,18 @@ let let-bound-name(name-ast: Ast) -> Str =
 ; so `(stdin: Str)` is not `(let stdin 0)`.
 let strip-trailing-colon(raw: Str) -> Str {
   let n = str-byte-length(raw)
-  if n > 0 && str-byte(raw, n - 1) == 58 -> str-slice(raw, 0, n - 1)
-   | else -> raw
+  if (n > 0 && str-byte(raw, n - 1) == 58) -> str-slice(raw, 0, n - 1) | raw
 }
 
 let param-bound-name(a: Ast) -> Str =
   match (a)
-    | ParenNode(Cons(n, _), _) -> strip-trailing-colon(let-bound-name(n))
+    | ParenNode(n :: _, _) -> strip-trailing-colon(let-bound-name(n))
     | SymNode(n, _) -> strip-trailing-colon(n)
     | _ -> ""
 
 let subst-let(elems: List Ast, sp: Span, consts: Map Str Int, bound: List Str) -> Ast =
   match (elems)
-    | Cons(head, Cons(name, rest)) -> ParenNode(Cons(head, Cons(name, subst-list(rest, consts, Cons(let-bound-name(name), bound)))), sp)
+    | head :: name :: rest -> ParenNode(head :: name :: subst-list(rest, consts, let-bound-name(name) :: bound), sp)
     | _ -> ParenNode(subst-list(elems, consts, bound), sp)
 
 ; Binders before `->` stay as written. The return type stays as written.
@@ -2752,27 +2769,27 @@ let subst-let(elems: List Ast, sp: Span, consts: Map Str Int, bound: List Str) -
 let subst-defn-body(xs: List Ast, consts: Map Str Int, bound: List Str) -> List Ast =
   match (xs)
     | [] -> []
-    | Cons(ret, body) -> Cons(ret, subst-list(body, consts, bound))
+    | ret :: body -> ret :: subst-list(body, consts, bound)
 
 let subst-defn-params(xs: List Ast, consts: Map Str Int, bound: List Str) -> List Ast =
   match (xs)
     | [] -> []
-    | Cons(x, rest) ->
-      if is-sym(x, "->") -> Cons(x, subst-defn-body(rest, consts, bound))
-       | else -> Cons(x, subst-defn-params(rest, consts, Cons(param-bound-name(x), bound)))
+    | x :: rest ->
+      if (is-sym(x, "->")) -> x :: subst-defn-body(rest, consts, bound) | x :: subst-defn-params(rest, consts, param-bound-name(x) :: bound)
 
 let subst-defn(elems: List Ast, sp: Span, consts: Map Str Int, bound: List Str) -> Ast =
   match (elems)
-    | Cons(head, Cons(name, rest)) -> ParenNode(Cons(head, Cons(name, subst-defn-params(rest, consts, bound))), sp)
+    | head :: name :: rest -> ParenNode(head :: name :: subst-defn-params(rest, consts, bound), sp)
     | _ -> ParenNode(subst-list(elems, consts, bound), sp)
 
 let subst-paren(elems: List Ast, sp: Span, consts: Map Str Int, bound: List Str) -> Ast =
   match (elems)
-    | Cons(head, _) ->
-      if is-sym(head, "quote") -> ParenNode(elems, sp)
-       | is-sym(head, "let") -> subst-let(elems, sp, consts, bound)
-       | is-sym(head, "defn") || is-sym(head, "fn") -> subst-defn(elems, sp, consts, bound)
-       | else -> ParenNode(subst-list(elems, consts, bound), sp)
+    | head :: _ ->
+      cond
+        | is-sym(head, "quote") -> ParenNode(elems, sp)
+        | is-sym(head, "let") -> subst-let(elems, sp, consts, bound)
+        | is-sym(head, "defn") || is-sym(head, "fn") -> subst-defn(elems, sp, consts, bound)
+        | else -> ParenNode(subst-list(elems, consts, bound), sp)
     | _ -> ParenNode(elems, sp)
 
 let subst-const(ast: Ast, consts: Map Str Int, bound: List Str) -> Ast =
@@ -2785,7 +2802,7 @@ let subst-const(ast: Ast, consts: Map Str Int, bound: List Str) -> Ast =
 let subst-forms(forms: List Ast, consts: Map Str Int) -> List Ast =
   match (forms)
     | [] -> []
-    | Cons(f, rest) -> Cons(subst-const(f, consts, []), subst-forms(rest, consts))
+    | f :: rest -> subst-const(f, consts, []) :: subst-forms(rest, consts)
 
 let subst-int-constants(forms: List Ast) -> List Ast =
   subst-forms(forms, collect-int-constants(forms))
@@ -2795,19 +2812,19 @@ let subst-int-constants(forms: List Ast) -> List Ast =
 let is-folded-int-let(ast: Ast) -> Bool =
   match (unwrap-pub(ast))
     | ParenNode([head, _, expr], _) ->
-      if is-sym(head, "let") ->
-        match (expr)
-          | IntNode(_, _) -> true
-          | _ -> false
-       | else -> false
+      cond
+        | is-sym(head, "let") ->
+          match (expr)
+            | IntNode(_, _) -> true
+            | _ -> false
+        | else -> false
     | _ -> false
 
 let drop-folded-int-lets(forms: List Ast) -> List Ast =
   match (forms)
     | [] -> []
-    | Cons(f, rest) ->
-      if is-folded-int-let(f) -> drop-folded-int-lets(rest)
-       | else -> Cons(f, drop-folded-int-lets(rest))
+    | f :: rest ->
+      if (is-folded-int-let(f)) -> drop-folded-int-lets(rest) | f :: drop-folded-int-lets(rest)
 
 pub let lower-program(forms: List Ast, triple: Str, paths: List Str) -> Result Str Str =
   lower-program-collected(drop-folded-int-lets(subst-int-constants(forms)), triple, paths)
@@ -2821,9 +2838,10 @@ let lower-program-collected(forms: List Ast, triple: Str, paths: List Str) -> Re
 }
 
 let lower-program-checked-main(main-ld: LDefn, word-lds: List LDefn, all-lds: List LDefn, forms: List Ast, triple: Str, paths: List Str) -> Result Str Str =
-  if param-arity-of(ldefn-params(main-ld)) > 0 -> Err("`main` must take no arguments")
-   | is-int-type(ldefn-ret(main-ld)) || is-unit-type(ldefn-ret(main-ld)) -> lower-program-build(word-lds, all-lds, forms, triple, paths, [], [])
-   | else -> Err("`main` must return Int or Unit")
+  cond
+    | param-arity-of(ldefn-params(main-ld)) > 0 -> Err("`main` must take no arguments")
+    | is-int-type(ldefn-ret(main-ld)) || is-unit-type(ldefn-ret(main-ld)) -> lower-program-build(word-lds, all-lds, forms, triple, paths, [], [])
+    | else -> Err("`main` must return Int or Unit")
 
 ; Global value numbering (see `llvm-ir.mnd`'s header comment and this
 ; module's `StrPool` doc comment): string globals first (`0..num-
@@ -2849,7 +2867,7 @@ let mc-alloc-name(hn: Str) -> Bool =
   mc-alloc-body(seam-menard-name(hn))
 
 let mc-alloc-body(hn: Str) -> Bool =
-  hn == "str-concat" || hn == "str-slice" || hn == "ref" || hn == "sb-new" || hn == "sb-append!" || hn == "sb-append-byte!" || hn == "sb-take-str!" || hn == "map-new" || hn == "map-set" || hn == "map-get" || hn == "mn-env-0" || hn == "mn-env-1" || hn == "mn-env-new" || hn == "mn-closure-new" || hn == "mn-apply-0" || hn == "mn-apply-1" || hn == "mn-apply-2" || hn == "arg" || hn == "read-file" || hn == "write-file" || hn == "show" || hn == "spawn" || hn == "spawn-capture" || hn == "getenv" || hn == "rename" || hn == "f+" || hn == "f-" || hn == "f*" || hn == "f/" || hn == "cwd" || hn == "list-dir" || hn == "realpath"
+  hn == "str-concat" || hn == "str-slice" || hn == "ref" || hn == "sb-new" || hn == "sb-append!" || hn == "sb-append-byte!" || hn == "sb-take-str!" || hn == "map-new" || hn == "map-set" || hn == "map-get" || hn == "map-keys" || hn == "mn-env-0" || hn == "mn-env-1" || hn == "mn-env-new" || hn == "mn-closure-new" || hn == "mn-apply-0" || hn == "mn-apply-1" || hn == "mn-apply-2" || hn == "arg" || hn == "read-file" || hn == "write-file" || hn == "show" || hn == "spawn" || hn == "spawn-capture" || hn == "getenv" || hn == "rename" || hn == "f+" || hn == "f-" || hn == "f*" || hn == "f/" || hn == "cwd" || hn == "list-dir" || hn == "realpath"
 
 let mc-ctor-alloc(hn: Str) -> Bool =
   is-upper-name(hn) && hn != "Nil" && hn != "None"
@@ -2867,7 +2885,7 @@ let mc-walk-empty() -> McWalk =
 let mc-append(xs: List Str, ys: List Str) -> List Str =
   match (xs)
     | [] -> ys
-    | Cons(x, rest) -> Cons(x, mc-append(rest, ys))
+    | x :: rest -> x :: mc-append(rest, ys)
 
 let mc-walk-or(a: McWalk, b: McWalk) -> McWalk =
   match (a)
@@ -2876,17 +2894,18 @@ let mc-walk-or(a: McWalk, b: McWalk) -> McWalk =
         | McWalk(db, cb) -> McWalk(da || db, mc-append(ca, cb))
 
 let mc-note-head(hn: Str, names: Map Str Bool) -> McWalk =
-  if mc-pure(hn) -> mc-walk-empty()
-   | mc-alloc-name(hn) || mc-ctor-alloc(hn) -> McWalk(true, [])
-   | else ->
-    match (map-get(names, hn))
-      | Some(_) -> McWalk(false, [hn])
-      | None -> McWalk(true, [])
+  cond
+    | mc-pure(hn) -> mc-walk-empty()
+    | mc-alloc-name(hn) || mc-ctor-alloc(hn) -> McWalk(true, [])
+    | else ->
+      match (map-get(names, hn))
+        | Some(_) -> McWalk(false, [hn])
+        | None -> McWalk(true, [])
 
 let mc-walk-forms(xs: List Ast, names: Map Str Bool) -> McWalk =
   match (xs)
     | [] -> mc-walk-empty()
-    | Cons(a, rest) -> mc-walk-or(mc-walk-ast(a, names), mc-walk-forms(rest, names))
+    | a :: rest -> mc-walk-or(mc-walk-ast(a, names), mc-walk-forms(rest, names))
 
 ; A string literal lowers to `mn_str_new`. That allocation is not a call
 ; in the AST, so it has to count on its own — otherwise a function whose
@@ -2904,7 +2923,7 @@ let mc-walk-ast(ast: Ast, names: Map Str Bool) -> McWalk =
 let mc-walk-loop-inits(pairs: List Ast, names: Map Str Bool) -> McWalk =
   match (pairs)
     | [] -> mc-walk-empty()
-    | Cons(p, rest) ->
+    | p :: rest ->
       mc-walk-or(
         match (binding-pair-of(p))
           | Some([_, init]) -> mc-walk-ast(init, names)
@@ -2930,67 +2949,64 @@ let mc-pat-alloc(pat: Ast) -> Bool =
 let mc-asts-alloc(xs: List Ast) -> Bool =
   match (xs)
     | [] -> false
-    | Cons(p, rest) ->
-      if mc-pat-alloc(p) -> true
-       | else -> mc-asts-alloc(rest)
+    | p :: rest ->
+      if (mc-pat-alloc(p)) -> true | mc-asts-alloc(rest)
 
 let mc-walk-match-clauses(xs: List Ast, names: Map Str Bool) -> McWalk =
   match (xs)
     | [] -> mc-walk-empty()
-    | Cons(pat, Cons(body, rest)) ->
+    | pat :: body :: rest ->
       mc-walk-or(
-        if mc-pat-alloc(pat) -> McWalk(true, [])
-         | else -> mc-walk-empty(),
+        if (mc-pat-alloc(pat)) -> McWalk(true, []) | mc-walk-empty(),
         mc-walk-or(mc-walk-ast(body, names), mc-walk-match-clauses(rest, names))
       )
     | [other] -> mc-walk-ast(other, names)
 
 let mc-walk-match(rest: List Ast, names: Map Str Bool) -> McWalk =
   match (rest)
-    | Cons(scrut, clauses) -> mc-walk-or(mc-walk-ast(scrut, names), mc-walk-match-clauses(clauses, names))
+    | scrut :: clauses -> mc-walk-or(mc-walk-ast(scrut, names), mc-walk-match-clauses(clauses, names))
     | [] -> mc-walk-empty()
 
 let mc-walk-paren(elems: List Ast, names: Map Str Bool) -> McWalk =
   match (elems)
     | [] -> mc-walk-empty()
-    | Cons(head, rest) ->
+    | head :: rest ->
       match (sym-str(head))
         | None -> mc-walk-or(mc-walk-forms(rest, names), McWalk(true, []))
         | Some(hn) ->
-          if hn == "loop" -> mc-walk-loop(rest, names)
-           | hn == "match" -> mc-walk-match(rest, names)
-           | else -> mc-walk-or(mc-walk-forms(rest, names), mc-note-head(hn, names))
+          cond
+            | hn == "loop" -> mc-walk-loop(rest, names)
+            | hn == "match" -> mc-walk-match(rest, names)
+            | else -> mc-walk-or(mc-walk-forms(rest, names), mc-note-head(hn, names))
 
 let mc-seed(lds: List LDefn) -> Map Str Bool =
   match (lds)
     | [] -> map-new()
-    | Cons(ld, rest) -> map-set(mc-seed(rest), ldefn-name(ld), false)
+    | ld :: rest -> map-set(mc-seed(rest), ldefn-name(ld), false)
 
 let mc-build(lds: List LDefn, names: Map Str Bool) -> Map Str McWalk =
   match (lds)
     | [] -> map-new()
-    | Cons(ld, rest) -> map-set(mc-build(rest, names), ldefn-name(ld), mc-walk-forms(ldefn-body(ld), names))
+    | ld :: rest -> map-set(mc-build(rest, names), ldefn-name(ld), mc-walk-forms(ldefn-body(ld), names))
 
 let mc-any-callee(xs: List Str, flags: Map Str Bool) -> Bool =
   match (xs)
     | [] -> false
-    | Cons(n, rest) ->
+    | n :: rest ->
       match (map-get(flags, n))
         | Some(f) ->
-          if f -> true
-           | else -> mc-any-callee(rest, flags)
+          if (f) -> true | mc-any-callee(rest, flags)
         | None -> mc-any-callee(rest, flags)
 
 let mc-body-true(w: McWalk, flags: Map Str Bool) -> Bool =
   match (w)
     | McWalk(direct, callees) ->
-      if direct -> true
-       | else -> mc-any-callee(callees, flags)
+      if (direct) -> true | mc-any-callee(callees, flags)
 
 let mc-apply(lds: List LDefn, info: Map Str McWalk, flags: Map Str Bool) -> Map Str Bool =
   match (lds)
     | [] -> flags
-    | Cons(ld, rest) -> mc-apply-one(ld, rest, info, flags)
+    | ld :: rest -> mc-apply-one(ld, rest, info, flags)
 
 let mc-apply-one(ld: LDefn, rest: List LDefn, info: Map Str McWalk, flags: Map Str Bool) -> Map Str Bool {
   let name = ldefn-name(ld)
@@ -2999,35 +3015,33 @@ let mc-apply-one(ld: LDefn, rest: List LDefn, info: Map Str McWalk, flags: Map S
       | Some(f) -> f
       | None -> false
   let next-flag =
-    if now -> true
-     | else ->
-      match (map-get(info, name))
-        | Some(w) -> mc-body-true(w, flags)
-        | None -> true
+    cond
+      | now -> true
+      | else ->
+        match (map-get(info, name))
+          | Some(w) -> mc-body-true(w, flags)
+          | None -> true
   mc-apply(rest, info, map-set(flags, name, next-flag))
 }
 
 let mc-flags-equal(lds: List LDefn, a: Map Str Bool, b: Map Str Bool) -> Bool =
   match (lds)
     | [] -> true
-    | Cons(ld, rest) ->
+    | ld :: rest ->
       match (map-get(a, ldefn-name(ld)))
         | None -> false
         | Some(fa) ->
           match (map-get(b, ldefn-name(ld)))
             | None -> false
             | Some(fb) ->
-              if fa == fb -> mc-flags-equal(rest, a, b)
-               | else -> false
+              if (fa == fb) -> mc-flags-equal(rest, a, b) | false
 
 let mc-propagate(lds: List LDefn, info: Map Str McWalk, flags: Map Str Bool, n: Int) -> Map Str Bool =
-  if n <= 0 -> flags
-   | else -> mc-propagate-step(lds, info, flags, n)
+  if (n <= 0) -> flags | mc-propagate-step(lds, info, flags, n)
 
 let mc-propagate-step(lds: List LDefn, info: Map Str McWalk, flags: Map Str Bool, n: Int) -> Map Str Bool {
   let next = mc-apply(lds, info, flags)
-  if mc-flags-equal(lds, flags, next) -> next
-   | else -> mc-propagate(lds, info, next, n - 1)
+  if (mc-flags-equal(lds, flags, next)) -> next | mc-propagate(lds, info, next, n - 1)
 }
 
 let mc-analyze(lds: List LDefn) -> Map Str Bool {
@@ -3052,25 +3066,23 @@ pub record CtorTable {
 let seed-specs(seeds: List CtorSeed, acc: Map Str CtorSpec) -> Map Str CtorSpec =
   match (seeds)
     | [] -> acc
-    | Cons(CtorSeed(n, t, a), rest) -> seed-specs(rest, map-set(acc, n, CtorSpec(t, a)))
+    | CtorSeed(n, t, a) :: rest -> seed-specs(rest, map-set(acc, n, CtorSpec(t, a)))
 
 let max-seed-tag(seeds: List CtorSeed, acc: Int) -> Int =
   match (seeds)
     | [] -> acc
-    | Cons(CtorSeed(_, t, _), rest) ->
-      if t > acc -> max-seed-tag(rest, t)
-       | else -> max-seed-tag(rest, acc)
+    | CtorSeed(_, t, _) :: rest ->
+      if (t > acc) -> max-seed-tag(rest, t) | max-seed-tag(rest, acc)
 
 let seed-start(seeds: List CtorSeed) -> Int {
   let m = max-seed-tag(seeds, user-ctor-tag-base - 1) + 1
-  if m > user-ctor-tag-base -> m
-   | else -> user-ctor-tag-base
+  if (m > user-ctor-tag-base) -> m | user-ctor-tag-base
 }
 
 let reverse-seeds(xs: List CtorSeed, acc: List CtorSeed) -> List CtorSeed =
   match (xs)
     | [] -> acc
-    | Cons(x, rest) -> reverse-seeds(rest, Cons(x, acc))
+    | x :: rest -> reverse-seeds(rest, x :: acc)
 
 let note-ctor(acc: Map Str CtorSpec, name: Str, arity: Int, tag-ref: Ref Int, local: Ref (List CtorSeed)) -> Map Str CtorSpec =
   match (map-get(acc, name))
@@ -3079,13 +3091,13 @@ let note-ctor(acc: Map Str CtorSpec, name: Str, arity: Int, tag-ref: Ref Int, lo
       {
         let tag = deref(tag-ref)
         set!(tag-ref, tag + 1)
-        set!(local, Cons(CtorSeed(name, tag, arity), deref(local)))
+        set!(local, CtorSeed(name, tag, arity) :: deref(local))
         map-set(acc, name, CtorSpec(tag, arity))
       }
 
 let note-one-variant(c: Ast, acc: Map Str CtorSpec, tag-ref: Ref Int, local: Ref (List CtorSeed)) -> Map Str CtorSpec =
   match (c)
-    | ParenNode(Cons(cname-ast, payload), _) ->
+    | ParenNode(cname-ast :: payload, _) ->
       match (sym-str(cname-ast))
         | None -> acc
         | Some(name) ->
@@ -3097,11 +3109,11 @@ let note-one-variant(c: Ast, acc: Map Str CtorSpec, tag-ref: Ref Int, local: Ref
 let note-variant-ctors(ctors: List Ast, acc: Map Str CtorSpec, tag-ref: Ref Int, local: Ref (List CtorSeed)) -> Map Str CtorSpec =
   match (ctors)
     | [] -> acc
-    | Cons(c, rest) -> note-variant-ctors(rest, note-one-variant(c, acc, tag-ref, local), tag-ref, local)
+    | c :: rest -> note-variant-ctors(rest, note-one-variant(c, acc, tag-ref, local), tag-ref, local)
 
 let note-defrec(rest: List Ast, acc: Map Str CtorSpec, tag-ref: Ref Int, local: Ref (List CtorSeed)) -> Map Str CtorSpec =
   match (rest)
-    | Cons(name-part, fields) ->
+    | name-part :: fields ->
       match (decl-name-of(name-part))
         | None -> acc
         | Some(name) ->
@@ -3111,16 +3123,17 @@ let note-defrec(rest: List Ast, acc: Map Str CtorSpec, tag-ref: Ref Int, local: 
     | [] -> acc
 
 let note-ctor-named(hn: Str, rest: List Ast, acc: Map Str CtorSpec, tag-ref: Ref Int, local: Ref (List CtorSeed)) -> Map Str CtorSpec =
-  if hn == "variant" ->
-    match (rest)
-      | Cons(_, ctors) -> note-variant-ctors(ctors, acc, tag-ref, local)
-      | [] -> acc
-   | hn == "defrec" -> note-defrec(rest, acc, tag-ref, local)
-   | else -> acc
+  cond
+    | hn == "variant" ->
+      match (rest)
+        | _ :: ctors -> note-variant-ctors(ctors, acc, tag-ref, local)
+        | [] -> acc
+    | hn == "defrec" -> note-defrec(rest, acc, tag-ref, local)
+    | else -> acc
 
 let note-ctor-form(ast: Ast, acc: Map Str CtorSpec, tag-ref: Ref Int, local: Ref (List CtorSeed)) -> Map Str CtorSpec =
   match (unwrap-pub(ast))
-    | ParenNode(Cons(head, rest), _) ->
+    | ParenNode(head :: rest, _) ->
       match (sym-str(head))
         | None -> acc
         | Some(hn) -> note-ctor-named(hn, rest, acc, tag-ref, local)
@@ -3129,7 +3142,7 @@ let note-ctor-form(ast: Ast, acc: Map Str CtorSpec, tag-ref: Ref Int, local: Ref
 let note-ctor-forms(forms: List Ast, acc: Map Str CtorSpec, tag-ref: Ref Int, local: Ref (List CtorSeed)) -> Map Str CtorSpec =
   match (forms)
     | [] -> acc
-    | Cons(f, rest) -> note-ctor-forms(rest, note-ctor-form(f, acc, tag-ref, local), tag-ref, local)
+    | f :: rest -> note-ctor-forms(rest, note-ctor-form(f, acc, tag-ref, local), tag-ref, local)
 
 pub let ctor-info(forms: List Ast, seeds: List CtorSeed) -> CtorTable {
   let local = ref([])
@@ -3141,7 +3154,7 @@ pub let ctor-info(forms: List Ast, seeds: List CtorSeed) -> CtorTable {
 let imp-count(imps: List Imp) -> Int =
   match (imps)
     | [] -> 0
-    | Cons(_, rest) -> 1 + imp-count(rest)
+    | _ :: rest -> 1 + imp-count(rest)
 
 ; Locals keep the abs ids `build-func-refs` assigned. An import whose
 ; Menard name is also a local function stays local; its declaration is
@@ -3149,7 +3162,7 @@ let imp-count(imps: List Imp) -> Int =
 let add-imp-refs(imps: List Imp, idx: Int, acc: Map Str FuncRef) -> Map Str FuncRef =
   match (imps)
     | [] -> acc
-    | Cons(Imp(name, _, ar), rest) ->
+    | Imp(name, _, ar) :: rest ->
       match (map-get(acc, name))
         | Some(_) -> add-imp-refs(rest, idx + 1, acc)
         | None -> add-imp-refs(rest, idx + 1, map-set(acc, name, FuncRef(idx, ar)))
@@ -3159,40 +3172,40 @@ let add-imp-refs(imps: List Imp, idx: Int, acc: Map Str FuncRef) -> Map Str Func
 let value-let-name(form: Ast) -> Maybe Str =
   match (unwrap-pub(form))
     | ParenNode([head, name, expr], _) ->
-      if is-sym(head, "let") ->
-        match (expr)
-          | IntNode(_, _) -> None()
-          | _ -> sym-str(name)
-       | else -> None()
+      cond
+        | is-sym(head, "let") ->
+          match (expr)
+            | IntNode(_, _) -> None()
+            | _ -> sym-str(name)
+        | else -> None()
     | _ -> None()
 
 let top-value-let-names(forms: List Ast) -> List Str =
   match (forms)
     | [] -> []
-    | Cons(f, rest) ->
+    | f :: rest ->
       match (value-let-name(f))
-        | Some(n) -> Cons(n, top-value-let-names(rest))
+        | Some(n) -> n :: top-value-let-names(rest)
         | None -> top-value-let-names(rest)
 
 let drop-top-value-lets(forms: List Ast) -> List Ast =
   match (forms)
     | [] -> []
-    | Cons(f, rest) ->
+    | f :: rest ->
       match (value-let-name(f))
         | Some(_) -> drop-top-value-lets(rest)
-        | None -> Cons(f, drop-top-value-lets(rest))
+        | None -> f :: drop-top-value-lets(rest)
 
 let any-module-init(lds: List LDefn) -> Bool =
   match (lds)
     | [] -> false
-    | Cons(ld, rest) ->
-      if is-module-init-name(ldefn-name(ld)) -> true
-       | else -> any-module-init(rest)
+    | ld :: rest ->
+      if (is-module-init-name(ldefn-name(ld))) -> true | any-module-init(rest)
 
 let add-slot-strs(names: List Str, p: StrPool) -> StrPool =
   match (names)
     | [] -> p
-    | Cons(n, rest) -> add-slot-strs(rest, str-pool-add(p, n))
+    | n :: rest -> add-slot-strs(rest, str-pool-add(p, n))
 
     ; When a module init exists, the value let runs there. Drop the
     ; top-level copy so bootstrap `main` does not evaluate it again.
@@ -3200,8 +3213,7 @@ let add-slot-strs(names: List Str, p: StrPool) -> StrPool =
 let lower-program-build(word-lds: List LDefn, all-lds: List LDefn, forms: List Ast, triple: Str, paths: List Str, imports: List Imp, seeds: List CtorSeed) -> Result Str Str {
   let slots = top-value-let-names(forms)
   let forms2 =
-    if any-module-init(word-lds) -> drop-top-value-lets(forms)
-     | else -> forms
+    if (any-module-init(word-lds)) -> drop-top-value-lets(forms) | forms
   let extra = collect-non-defn-tops(forms2)
   let word-lds2 = replace-main-body(word-lds, extra)
   let specs =

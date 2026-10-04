@@ -88,8 +88,7 @@ let mn-flags() -> List Flag =
   [Flag("--dump-after=reader", false), Flag("--dump-after=desugar", false), Flag("--dump-after=type", false), Flag("--dump-after=close", false), Flag("--dump-after=root", false), Flag("--dump-after=derive", false), Flag("--show-result", false), Flag("--clean", false), Flag("--verbose", false), Flag("--quiet", false), Flag("-o", true), Flag("--cc", true), Flag("--runtime", true)]
 
 let argv-onto(i: Int, n: Int, acc: List Str) -> List Str =
-  if i >= n -> reverse(acc)
-   | else -> argv-onto(i + 1, n, Cons(arg(i), acc))
+  if (i >= n) -> reverse(acc) | argv-onto(i + 1, n, arg(i) :: acc)
 
 let argv() -> List Str =
   argv-onto(0, arg-count(), [])
@@ -130,12 +129,13 @@ let opt(name: Str) -> Str =
 ; Progress is for a person watching a terminal. A captured stderr stays
 ; empty unless something failed. `--quiet` suppresses it even on a tty.
 let note-compiling(path: Str, ms: Int) -> Unit =
-  if has-quiet() -> ()
-   | isatty(2) ->
-    {
-      write(stderr, progress-line("Compiling", display-path(canonical-path(path)), ms))
-      ()
-    }
+  cond
+    | has-quiet() -> ()
+    | isatty(2) ->
+      {
+        write(stderr, progress-line("Compiling", display-path(canonical-path(path)), ms))
+        ()
+      }
 
 let explicit-out() -> Bool =
   str-byte-length(opt("-o")) > 0
@@ -155,10 +155,11 @@ let prog-args() -> List Str =
 ; that file.
 
 let parse-code(msg: Str) -> Str =
-  if has(msg, "unclosed") -> "E_PARSE_UNCLOSED"
-   | has(msg, "'!'") -> "E_PARSE_BANG"
-   | has(msg, "unterminated") -> "E_PARSE_STRING"
-   | else -> "E_PARSE"
+  cond
+    | has(msg, "unclosed") -> "E_PARSE_UNCLOSED"
+    | has(msg, "'!'") -> "E_PARSE_BANG"
+    | has(msg, "unterminated") -> "E_PARSE_STRING"
+    | else -> "E_PARSE"
 
 let report-parse-error(path: Str, src: Str, e: ParseError) -> Unit =
   match (e)
@@ -175,7 +176,7 @@ let report-desugar-error(path: Str, src: Str, e: DesugarError) -> Unit =
 let report-desugar-errors(path: Str, src: Str, es: List DesugarError) -> Unit =
   match (es)
     | [] -> ()
-    | Cons(e, rest) ->
+    | e :: rest ->
       {
         report-desugar-error(path, src, e)
         report-desugar-errors(path, src, rest)
@@ -184,18 +185,17 @@ let report-desugar-errors(path: Str, src: Str, es: List DesugarError) -> Unit =
 let nth-path(paths: List Str, i: Int, fallback: Str) -> Str =
   match (paths)
     | [] -> fallback
-    | Cons(p, rest) ->
-      if i <= 0 -> p
-       | else -> nth-path(rest, i - 1, fallback)
+    | p :: rest ->
+      if (i <= 0) -> p | nth-path(rest, i - 1, fallback)
 
 let report-type-errors(paths: List Str, es: List TypeError) -> Unit =
   match (es)
     | [] -> ()
-    | Cons(TypeError(sp, code, msg), rest) ->
+    | TypeError(sp, code, msg) :: rest ->
       {
         let fallback =
           match (paths)
-            | Cons(p, _) -> p
+            | p :: _ -> p
             | [] -> ""
         let p = nth-path(paths, span-origin(sp), fallback)
         let src =
@@ -221,7 +221,7 @@ let usage() -> Unit {
 ; desugar) → flatten imports when the entry has any → typecheck → …
 
 let maybe-dump(forms: List Ast, dump-after: Bool) -> Unit =
-  if dump-after -> dump(forms)
+  if (dump-after) -> dump(forms)
 
 let fail-load(msg: Str) -> Unit {
   write-line(2, str-concat("error: ", msg))
@@ -230,7 +230,7 @@ let fail-load(msg: Str) -> Unit {
 
 let form-is-import(form: Ast) -> Bool =
   match (form)
-    | ParenNode(Cons(head, _), _) ->
+    | ParenNode(head :: _, _) ->
       match (head)
         | SymNode(n, _) -> n == "import"
         | _ -> false
@@ -239,9 +239,8 @@ let form-is-import(form: Ast) -> Bool =
 let has-import(forms: List Ast) -> Bool =
   match (forms)
     | [] -> false
-    | Cons(f, rest) ->
-      if form-is-import(f) -> true
-       | else -> has-import(rest)
+    | f :: rest ->
+      if (form-is-import(f)) -> true | has-import(rest)
 
 let front-end(path: Str, src: Str, dump-after-reader: Bool, dump-after-desugar: Bool, dump-after-type: Bool, dump-after-close: Bool, dump-after-root: Bool, dump-after-derive: Bool, on-ok: (List Ast, List Str) -> Unit) -> Unit =
   match (read-all(src))
@@ -279,15 +278,16 @@ let front-end-desugared(path: Str, src: Str, forms: List Ast, dump-after-desugar
 ; A single file keeps the names the reader saw. An import graph is flattened
 ; and its private bindings renamed before typechecking.
 let front-end-loaded(path: Str, src: Str, desugared: List Ast, dump-after-type: Bool, dump-after-close: Bool, dump-after-root: Bool, dump-after-derive: Bool, on-ok: (List Ast, List Str) -> Unit) -> Unit =
-  if has-import(desugared) ->
-    match (flatten-module-graph(path, src))
-      | Ok(Flat(flat, paths)) -> front-end-typechecked(path, flat, paths, dump-after-type, dump-after-close, dump-after-root, dump-after-derive, on-ok)
-      | Err(msg) -> fail-load(msg)
-   | else ->
-    {
-      let stamped = stamp-spans(desugared, src, 0)
-      front-end-typechecked(path, stamped, [path], dump-after-type, dump-after-close, dump-after-root, dump-after-derive, on-ok)
-    }
+  cond
+    | has-import(desugared) ->
+      match (flatten-module-graph(path, src))
+        | Ok(Flat(flat, paths)) -> front-end-typechecked(path, flat, paths, dump-after-type, dump-after-close, dump-after-root, dump-after-derive, on-ok)
+        | Err(msg) -> fail-load(msg)
+    | else ->
+      {
+        let stamped = stamp-spans(desugared, src, 0)
+        front-end-typechecked(path, stamped, [path], dump-after-type, dump-after-close, dump-after-root, dump-after-derive, on-ok)
+      }
 
 let front-end-typechecked(path: Str, forms: List Ast, paths: List Str, dump-after-type: Bool, dump-after-close: Bool, dump-after-root: Bool, dump-after-derive: Bool, on-ok: (List Ast, List Str) -> Unit) -> Unit =
   match (typecheck-forms(forms))
@@ -315,7 +315,7 @@ let front-end-rooted(path: Str, forms: List Ast, paths: List Str, dump-after-roo
 }
 
 let maybe-dump-derive-plan(forms: List Ast, dump-after-derive: Bool) -> Unit =
-  if dump-after-derive -> write-line(2, describe-derives(forms))
+  if (dump-after-derive) -> write-line(2, describe-derives(forms))
 
 let front-end-derived(path: Str, forms: List Ast, paths: List Str, dump-after-derive: Bool, on-ok: (List Ast, List Str) -> Unit) -> Unit {
   let derived = plan-derives(forms)
@@ -356,12 +356,10 @@ let run-check(path: Str, dump-after-reader: Bool, dump-after-desugar: Bool, dump
 ; emit
 
 let default-output-path(path: Str) -> Str =
-  if ends-with(path, ".mnd") -> str-concat(str-slice(path, 0, str-byte-length(path) - 4), ".bc")
-   | else -> str-concat(path, ".bc")
+  if (ends-with(path, ".mnd")) -> str-concat(str-slice(path, 0, str-byte-length(path) - 4), ".bc") | str-concat(path, ".bc")
 
 let output-path(path: Str, has-out: Bool, out: Str) -> Str =
-  if has-out -> out
-   | else -> default-output-path(path)
+  if (has-out) -> out | default-output-path(path)
 
 let fail-cannot-write(out: Str) -> Unit {
   write-line(2, str-concat("error: cannot write ", out))
@@ -387,45 +385,47 @@ let triple-marker() -> Str =
   "target triple = \""
 
 let bytes-match-at(s: Str, i: Int, pat: Str, j: Int) -> Bool =
-  if j >= str-byte-length(pat) -> true
-   | i + j >= str-byte-length(s) -> false
-   | str-byte(s, i + j) == str-byte(pat, j) -> bytes-match-at(s, i, pat, j + 1)
-   | else -> false
+  cond
+    | j >= str-byte-length(pat) -> true
+    | i + j >= str-byte-length(s) -> false
+    | str-byte(s, i + j) == str-byte(pat, j) -> bytes-match-at(s, i, pat, j + 1)
+    | else -> false
 
 let find-bytes(s: Str, pat: Str, i: Int) -> Int =
-  if i + str-byte-length(pat) > str-byte-length(s) -> -1
-   | bytes-match-at(s, i, pat, 0) -> i
-   | else -> find-bytes(s, pat, i + 1)
+  cond
+    | i + str-byte-length(pat) > str-byte-length(s) -> -1
+    | bytes-match-at(s, i, pat, 0) -> i
+    | else -> find-bytes(s, pat, i + 1)
 
 let copy-until(s: Str, i: Int, stop: Int, acc: Str) -> Str =
-  if i >= str-byte-length(s) -> acc
-   | str-byte(s, i) == stop -> acc
-   | else -> copy-until(s, i + 1, stop, str-concat(acc, str-slice(s, i, 1)))
+  cond
+    | i >= str-byte-length(s) -> acc
+    | str-byte(s, i) == stop -> acc
+    | else -> copy-until(s, i + 1, stop, str-concat(acc, str-slice(s, i, 1)))
 
 let triple-from-text(text: Str) -> Str {
   let mark = triple-marker()
   let at = find-bytes(text, mark, 0)
-  if at < 0 -> ""
-   | else -> copy-until(text, at + str-byte-length(mark), 34, "")
+  if (at < 0) -> "" | copy-until(text, at + str-byte-length(mark), 34, "")
 }
 
 let triple-or-fail(text: Str) -> Str {
   let triple = triple-from-text(text)
-  if str-byte-length(triple) == 0 ->
-    {
-      write-line(2, "error: clang IR has no target triple")
-      exit(1)
-      ""
-    }
-   | else -> triple
+  cond
+    | str-byte-length(triple) == 0 ->
+      {
+        write-line(2, "error: clang IR has no target triple")
+        exit(1)
+        ""
+      }
+    | else -> triple
 }
 
 let clang-target-triple(cc: Str) -> Str =
   match (spawn-capture([cc, "-S", "-emit-llvm", "-o", "-", "-x", "c", "-"], "int x;"))
     | Err(_) -> ""
     | Ok(SpawnOutput(st, text, _)) ->
-      if status-exit-code(st) == 0 -> triple-or-fail(text)
-       | else -> ""
+      if (status-exit-code(st) == 0) -> triple-or-fail(text) | ""
 
 let write-module(out: Str, forms: List Ast, paths: List Str) -> Unit =
   match (emit-program-bc(forms, clang-target-triple(chosen-cc("")), paths))
@@ -472,27 +472,26 @@ let recorded-runtime() -> Str =
 let chosen-cc-menard() -> Str =
   match (getenv("MENARD_CC"))
     | Some(s) ->
-      if str-byte-length(s) > 0 -> s
-       | else -> recorded-cc()
+      if (str-byte-length(s) > 0) -> s | recorded-cc()
     | None -> recorded-cc()
 
 let chosen-cc(flag: Str) -> Str =
-  if str-byte-length(flag) > 0 -> flag
-   | else ->
-    match (getenv("CC"))
-      | Some(s) ->
-        if str-byte-length(s) > 0 -> s
-         | else -> chosen-cc-menard()
-      | None -> chosen-cc-menard()
+  cond
+    | str-byte-length(flag) > 0 -> flag
+    | else ->
+      match (getenv("CC"))
+        | Some(s) ->
+          if (str-byte-length(s) > 0) -> s | chosen-cc-menard()
+        | None -> chosen-cc-menard()
 
 let chosen-runtime(flag: Str) -> Str =
-  if str-byte-length(flag) > 0 -> flag
-   | else -> recorded-runtime()
+  if (str-byte-length(flag) > 0) -> flag | recorded-runtime()
 
 let last-slash-from(s: Str, i: Int, last: Int, n: Int) -> Int =
-  if i >= n -> last
-   | str-byte(s, i) == 47 -> last-slash-from(s, i + 1, i + 1, n)
-   | else -> last-slash-from(s, i + 1, last, n)
+  cond
+    | i >= n -> last
+    | str-byte(s, i) == 47 -> last-slash-from(s, i + 1, i + 1, n)
+    | else -> last-slash-from(s, i + 1, last, n)
 
 let basename(s: Str) -> Str {
   let n = str-byte-length(s)
@@ -502,8 +501,7 @@ let basename(s: Str) -> Str {
 
 let stem-of(file: Str) -> Str {
   let b = basename(file)
-  if ends-with(b, ".mnd") -> str-slice(b, 0, str-byte-length(b) - 4)
-   | else -> b
+  if (ends-with(b, ".mnd")) -> str-slice(b, 0, str-byte-length(b) - 4) | b
 }
 
 let default-bin(file: Str) -> Str =
@@ -526,19 +524,20 @@ let link-rename(cc: Str, runtime: Str, bc: Str, link-out: Str, bin: Str) -> Unit
     | Ok(st) ->
       {
         let code = status-exit-code(st)
-        if code == 0 ->
-          match (rename(link-out, bin))
-            | Ok(_) -> ()
-            | Err(_) ->
-              {
-                write-line(2, str-concat("error: cannot rename ", bin))
-                exit(2)
-              }
-         | else -> exit(code)
+        cond
+          | code == 0 ->
+            match (rename(link-out, bin))
+              | Ok(_) -> ()
+              | Err(_) ->
+                {
+                  write-line(2, str-concat("error: cannot rename ", bin))
+                  exit(2)
+                }
+          | else -> exit(code)
       }
 
 let run-built(bin: Str) -> Unit =
-  match (spawn(Cons(bin, prog-args())))
+  match (spawn(bin :: prog-args()))
     | Err(_) -> fail-spawn(bin)
     | Ok(st) -> exit(status-exit-code(st))
 
@@ -553,12 +552,13 @@ let accept-build(cc: Str, runtime: Str, bin: Str, and-run: Bool, forms: List Ast
         | Ok(_) ->
           {
             link-rename(cc, runtime, bc, link-out, bin)
-            if and-run -> run-built(bin)
-             | else ->
-              {
-                write-line(2, str-concat("wrote ", bin))
-                exit(0)
-              }
+            cond
+              | and-run -> run-built(bin)
+              | else ->
+                {
+                  write-line(2, str-concat("wrote ", bin))
+                  exit(0)
+                }
           }
 }
 
@@ -567,31 +567,30 @@ let run-build(file: Str, cc: Str, runtime: Str, bin: Str, and-run: Bool, dump-af
 
 ; Visible PATH search. The driver does not call this for `cc`.
 let path-dir-end(s: Str, i: Int, n: Int) -> Int =
-  if i >= n -> n
-   | str-byte(s, i) == 58 -> i
-   | else -> path-dir-end(s, i + 1, n)
+  cond
+    | i >= n -> n
+    | str-byte(s, i) == 58 -> i
+    | else -> path-dir-end(s, i + 1, n)
 
 let probe-dir(dir: Str, name: Str) -> Maybe Str {
   let candidate =
-    if str-byte-length(dir) == 0 -> name
-     | else -> str-concat(dir, "/", name)
-  if exists(candidate) -> Some(candidate)
-   | else -> None()
+    if (str-byte-length(dir) == 0) -> name | str-concat(dir, "/", name)
+  if (exists(candidate)) -> Some(candidate) | None()
 }
 
 let search-path(path: Str, name: Str, i: Int) -> Maybe Str {
   let n = str-byte-length(path)
-  if i > n -> None()
-   | else ->
-    {
-      let end = path-dir-end(path, i, n)
-      let dir = str-slice(path, i, end - i)
-      match (probe-dir(dir, name))
-        | Some(c) -> Some(c)
-        | None ->
-          if end >= n -> None()
-           | else -> search-path(path, name, end + 1)
-    }
+  cond
+    | i > n -> None()
+    | else ->
+      {
+        let end = path-dir-end(path, i, n)
+        let dir = str-slice(path, i, end - i)
+        match (probe-dir(dir, name))
+          | Some(c) -> Some(c)
+          | None ->
+            if (end >= n) -> None() | search-path(path, name, end + 1)
+      }
 }
 
 let find-on-path(name: Str) -> Maybe Str =
@@ -611,38 +610,38 @@ let bun-on-path() -> Str =
 let chosen-bun() -> Str =
   match (getenv("MENARD_BUN"))
     | Some(s) ->
-      if str-byte-length(s) > 0 -> s
-       | else -> bun-on-path()
+      if (str-byte-length(s) > 0) -> s | bun-on-path()
     | None -> bun-on-path()
 
 let append-strs(a: List Str, b: List Str) -> List Str =
   match (a)
     | [] -> b
-    | Cons(h, t) -> Cons(h, append-strs(t, b))
+    | h :: t -> h :: append-strs(t, b)
 
 let inter-tail(file: Str, show: Bool, args: List Str) -> List Str {
   let head =
-    if show -> ["--show-result", file]
-     | else -> [file]
+    if (show) -> ["--show-result", file] | [file]
   match (args)
     | [] -> head
-    | _ -> append-strs(head, Cons("--", args))
+    | _ -> append-strs(head, "--" :: args)
 }
 
 let inter-argv(bun: Str, file: Str, show: Bool, args: List Str) -> List Str =
-  Cons(bun, Cons("run", Cons("host/src/cli/menard.ts", Cons("run", inter-tail(file, show, args)))))
+  bun :: "run" :: "host/src/cli/menard.ts" :: "run" :: inter-tail(file, show, args)
 
 let run-inter(file: Str) -> Unit =
-  if exists(file) ->
-    {
-      let bun = chosen-bun()
-      if str-byte-length(bun) == 0 -> fail-spawn("bun")
-       | else ->
-        match (spawn(inter-argv(bun, file, has-show-result(), prog-args())))
-          | Err(_) -> fail-spawn(bun)
-          | Ok(st) -> exit(status-exit-code(st))
-    }
-   | else -> fail-cannot-read(file)
+  cond
+    | exists(file) ->
+      {
+        let bun = chosen-bun()
+        cond
+          | str-byte-length(bun) == 0 -> fail-spawn("bun")
+          | else ->
+            match (spawn(inter-argv(bun, file, has-show-result(), prog-args())))
+              | Err(_) -> fail-spawn(bun)
+              | Ok(st) -> exit(status-exit-code(st))
+      }
+    | else -> fail-cannot-read(file)
 
 ; ---------------------------------------------------------------------------
 ; Dispatch
@@ -651,84 +650,80 @@ let run-inter(file: Str) -> Unit =
 ; reuse a fresh interface instead of parsing it again. `emit` stays a
 ; single flat bitcode file so the fixed-point gate can compare bytes.
 let run-cached(file: Str, bin: Str, do-link: Bool, and-run: Bool) -> Unit =
-  if exists(file) -> run-cached-existing(file, bin, do-link, and-run)
-   | else -> fail-cannot-read(file)
+  if (exists(file)) -> run-cached-existing(file, bin, do-link, and-run) | fail-cannot-read(file)
 
 let run-cached-existing(file: Str, bin: Str, do-link: Bool, and-run: Bool) -> Unit {
   let cc = chosen-cc(opt("--cc"))
   let runtime = chosen-runtime(opt("--runtime"))
   match (build-program(file, has-clean(), false, cc, runtime, bin, do-link, has-quiet()))
     | Ok(out) ->
-      if and-run -> run-built(out)
-       | do-link ->
-        {
-          write-line(2, str-concat("wrote ", out))
-          exit(0)
-        }
-       | else -> exit(0)
+      cond
+        | and-run -> run-built(out)
+        | do-link ->
+          {
+            write-line(2, str-concat("wrote ", out))
+            exit(0)
+          }
+        | else -> exit(0)
     | Err(msg) ->
       {
-        if str-byte-length(msg) > 0 -> write-line(2, str-concat("error: ", msg))
+        if (str-byte-length(msg) > 0) -> write-line(2, str-concat("error: ", msg))
         exit(1)
       }
 }
 
 let dispatch(mode: Str, file: Str, has-out: Bool, out: Str, bin: Str, dump-after-reader: Bool, dump-after-desugar: Bool, dump-after-type: Bool, dump-after-close: Bool, dump-after-root: Bool, dump-after-derive: Bool) -> Unit =
-  if mode == "check" ->
-    if dump-after-reader || dump-after-desugar || dump-after-type || dump-after-close || dump-after-root || dump-after-derive -> run-check(file, dump-after-reader, dump-after-desugar, dump-after-type, dump-after-close, dump-after-root, dump-after-derive)
-     | else -> run-cached(file, "", false, false)
-   | mode == "emit" -> run-emit(file, has-out, out, dump-after-reader, dump-after-desugar, dump-after-type, dump-after-close, dump-after-root, dump-after-derive)
-   | mode == "build" -> run-cached(file, bin, true, false)
-   | mode == "run" ->
-    run-cached(
-      file,
-      if explicit-out() -> bin
-       | else -> cache-bin(canonical-path(file)),
-      true,
-      true
-    )
-   | mode == "test" ->
-    exit(
-      run-suite(
-        if str-byte-length(file) > 0 -> file
-         | else -> ".",
-        has-clean(),
-        has-verbose(),
-        has-quiet(),
-        chosen-cc(opt("--cc")),
-        chosen-runtime(opt("--runtime"))
+  cond
+    | mode == "check" ->
+      if (dump-after-reader || dump-after-desugar || dump-after-type || dump-after-close || dump-after-root || dump-after-derive) -> run-check(file, dump-after-reader, dump-after-desugar, dump-after-type, dump-after-close, dump-after-root, dump-after-derive) | run-cached(file, "", false, false)
+    | mode == "emit" -> run-emit(file, has-out, out, dump-after-reader, dump-after-desugar, dump-after-type, dump-after-close, dump-after-root, dump-after-derive)
+    | mode == "build" -> run-cached(file, bin, true, false)
+    | mode == "run" ->
+      run-cached(
+        file,
+        if (explicit-out()) -> bin | cache-bin(canonical-path(file)),
+        true,
+        true
       )
-    )
-   | mode == "inter" -> run-inter(file)
-   | else -> usage()
+    | mode == "test" ->
+      exit(
+        run-suite(
+          if (str-byte-length(file) > 0) -> file | ".",
+          has-clean(),
+          has-verbose(),
+          has-quiet(),
+          chosen-cc(opt("--cc")),
+          chosen-runtime(opt("--runtime"))
+        )
+      )
+    | mode == "inter" -> run-inter(file)
+    | else -> usage()
 
 let main() -> Unit {
   let n = positional-count()
   let mode0 = positional-arg(0)
-  if n >= 2 || n == 1 && mode0 == "test" ->
-    {
-      let mode = mode0
-      let file =
-        if n >= 2 -> positional-arg(1)
-         | else -> ""
-      let o-flag = opt("-o")
-      let bin =
-        if str-byte-length(o-flag) > 0 -> o-flag
-         | else -> default-bin(file)
-      dispatch(
-        mode,
-        file,
-        n >= 3,
-        if n >= 3 -> positional-arg(2)
-         | else -> "",
-        bin,
-        has-dump-after-reader(),
-        has-dump-after-desugar(),
-        has-dump-after-type(),
-        has-dump-after-close(),
-        has-dump-after-root(),
-        has-dump-after-derive()
-      )
-    }
-   | else -> usage()
+  cond
+    | n >= 2 || n == 1 && mode0 == "test" ->
+      {
+        let mode = mode0
+        let file =
+          if (n >= 2) -> positional-arg(1) | ""
+        let o-flag = opt("-o")
+        let bin =
+          if (str-byte-length(o-flag) > 0) -> o-flag | default-bin(file)
+        dispatch(
+          mode,
+          file,
+          n >= 3,
+          if (n >= 3) -> positional-arg(2) | "",
+          bin,
+          has-dump-after-reader(),
+          has-dump-after-desugar(),
+          has-dump-after-type(),
+          has-dump-after-close(),
+          has-dump-after-root(),
+          has-dump-after-derive()
+        )
+      }
+    | else -> usage()
 }

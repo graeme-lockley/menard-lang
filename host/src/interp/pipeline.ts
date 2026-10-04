@@ -97,12 +97,16 @@ function diagnoseModules(
   for (const p of loaded.graph.order) {
     const mod = loaded.graph.modules.get(p)!;
     const imports: ImportBundle[] = [];
+    const qualified: { alias: string; bundle: ImportBundle }[] = [];
     for (const imp of mod.imports) {
-      const b = bundles.get(imp);
-      if (b) imports.push(b);
+      const b = bundles.get(imp.path);
+      if (!b) continue;
+      if (imp.alias) qualified.push({ alias: imp.alias, bundle: b });
+      else imports.push(b);
     }
     const typed = typecheckForms(mod.forms, {
       imports,
+      qualified,
       exports: mod.exports,
     });
     allDiags.push(...typed.diagnostics);
@@ -184,8 +188,11 @@ function runModules(src: Uint8Array, path: string, host: Host): RunResult {
     const mod = loaded.graph.modules.get(p)!;
     const importBindings = new Map<string, Value>();
     for (const imp of mod.imports) {
-      const ex = exportVals.get(imp);
-      if (ex) {
+      const ex = exportVals.get(imp.path);
+      if (!ex) continue;
+      if (imp.alias) {
+        importBindings.set(imp.alias, { tag: "module", exports: ex });
+      } else {
         for (const [k, v] of ex) importBindings.set(k, v);
       }
     }

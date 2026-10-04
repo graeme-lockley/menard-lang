@@ -108,21 +108,18 @@ pub let wrapper-magic-byte-3 = 11
 ; was one call per bit on every bitstream write.
 let pow2(n: Int) -> Int =
   loop (i = 0, acc = 1)
-    if i >= n -> acc
-     | else -> recur(i + 1, acc * 2)
+    if (i >= n) -> acc | recur(i + 1, acc * 2)
 
 let int-list-length(xs: List Int) -> Int =
   match (xs)
     | [] -> 0
-    | Cons(_, rest) -> 1 + int-list-length(rest)
+    | _ :: rest -> 1 + int-list-length(rest)
 
 let max-int(a: Int, b: Int) -> Int =
-  if a > b -> a
-   | else -> b
+  if (a > b) -> a | b
 
 let str-byte-ops-from(s: Str, i: Int, n: Int) -> List Int =
-  if i >= n -> []
-   | else -> Cons(str-byte(s, i), str-byte-ops-from(s, i + 1, n))
+  if (i >= n) -> [] | str-byte(s, i) :: str-byte-ops-from(s, i + 1, n)
 
 ; A Str's bytes as a `(List Int)` — how a record's inline name operands
 ; (`vst-code-entry`, below) are built from a function's literal name.
@@ -159,14 +156,15 @@ let bitsink-new() -> BitSink =
 ; The field walker is the hot path: matching `BitSink` once, then
 ; touching the refs directly, instead of re-matching on every deref.
 let bitsink-flush-fields!(buf: StringBuffer, pending: Ref Int, pending-bits: Ref Int) -> Unit =
-  if deref(pending-bits) >= 8 ->
-    {
-      let p = deref(pending)
-      sb-append-byte!(buf, p % 256)
-      set!(pending, p / 256)
-      set!(pending-bits, deref(pending-bits) - 8)
-      bitsink-flush-fields!(buf, pending, pending-bits)
-    }
+  cond
+    | deref(pending-bits) >= 8 ->
+      {
+        let p = deref(pending)
+        sb-append-byte!(buf, p % 256)
+        set!(pending, p / 256)
+        set!(pending-bits, deref(pending-bits) - 8)
+        bitsink-flush-fields!(buf, pending, pending-bits)
+      }
 
 let bitsink-flush!(s: BitSink) -> Unit =
   match (s)
@@ -180,27 +178,29 @@ let bitsink-flush!(s: BitSink) -> Unit =
 let bitsink-write-fixed!(s: BitSink, value: Int, width: Int) -> Unit =
   match (s)
     | BitSink(buf, pending, pending-bits) ->
-      if width == 0 -> ()
-       | else ->
-        {
-          let shift = deref(pending-bits)
-          let p = deref(pending)
-          set!(pending, p + value * pow2(shift))
-          set!(pending-bits, shift + width)
-          bitsink-flush-fields!(buf, pending, pending-bits)
-        }
+      cond
+        | width == 0 -> ()
+        | else ->
+          {
+            let shift = deref(pending-bits)
+            let p = deref(pending)
+            set!(pending, p + value * pow2(shift))
+            set!(pending-bits, shift + width)
+            bitsink-flush-fields!(buf, pending, pending-bits)
+          }
 
 ; VBR(width): `value` split into (width-1)-bit chunks, least-significant
 ; chunk first, each chunk's high bit set iff another chunk follows.
 let bitsink-write-vbr-chunks!(s: BitSink, value: Int, cont-bit: Int, width: Int) -> Unit {
   let chunk = value % cont-bit
   let rest = value / cont-bit
-  if rest == 0 -> bitsink-write-fixed!(s, chunk, width)
-   | else ->
-    {
-      bitsink-write-fixed!(s, chunk + cont-bit, width)
-      bitsink-write-vbr-chunks!(s, rest, cont-bit, width)
-    }
+  cond
+    | rest == 0 -> bitsink-write-fixed!(s, chunk, width)
+    | else ->
+      {
+        bitsink-write-fixed!(s, chunk + cont-bit, width)
+        bitsink-write-vbr-chunks!(s, rest, cont-bit, width)
+      }
 }
 
 let bitsink-write-vbr!(s: BitSink, value: Int, width: Int) -> Unit =
@@ -214,8 +214,7 @@ let bitsink-total-bits(s: BitSink) -> Int =
 ; header comment on why that makes backpatching unnecessary.
 let bitsink-align32!(s: BitSink) -> Unit {
   let rem = bitsink-total-bits(s) % 32
-  if rem == 0 -> ()
-   | else -> bitsink-write-fixed!(s, 0, 32 - rem)
+  if (rem == 0) -> () | bitsink-write-fixed!(s, 0, 32 - rem)
 }
 
 ; Append already byte-aligned bytes verbatim. Only ever called right
@@ -235,7 +234,7 @@ let bitsink-finish!(s: BitSink) -> Str =
 let write-record-ops!(s: BitSink, ops: List Int) -> Unit =
   match (ops)
     | [] -> ()
-    | Cons(op, rest) ->
+    | op :: rest ->
       {
         bitsink-write-vbr!(s, op, 6)
         write-record-ops!(s, rest)
@@ -405,28 +404,28 @@ let ty-str-array-idx(ma: Int, i: Int) -> Int =
   ty-panic-at-sig-idx(ma) + i + 1
 
 let i64-param-types(n: Int) -> List Int =
-  if n <= 0 -> []
-   | else -> Cons(ty-i64, i64-param-types(n - 1))
+  if (n <= 0) -> [] | ty-i64 :: i64-param-types(n - 1)
 
 let write-func-types!(t: BitSink, arity: Int, ma: Int) -> Unit =
-  if arity > ma -> ()
-   | else ->
-    {
-      write-record!(t, type-code-function, Cons(0, Cons(ty-i64, i64-param-types(arity))))
-      write-func-types!(t, arity + 1, ma)
-    }
+  cond
+    | arity > ma -> ()
+    | else ->
+      {
+        write-record!(t, type-code-function, 0 :: ty-i64 :: i64-param-types(arity))
+        write-func-types!(t, arity + 1, ma)
+      }
 
 ; One `[len x i8]` array type per string in `globals`, in order — see
 ; header comment's trailing "then one ... array type per string global".
 let str-lengths(globals: List Str) -> List Int =
   match (globals)
     | [] -> []
-    | Cons(g, rest) -> Cons(str-byte-length(g), str-lengths(rest))
+    | g :: rest -> str-byte-length(g) :: str-lengths(rest)
 
 let write-array-types!(t: BitSink, ma: Int, lens: List Int) -> Unit =
   match (lens)
     | [] -> ()
-    | Cons(len, rest) ->
+    | len :: rest ->
       {
         write-record!(t, type-code-array, [len, ty-i8-idx(ma)])
         write-array-types!(t, ma, rest)
@@ -467,11 +466,10 @@ let write-types!(t: BitSink, ma: Int, globals: List Str) -> Unit {
 let write-function-decls!(m: BitSink, fs: List LFunc, ma: Int) -> Unit =
   match (fs)
     | [] -> ()
-    | Cons(f, rest) ->
+    | f :: rest ->
       {
         let ty =
-          if lfunc-is-main(f) -> main-type-idx(ma)
-           | else -> func-type-idx-for-arity(lfunc-nparams(f))
+          if (lfunc-is-main(f)) -> main-type-idx(ma) | func-type-idx-for-arity(lfunc-nparams(f))
         write-record!(m, module-code-function, [ty, 0, 0, 0, 0, 0, 0, 0])
         write-function-decls!(m, rest, ma)
       }
@@ -576,6 +574,7 @@ let write-extern-decls!(m: BitSink, ma: Int) -> Unit {
   write-extern-decl!(m, func-type-idx-for-arity(1))
   write-extern-decl!(m, func-type-idx-for-arity(2))
   write-extern-decl!(m, func-type-idx-for-arity(3))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
 }
 
  ; mn_slot_set
@@ -583,7 +582,7 @@ let write-extern-decls!(m: BitSink, ma: Int) -> Unit {
 let write-import-decls!(m: BitSink, imps: List Imp) -> Unit =
   match (imps)
     | [] -> ()
-    | Cons(Imp(_, _, ar), rest) ->
+    | Imp(_, _, ar) :: rest ->
       {
         write-extern-decl!(m, func-type-idx-for-arity(ar))
         write-import-decls!(m, rest)
@@ -592,21 +591,20 @@ let write-import-decls!(m: BitSink, imps: List Imp) -> Unit =
 let imp-length(imps: List Imp) -> Int =
   match (imps)
     | [] -> 0
-    | Cons(_, rest) -> 1 + imp-length(rest)
+    | _ :: rest -> 1 + imp-length(rest)
 
 let max-imp-arity(imps: List Imp, acc: Int) -> Int =
   match (imps)
     | [] -> acc
-    | Cons(Imp(_, _, ar), rest) ->
-      if ar > acc -> max-imp-arity(rest, ar)
-       | else -> max-imp-arity(rest, acc)
+    | Imp(_, _, ar) :: rest ->
+      if (ar > acc) -> max-imp-arity(rest, ar) | max-imp-arity(rest, acc)
 
 let write-import-vst!(v: BitSink, imps: List Imp, idx: Int) -> Unit =
   match (imps)
     | [] -> ()
-    | Cons(Imp(_, link, _), rest) ->
+    | Imp(_, link, _) :: rest ->
       {
-        write-record!(v, vst-code-entry, Cons(idx, str-byte-ops(link)))
+        write-record!(v, vst-code-entry, idx :: str-byte-ops(link))
         write-import-vst!(v, rest, idx + 1)
       }
 
@@ -646,7 +644,7 @@ let write-globalvar!(m: BitSink, ma: Int, i: Int, len: Int, init-base: Int) -> U
 let write-globalvars!(m: BitSink, ma: Int, lens: List Int, i: Int, init-base: Int) -> Unit =
   match (lens)
     | [] -> ()
-    | Cons(len, rest) ->
+    | len :: rest ->
       {
         write-globalvar!(m, ma, i, len, init-base)
         write-globalvars!(m, ma, rest, i + 1, init-base)
@@ -668,14 +666,13 @@ let write-globalvars!(m: BitSink, ma: Int, lens: List Int, i: Int, init-base: In
     ; `CST_CODE_STRING` record is rejected as "Invalid string record".
 let write-global-const!(c: BitSink, ma: Int, i: Int, s: Str) -> Unit {
   write-record!(c, cst-code-settype, [ty-str-array-idx(ma, i)])
-  if str-byte-length(s) == 0 -> write-record!(c, cst-code-null, [])
-   | else -> write-record!(c, cst-code-string, str-byte-ops(s))
+  if (str-byte-length(s) == 0) -> write-record!(c, cst-code-null, []) | write-record!(c, cst-code-string, str-byte-ops(s))
 }
 
 let write-global-consts!(c: BitSink, ma: Int, globals: List Str, i: Int) -> Unit =
   match (globals)
     | [] -> ()
-    | Cons(s, rest) ->
+    | s :: rest ->
       {
         write-global-const!(c, ma, i, s)
         write-global-consts!(c, ma, rest, i + 1)
@@ -689,8 +686,7 @@ let write-global-consts!(c: BitSink, ma: Int, globals: List Str, i: Int) -> Unit
 ; `IConstI32`); this module only ever writes the already-encoded integer
 ; it is handed.
 pub let encode-signed-i64(v: Int) -> Int =
-  if v >= 0 -> v * 2
-   | else -> -v * 2 + 1
+  if (v >= 0) -> v * 2 | -v * 2 + 1
 
 ; `SETTYPE ty; INTEGER encoded` (or `NULL` for the zero shortcut, exactly
 ; as slice 2A's single-constant writer used) — one function-local constant,
@@ -698,8 +694,7 @@ pub let encode-signed-i64(v: Int) -> Int =
 ; `llvm-ir.mnd`'s "Constants are interleaved" note).
 let write-const!(c: BitSink, ty: Int, encoded: Int) -> Unit {
   write-record!(c, cst-code-settype, [ty])
-  if encoded == 0 -> write-record!(c, cst-code-null, [])
-   | else -> write-record!(c, cst-code-integer, [encoded])
+  if (encoded == 0) -> write-record!(c, cst-code-null, []) | write-record!(c, cst-code-integer, [encoded])
 }
 
 ; `cc = 0` (ccc, spec §3.4's "C calling convention everywhere") with bit
@@ -710,7 +705,7 @@ let write-const!(c: BitSink, ty: Int, encoded: Int) -> Unit {
 let call-cc-info = 32768
 
 let write-call!(f: BitSink, callee-rel: Int, arg-rels: List Int) -> Unit =
-  write-record!(f, func-code-inst-call, Cons(0, Cons(call-cc-info, Cons(func-type-idx-for-arity(int-list-length(arg-rels)), Cons(callee-rel, arg-rels)))))
+  write-record!(f, func-code-inst-call, 0 :: call-cc-info :: func-type-idx-for-arity(int-list-length(arg-rels)) :: callee-rel :: arg-rels)
 
 ; `println`/`print`/`write` lowering's void call — same record shape as
 ; `write-call!` (the format doesn't distinguish "produces a value" from
@@ -721,14 +716,15 @@ let write-call!(f: BitSink, callee-rel: Int, arg-rels: List Int) -> Unit =
 ; picks it) rather than a `(i64^n)->i64` family member.
 let write-call-void!(f: BitSink, ma: Int, kind: Int, callee-rel: Int, arg-rels: List Int) -> Unit {
   let fnty =
-    if kind == extern-kind-write -> ty-write-sig-idx(ma)
-     | kind == extern-kind-init -> ty-init-sig-idx(ma)
-     | kind == extern-kind-panic -> ty-panic-sig-idx(ma)
-     | kind == extern-kind-trace-push -> ty-write-sig-idx(ma)
-     | kind == extern-kind-trace-pop -> ty-pop-sig-idx(ma)
-     | kind == extern-kind-panic-at -> ty-panic-at-sig-idx(ma)
-     | else -> ty-print-sig-idx(ma)
-  write-record!(f, func-code-inst-call, Cons(0, Cons(call-cc-info, Cons(fnty, Cons(callee-rel, arg-rels)))))
+    cond
+      | kind == extern-kind-write -> ty-write-sig-idx(ma)
+      | kind == extern-kind-init -> ty-init-sig-idx(ma)
+      | kind == extern-kind-panic -> ty-panic-sig-idx(ma)
+      | kind == extern-kind-trace-push -> ty-write-sig-idx(ma)
+      | kind == extern-kind-trace-pop -> ty-pop-sig-idx(ma)
+      | kind == extern-kind-panic-at -> ty-panic-at-sig-idx(ma)
+      | else -> ty-print-sig-idx(ma)
+  write-record!(f, func-code-inst-call, 0 :: call-cc-info :: fnty :: callee-rel :: arg-rels)
 }
 
 ; One `Item` -> one record (or, for a constant, one tiny nested
@@ -755,7 +751,7 @@ let write-item!(f: BitSink, ma: Int, item: Item) -> Unit =
     | IStore(ptr, val) -> write-record!(f, func-code-inst-store, [ptr, val, 4, 0])
     | ILoad(ptr) -> write-record!(f, func-code-inst-load, [ptr, ty-i64, 4, 0])
     | IBr(bb) -> write-record!(f, func-code-inst-br, [bb])
-    | ICondBr(t, e, cond) -> write-record!(f, func-code-inst-br, [t, e, cond])
+    | ICondBr(t, e, pred) -> write-record!(f, func-code-inst-br, [t, e, pred])
     | ICall(callee, args) -> write-call!(f, callee, args)
     | ICallVoid(kind, callee, args) -> write-call-void!(f, ma, kind, callee, args)
     | IRet(val) -> write-record!(f, func-code-inst-ret, [val])
@@ -764,7 +760,7 @@ let write-item!(f: BitSink, ma: Int, item: Item) -> Unit =
 let write-items!(f: BitSink, ma: Int, items: List Item) -> Unit =
   match (items)
     | [] -> ()
-    | Cons(it, rest) ->
+    | it :: rest ->
       {
         write-item!(f, ma, it)
         write-items!(f, ma, rest)
@@ -785,7 +781,7 @@ let write-function-body!(f: BitSink, ma: Int, lf: LFunc) -> Unit {
 let write-function-bodies!(m: BitSink, ma: Int, fs: List LFunc) -> Unit =
   match (fs)
     | [] -> ()
-    | Cons(f, rest) ->
+    | f :: rest ->
       {
         enter-subblock!(m, function-block-id, fn (fb) = write-function-body!(fb, ma, f))
         write-function-bodies!(m, ma, rest)
@@ -799,9 +795,9 @@ let write-function-bodies!(m: BitSink, ma: Int, fs: List LFunc) -> Unit =
 let write-vst-entries!(v: BitSink, fs: List LFunc, idx: Int) -> Unit =
   match (fs)
     | [] -> ()
-    | Cons(f, rest) ->
+    | f :: rest ->
       {
-        write-record!(v, vst-code-entry, Cons(idx, str-byte-ops(lfunc-name(f))))
+        write-record!(v, vst-code-entry, idx :: str-byte-ops(lfunc-name(f)))
         write-vst-entries!(v, rest, idx + 1)
       }
 
@@ -811,103 +807,104 @@ let write-vst-entries!(v: BitSink, fs: List LFunc, idx: Int) -> Unit =
 ; `mn_write_stdout`/`mn_print_i64`/`mn_write_stderr` C symbol
 ; (`runtime/src/print.c`) by exactly this name.
 let write-extern-vst-entries!(v: BitSink, num-strings: Int) -> Unit {
-  write-record!(v, vst-code-entry, Cons(extern-write-stdout-abs(num-strings), str-byte-ops("mn_write_stdout")))
-  write-record!(v, vst-code-entry, Cons(extern-print-i64-abs(num-strings), str-byte-ops("mn_print_i64")))
-  write-record!(v, vst-code-entry, Cons(extern-write-stderr-abs(num-strings), str-byte-ops("mn_write_stderr")))
-  write-record!(v, vst-code-entry, Cons(extern-alloc-abs(num-strings), str-byte-ops("mn_alloc")))
-  write-record!(v, vst-code-entry, Cons(extern-nil-abs(num-strings), str-byte-ops("mn_nil")))
-  write-record!(v, vst-code-entry, Cons(extern-cons-abs(num-strings), str-byte-ops("mn_cons")))
-  write-record!(v, vst-code-entry, Cons(extern-none-abs(num-strings), str-byte-ops("mn_none")))
-  write-record!(v, vst-code-entry, Cons(extern-some-abs(num-strings), str-byte-ops("mn_some")))
-  write-record!(v, vst-code-entry, Cons(extern-ok-abs(num-strings), str-byte-ops("mn_ok")))
-  write-record!(v, vst-code-entry, Cons(extern-err-abs(num-strings), str-byte-ops("mn_err")))
-  write-record!(v, vst-code-entry, Cons(extern-tag-abs(num-strings), str-byte-ops("mn_tag")))
-  write-record!(v, vst-code-entry, Cons(extern-slot-abs(num-strings), str-byte-ops("mn_slot")))
-  write-record!(v, vst-code-entry, Cons(extern-print-str-abs(num-strings), str-byte-ops("mn_print_str")))
-  write-record!(v, vst-code-entry, Cons(extern-str-new-abs(num-strings), str-byte-ops("mn_str_new")))
-  write-record!(v, vst-code-entry, Cons(extern-str-concat-abs(num-strings), str-byte-ops("mn_str_concat")))
-  write-record!(v, vst-code-entry, Cons(extern-str-byte-length-abs(num-strings), str-byte-ops("mn_str_byte_length")))
-  write-record!(v, vst-code-entry, Cons(extern-str-byte-abs(num-strings), str-byte-ops("mn_str_byte")))
-  write-record!(v, vst-code-entry, Cons(extern-str-slice-abs(num-strings), str-byte-ops("mn_str_slice")))
-  write-record!(v, vst-code-entry, Cons(extern-ref-new-abs(num-strings), str-byte-ops("mn_ref_new")))
-  write-record!(v, vst-code-entry, Cons(extern-ref-deref-abs(num-strings), str-byte-ops("mn_ref_deref")))
-  write-record!(v, vst-code-entry, Cons(extern-ref-set-abs(num-strings), str-byte-ops("mn_ref_set")))
-  write-record!(v, vst-code-entry, Cons(extern-sb-new-abs(num-strings), str-byte-ops("mn_sb_new")))
-  write-record!(v, vst-code-entry, Cons(extern-sb-append-abs(num-strings), str-byte-ops("mn_sb_append")))
-  write-record!(v, vst-code-entry, Cons(extern-sb-append-byte-abs(num-strings), str-byte-ops("mn_sb_append_byte")))
-  write-record!(v, vst-code-entry, Cons(extern-sb-take-str-abs(num-strings), str-byte-ops("mn_sb_take_str")))
-  write-record!(v, vst-code-entry, Cons(extern-map-new-abs(num-strings), str-byte-ops("mn_map_new")))
-  write-record!(v, vst-code-entry, Cons(extern-map-set-abs(num-strings), str-byte-ops("mn_map_set")))
-  write-record!(v, vst-code-entry, Cons(extern-map-get-abs(num-strings), str-byte-ops("mn_map_get")))
-  write-record!(v, vst-code-entry, Cons(extern-map-has-abs(num-strings), str-byte-ops("mn_map_has")))
-  write-record!(v, vst-code-entry, Cons(extern-map-size-abs(num-strings), str-byte-ops("mn_map_size")))
-  write-record!(v, vst-code-entry, Cons(extern-env-0-abs(num-strings), str-byte-ops("mn_env_0")))
-  write-record!(v, vst-code-entry, Cons(extern-env-1-abs(num-strings), str-byte-ops("mn_env_1")))
-  write-record!(v, vst-code-entry, Cons(extern-env-get-abs(num-strings), str-byte-ops("mn_env_get")))
-  write-record!(v, vst-code-entry, Cons(extern-closure-new-abs(num-strings), str-byte-ops("mn_closure_new")))
-  write-record!(v, vst-code-entry, Cons(extern-apply-1-abs(num-strings), str-byte-ops("mn_apply_1")))
-  write-record!(v, vst-code-entry, Cons(extern-init-abs(num-strings), str-byte-ops("mn_init")))
-  write-record!(v, vst-code-entry, Cons(extern-arg-count-abs(num-strings), str-byte-ops("mn_arg_count")))
-  write-record!(v, vst-code-entry, Cons(extern-arg-abs(num-strings), str-byte-ops("mn_arg")))
-  write-record!(v, vst-code-entry, Cons(extern-read-file-abs(num-strings), str-byte-ops("mn_read_file")))
-  write-record!(v, vst-code-entry, Cons(extern-write-file-abs(num-strings), str-byte-ops("mn_write_file")))
-  write-record!(v, vst-code-entry, Cons(extern-exit-abs(num-strings), str-byte-ops("mn_exit")))
-  write-record!(v, vst-code-entry, Cons(extern-new-abs(num-strings), str-byte-ops("mn_new")))
-  write-record!(v, vst-code-entry, Cons(extern-set-slot-abs(num-strings), str-byte-ops("mn_set_slot")))
-  write-record!(v, vst-code-entry, Cons(extern-apply-0-abs(num-strings), str-byte-ops("mn_apply_0")))
-  write-record!(v, vst-code-entry, Cons(extern-apply-2-abs(num-strings), str-byte-ops("mn_apply_2")))
-  write-record!(v, vst-code-entry, Cons(extern-closure-bare-abs(num-strings), str-byte-ops("mn_closure_bare")))
-  write-record!(v, vst-code-entry, Cons(extern-ctor-closure-abs(num-strings), str-byte-ops("mn_ctor_closure")))
-  write-record!(v, vst-code-entry, Cons(extern-show-abs(num-strings), str-byte-ops("mn_show")))
-  write-record!(v, vst-code-entry, Cons(extern-env-new-abs(num-strings), str-byte-ops("mn_env_new")))
-  write-record!(v, vst-code-entry, Cons(extern-env-set-abs(num-strings), str-byte-ops("mn_env_set")))
-  write-record!(v, vst-code-entry, Cons(extern-equal-abs(num-strings), str-byte-ops("mn_equal")))
-  write-record!(v, vst-code-entry, Cons(extern-compare-abs(num-strings), str-byte-ops("mn_compare")))
-  write-record!(v, vst-code-entry, Cons(extern-write-abs(num-strings), str-byte-ops("mn_write")))
-  write-record!(v, vst-code-entry, Cons(extern-sb-length-abs(num-strings), str-byte-ops("mn_sb_length")))
-  write-record!(v, vst-code-entry, Cons(extern-dump-abs(num-strings), str-byte-ops("mn_dump")))
-  write-record!(v, vst-code-entry, Cons(extern-spawn-abs(num-strings), str-byte-ops("mn_spawn")))
-  write-record!(v, vst-code-entry, Cons(extern-getenv-abs(num-strings), str-byte-ops("mn_getenv")))
-  write-record!(v, vst-code-entry, Cons(extern-exists-abs(num-strings), str-byte-ops("mn_exists")))
-  write-record!(v, vst-code-entry, Cons(extern-rename-abs(num-strings), str-byte-ops("mn_rename")))
-  write-record!(v, vst-code-entry, Cons(extern-root-keep-abs(num-strings), str-byte-ops("mn_root_keep")))
-  write-record!(v, vst-code-entry, Cons(extern-root-get-abs(num-strings), str-byte-ops("mn_root_get")))
-  write-record!(v, vst-code-entry, Cons(extern-root-save-abs(num-strings), str-byte-ops("mn_root_save")))
-  write-record!(v, vst-code-entry, Cons(extern-root-restore-abs(num-strings), str-byte-ops("mn_root_restore")))
-  write-record!(v, vst-code-entry, Cons(extern-root-push-abs(num-strings), str-byte-ops("mn_root_push")))
-  write-record!(v, vst-code-entry, Cons(extern-float-from-str-abs(num-strings), str-byte-ops("mn_float_from_str")))
-  write-record!(v, vst-code-entry, Cons(extern-fadd-abs(num-strings), str-byte-ops("mn_fadd")))
-  write-record!(v, vst-code-entry, Cons(extern-fsub-abs(num-strings), str-byte-ops("mn_fsub")))
-  write-record!(v, vst-code-entry, Cons(extern-fmul-abs(num-strings), str-byte-ops("mn_fmul")))
-  write-record!(v, vst-code-entry, Cons(extern-fdiv-abs(num-strings), str-byte-ops("mn_fdiv")))
-  write-record!(v, vst-code-entry, Cons(extern-spawn-capture-abs(num-strings), str-byte-ops("mn_spawn_capture")))
-  write-record!(v, vst-code-entry, Cons(extern-panic-abs(num-strings), str-byte-ops("mn_panic")))
-  write-record!(v, vst-code-entry, Cons(extern-trace-push-abs(num-strings), str-byte-ops("mn_trace_push")))
-  write-record!(v, vst-code-entry, Cons(extern-trace-pop-abs(num-strings), str-byte-ops("mn_trace_pop")))
-  write-record!(v, vst-code-entry, Cons(extern-panic-at-abs(num-strings), str-byte-ops("mn_panic_at")))
-  write-record!(v, vst-code-entry, Cons(extern-isatty-abs(num-strings), str-byte-ops("mn_isatty")))
-  write-record!(v, vst-code-entry, Cons(extern-mtime-abs(num-strings), str-byte-ops("mn_mtime")))
-  write-record!(v, vst-code-entry, Cons(extern-cwd-abs(num-strings), str-byte-ops("mn_cwd")))
-  write-record!(v, vst-code-entry, Cons(extern-ensure-dir-abs(num-strings), str-byte-ops("mn_ensure_dir")))
-  write-record!(v, vst-code-entry, Cons(extern-list-dir-abs(num-strings), str-byte-ops("mn_list_dir")))
-  write-record!(v, vst-code-entry, Cons(extern-realpath-abs(num-strings), str-byte-ops("mn_realpath")))
-  write-record!(v, vst-code-entry, Cons(extern-now-ms-abs(num-strings), str-byte-ops("mn_now_ms")))
-  write-record!(v, vst-code-entry, Cons(extern-remove-abs(num-strings), str-byte-ops("mn_remove")))
-  write-record!(v, vst-code-entry, Cons(extern-is-dir-abs(num-strings), str-byte-ops("mn_is_dir")))
-  write-record!(v, vst-code-entry, Cons(extern-sb-to-str-abs(num-strings), str-byte-ops("mn_sb_to_str")))
-  write-record!(v, vst-code-entry, Cons(extern-slot-get-abs(num-strings), str-byte-ops("mn_slot_get")))
-  write-record!(v, vst-code-entry, Cons(extern-slot-set-abs(num-strings), str-byte-ops("mn_slot_set")))
+  write-record!(v, vst-code-entry, extern-write-stdout-abs(num-strings) :: str-byte-ops("mn_write_stdout"))
+  write-record!(v, vst-code-entry, extern-print-i64-abs(num-strings) :: str-byte-ops("mn_print_i64"))
+  write-record!(v, vst-code-entry, extern-write-stderr-abs(num-strings) :: str-byte-ops("mn_write_stderr"))
+  write-record!(v, vst-code-entry, extern-alloc-abs(num-strings) :: str-byte-ops("mn_alloc"))
+  write-record!(v, vst-code-entry, extern-nil-abs(num-strings) :: str-byte-ops("mn_nil"))
+  write-record!(v, vst-code-entry, extern-cons-abs(num-strings) :: str-byte-ops("mn_cons"))
+  write-record!(v, vst-code-entry, extern-none-abs(num-strings) :: str-byte-ops("mn_none"))
+  write-record!(v, vst-code-entry, extern-some-abs(num-strings) :: str-byte-ops("mn_some"))
+  write-record!(v, vst-code-entry, extern-ok-abs(num-strings) :: str-byte-ops("mn_ok"))
+  write-record!(v, vst-code-entry, extern-err-abs(num-strings) :: str-byte-ops("mn_err"))
+  write-record!(v, vst-code-entry, extern-tag-abs(num-strings) :: str-byte-ops("mn_tag"))
+  write-record!(v, vst-code-entry, extern-slot-abs(num-strings) :: str-byte-ops("mn_slot"))
+  write-record!(v, vst-code-entry, extern-print-str-abs(num-strings) :: str-byte-ops("mn_print_str"))
+  write-record!(v, vst-code-entry, extern-str-new-abs(num-strings) :: str-byte-ops("mn_str_new"))
+  write-record!(v, vst-code-entry, extern-str-concat-abs(num-strings) :: str-byte-ops("mn_str_concat"))
+  write-record!(v, vst-code-entry, extern-str-byte-length-abs(num-strings) :: str-byte-ops("mn_str_byte_length"))
+  write-record!(v, vst-code-entry, extern-str-byte-abs(num-strings) :: str-byte-ops("mn_str_byte"))
+  write-record!(v, vst-code-entry, extern-str-slice-abs(num-strings) :: str-byte-ops("mn_str_slice"))
+  write-record!(v, vst-code-entry, extern-ref-new-abs(num-strings) :: str-byte-ops("mn_ref_new"))
+  write-record!(v, vst-code-entry, extern-ref-deref-abs(num-strings) :: str-byte-ops("mn_ref_deref"))
+  write-record!(v, vst-code-entry, extern-ref-set-abs(num-strings) :: str-byte-ops("mn_ref_set"))
+  write-record!(v, vst-code-entry, extern-sb-new-abs(num-strings) :: str-byte-ops("mn_sb_new"))
+  write-record!(v, vst-code-entry, extern-sb-append-abs(num-strings) :: str-byte-ops("mn_sb_append"))
+  write-record!(v, vst-code-entry, extern-sb-append-byte-abs(num-strings) :: str-byte-ops("mn_sb_append_byte"))
+  write-record!(v, vst-code-entry, extern-sb-take-str-abs(num-strings) :: str-byte-ops("mn_sb_take_str"))
+  write-record!(v, vst-code-entry, extern-map-new-abs(num-strings) :: str-byte-ops("mn_map_new"))
+  write-record!(v, vst-code-entry, extern-map-set-abs(num-strings) :: str-byte-ops("mn_map_set"))
+  write-record!(v, vst-code-entry, extern-map-get-abs(num-strings) :: str-byte-ops("mn_map_get"))
+  write-record!(v, vst-code-entry, extern-map-has-abs(num-strings) :: str-byte-ops("mn_map_has"))
+  write-record!(v, vst-code-entry, extern-map-size-abs(num-strings) :: str-byte-ops("mn_map_size"))
+  write-record!(v, vst-code-entry, extern-env-0-abs(num-strings) :: str-byte-ops("mn_env_0"))
+  write-record!(v, vst-code-entry, extern-env-1-abs(num-strings) :: str-byte-ops("mn_env_1"))
+  write-record!(v, vst-code-entry, extern-env-get-abs(num-strings) :: str-byte-ops("mn_env_get"))
+  write-record!(v, vst-code-entry, extern-closure-new-abs(num-strings) :: str-byte-ops("mn_closure_new"))
+  write-record!(v, vst-code-entry, extern-apply-1-abs(num-strings) :: str-byte-ops("mn_apply_1"))
+  write-record!(v, vst-code-entry, extern-init-abs(num-strings) :: str-byte-ops("mn_init"))
+  write-record!(v, vst-code-entry, extern-arg-count-abs(num-strings) :: str-byte-ops("mn_arg_count"))
+  write-record!(v, vst-code-entry, extern-arg-abs(num-strings) :: str-byte-ops("mn_arg"))
+  write-record!(v, vst-code-entry, extern-read-file-abs(num-strings) :: str-byte-ops("mn_read_file"))
+  write-record!(v, vst-code-entry, extern-write-file-abs(num-strings) :: str-byte-ops("mn_write_file"))
+  write-record!(v, vst-code-entry, extern-exit-abs(num-strings) :: str-byte-ops("mn_exit"))
+  write-record!(v, vst-code-entry, extern-new-abs(num-strings) :: str-byte-ops("mn_new"))
+  write-record!(v, vst-code-entry, extern-set-slot-abs(num-strings) :: str-byte-ops("mn_set_slot"))
+  write-record!(v, vst-code-entry, extern-apply-0-abs(num-strings) :: str-byte-ops("mn_apply_0"))
+  write-record!(v, vst-code-entry, extern-apply-2-abs(num-strings) :: str-byte-ops("mn_apply_2"))
+  write-record!(v, vst-code-entry, extern-closure-bare-abs(num-strings) :: str-byte-ops("mn_closure_bare"))
+  write-record!(v, vst-code-entry, extern-ctor-closure-abs(num-strings) :: str-byte-ops("mn_ctor_closure"))
+  write-record!(v, vst-code-entry, extern-show-abs(num-strings) :: str-byte-ops("mn_show"))
+  write-record!(v, vst-code-entry, extern-env-new-abs(num-strings) :: str-byte-ops("mn_env_new"))
+  write-record!(v, vst-code-entry, extern-env-set-abs(num-strings) :: str-byte-ops("mn_env_set"))
+  write-record!(v, vst-code-entry, extern-equal-abs(num-strings) :: str-byte-ops("mn_equal"))
+  write-record!(v, vst-code-entry, extern-compare-abs(num-strings) :: str-byte-ops("mn_compare"))
+  write-record!(v, vst-code-entry, extern-write-abs(num-strings) :: str-byte-ops("mn_write"))
+  write-record!(v, vst-code-entry, extern-sb-length-abs(num-strings) :: str-byte-ops("mn_sb_length"))
+  write-record!(v, vst-code-entry, extern-dump-abs(num-strings) :: str-byte-ops("mn_dump"))
+  write-record!(v, vst-code-entry, extern-spawn-abs(num-strings) :: str-byte-ops("mn_spawn"))
+  write-record!(v, vst-code-entry, extern-getenv-abs(num-strings) :: str-byte-ops("mn_getenv"))
+  write-record!(v, vst-code-entry, extern-exists-abs(num-strings) :: str-byte-ops("mn_exists"))
+  write-record!(v, vst-code-entry, extern-rename-abs(num-strings) :: str-byte-ops("mn_rename"))
+  write-record!(v, vst-code-entry, extern-root-keep-abs(num-strings) :: str-byte-ops("mn_root_keep"))
+  write-record!(v, vst-code-entry, extern-root-get-abs(num-strings) :: str-byte-ops("mn_root_get"))
+  write-record!(v, vst-code-entry, extern-root-save-abs(num-strings) :: str-byte-ops("mn_root_save"))
+  write-record!(v, vst-code-entry, extern-root-restore-abs(num-strings) :: str-byte-ops("mn_root_restore"))
+  write-record!(v, vst-code-entry, extern-root-push-abs(num-strings) :: str-byte-ops("mn_root_push"))
+  write-record!(v, vst-code-entry, extern-float-from-str-abs(num-strings) :: str-byte-ops("mn_float_from_str"))
+  write-record!(v, vst-code-entry, extern-fadd-abs(num-strings) :: str-byte-ops("mn_fadd"))
+  write-record!(v, vst-code-entry, extern-fsub-abs(num-strings) :: str-byte-ops("mn_fsub"))
+  write-record!(v, vst-code-entry, extern-fmul-abs(num-strings) :: str-byte-ops("mn_fmul"))
+  write-record!(v, vst-code-entry, extern-fdiv-abs(num-strings) :: str-byte-ops("mn_fdiv"))
+  write-record!(v, vst-code-entry, extern-spawn-capture-abs(num-strings) :: str-byte-ops("mn_spawn_capture"))
+  write-record!(v, vst-code-entry, extern-panic-abs(num-strings) :: str-byte-ops("mn_panic"))
+  write-record!(v, vst-code-entry, extern-trace-push-abs(num-strings) :: str-byte-ops("mn_trace_push"))
+  write-record!(v, vst-code-entry, extern-trace-pop-abs(num-strings) :: str-byte-ops("mn_trace_pop"))
+  write-record!(v, vst-code-entry, extern-panic-at-abs(num-strings) :: str-byte-ops("mn_panic_at"))
+  write-record!(v, vst-code-entry, extern-isatty-abs(num-strings) :: str-byte-ops("mn_isatty"))
+  write-record!(v, vst-code-entry, extern-mtime-abs(num-strings) :: str-byte-ops("mn_mtime"))
+  write-record!(v, vst-code-entry, extern-cwd-abs(num-strings) :: str-byte-ops("mn_cwd"))
+  write-record!(v, vst-code-entry, extern-ensure-dir-abs(num-strings) :: str-byte-ops("mn_ensure_dir"))
+  write-record!(v, vst-code-entry, extern-list-dir-abs(num-strings) :: str-byte-ops("mn_list_dir"))
+  write-record!(v, vst-code-entry, extern-realpath-abs(num-strings) :: str-byte-ops("mn_realpath"))
+  write-record!(v, vst-code-entry, extern-now-ms-abs(num-strings) :: str-byte-ops("mn_now_ms"))
+  write-record!(v, vst-code-entry, extern-remove-abs(num-strings) :: str-byte-ops("mn_remove"))
+  write-record!(v, vst-code-entry, extern-is-dir-abs(num-strings) :: str-byte-ops("mn_is_dir"))
+  write-record!(v, vst-code-entry, extern-sb-to-str-abs(num-strings) :: str-byte-ops("mn_sb_to_str"))
+  write-record!(v, vst-code-entry, extern-slot-get-abs(num-strings) :: str-byte-ops("mn_slot_get"))
+  write-record!(v, vst-code-entry, extern-slot-set-abs(num-strings) :: str-byte-ops("mn_slot_set"))
+  write-record!(v, vst-code-entry, extern-map-keys-abs(num-strings) :: str-byte-ops("mn_map_keys"))
 }
 
 let lfunc-list-length(fs: List LFunc) -> Int =
   match (fs)
     | [] -> 0
-    | Cons(_, rest) -> 1 + lfunc-list-length(rest)
+    | _ :: rest -> 1 + lfunc-list-length(rest)
 
 let max-arity-of(fs: List LFunc) -> Int =
   match (fs)
     | [] -> 0
-    | Cons(f, rest) -> max-int(lfunc-nparams(f), max-arity-of(rest))
+    | f :: rest -> max-int(lfunc-nparams(f), max-arity-of(rest))
 
 ; ---------------------------------------------------------------------------
 ; Module value numbering, spelled out once (see `llvm-ir.mnd`'s header
@@ -923,8 +920,7 @@ let max-arity-of(fs: List LFunc) -> Int =
 ; missing or differs from the compiler it is linking with. An empty
 ; string leaves the record out (callers that cannot ask clang).
 let write-target-triple!(m: BitSink, triple: Str) -> Unit =
-  if str-byte-length(triple) == 0 -> ()
-   | else -> write-record!(m, module-code-triple, str-byte-ops(triple))
+  if (str-byte-length(triple) == 0) -> () | write-record!(m, module-code-triple, str-byte-ops(triple))
 
     ; Heap helpers need arities up to 3 (str-slice) even when user code is narrower.
 let write-module-body!(m: BitSink, mod: LlvmModule, triple: Str) -> Unit {
@@ -935,8 +931,7 @@ let write-module-body!(m: BitSink, mod: LlvmModule, triple: Str) -> Unit {
   let ma0 = max-arity-of(fs)
   let ma1 = max-imp-arity(imps, ma0)
   let ma =
-    if ma1 < 3 -> 3
-     | else -> ma1
+    if (ma1 < 3) -> 3 | ma1
   let ns = int-list-length(str-lengths(globals))
   write-record!(m, module-code-version, [1])
   write-target-triple!(m, triple)

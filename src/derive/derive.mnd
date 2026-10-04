@@ -64,19 +64,17 @@ let is-sym(ast: Ast, name: Str) -> Bool =
 let append-ast(xs: List Ast, ys: List Ast) -> List Ast =
   match (xs)
     | [] -> ys
-    | Cons(x, rest) -> Cons(x, append-ast(rest, ys))
+    | x :: rest -> x :: append-ast(rest, ys)
 
 let strip-colon(s: Str) -> Str {
   let n = str-byte-length(s)
-  if n > 0 && str-byte(s, n - 1) == 58 -> str-slice(s, 0, n - 1)
-   | else -> s
+  if (n > 0 && str-byte(s, n - 1) == 58) -> str-slice(s, 0, n - 1) | s
 }
 
 let unwrap-pub(ast: Ast) -> Ast =
   match (ast)
-    | ParenNode(Cons(head, rest), sp) ->
-      if is-sym(head, "pub") -> unwrap-pub(ParenNode(rest, sp))
-       | else -> ast
+    | ParenNode(head :: rest, sp) ->
+      if (is-sym(head, "pub")) -> unwrap-pub(ParenNode(rest, sp)) | ast
     | _ -> ast
 
 record DeriveCtor {
@@ -93,34 +91,34 @@ let dc-arity(c: DeriveCtor) -> Int =
     | DeriveCtor(_, a) -> a
 
 let binders(prefix: Str, n: Int, i: Int) -> List Str =
-  if i >= n -> []
-   | else -> Cons(str-concat(prefix, show(i)), binders(prefix, n, i + 1))
+  if (i >= n) -> [] | str-concat(prefix, show(i)) :: binders(prefix, n, i + 1)
 
 let syms-of(xs: List Str) -> List Ast =
   match (xs)
     | [] -> []
-    | Cons(h, rest) -> Cons(sy(h), syms-of(rest))
+    | h :: rest -> sy(h) :: syms-of(rest)
 
 let ctor-pat(c: DeriveCtor, prefix: Str) -> Ast =
-  paren(Cons(sy(dc-name(c)), syms-of(binders(prefix, dc-arity(c), 0))))
+  paren(sy(dc-name(c)) :: syms-of(binders(prefix, dc-arity(c), 0)))
 
 ; Flatten renames a private constructor to `__mN_Name` before derive runs.
 ; The match pattern keeps that name so it still matches the value. Only the
 ; characters inside `show` and `dump` use the name the source wrote.
 let source-ctor-name-digits(n: Str, i: Int, len: Int) -> Str =
-  if i >= len -> n
-   | else ->
-    {
-      let b = str-byte(n, i)
-      if b >= 48 && b <= 57 -> source-ctor-name-digits(n, i + 1, len)
-       | b == 95 -> str-slice(n, i + 1, len - (i + 1))
-       | else -> n
-    }
+  cond
+    | i >= len -> n
+    | else ->
+      {
+        let b = str-byte(n, i)
+        cond
+          | b >= 48 && b <= 57 -> source-ctor-name-digits(n, i + 1, len)
+          | b == 95 -> str-slice(n, i + 1, len - (i + 1))
+          | else -> n
+      }
 
 let source-ctor-name(n: Str) -> Str {
   let len = str-byte-length(n)
-  if len >= 4 && str-byte(n, 0) == 95 && str-byte(n, 1) == 95 && str-byte(n, 2) == 109 -> source-ctor-name-digits(n, 3, len)
-   | else -> n
+  if (len >= 4 && str-byte(n, 0) == 95 && str-byte(n, 1) == 95 && str-byte(n, 2) == 109) -> source-ctor-name-digits(n, 3, len) | n
 }
 
 let concat2(a: Ast, b: Ast) -> Ast =
@@ -133,34 +131,33 @@ let join-shown(fields: List Str) -> Ast =
   match (fields)
     | [] -> st("")
     | [f] -> show-call(f)
-    | Cons(f, rest) -> concat2(show-call(f), concat2(st(" "), join-shown(rest)))
+    | f :: rest -> concat2(show-call(f), concat2(st(" "), join-shown(rest)))
 
 let show-of-ctor(c: DeriveCtor, prefix: Str) -> Ast {
   let spelled = source-ctor-name(dc-name(c))
-  if dc-arity(c) == 0 -> st(str-concat("(", spelled, ")"))
-   | else -> concat2(st(str-concat("(", spelled, " ")), concat2(join-shown(binders(prefix, dc-arity(c), 0)), st(")")))
+  if (dc-arity(c) == 0) -> st(str-concat("(", spelled, ")")) | concat2(st(str-concat("(", spelled, " ")), concat2(join-shown(binders(prefix, dc-arity(c), 0)), st(")")))
 }
 
 let show-clauses(ctors: List DeriveCtor) -> List Ast =
   match (ctors)
     | [] -> []
-    | Cons(c, rest) -> append-ast([ctor-pat(c, "a"), show-of-ctor(c, "a")], show-clauses(rest))
+    | c :: rest -> append-ast([ctor-pat(c, "a"), show-of-ctor(c, "a")], show-clauses(rest))
 
 let eq-fields(as: List Str, bs: List Str) -> Ast =
   match (as)
     | [] -> bool-lit(true)
-    | Cons(a, ar) ->
+    | a :: ar ->
       match (bs)
         | [] -> bool-lit(false)
-        | Cons(b, br) -> paren([sy("if"), paren([sy("="), sy(a), sy(b)]), eq-fields(ar, br), bool-lit(false)])
+        | b :: br -> paren([sy("if"), paren([sy("="), sy(a), sy(b)]), eq-fields(ar, br), bool-lit(false)])
 
 let cmp-fields(as: List Str, bs: List Str) -> Ast =
   match (as)
     | [] -> int-lit(0)
-    | Cons(a, ar) ->
+    | a :: ar ->
       match (bs)
         | [] -> int-lit(0)
-        | Cons(b, br) -> paren([sy("let"), sy("c"), paren([sy("compare"), sy(a), sy(b)]), paren([sy("if"), paren([sy("="), sy("c"), int-lit(0)]), cmp-fields(ar, br), sy("c")])])
+        | b :: br -> paren([sy("let"), sy("c"), paren([sy("compare"), sy(a), sy(b)]), paren([sy("if"), paren([sy("="), sy("c"), int-lit(0)]), cmp-fields(ar, br), sy("c")])])
 
 let eq-one(c: DeriveCtor) -> Ast =
   paren([sy("match"), sy("b"), ctor-pat(c, "b"), eq-fields(binders("a", dc-arity(c), 0), binders("b", dc-arity(c), 0)), sy("_"), bool-lit(false)])
@@ -168,7 +165,7 @@ let eq-one(c: DeriveCtor) -> Ast =
 let eq-clauses(ctors: List DeriveCtor) -> List Ast =
   match (ctors)
     | [] -> []
-    | Cons(c, rest) -> append-ast([ctor-pat(c, "a"), eq-one(c)], eq-clauses(rest))
+    | c :: rest -> append-ast([ctor-pat(c, "a"), eq-one(c)], eq-clauses(rest))
 
 let cmp-one(c: DeriveCtor) -> Ast =
   paren([sy("match"), sy("b"), ctor-pat(c, "b"), cmp-fields(binders("a", dc-arity(c), 0), binders("b", dc-arity(c), 0)), sy("_"), int-lit(1)])
@@ -176,7 +173,7 @@ let cmp-one(c: DeriveCtor) -> Ast =
 let cmp-clauses(ctors: List DeriveCtor) -> List Ast =
   match (ctors)
     | [] -> []
-    | Cons(c, rest) -> append-ast([ctor-pat(c, "a"), cmp-one(c)], cmp-clauses(rest))
+    | c :: rest -> append-ast([ctor-pat(c, "a"), cmp-one(c)], cmp-clauses(rest))
 
 let defn-1(name: Str, ty: Str, ret: Str, body: Ast) -> Ast =
   paren([sy("defn"), sy(name), paren([sy("v:"), sy(ty)]), sy("->"), sy(ret), body])
@@ -185,10 +182,10 @@ let defn-2(name: Str, ty: Str, ret: Str, body: Ast) -> Ast =
   paren([sy("defn"), sy(name), paren([sy("a:"), sy(ty)]), paren([sy("b:"), sy(ty)]), sy("->"), sy(ret), body])
 
 let match-v(clauses: List Ast) -> Ast =
-  paren(Cons(sy("match"), Cons(sy("v"), clauses)))
+  paren(sy("match") :: sy("v") :: clauses)
 
 let match-a(clauses: List Ast) -> Ast =
-  paren(Cons(sy("match"), Cons(sy("a"), clauses)))
+  paren(sy("match") :: sy("a") :: clauses)
 
 let gen-type(ty: Str, ctors: List DeriveCtor) -> List Ast =
   [defn-1(str-concat("show_", ty), ty, "Str", match-v(show-clauses(ctors))), defn-2(str-concat("eq_", ty), ty, "Bool", match-a(eq-clauses(ctors))), defn-2(str-concat("compare_", ty), ty, "Int", match-a(cmp-clauses(ctors))), defn-1(str-concat("dump_", ty), ty, "Str", match-v(show-clauses(ctors)))]
@@ -196,7 +193,7 @@ let gen-type(ty: Str, ctors: List DeriveCtor) -> List Ast =
 let gen-used(names: List Str, types: Map Str (List DeriveCtor)) -> List Ast =
   match (names)
     | [] -> []
-    | Cons(n, rest) ->
+    | n :: rest ->
       match (map-get(types, n))
         | None -> gen-used(rest, types)
         | Some(ctors) -> append-ast(gen-type(n, ctors), gen-used(rest, types))
@@ -204,10 +201,11 @@ let gen-used(names: List Str, types: Map Str (List DeriveCtor)) -> List Ast =
 let insert-name(x: Str, xs: List Str) -> List Str =
   match (xs)
     | [] -> [x]
-    | Cons(h, rest) ->
-      if h == x -> xs
-       | compare(x, h) <= 0 -> Cons(x, xs)
-       | else -> Cons(h, insert-name(x, rest))
+    | h :: rest ->
+      cond
+        | h == x -> xs
+        | compare(x, h) <= 0 -> x :: xs
+        | else -> h :: insert-name(x, rest)
 
 let ctor-type-of(name: Str, ctors: Map Str Str) -> Maybe Str =
   map-get(ctors, name)
@@ -215,7 +213,7 @@ let ctor-type-of(name: Str, ctors: Map Str Str) -> Maybe Str =
 let classify-user(ast: Ast, ctors: Map Str Str) -> Maybe Str =
   match (ast)
     | SymNode(n, _) -> ctor-type-of(n, ctors)
-    | ParenNode(Cons(head, args), _) ->
+    | ParenNode(head :: args, _) ->
       match (sym-str(head))
         | None -> None()
         | Some(hn) -> ctor-type-of(hn, ctors)
@@ -225,10 +223,11 @@ let is-derive-op(name: Str) -> Bool =
   name == "show" || name == "=" || name == "compare" || name == "dump"
 
 let op-prefix(name: Str) -> Str =
-  if name == "show" -> "show_"
-   | name == "=" -> "eq_"
-   | name == "compare" -> "compare_"
-   | else -> "dump_"
+  cond
+    | name == "show" -> "show_"
+    | name == "=" -> "eq_"
+    | name == "compare" -> "compare_"
+    | else -> "dump_"
 
 let note-used(ast: Ast, ctors: Map Str Str, acc: List Str) -> List Str =
   match (ast)
@@ -239,25 +238,26 @@ let note-used(ast: Ast, ctors: Map Str Str, acc: List Str) -> List Str =
 let note-used-list(xs: List Ast, ctors: Map Str Str, acc: List Str) -> List Str =
   match (xs)
     | [] -> acc
-    | Cons(x, rest) -> note-used-list(rest, ctors, note-used(x, ctors, acc))
+    | x :: rest -> note-used-list(rest, ctors, note-used(x, ctors, acc))
 
 let note-used-paren(elems: List Ast, ctors: Map Str Str, acc: List Str) -> List Str =
   match (elems)
-    | Cons(head, rest) -> note-used-list(rest, ctors, note-used-head(head, rest, ctors, acc))
+    | head :: rest -> note-used-list(rest, ctors, note-used-head(head, rest, ctors, acc))
     | [] -> acc
 
 let note-used-head(head: Ast, rest: List Ast, ctors: Map Str Str, acc: List Str) -> List Str =
   match (sym-str(head))
     | None -> acc
     | Some(hn) ->
-      if is-derive-op(hn) ->
-        match (rest)
-          | Cons(a, _) ->
-            match (classify-user(a, ctors))
-              | None -> acc
-              | Some(ty) -> insert-name(ty, acc)
-          | [] -> acc
-       | else -> acc
+      cond
+        | is-derive-op(hn) ->
+          match (rest)
+            | a :: _ ->
+              match (classify-user(a, ctors))
+                | None -> acc
+                | Some(ty) -> insert-name(ty, acc)
+            | [] -> acc
+        | else -> acc
 
 let used-in(forms: List Ast, ctors: Map Str Str) -> List Str =
   used-in-list(forms, ctors, [])
@@ -265,7 +265,7 @@ let used-in(forms: List Ast, ctors: Map Str Str) -> List Str =
 let used-in-list(forms: List Ast, ctors: Map Str Str, acc: List Str) -> List Str =
   match (forms)
     | [] -> acc
-    | Cons(f, rest) -> used-in-list(rest, ctors, note-used(f, ctors, acc))
+    | f :: rest -> used-in-list(rest, ctors, note-used(f, ctors, acc))
 
 let rewrite-name(op: Str, ty: Str) -> Str =
   str-concat(op-prefix(op), ty)
@@ -279,32 +279,31 @@ let rewrite(ast: Ast, ctors: Map Str Str) -> Ast =
 let rewrite-list(xs: List Ast, ctors: Map Str Str) -> List Ast =
   match (xs)
     | [] -> []
-    | Cons(x, rest) -> Cons(rewrite(x, ctors), rewrite-list(rest, ctors))
+    | x :: rest -> rewrite(x, ctors) :: rewrite-list(rest, ctors)
 
 let rewrite-paren(elems: List Ast, ctors: Map Str Str) -> List Ast =
   match (elems)
-    | Cons(head, rest) -> rewrite-paren-head(head, rest, ctors)
+    | head :: rest -> rewrite-paren-head(head, rest, ctors)
     | [] -> []
 
 let rewrite-paren-head(head: Ast, rest: List Ast, ctors: Map Str Str) -> List Ast =
   match (sym-str(head))
-    | None -> Cons(rewrite(head, ctors), rewrite-list(rest, ctors))
+    | None -> rewrite(head, ctors) :: rewrite-list(rest, ctors)
     | Some(hn) ->
-      if is-derive-op(hn) -> rewrite-derive(hn, head, rest, ctors)
-       | else -> Cons(head, rewrite-list(rest, ctors))
+      if (is-derive-op(hn)) -> rewrite-derive(hn, head, rest, ctors) | head :: rewrite-list(rest, ctors)
 
 let rewrite-derive(hn: Str, head: Ast, rest: List Ast, ctors: Map Str Str) -> List Ast =
   match (rest)
-    | Cons(a, more) ->
+    | a :: more ->
       match (classify-user(a, ctors))
-        | None -> Cons(head, rewrite-list(rest, ctors))
-        | Some(ty) -> Cons(sy(rewrite-name(hn, ty)), rewrite-list(rest, ctors))
-    | [] -> Cons(head, [])
+        | None -> head :: rewrite-list(rest, ctors)
+        | Some(ty) -> sy(rewrite-name(hn, ty)) :: rewrite-list(rest, ctors)
+    | [] -> head :: []
 
 let rewrite-forms(forms: List Ast, ctors: Map Str Str) -> List Ast =
   match (forms)
     | [] -> []
-    | Cons(f, rest) -> Cons(rewrite(f, ctors), rewrite-forms(rest, ctors))
+    | f :: rest -> rewrite(f, ctors) :: rewrite-forms(rest, ctors)
 
 let add-ctor(ctors: Map Str Str, cname: Str, ty: Str) -> Map Str Str =
   map-set(ctors, cname, ty)
@@ -312,20 +311,20 @@ let add-ctor(ctors: Map Str Str, cname: Str, ty: Str) -> Map Str Str =
 let variant-ctors(cs: List Ast, ty: Str, ctors: Map Str Str, acc: List DeriveCtor) -> List DeriveCtor =
   match (cs)
     | [] -> acc
-    | Cons(c, rest) ->
+    | c :: rest ->
       match (c)
-        | ParenNode(Cons(name-ast, payloads), _) ->
+        | ParenNode(name-ast :: payloads, _) ->
           match (sym-str(name-ast))
             | None -> variant-ctors(rest, ty, ctors, acc)
-            | Some(cname) -> Cons(DeriveCtor(cname, length(payloads)), variant-ctors(rest, ty, ctors, acc))
+            | Some(cname) -> DeriveCtor(cname, length(payloads)) :: variant-ctors(rest, ty, ctors, acc)
         | _ -> variant-ctors(rest, ty, ctors, acc)
 
 let remember-variant(cs: List Ast, ty: Str, ctors: Map Str Str) -> Map Str Str =
   match (cs)
     | [] -> ctors
-    | Cons(c, rest) ->
+    | c :: rest ->
       match (c)
-        | ParenNode(Cons(name-ast, _), _) ->
+        | ParenNode(name-ast :: _, _) ->
           match (sym-str(name-ast))
             | None -> remember-variant(rest, ty, ctors)
             | Some(cname) -> remember-variant(rest, ty, add-ctor(ctors, cname, ty))
@@ -347,32 +346,33 @@ let acc-add-variant(acc: TypeAcc, name: Str, cs: List Ast) -> TypeAcc =
 let take-name(ast: Ast) -> Maybe Str =
   match (ast)
     | SymNode(n, _) -> Some(strip-colon(n))
-    | ParenNode(Cons(n, _), _) ->
+    | ParenNode(n :: _, _) ->
       match (sym-str(n))
         | Some(s) -> Some(strip-colon(s))
         | None -> None()
     | _ -> None()
 
 let consider-named(hn: Str, rest: List Ast, acc: TypeAcc) -> TypeAcc =
-  if hn == "defrec" ->
-    match (rest)
-      | Cons(name-ast, fields) ->
-        match (take-name(name-ast))
-          | None -> acc
-          | Some(name) -> acc-add-defrec(acc, name, length(fields))
-      | [] -> acc
-   | hn == "variant" ->
-    match (rest)
-      | Cons(name-ast, cs) ->
-        match (take-name(name-ast))
-          | None -> acc
-          | Some(name) -> acc-add-variant(acc, name, cs)
-      | [] -> acc
-   | else -> acc
+  cond
+    | hn == "defrec" ->
+      match (rest)
+        | name-ast :: fields ->
+          match (take-name(name-ast))
+            | None -> acc
+            | Some(name) -> acc-add-defrec(acc, name, length(fields))
+        | [] -> acc
+    | hn == "variant" ->
+      match (rest)
+        | name-ast :: cs ->
+          match (take-name(name-ast))
+            | None -> acc
+            | Some(name) -> acc-add-variant(acc, name, cs)
+        | [] -> acc
+    | else -> acc
 
 let consider(ast: Ast, acc: TypeAcc) -> TypeAcc =
   match (unwrap-pub(ast))
-    | ParenNode(Cons(head, rest), _) ->
+    | ParenNode(head :: rest, _) ->
       match (sym-str(head))
         | None -> acc
         | Some(hn) -> consider-named(hn, rest, acc)
@@ -381,7 +381,7 @@ let consider(ast: Ast, acc: TypeAcc) -> TypeAcc =
 let consider-all(forms: List Ast, acc: TypeAcc) -> TypeAcc =
   match (forms)
     | [] -> acc
-    | Cons(f, rest) -> consider-all(rest, consider(f, acc))
+    | f :: rest -> consider-all(rest, consider(f, acc))
 
 pub let plan-derives(forms: List Ast) -> List Ast =
   match (consider-all(forms, TypeAcc(map-new(), map-new())))

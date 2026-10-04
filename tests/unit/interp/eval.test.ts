@@ -81,8 +81,7 @@ describe("builtins StringBuffer", () => {
 describe("evaluator depth", () => {
   test("non-tail recursion of 20k frames stays within memory", () => {
     const src = `let mk(n: Int) -> Int =
-  if n == 0 -> 0
-   | else -> 1 + mk(n - 1)
+  if (n == 0) -> 0 | 1 + mk(n - 1)
 mk(20000)`;
     const r = run(src);
     expect(r.ok).toBe(true);
@@ -114,8 +113,7 @@ lex-peek(1)`;
 
   test("builds and sizes a 10k-element list", () => {
     const src = `let mk(n: Int) -> List Int =
-  if n == 0 -> Nil()
-   | else -> Cons(n, mk(n - 1))
+  if (n == 0) -> Nil() | Cons(n, mk(n - 1))
 let size[a](xs: List a) -> Int =
   match (xs)
     | [] -> 0

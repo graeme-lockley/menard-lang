@@ -50,8 +50,9 @@ decisions are in [`docs/decisions.md`](docs/decisions.md).
   parameters. Instantiation, not Hindley–Milner inference.
 - **Values:** one 64-bit word each; `Int` is 63-bit tagged; immutability by
   default, with exactly two reference types (`Ref`, `StringBuffer`).
-- **Control:** expression-oriented `if` / `match` / `loop`–`recur`; no
-  exceptions; results via `Result`.
+- **Control:** expression-oriented `cond` / `if` / `match` / `loop`–`recur`; no
+  exceptions; results via `Result`. `cond` lays tests out; `if (test) -> then | else`
+  is the inline value.
 - **Runtime (planned):** precise tag-based GC, shadow-stack rooting, C11 runtime
   linked by clang.
 

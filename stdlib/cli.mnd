@@ -14,52 +14,55 @@ pub record Flag {
 let flag-named(name: Str, flags: List Flag) -> Maybe Flag =
   match (flags)
     | [] -> None()
-    | Cons(f, rest) ->
+    | f :: rest ->
       match (f)
         | Flag(n, _) ->
-          if n == name -> Some(f)
-           | else -> flag-named(name, rest)
+          if (n == name) -> Some(f) | flag-named(name, rest)
 
 ; Whether name occurs as its own word before `--`.
 ; @test has-flag(["run", "--clean", "a.mnd"], "--clean") => true
 pub let has-flag(args: List Str, name: Str) -> Bool =
   match (args)
     | [] -> false
-    | Cons(a, rest) ->
-      if a == "--" -> false
-       | a == name -> true
-       | else -> has-flag(rest, name)
+    | a :: rest ->
+      cond
+        | a == "--" -> false
+        | a == name -> true
+        | else -> has-flag(rest, name)
 
 ; The word after name, or "" when name is absent or has no following word.
 ; @test flag-value(["-o", "out", "a.mnd"], "-o") => "out"
 pub let flag-value(args: List Str, name: Str) -> Str =
   match (args)
     | [] -> ""
-    | Cons(a, rest) ->
-      if a == "--" -> ""
-       | a == name ->
-        match (rest)
-          | [] -> ""
-          | Cons(v, _) -> v
-       | else -> flag-value(rest, name)
+    | a :: rest ->
+      cond
+        | a == "--" -> ""
+        | a == name ->
+          match (rest)
+            | [] -> ""
+            | v :: _ -> v
+        | else -> flag-value(rest, name)
 
 ; Positionals accumulated in reverse, stopping at `--`.
 let positionals-onto(args: List Str, flags: List Flag, acc: List Str) -> List Str =
   match (args)
     | [] -> reverse(acc)
-    | Cons(a, rest) ->
-      if a == "--" -> reverse(acc)
-       | else ->
-        match (flag-named(a, flags))
-          | None -> positionals-onto(rest, flags, Cons(a, acc))
-          | Some(f) ->
-            match (f)
-              | Flag(_, valued) ->
-                if valued ->
-                  match (rest)
-                    | [] -> reverse(acc)
-                    | Cons(_, more) -> positionals-onto(more, flags, acc)
-                 | else -> positionals-onto(rest, flags, acc)
+    | a :: rest ->
+      cond
+        | a == "--" -> reverse(acc)
+        | else ->
+          match (flag-named(a, flags))
+            | None -> positionals-onto(rest, flags, a :: acc)
+            | Some(f) ->
+              match (f)
+                | Flag(_, valued) ->
+                  cond
+                    | valued ->
+                      match (rest)
+                        | [] -> reverse(acc)
+                        | _ :: more -> positionals-onto(more, flags, acc)
+                    | else -> positionals-onto(rest, flags, acc)
 
 ; Words that are not flags in the table and not a valued flag's argument.
 ; @test positionals(["check", "-o", "out", "a.mnd"], [Flag("-o", true)]) => ["check", "a.mnd"]
@@ -78,6 +81,5 @@ pub let positional(args: List Str, flags: List Flag, index: Int) -> Str =
 pub let args-after(args: List Str) -> List Str =
   match (args)
     | [] -> []
-    | Cons(a, rest) ->
-      if a == "--" -> rest
-       | else -> args-after(rest)
+    | a :: rest ->
+      if (a == "--") -> rest | args-after(rest)

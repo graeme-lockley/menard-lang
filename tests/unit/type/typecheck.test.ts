@@ -21,7 +21,7 @@ describe("typer", () => {
   });
 
   test("if requires Bool", () => {
-    const diags = diagnose("if 1 -> 2\n | else -> 3");
+    const diags = diagnose("if (1) -> 2 | 3");
     expect(diags.some((d) => d.code === "E_TYPE_MISMATCH")).toBe(true);
   });
 
@@ -73,8 +73,7 @@ f(1)`;
   test("loop/recur sum-to typechecks (spec §2.4)", () => {
     const src = `let sum-to(n: Int) -> Int =
   loop (i = 0, acc = 0)
-    if i > n -> acc
-     | else -> recur(i + 1, acc + i)
+    if (i > n) -> acc | recur(i + 1, acc + i)
 sum-to(10)`;
     const diags = diagnose(src);
     expect(diags).toEqual([]);
@@ -83,8 +82,7 @@ sum-to(10)`;
   test("recur arity must match loop bindings", () => {
     const src = `let bad(n: Int) -> Int =
   loop (i = 0)
-    if i > n -> i
-     | else -> recur(i + 1, 0)`;
+    if (i > n) -> i | recur(i + 1, 0)`;
     const diags = diagnose(src);
     expect(diags.some((d) => d.code === "E_TYPE_ARITY" || d.code === "E_TYPE_RECUR")).toBe(
       true,
@@ -240,8 +238,7 @@ sz(Leaf(9))`;
   test("loop/recur sum-to evaluates", () => {
     const src = `let sum-to(n: Int) -> Int =
   loop (i = 0, acc = 0)
-    if i > n -> acc
-     | else -> recur(i + 1, acc + i)
+    if (i > n) -> acc | recur(i + 1, acc + i)
 sum-to(10)`;
     const r = run(src);
     expect(r.ok).toBe(true);
@@ -293,11 +290,9 @@ g(3)`;
 
   test("mutual recursion evaluates with base case", () => {
     const src = `let is-even(n: Int) -> Bool =
-  if n == 0 -> true
-   | else -> is-odd(n - 1)
+  if (n == 0) -> true | is-odd(n - 1)
 let is-odd(n: Int) -> Bool =
-  if n == 0 -> false
-   | else -> is-even(n - 1)
+  if (n == 0) -> false | is-even(n - 1)
 is-even(4)`;
     const r = run(src);
     expect(r.ok).toBe(true);

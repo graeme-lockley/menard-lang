@@ -18,9 +18,10 @@ pub let ends-with(s: Str, suffix: Str) -> Bool {
 
 ; Whether needle matches s at byte i. The needle is short, so the walk stays shallow.
 let bytes-eq(s: Str, i: Int, pat: Str, j: Int, n: Int) -> Bool =
-  if j >= n -> true
-   | str-byte(s, i + j) == str-byte(pat, j) -> bytes-eq(s, i, pat, j + 1, n)
-   | else -> false
+  cond
+    | j >= n -> true
+    | str-byte(s, i + j) == str-byte(pat, j) -> bytes-eq(s, i, pat, j + 1, n)
+    | else -> false
 
 ; Whether s contains needle as a byte substring.
 ; Named `has` so a program can import std/list, which also publishes `contains`.
@@ -29,20 +30,69 @@ pub let has(s: Str, needle: Str) -> Bool {
   let n = str-byte-length(needle)
   let sn = str-byte-length(s)
   loop (i = 0)
-    if i + n > sn -> false
-     | bytes-eq(s, i, needle, 0, n) -> true
-     | else -> recur(i + 1)
+    cond
+      | i + n > sn -> false
+      | bytes-eq(s, i, needle, 0, n) -> true
+      | else -> recur(i + 1)
 }
 
 ; parts joined by sep. An empty list joins to the empty string.
 let join-rest(sep: Str, acc: Str, rest: List Str) -> Str =
   match (rest)
     | [] -> acc
-    | Cons(h, t) -> join-rest(sep, str-concat(acc, sep, h), t)
+    | h :: t -> join-rest(sep, str-concat(acc, sep, h), t)
 
 ; parts joined by sep.
 ; @test join(",", ["a", "b"]) => "a,b"
 pub let join(sep: Str, parts: List Str) -> Str =
   match (parts)
     | [] -> ""
-    | Cons(h, t) -> join-rest(sep, h, t)
+    | h :: t -> join-rest(sep, h, t)
+
+; Index of sep at or after i, or -1 when it does not occur.
+let find-sep(s: Str, sep: Str, i: Int) -> Int {
+  let n = str-byte-length(sep)
+  let sn = str-byte-length(s)
+  loop (j = i)
+    cond
+      | j + n > sn -> -1
+      | bytes-eq(s, j, sep, 0, n) -> j
+      | else -> recur(j + 1)
+}
+
+; The pieces of s from byte i to the end, split on sep.
+let split-from(s: Str, sep: Str, i: Int) -> List Str {
+  let at = find-sep(s, sep, i)
+  let n = str-byte-length(sep)
+  let sn = str-byte-length(s)
+  if (at < 0) -> [str-slice(s, i, sn - i)] | str-slice(s, i, at - i) :: split-from(s, sep, at + n)
+}
+
+; s split on sep. An empty separator is not a split: the whole string is the one piece.
+; @test split("a,b,c", ",") => ["a", "b", "c"]
+pub let split(s: Str, sep: Str) -> List Str =
+  if (str-byte-length(sep) == 0) -> [s] | split-from(s, sep, 0)
+
+; A string of the single newline byte.
+let newline() -> Str {
+  let sb = sb-new()
+  sb-append-byte!(sb, 10)
+  sb-to-str(sb)
+}
+
+; Drop a final empty piece left by a trailing newline.
+let drop-trailing-empty(parts: List Str) -> List Str =
+  match (parts)
+    | [] -> []
+    | h :: [] ->
+      if (h == "") -> [] | [h]
+    | h :: t -> h :: drop-trailing-empty(t)
+
+; s split into lines. A trailing newline does not add an empty last line. The empty string has no lines.
+; @test lines(newline()) => [""]
+pub let lines(s: Str) -> List Str =
+  if (s == "") -> [] | lines-split(s, newline())
+
+; Split on nl, then drop the empty piece a trailing newline would leave.
+let lines-split(s: Str, nl: Str) -> List Str =
+  if (ends-with(s, nl)) -> drop-trailing-empty(split(s, nl)) | split(s, nl)

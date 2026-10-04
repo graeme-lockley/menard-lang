@@ -94,8 +94,7 @@ describe("tier-0 host seam", () => {
         | None ->
           match (moved)
             | Ok(_) ->
-              if was && there && not(now) -> cc
-               | else -> "bad-flags"
+              if (was && there && not(now)) -> cc | "bad-flags"
             | Err(_) -> "bad-rename"
         | _ -> "bad-missing"
     | _ -> "bad-getenv"

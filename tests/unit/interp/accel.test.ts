@@ -15,6 +15,7 @@ function sink(): { sb: ReturnType<typeof sbNew>; value: Value } {
         { tag: "ref", cell: { value: vInt(0n) } },
         { tag: "ref", cell: { value: vInt(0n) } },
       ],
+      fieldNames: ["sb", "pos", "len"],
     },
   };
 }

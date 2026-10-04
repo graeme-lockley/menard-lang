@@ -39,27 +39,26 @@ let nl =
 let print-verbose(lines: List Str, on: Bool) -> Unit =
   match (lines)
     | [] -> ()
-    | Cons(line, rest) ->
+    | line :: rest ->
       {
-        if starts-with(line, "pass ") || starts-with(line, "fail ") ->
-          {
-            write(stdout, "  ")
-            write(
-              stdout,
-              if starts-with(line, "pass ") -> paint(on, "[32m", line)
-               | else -> paint(on, "[31m", line)
-            )
-            write(stdout, nl)
-            ()
-          }
+        cond
+          | starts-with(line, "pass ") || starts-with(line, "fail ") ->
+            {
+              write(stdout, "  ")
+              write(
+                stdout,
+                if (starts-with(line, "pass ")) -> paint(on, "[32m", line) | paint(on, "[31m", line)
+              )
+              write(stdout, nl)
+              ()
+            }
         print-verbose(rest, on)
       }
 
 ; A passing file stays a single status line. A failure points at the
 ; assertion expression, the same way a compile error points at its span.
 let fail-name(line: Str) -> Maybe Str =
-  if starts-with(line, "fail ") -> Some(str-slice(line, 5, str-byte-length(line) - 5))
-   | else -> None()
+  if (starts-with(line, "fail ")) -> Some(str-slice(line, 5, str-byte-length(line) - 5)) | None()
 
 let sym-text(a: Ast) -> Maybe Str =
   match (a)
@@ -73,17 +72,17 @@ let str-text(a: Ast) -> Maybe Str =
 
 let list-head(xs: List Ast) -> Maybe Ast =
   match (xs)
-    | Cons(h, _) -> Some(h)
+    | h :: _ -> Some(h)
     | [] -> None()
 
 let list-second(xs: List Ast) -> Maybe Ast =
   match (xs)
-    | Cons(_, Cons(n, _)) -> Some(n)
+    | _ :: n :: _ -> Some(n)
     | _ -> None()
 
 let third(xs: List Ast) -> Maybe Ast =
   match (xs)
-    | Cons(_, Cons(_, Cons(e, _))) -> Some(e)
+    | _ :: _ :: e :: _ -> Some(e)
     | _ -> None()
 
 let test-named(form: Ast, name: Str) -> Maybe Ast =
@@ -93,16 +92,16 @@ let test-named(form: Ast, name: Str) -> Maybe Ast =
         | Some(h) ->
           match (sym-text(h))
             | Some(s) ->
-              if s == "test" ->
-                match (list-second(elems))
-                  | Some(n) ->
-                    match (str-text(n))
-                      | Some(text) ->
-                        if text == name -> third(elems)
-                         | else -> None()
-                      | None -> None()
-                  | None -> None()
-               | else -> None()
+              cond
+                | s == "test" ->
+                  match (list-second(elems))
+                    | Some(n) ->
+                      match (str-text(n))
+                        | Some(text) ->
+                          if (text == name) -> third(elems) | None()
+                        | None -> None()
+                    | None -> None()
+                | else -> None()
             | None -> None()
         | None -> None()
     | _ -> None()
@@ -110,7 +109,7 @@ let test-named(form: Ast, name: Str) -> Maybe Ast =
 let find-named(forms: List Ast, name: Str) -> Maybe Ast =
   match (forms)
     | [] -> None()
-    | Cons(f, rest) ->
+    | f :: rest ->
       match (test-named(f, name))
         | Some(expr) -> Some(expr)
         | None -> find-named(rest, name)
@@ -123,7 +122,7 @@ let explain-one(path: Str, src: Str, forms: List Ast, name: Str) -> Unit =
 let explain-fails(path: Str, src: Str, forms: List Ast, lines: List Str) -> Unit =
   match (lines)
     | [] -> ()
-    | Cons(line, rest) ->
+    | line :: rest ->
       {
         match (fail-name(line))
           | Some(name) -> explain-one(path, src, forms, name)
@@ -144,8 +143,7 @@ let file-line(path: Str, ok: Bool, on: Bool) -> Unit {
   write(stdout, " ... ")
   write(
     stdout,
-    if ok -> paint(on, "[32m", "ok")
-     | else -> paint(on, "[31m", "FAILED")
+    if (ok) -> paint(on, "[32m", "ok") | paint(on, "[31m", "FAILED")
   )
   write(stdout, nl)
   ()
@@ -154,12 +152,11 @@ let file-line(path: Str, ok: Bool, on: Bool) -> Unit {
 let rev-strs(xs: List Str, acc: List Str) -> List Str =
   match (xs)
     | [] -> acc
-    | Cons(x, rest) -> rev-strs(rest, Cons(x, acc))
+    | x :: rest -> rev-strs(rest, x :: acc)
 
 ; `file <path>` is printed by the suite bootstrap before that file's tests.
 let file-path(line: Str) -> Maybe Str =
-  if starts-with(line, "file ") -> Some(str-slice(line, 5, str-byte-length(line) - 5))
-   | else -> None()
+  if (starts-with(line, "file ")) -> Some(str-slice(line, 5, str-byte-length(line) - 5)) | None()
 
 record RunAcc {
   path: Str
@@ -171,35 +168,34 @@ record RunAcc {
 ; `exit-bad` is the process status, applied only to the file that was
 ; running when the process stopped. A panic aborts the rest of the suite.
 let flush-file(path: Str, lines: List Str, verbose: Bool, on: Bool, exit-bad: Bool) -> Counts =
-  if str-byte-length(path) == 0 ->
-    if exit-bad -> Counts(0, 1)
-     | else -> Counts(0, 0)
-   | else ->
-    {
-      let ordered = rev-strs(lines, [])
-      if verbose -> print-verbose(ordered, on)
-      match (count-lines(ordered))
-        | Counts(p, f) ->
-          {
-            let bad = f > 0 || exit-bad
-            file-line(path, not(bad), on)
-            if f > 0 -> explain-file(path, ordered)
-            if bad && f == 0 -> Counts(p, 1)
-             | else -> Counts(p, f)
-          }
-    }
+  cond
+    | str-byte-length(path) == 0 ->
+      if (exit-bad) -> Counts(0, 1) | Counts(0, 0)
+    | else ->
+      {
+        let ordered = rev-strs(lines, [])
+        if (verbose) -> print-verbose(ordered, on)
+        match (count-lines(ordered))
+          | Counts(p, f) ->
+            {
+              let bad = f > 0 || exit-bad
+              file-line(path, not(bad), on)
+              if (f > 0) -> explain-file(path, ordered)
+              if (bad && f == 0) -> Counts(p, 1) | Counts(p, f)
+            }
+      }
 
 let take-lines(lines: List Str, acc: RunAcc, verbose: Bool, on: Bool) -> RunAcc =
   match (lines)
     | [] -> acc
-    | Cons(line, rest) ->
+    | line :: rest ->
       match (acc)
         | RunAcc(path, buf, passed, failed) ->
           match (file-path(line))
             | Some(next) ->
               match (flush-file(path, buf, verbose, on, false))
                 | Counts(p, f) -> take-lines(rest, RunAcc(next, [], passed + p, failed + f), verbose, on)
-            | None -> take-lines(rest, RunAcc(path, Cons(line, buf), passed, failed), verbose, on)
+            | None -> take-lines(rest, RunAcc(path, line :: buf, passed, failed), verbose, on)
 
 let finish-acc(acc: RunAcc, verbose: Bool, on: Bool, exit-bad: Bool, err: Str) -> Counts =
   match (acc)
@@ -208,18 +204,19 @@ let finish-acc(acc: RunAcc, verbose: Bool, on: Bool, exit-bad: Bool, err: Str) -
         match (flush-file(path, buf, verbose, on, exit-bad))
           | Counts(p, f) ->
             {
-              if exit-bad && str-byte-length(err) > 0 ->
-                {
-                  write(stderr, err)
-                  write(stderr, nl)
-                  ()
-                }
+              cond
+                | exit-bad && str-byte-length(err) > 0 ->
+                  {
+                    write(stderr, err)
+                    write(stderr, nl)
+                    ()
+                  }
               Counts(passed + p, failed + f)
             }
       }
 
 let report-suite-error(msg: Str, started: Int, on: Bool) -> Int {
-  if str-byte-length(msg) > 0 -> report-plain(msg)
+  if (str-byte-length(msg) > 0) -> report-plain(msg)
   summary(Counts(0, 1), now-ms() - started, on)
   1
 }
@@ -232,7 +229,7 @@ pub let run-suite(path: Str, clean: Bool, verbose: Bool, quiet: Bool, cc: Str, r
         report-plain(str-concat("no tests found in ", path))
         1
       }
-    | Cons(_, _) ->
+    | _ :: _ ->
       {
         let on = tty-color(1)
         let started = now-ms()
@@ -249,8 +246,7 @@ pub let run-suite(path: Str, clean: Bool, verbose: Bool, quiet: Bool, cc: Str, r
                   summary(totals, now-ms() - started, on)
                   match (totals)
                     | Counts(_, f) ->
-                      if f > 0 -> 1
-                       | else -> 0
+                      if (f > 0) -> 1 | 0
                 }
       }
 }

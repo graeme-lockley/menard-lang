@@ -44,8 +44,9 @@ let check-source(path: Str, src: Str) -> Unit =
     | Err(e) -> fail-parse(path, e)
 
 let main() -> Unit =
-  if arg-count() < 1 -> fail("usage: pool-dump.mnd <file.mnd>")
-   | else ->
-    match (read-file(arg(0)))
-      | Ok(src) -> check-source(arg(0), src)
-      | Err(_) -> fail(str-concat("cannot read ", arg(0)))
+  cond
+    | arg-count() < 1 -> fail("usage: pool-dump.mnd <file.mnd>")
+    | else ->
+      match (read-file(arg(0)))
+        | Ok(src) -> check-source(arg(0), src)
+        | Err(_) -> fail(str-concat("cannot read ", arg(0)))

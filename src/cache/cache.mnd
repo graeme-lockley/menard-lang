@@ -64,38 +64,35 @@ let quote-str(s: Str) -> Str =
 let dirname-of(path: Str) -> Str {
   let n = str-byte-length(path)
   let slash = last-slash(path, n - 1)
-  if slash < 0 -> "."
-   | slash == 0 -> "/"
-   | else -> str-slice(path, 0, slash)
+  cond
+    | slash < 0 -> "."
+    | slash == 0 -> "/"
+    | else -> str-slice(path, 0, slash)
 }
 
 let last-slash(s: Str, i: Int) -> Int =
-  if i < 0 -> -1
-   | str-byte(s, i) == 47 -> i
-   | else -> last-slash(s, i - 1)
+  cond
+    | i < 0 -> -1
+    | str-byte(s, i) == 47 -> i
+    | else -> last-slash(s, i - 1)
 
 pub let cache-root() -> Str =
   match (getenv("MENARD_CACHE"))
     | Some(s) ->
-      if str-byte-length(s) > 0 -> s
-       | else -> default-cache()
+      if (str-byte-length(s) > 0) -> s | default-cache()
     | None -> default-cache()
 
 let default-cache() -> Str =
   match (getenv("HOME"))
     | Some(h) ->
-      if str-byte-length(h) > 0 -> str-concat(h, "/.menard")
-       | else -> "/tmp/menard"
+      if (str-byte-length(h) > 0) -> str-concat(h, "/.menard") | "/tmp/menard"
     | None -> "/tmp/menard"
 
 pub let canonical-path(path: Str) -> Str {
   let direct = realpath(path)
-  if str-byte-length(direct) > 0 -> direct
-   | else ->
-    normalize-path(
-      if starts-with(path, "/") -> path
-       | else -> str-concat(cwd(), "/", path)
-    )
+  if (str-byte-length(direct) > 0) -> direct | normalize-path(
+    if (starts-with(path, "/")) -> path | str-concat(cwd(), "/", path)
+  )
 }
 
 ; Path recorded in panic frames and diagnostics. Relative to the
@@ -103,8 +100,7 @@ pub let canonical-path(path: Str) -> Str {
 ; do not contain an absolute path.
 pub let display-path(abs: Str) -> Str {
   let prefix = str-concat(cwd(), "/")
-  if starts-with(abs, prefix) -> str-slice(abs, str-byte-length(prefix), str-byte-length(abs) - str-byte-length(prefix))
-   | else -> abs
+  if (starts-with(abs, prefix)) -> str-slice(abs, str-byte-length(prefix), str-byte-length(abs) - str-byte-length(prefix)) | abs
 }
 
 let cache-base(abs: Str) -> Str =
@@ -143,7 +139,7 @@ let add-line(sb: StringBuffer, s: Str) -> Unit {
 let write-deps(sb: StringBuffer, deps: List DepRec) -> Unit =
   match (deps)
     | [] -> ()
-    | Cons(DepRec(h, p), rest) ->
+    | DepRec(h, p) :: rest ->
       {
         add-line(sb, str-concat("(dep ", show(h), " ", quote-str(p), ")"))
         write-deps(sb, rest)
@@ -152,7 +148,7 @@ let write-deps(sb: StringBuffer, deps: List DepRec) -> Unit =
 let write-fns(sb: StringBuffer, fns: List FnRec) -> Unit =
   match (fns)
     | [] -> ()
-    | Cons(FnRec(name, link, ar), rest) ->
+    | FnRec(name, link, ar) :: rest ->
       {
         add-line(sb, str-concat("(fn ", quote-str(name), " ", quote-str(link), " ", show(ar), ")"))
         write-fns(sb, rest)
@@ -161,7 +157,7 @@ let write-fns(sb: StringBuffer, fns: List FnRec) -> Unit =
 let write-ctors(sb: StringBuffer, ctors: List CtorRec) -> Unit =
   match (ctors)
     | [] -> ()
-    | Cons(CtorRec(name, tag, ar), rest) ->
+    | CtorRec(name, tag, ar) :: rest ->
       {
         add-line(sb, str-concat("(ctor ", quote-str(name), " ", show(tag), " ", show(ar), ")"))
         write-ctors(sb, rest)
@@ -170,15 +166,14 @@ let write-ctors(sb: StringBuffer, ctors: List CtorRec) -> Unit =
 let write-stubs(sb: StringBuffer, stubs: List Ast) -> Unit =
   match (stubs)
     | [] -> ()
-    | Cons(f, rest) ->
+    | f :: rest ->
       {
         add-line(sb, str-concat("(stub ", print-form(f), ")"))
         write-stubs(sb, rest)
       }
 
 let dash(s: Str) -> Str =
-  if str-byte-length(s) == 0 -> "-"
-   | else -> s
+  if (str-byte-length(s) == 0) -> "-" | s
 
 let iface-text(iface: Iface) -> Str =
   match (iface)
@@ -205,12 +200,11 @@ pub let write-iface(abs: Str, iface: Iface) -> Bool {
 }
 
 let undash(s: Str) -> Str =
-  if s == "-" -> ""
-   | else -> s
+  if (s == "-") -> "" | s
 
 let head-of(a: Ast) -> Str =
   match (a)
-    | ParenNode(Cons(h, _), _) ->
+    | ParenNode(h :: _, _) ->
       match (sym-str(h))
         | Some(n) -> n
         | None -> ""
@@ -219,71 +213,72 @@ let head-of(a: Ast) -> Str =
 let elem-str(elems: List Ast, i: Int) -> Str =
   match (elems)
     | [] -> ""
-    | Cons(e, rest) ->
-      if i == 0 ->
-        match (e)
-          | StrNode(s, _) -> s
-          | _ -> ""
-       | else -> elem-str(rest, i - 1)
+    | e :: rest ->
+      cond
+        | i == 0 ->
+          match (e)
+            | StrNode(s, _) -> s
+            | _ -> ""
+        | else -> elem-str(rest, i - 1)
 
 let elem-int(elems: List Ast, i: Int) -> Int =
   match (elems)
     | [] -> 0
-    | Cons(e, rest) ->
-      if i == 0 ->
-        match (e)
-          | IntNode(n, _) -> n
-          | _ -> 0
-       | else -> elem-int(rest, i - 1)
+    | e :: rest ->
+      cond
+        | i == 0 ->
+          match (e)
+            | IntNode(n, _) -> n
+            | _ -> 0
+        | else -> elem-int(rest, i - 1)
 
 let elem-ast(elems: List Ast, i: Int) -> Maybe Ast =
   match (elems)
     | [] -> None()
-    | Cons(e, rest) ->
-      if i == 0 -> Some(e)
-       | else -> elem-ast(rest, i - 1)
+    | e :: rest ->
+      if (i == 0) -> Some(e) | elem-ast(rest, i - 1)
 
 let reverse-deps(xs: List DepRec, acc: List DepRec) -> List DepRec =
   match (xs)
     | [] -> acc
-    | Cons(x, rest) -> reverse-deps(rest, Cons(x, acc))
+    | x :: rest -> reverse-deps(rest, x :: acc)
 
 let reverse-fns(xs: List FnRec, acc: List FnRec) -> List FnRec =
   match (xs)
     | [] -> acc
-    | Cons(x, rest) -> reverse-fns(rest, Cons(x, acc))
+    | x :: rest -> reverse-fns(rest, x :: acc)
 
 let reverse-ctors(xs: List CtorRec, acc: List CtorRec) -> List CtorRec =
   match (xs)
     | [] -> acc
-    | Cons(x, rest) -> reverse-ctors(rest, Cons(x, acc))
+    | x :: rest -> reverse-ctors(rest, x :: acc)
 
 let reverse-asts(xs: List Ast, acc: List Ast) -> List Ast =
   match (xs)
     | [] -> acc
-    | Cons(x, rest) -> reverse-asts(rest, Cons(x, acc))
+    | x :: rest -> reverse-asts(rest, x :: acc)
 
 let take-form(a: Ast, src-hash: Ref Int, deps: Ref (List DepRec), init: Ref Str, main-sym: Ref Str, main-ret: Ref Str, fns: Ref (List FnRec), ctors: Ref (List CtorRec), stubs: Ref (List Ast)) -> Unit =
   match (a)
     | ParenNode(elems, _) ->
       {
         let h = head-of(a)
-        if h == "src" -> set!(src-hash, elem-int(elems, 1))
-         | h == "dep" -> set!(deps, Cons(DepRec(elem-int(elems, 1), elem-str(elems, 2)), deref(deps)))
-         | h == "init" -> set!(init, undash(elem-str(elems, 1)))
-         | h == "main" ->
-          {
-            set!(main-sym, undash(elem-str(elems, 1)))
-            set!(main-ret, undash(elem-str(elems, 2)))
-            ()
-          }
-         | h == "fn" -> set!(fns, Cons(FnRec(elem-str(elems, 1), elem-str(elems, 2), elem-int(elems, 3)), deref(fns)))
-         | h == "ctor" -> set!(ctors, Cons(CtorRec(elem-str(elems, 1), elem-int(elems, 2), elem-int(elems, 3)), deref(ctors)))
-         | h == "stub" ->
-          match (elem-ast(elems, 1))
-            | Some(inner) -> set!(stubs, Cons(inner, deref(stubs)))
-            | None -> ()
-         | else -> ()
+        cond
+          | h == "src" -> set!(src-hash, elem-int(elems, 1))
+          | h == "dep" -> set!(deps, DepRec(elem-int(elems, 1), elem-str(elems, 2)) :: deref(deps))
+          | h == "init" -> set!(init, undash(elem-str(elems, 1)))
+          | h == "main" ->
+            {
+              set!(main-sym, undash(elem-str(elems, 1)))
+              set!(main-ret, undash(elem-str(elems, 2)))
+              ()
+            }
+          | h == "fn" -> set!(fns, FnRec(elem-str(elems, 1), elem-str(elems, 2), elem-int(elems, 3)) :: deref(fns))
+          | h == "ctor" -> set!(ctors, CtorRec(elem-str(elems, 1), elem-int(elems, 2), elem-int(elems, 3)) :: deref(ctors))
+          | h == "stub" ->
+            match (elem-ast(elems, 1))
+              | Some(inner) -> set!(stubs, inner :: deref(stubs))
+              | None -> ()
         ()
       }
     | _ -> ()
@@ -291,7 +286,7 @@ let take-form(a: Ast, src-hash: Ref Int, deps: Ref (List DepRec), init: Ref Str,
 let take-forms(forms: List Ast, src-hash: Ref Int, deps: Ref (List DepRec), init: Ref Str, main-sym: Ref Str, main-ret: Ref Str, fns: Ref (List FnRec), ctors: Ref (List CtorRec), stubs: Ref (List Ast)) -> Unit =
   match (forms)
     | [] -> ()
-    | Cons(f, rest) ->
+    | f :: rest ->
       {
         take-form(f, src-hash, deps, init, main-sym, main-ret, fns, ctors, stubs)
         take-forms(rest, src-hash, deps, init, main-sym, main-ret, fns, ctors, stubs)
@@ -321,9 +316,8 @@ pub let read-iface(abs: Str) -> Maybe Iface =
 let deps-match(deps: List DepRec) -> Bool =
   match (deps)
     | [] -> true
-    | Cons(DepRec(h, path), rest) ->
-      if h == hash-file(iface-path(path)) -> deps-match(rest)
-       | else -> false
+    | DepRec(h, path) :: rest ->
+      if (h == hash-file(iface-path(path))) -> deps-match(rest) | false
 
 let stamps-fresh(abs: Str) -> Bool {
   let src = mtime(abs)
@@ -343,16 +337,16 @@ pub let remove-cache(abs: Str) -> Unit {
 }
 
 let split-acc(s: Str, i: Int, start: Int, n: Int, acc: List Str) -> List Str =
-  if i > n -> acc
-   | i == n || str-byte(s, i) == 10 ->
-    if i == start -> split-acc(s, i + 1, i + 1, n, acc)
-     | else -> split-acc(s, i + 1, i + 1, n, Cons(str-slice(s, start, i - start), acc))
-   | else -> split-acc(s, i + 1, start, n, acc)
+  cond
+    | i > n -> acc
+    | i == n || str-byte(s, i) == 10 ->
+      if (i == start) -> split-acc(s, i + 1, i + 1, n, acc) | split-acc(s, i + 1, i + 1, n, str-slice(s, start, i - start) :: acc)
+    | else -> split-acc(s, i + 1, start, n, acc)
 
 let reverse-strs(xs: List Str, acc: List Str) -> List Str =
   match (xs)
     | [] -> acc
-    | Cons(x, rest) -> reverse-strs(rest, Cons(x, acc))
+    | x :: rest -> reverse-strs(rest, x :: acc)
 
 pub let split-lines(s: Str) -> List Str =
   reverse-strs(split-acc(s, 0, 0, str-byte-length(s), []), [])

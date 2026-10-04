@@ -4,7 +4,7 @@
 let list-sum(xs: List Int) -> Int =
   match (xs)
     | [] -> 0
-    | Cons(h, t) -> h + list-sum(t)
+    | h :: t -> h + list-sum(t)
 
 let main() -> Int =
   list-sum([10, 20, 30])

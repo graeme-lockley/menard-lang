@@ -1,6 +1,5 @@
-; Slice 3E oracle: a nested `fn`, bound by a bare `let` and then called —
-; `src/close/close.mnd` lifts it to `__lam0` + heap env/closure, and
-; `src/emit/lower.mnd` emits `mn_closure_new` / `mn_apply_1`. Exit 41.
+; Slice 3E oracle: a nested `fn` with an empty capture is a direct call of
+; the lifted function. Exit 41.
 
 let main() -> Int {
   let add = fn (x) = x + 1

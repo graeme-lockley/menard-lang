@@ -34,12 +34,13 @@ let fail-parse(path: Str, e: ParseError) -> Unit =
     | ParseError(_, msg) -> fail(str-concat(path, ": parse error: ", msg))
 
 let compare-roundtrip(path: Str, forms: List Ast, forms2: List Ast) -> Unit =
-  if ast-list-equal(forms, forms2) ->
-    {
-      println("ok")
-      exit(0)
-    }
-   | else -> fail(str-concat("roundtrip mismatch: ", path))
+  cond
+    | ast-list-equal(forms, forms2) ->
+      {
+        println("ok")
+        exit(0)
+      }
+    | else -> fail(str-concat("roundtrip mismatch: ", path))
 
 let reread(path: Str, forms: List Ast, printed: Str) -> Unit =
   match (read-all(printed))
@@ -55,8 +56,9 @@ let check-source(path: Str, src: Str) -> Unit =
     | Err(e) -> fail-parse(path, e)
 
 let main() -> Unit =
-  if arg-count() < 1 -> fail("usage: read-roundtrip.mnd <file.mnd>")
-   | else ->
-    match (read-file(arg(0)))
-      | Ok(src) -> check-source(arg(0), src)
-      | Err(_) -> fail(str-concat("cannot read ", arg(0)))
+  cond
+    | arg-count() < 1 -> fail("usage: read-roundtrip.mnd <file.mnd>")
+    | else ->
+      match (read-file(arg(0)))
+        | Ok(src) -> check-source(arg(0), src)
+        | Err(_) -> fail(str-concat("cannot read ", arg(0)))

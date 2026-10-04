@@ -1,39 +1,35 @@
 ; Operations on the language List type.
 ; @module std/list
 
-import std/map
-
-; Re-export the pair type so a public `zip` may name it.
-pub alias Pair = Pair
+import std/pair
 
 ; Number of elements in xs.
 ; @test length([1, 2, 3]) => 3
 pub let length[a](xs: List a) -> Int =
   match (xs)
     | [] -> 0
-    | Cons(_, t) -> 1 + length(t)
+    | _ :: t -> 1 + length(t)
 
 ; The element at i, or None when i is past the end.
 ; @test nth([10, 20], 1) => Some(20)
 pub let nth[a](xs: List a, i: Int) -> Maybe a =
   match (xs)
     | [] -> None()
-    | Cons(h, t) ->
-      if i == 0 -> Some(h)
-       | else -> nth(t, i - 1)
+    | h :: t ->
+      if (i == 0) -> Some(h) | nth(t, i - 1)
 
 ; The elements of xs followed by the elements of ys.
 ; @test append([1], [2, 3]) => [1, 2, 3]
 pub let append[a](xs: List a, ys: List a) -> List a =
   match (xs)
     | [] -> ys
-    | Cons(h, t) -> Cons(h, append(t, ys))
+    | h :: t -> h :: append(t, ys)
 
 ; xs reversed onto acc.
 let reverse-onto[a](xs: List a, acc: List a) -> List a =
   match (xs)
     | [] -> acc
-    | Cons(h, t) -> reverse-onto(t, Cons(h, acc))
+    | h :: t -> reverse-onto(t, h :: acc)
 
 ; Elements of xs from last to first.
 ; @test reverse([1, 2, 3]) => [3, 2, 1]
@@ -45,58 +41,133 @@ pub let reverse[a](xs: List a) -> List a =
 pub let map[a, b](f: (a) -> b, xs: List a) -> List b =
   match (xs)
     | [] -> []
-    | Cons(h, t) -> Cons(f(h), map(f, t))
+    | h :: t -> f(h) :: map(f, t)
 
 ; Elements for which f returns true, in order.
 ; @test filter(fn (n) = n > 1, [1, 2, 3]) => [2, 3]
 pub let filter[a](f: (a) -> Bool, xs: List a) -> List a =
   match (xs)
     | [] -> []
-    | Cons(h, t) ->
-      if f(h) -> Cons(h, filter(f, t))
-       | else -> filter(f, t)
+    | h :: t ->
+      if (f(h)) -> h :: filter(f, t) | filter(f, t)
 
 ; f folded from the left, starting at acc.
 ; @test fold(fn (a, n) = a + n, 0, [1, 2, 3]) => 6
 pub let fold[a, b](f: (b, a) -> b, acc: b, xs: List a) -> b =
   match (xs)
     | [] -> acc
-    | Cons(h, t) -> fold(f, f(acc, h), t)
+    | h :: t -> fold(f, f(acc, h), t)
 
 ; Pairs of elements taken until either list ends.
 ; @test zip([1, 2], ["a", "b"]) => [Pair(1, "a"), Pair(2, "b")]
 pub let zip[a, b](xs: List a, ys: List b) -> List (Pair a b) =
   match (xs)
     | [] -> []
-    | Cons(x, xt) ->
+    | x :: xt ->
       match (ys)
         | [] -> []
-        | Cons(y, yt) -> Cons(Pair(x, y), zip(xt, yt))
+        | y :: yt -> Pair(x, y) :: zip(xt, yt)
 
 ; Whether x occurs in xs, compared with =.
 ; @test contains([1, 2, 3], 2) => true
 pub let contains[a](xs: List a, x: a) -> Bool =
   match (xs)
     | [] -> false
-    | Cons(h, t) ->
-      if h == x -> true
-       | else -> contains(t, x)
+    | h :: t ->
+      if (h == x) -> true | contains(t, x)
 
 ; Insert x into an already sorted list.
 let insert[a](x: a, xs: List a) -> List a =
   match (xs)
     | [] -> [x]
-    | Cons(y, rest) ->
-      if compare(x, y) <= 0 -> Cons(x, xs)
-       | else -> Cons(y, insert(x, rest))
+    | y :: rest ->
+      if (compare(x, y) <= 0) -> x :: xs | y :: insert(x, rest)
 
 ; Insert each element of xs into the sorted accumulator.
 let sort-onto[a](xs: List a, acc: List a) -> List a =
   match (xs)
     | [] -> acc
-    | Cons(x, rest) -> sort-onto(rest, insert(x, acc))
+    | x :: rest -> sort-onto(rest, insert(x, acc))
 
 ; xs in the derived order of compare.
 ; @test sort([3, 1, 2]) => [1, 2, 3]
 pub let sort[a](xs: List a) -> List a =
   sort-onto(xs, [])
+
+; The first element for which f returns true.
+; @test find(fn (n) = n > 1, [1, 2, 3]) => Some(2)
+pub let find[a](f: (a) -> Bool, xs: List a) -> Maybe a =
+  match (xs)
+    | [] -> None()
+    | h :: t ->
+      if (f(h)) -> Some(h) | find(f, t)
+
+; Whether f returns true for any element.
+; @test any(fn (n) = n > 2, [1, 2, 3]) => true
+pub let any[a](f: (a) -> Bool, xs: List a) -> Bool =
+  match (xs)
+    | [] -> false
+    | h :: t ->
+      if (f(h)) -> true | any(f, t)
+
+; Whether f returns true for every element.
+; @test all(fn (n) = n > 0, [1, 2, 3]) => true
+pub let all[a](f: (a) -> Bool, xs: List a) -> Bool =
+  match (xs)
+    | [] -> true
+    | h :: t ->
+      if (f(h)) -> all(f, t) | false
+
+; The elements of each list, in order.
+; @test concat([[1], [2, 3]]) => [1, 2, 3]
+pub let concat[a](xss: List (List a)) -> List a =
+  match (xss)
+    | [] -> []
+    | h :: t -> append(h, concat(t))
+
+; The lists returned by f, joined in order.
+; @test flat-map(fn (n) = [n, n], [1, 2]) => [1, 1, 2, 2]
+pub let flat-map[a, b](f: (a) -> List b, xs: List a) -> List b =
+  match (xs)
+    | [] -> []
+    | h :: t -> append(f(h), flat-map(f, t))
+
+; The first n elements. Fewer when xs is shorter. None when n is not positive.
+; @test take(2, [1, 2, 3]) => [1, 2]
+pub let take[a](n: Int, xs: List a) -> List a =
+  if (n <= 0) -> [] | take-some(n, xs)
+
+; take when n is still positive.
+let take-some[a](n: Int, xs: List a) -> List a =
+  match (xs)
+    | [] -> []
+    | h :: t -> h :: take(n - 1, t)
+
+; xs without its first n elements. All of xs when n is not positive.
+; @test drop(2, [1, 2, 3]) => [3]
+pub let drop[a](n: Int, xs: List a) -> List a =
+  if (n <= 0) -> xs | drop-some(n, xs)
+
+; drop when n is still positive.
+let drop-some[a](n: Int, xs: List a) -> List a =
+  match (xs)
+    | [] -> []
+    | _ :: t -> drop(n - 1, t)
+
+; Insert x by the order of key into an already sorted list.
+let insert-by[a, b](key: (a) -> b, x: a, xs: List a) -> List a =
+  match (xs)
+    | [] -> [x]
+    | y :: rest ->
+      if (compare(key(x), key(y)) < 0) -> x :: xs | y :: insert-by(key, x, rest)
+
+; Insert each element of xs by key into the sorted accumulator.
+let sort-by-onto[a, b](key: (a) -> b, xs: List a, acc: List a) -> List a =
+  match (xs)
+    | [] -> acc
+    | x :: rest -> sort-by-onto(key, rest, insert-by(key, x, acc))
+
+; xs ordered by key. Equal keys keep the earlier element first.
+; @test sort-by(fn (n) = 0 - n, [1, 3, 2]) => [3, 2, 1]
+pub let sort-by[a, b](key: (a) -> b, xs: List a) -> List a =
+  sort-by-onto(key, xs, [])

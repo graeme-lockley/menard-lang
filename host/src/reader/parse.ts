@@ -32,6 +32,7 @@ const PREC: Record<string, number> = {
   ">=": 3,
   "+": 4,
   "-": 4,
+  "::": 4,
   "*": 5,
   "/": 5,
   "%": 5,
@@ -132,7 +133,18 @@ class P {
     if (t.kind === "str" || t.kind === "ident") {
       this.i++;
       const path = t.kind === "str" ? strAst(t) : sym(t.text, t.span);
-      return { ok: true, ast: paren([sym("import", kw.span), path], join(kw.span, t.span)) };
+      const elems: Ast[] = [sym("import", kw.span), path];
+      let end = t.span;
+      // `as` is a name everywhere except immediately after an import path.
+      if (this.cur().kind === "ident" && this.cur().text === "as") {
+        this.i++;
+        const alias = this.cur();
+        if (alias.kind !== "ident") return this.err(alias, "expected a module name");
+        this.i++;
+        elems.push(sym(alias.text, alias.span));
+        end = alias.span;
+      }
+      return { ok: true, ast: paren(elems, join(kw.span, end)) };
     }
     return this.err(t, "expected a module path");
   }
@@ -231,13 +243,11 @@ class P {
     const kw = this.toks[this.i++]!;
     const name = this.cur();
     if (name.kind !== "ident" && name.kind !== "kw") return this.err(name, "expected a name");
-    // keyword as name is an error except we already consumed let
     if (name.kind === "kw") return this.err(name, "expected a name");
     this.i++;
     const tparams = this.parseTParamsOpt();
     if (!tparams.ok) return tparams;
     if (this.delim("(")) {
-      if (indent > 0) return this.err(kw, "parameter-list let is only legal at the top level");
       const params = this.parseParamList();
       if (!params.ok) return params;
       if (!this.eat("->")) return this.err(this.cur(), "expected ->");
@@ -245,6 +255,14 @@ class P {
       if (!ret.ok) return ret;
       const body = this.parseBody();
       if (!body.ok) return body;
+      if (indent > 0) {
+        const fnParams = paren(params.asts.map(bareParam), name.span);
+        const fnAst = paren([sym("fn", kw.span), fnParams, body.ast], join(kw.span, body.ast.span));
+        return {
+          ok: true,
+          ast: paren([sym("let", kw.span), sym(name.text, name.span), fnAst], join(kw.span, body.ast.span)),
+        };
+      }
       const nameAst = tparams.ast
         ? paren([sym(name.text, name.span), tparams.ast], join(name.span, tparams.ast.span))
         : sym(name.text, name.span);
@@ -395,9 +413,10 @@ class P {
         continue;
       }
       this.i++;
-      const right = this.parsePrec(p + 1);
+      const rightPrec = op.text === "::" ? p : p + 1;
+      const right = this.parsePrec(rightPrec);
       if (!right.ok) return right;
-      const core = op.text === "&&" ? "and" : op.text === "||" ? "or" : op.text;
+      const core = op.text === "::" ? "Cons" : op.text;
       left = {
         ok: true,
         ast: paren([sym(core, op.span), left.ast, right.ast], join(left.ast.span, right.ast.span)),
@@ -463,12 +482,35 @@ class P {
   parsePost(): R {
     let left = this.parseAtom();
     if (!left.ok) return left;
-    while (this.delim("(") && !this.cur().bol) {
-      const call = this.parseCallArgs(left.ast);
-      if (!call.ok) return call;
-      left = call;
+    for (;;) {
+      if (this.delim("(") && !this.cur().bol) {
+        const call = this.parseCallArgs(left.ast);
+        if (!call.ok) return call;
+        left = call;
+        continue;
+      }
+      if (this.cur().kind === "punct" && this.cur().text === "." && !this.cur().bol) {
+        const projected = this.parseProject(left.ast);
+        if (!projected.ok) return projected;
+        left = projected;
+        continue;
+      }
+      return left;
     }
-    return left;
+  }
+
+  parseProject(target: Ast): R {
+    const dot = this.toks[this.i++]!;
+    const field = this.cur();
+    if (field.kind !== "ident") return this.err(field, "expected a field name");
+    this.i++;
+    return {
+      ok: true,
+      ast: paren(
+        [sym("project", dot.span), target, sym(field.text, field.span)],
+        join(target.span, field.span),
+      ),
+    };
   }
 
   parseCallArgs(callee: Ast): R {
@@ -494,6 +536,7 @@ class P {
   parseAtom(): R {
     const t = this.cur();
     if (t.kind === "kw" && t.text === "if") return this.parseIf();
+    if (t.kind === "kw" && t.text === "cond") return this.parseCond();
     if (t.kind === "kw" && t.text === "match") return this.parseMatch();
     if (t.kind === "kw" && t.text === "loop") return this.parseLoop();
     if (t.kind === "kw" && t.text === "while") return this.parseWhile();
@@ -548,14 +591,32 @@ class P {
 
   parseIf(): R {
     const kw = this.toks[this.i++]!;
-    const arms: { test: Ast | null; body: Ast }[] = [];
-    const firstTest = this.parseExprStop(["->"]);
-    if (!firstTest.ok) return firstTest;
+    if (this.cur().kind === "punct" && this.cur().text === "(") return this.parseInlineIf(kw);
+    return this.err(this.cur(), "expected (");
+  }
+
+  parseInlineIf(kw: Tok): R {
+    if (!this.eat("(")) return this.err(this.cur(), "expected (");
+    const test = this.parseExpr();
+    if (!test.ok) return test;
+    if (!this.eat(")")) return this.errEnd("unclosed (");
     if (!this.eat("->")) return this.err(this.cur(), "expected ->");
-    const firstBody = this.parseExpr();
-    if (!firstBody.ok) return firstBody;
-    arms.push({ test: firstTest.ast, body: firstBody.ast });
-    while (this.cur().kind === "op" && this.cur().text === "|" && this.cur().bol && this.cur().col === kw.col + 1) {
+    const body = this.parseExpr();
+    if (!body.ok) return body;
+    const unit = paren([], kw.span);
+    if (this.cur().kind === "op" && this.cur().text === "|" && !this.cur().bol) {
+      this.i++;
+      const els = this.parseExpr();
+      if (!els.ok) return els;
+      return { ok: true, ast: paren([sym("if", kw.span), test.ast, body.ast, els.ast], join(kw.span, els.ast.span)) };
+    }
+    return { ok: true, ast: paren([sym("if", kw.span), test.ast, body.ast, unit], join(kw.span, body.ast.span)) };
+  }
+
+  parseCond(): R {
+    const kw = this.toks[this.i++]!;
+    const arms: { test: Ast | null; body: Ast }[] = [];
+    while (this.cur().kind === "op" && this.cur().text === "|" && this.cur().bol && this.cur().indent > kw.indent) {
       this.i++;
       if (this.cur().text === "else") {
         this.i++;
@@ -572,6 +633,7 @@ class P {
       if (!body.ok) return body;
       arms.push({ test: test.ast, body: body.ast });
     }
+    if (arms.length === 0) return this.err(this.cur(), "cond requires arms");
     return { ok: true, ast: nestIf(arms, kw.span) };
   }
 
@@ -627,6 +689,18 @@ class P {
   }
 
   parsePattern(): R {
+    const left = this.parsePatternAtom();
+    if (!left.ok) return left;
+    if (this.cur().kind === "op" && this.cur().text === "::") {
+      const op = this.toks[this.i++]!;
+      const right = this.parsePattern();
+      if (!right.ok) return right;
+      return { ok: true, ast: paren([sym("Cons", op.span), left.ast, right.ast], join(left.ast.span, right.ast.span)) };
+    }
+    return left;
+  }
+
+  parsePatternAtom(): R {
     const t = this.cur();
     if (t.text === "_") {
       this.i++;
@@ -890,9 +964,10 @@ class P {
         continue;
       }
       this.i++;
-      const right = this.parsePrecStop(p + 1, stops);
+      const rightPrec = op.text === "::" ? p : p + 1;
+      const right = this.parsePrecStop(rightPrec, stops);
       if (!right.ok) return right;
-      const core = op.text === "&&" ? "and" : op.text === "||" ? "or" : op.text;
+      const core = op.text === "::" ? "Cons" : op.text;
       left = {
         ok: true,
         ast: paren([sym(core, op.span), left.ast, right.ast], join(left.ast.span, right.ast.span)),
@@ -914,6 +989,13 @@ class P {
 }
 
 type TokKind = Tok["kind"];
+
+function bareParam(p: Ast): Ast {
+  if (p.tag !== "list" || p.elems[0]?.tag !== "sym") return p;
+  const raw = new TextDecoder().decode(p.elems[0].name);
+  const bare = raw.endsWith(":") ? raw.slice(0, -1) : raw;
+  return sym(bare, p.elems[0].span);
+}
 
 function strAst(t: Tok): Ast {
   return { tag: "str", bytes: Buffer.from(t.text, "latin1"), span: t.span };

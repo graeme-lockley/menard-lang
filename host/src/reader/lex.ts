@@ -26,6 +26,7 @@ export type Tok = {
 
 const KEYWORDS = new Set([
   "alias",
+  "cond",
   "else",
   "extern",
   "fn",
@@ -72,7 +73,7 @@ function isIdentCont(b: number): boolean {
   );
 }
 
-const OPS = ["==", "!=", "<=", ">=", "&&", "||", "->", "+", "-", "*", "/", "%", "<", ">", "=", "|"];
+const OPS = ["==", "!=", "<=", ">=", "&&", "||", "->", "::", "+", "-", "*", "/", "%", "<", ">", "=", "|"];
 
 export function lex(src: Uint8Array): { ok: true; toks: Tok[] } | { ok: false; error: LexErr } {
   const toks: Tok[] = [];
@@ -210,6 +211,23 @@ export function lex(src: Uint8Array): { ok: true; toks: Tok[] } | { ok: false; e
       toks.push({
         kind: "ident",
         text: "...",
+        span: { start, end: i },
+        col: tokCol,
+        indent: tokIndent,
+        bol: tokBol,
+        line: tokLine,
+      });
+      continue;
+    }
+
+    // A single dot is field or module projection (`pair.fst`, `Lexer.read`).
+    // `...` is already consumed above. Dot is not an identifier character,
+    // so it stays a token even when glued to the names on either side.
+    if (b === 0x2e) {
+      bump();
+      toks.push({
+        kind: "punct",
+        text: ".",
         span: { start, end: i },
         col: tokCol,
         indent: tokIndent,

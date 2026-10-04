@@ -134,26 +134,27 @@ let int-node(n: Int) -> Ast =
 let append-asts(xs: List Ast, ys: List Ast) -> List Ast =
   match (xs)
     | [] -> ys
-    | Cons(x, rest) -> Cons(x, append-asts(rest, ys))
+    | x :: rest -> x :: append-asts(rest, ys)
 
 let append-strs(xs: List Str, ys: List Str) -> List Str =
   match (xs)
     | [] -> ys
-    | Cons(x, rest) -> Cons(x, append-strs(rest, ys))
+    | x :: rest -> x :: append-strs(rest, ys)
 
 let snoc-str(xs: List Str, x: Str) -> List Str =
   append-strs(xs, [x])
 
 let drop-n(n: Int, xs: List Ast) -> List Ast =
-  if n <= 0 -> xs
-   | else ->
-    match (xs)
-      | [] -> []
-      | Cons(_, rest) -> drop-n(n - 1, rest)
+  cond
+    | n <= 0 -> xs
+    | else ->
+      match (xs)
+        | [] -> []
+        | _ :: rest -> drop-n(n - 1, rest)
 
 let is-head(form: Ast, name: Str) -> Bool =
   match (form)
-    | ParenNode(Cons(h, _), _) ->
+    | ParenNode(h :: _, _) ->
       match (sym-str(h))
         | Some(n) -> n == name
         | None -> false
@@ -161,16 +162,16 @@ let is-head(form: Ast, name: Str) -> Bool =
 
 let unwrap-pub(form: Ast) -> Ast =
   match (form)
-    | ParenNode(Cons(h, rest), sp) ->
-      if is-head(form, "pub") -> ParenNode(rest, sp)
-       | else -> form
+    | ParenNode(h :: rest, sp) ->
+      if (is-head(form, "pub")) -> ParenNode(rest, sp) | form
     | _ -> form
 
 let parse-code(msg: Str) -> Str =
-  if has(msg, "unclosed") -> "E_PARSE_UNCLOSED"
-   | has(msg, "'!'") -> "E_PARSE_BANG"
-   | has(msg, "unterminated") -> "E_PARSE_STRING"
-   | else -> "E_PARSE"
+  cond
+    | has(msg, "unclosed") -> "E_PARSE_UNCLOSED"
+    | has(msg, "'!'") -> "E_PARSE_BANG"
+    | has(msg, "unterminated") -> "E_PARSE_STRING"
+    | else -> "E_PARSE"
 
 let report-parse(path: Str, src: Str, e: ParseError) -> Unit =
   match (e)
@@ -183,7 +184,7 @@ let report-casing(path: Str, src: Str, e: CasingError) -> Unit =
 let report-desugar(path: Str, src: Str, es: List DesugarError) -> Unit =
   match (es)
     | [] -> ()
-    | Cons(DesugarError(sp, code, msg), rest) ->
+    | DesugarError(sp, code, msg) :: rest ->
       {
         report-span(path, src, sp, "error", code, msg)
         report-desugar(path, src, rest)
@@ -192,7 +193,7 @@ let report-desugar(path: Str, src: Str, es: List DesugarError) -> Unit =
 let report-types(path: Str, src: Str, es: List TypeError) -> Unit =
   match (es)
     | [] -> ()
-    | Cons(TypeError(sp, code, msg), rest) ->
+    | TypeError(sp, code, msg) :: rest ->
       {
         report-span(path, src, sp, "error", code, msg)
         report-types(path, src, rest)
@@ -201,33 +202,32 @@ let report-types(path: Str, src: Str, es: List TypeError) -> Unit =
 let before-arrow(xs: List Ast, acc: List Ast) -> List Ast =
   match (xs)
     | [] -> reverse(acc)
-    | Cons(x, rest) ->
+    | x :: rest ->
       match (sym-str(x))
         | Some(n) ->
-          if n == "->" -> reverse(acc)
-           | else -> before-arrow(rest, Cons(x, acc))
-        | None -> before-arrow(rest, Cons(x, acc))
+          if (n == "->") -> reverse(acc) | before-arrow(rest, x :: acc)
+        | None -> before-arrow(rest, x :: acc)
 
 let after-arrow(xs: List Ast) -> Maybe Ast =
   match (xs)
     | [] -> None()
-    | Cons(x, rest) ->
+    | x :: rest ->
       match (sym-str(x))
         | Some(n) ->
-          if n == "->" ->
-            match (rest)
-              | Cons(r, _) -> Some(r)
-              | [] -> None()
-           | else -> after-arrow(rest)
+          cond
+            | n == "->" ->
+              match (rest)
+                | r :: _ -> Some(r)
+                | [] -> None()
+            | else -> after-arrow(rest)
         | None -> after-arrow(rest)
 
 let defn-rest(form: Ast) -> Maybe (List Ast) =
   match (unwrap-pub(form))
-    | ParenNode(Cons(h, rest), _) ->
+    | ParenNode(h :: rest, _) ->
       match (sym-str(h))
         | Some(n) ->
-          if n == "defn" -> Some(rest)
-           | else -> None()
+          if (n == "defn") -> Some(rest) | None()
         | None -> None()
     | _ -> None()
 
@@ -235,7 +235,7 @@ let defn-rest(form: Ast) -> Maybe (List Ast) =
 let bare-name(name: Ast) -> Maybe Str =
   match (name)
     | SymNode(n, _) -> Some(n)
-    | ParenNode(Cons(h, _), _) -> sym-str(h)
+    | ParenNode(h :: _, _) -> sym-str(h)
     | _ -> None()
 
 let defn-name(form: Ast) -> Maybe Str =
@@ -243,7 +243,7 @@ let defn-name(form: Ast) -> Maybe Str =
     | None -> None()
     | Some(rest) ->
       match (rest)
-        | Cons(name, _) -> bare-name(name)
+        | name :: _ -> bare-name(name)
         | [] -> None()
 
 ; A stub is typechecked without the source's private `(variant Name)`
@@ -251,7 +251,7 @@ let defn-name(form: Ast) -> Maybe Str =
 ; declaration first, or the payload types are unknown.
 let variant-forward(form: Ast) -> Ast =
   match (unwrap-pub(form))
-    | ParenNode(Cons(_, Cons(name-part, _)), sp) -> ParenNode([sym("variant"), name-part], sp)
+    | ParenNode(_ :: name-part :: _, sp) -> ParenNode([sym("variant"), name-part], sp)
     | _ -> form
 
 let is-test-form(form: Ast) -> Bool =
@@ -260,21 +260,19 @@ let is-test-form(form: Ast) -> Bool =
 let drop-tests(forms: List Ast, acc: List Ast) -> List Ast =
   match (forms)
     | [] -> reverse(acc)
-    | Cons(f, rest) ->
-      if is-test-form(f) -> drop-tests(rest, acc)
-       | else -> drop-tests(rest, Cons(f, acc))
+    | f :: rest ->
+      if (is-test-form(f)) -> drop-tests(rest, acc) | drop-tests(rest, f :: acc)
 
 let take-test(form: Ast, acc: List Ast) -> List Ast =
   match (form)
-    | ParenNode([_, name, expr], _) -> Cons(ParenNode([name, expr], blank()), acc)
+    | ParenNode([_, name, expr], _) -> ParenNode([name, expr], blank()) :: acc
     | _ -> acc
 
 let take-tests(forms: List Ast, acc: List Ast) -> List Ast =
   match (forms)
     | [] -> reverse(acc)
-    | Cons(f, rest) ->
-      if is-test-form(f) -> take-tests(rest, take-test(f, acc))
-       | else -> take-tests(rest, acc)
+    | f :: rest ->
+      if (is-test-form(f)) -> take-tests(rest, take-test(f, acc)) | take-tests(rest, acc)
 
 ; `println` writes a string literal as text and an `Int` as digits. A
 ; computed `str-concat` would be printed as a pointer, so the prefix and
@@ -285,8 +283,8 @@ let test-stmt(name: Ast, expr: Ast) -> Ast =
 let test-stmts(tests: List Ast) -> List Ast =
   match (tests)
     | [] -> []
-    | Cons(ParenNode([name, expr], _), rest) -> Cons(test-stmt(name, expr), test-stmts(rest))
-    | Cons(_, rest) -> test-stmts(rest)
+    | ParenNode([name, expr], _) :: rest -> test-stmt(name, expr) :: test-stmts(rest)
+    | _ :: rest -> test-stmts(rest)
 
 let test-main(tests: List Ast) -> Ast =
   ParenNode([sym("defn"), sym("main"), sym("->"), sym("Int"), ParenNode(append-asts([sym("do")], append-asts(test-stmts(tests), [int-node(0)])), blank())], blank())
@@ -294,37 +292,36 @@ let test-main(tests: List Ast) -> Ast =
 let drop-main(forms: List Ast, acc: List Ast) -> List Ast =
   match (forms)
     | [] -> reverse(acc)
-    | Cons(f, rest) ->
+    | f :: rest ->
       match (defn-name(f))
         | Some(n) ->
-          if n == "main" -> drop-main(rest, acc)
-           | else -> drop-main(rest, Cons(f, acc))
-        | None -> drop-main(rest, Cons(f, acc))
+          if (n == "main") -> drop-main(rest, acc) | drop-main(rest, f :: acc)
+        | None -> drop-main(rest, f :: acc)
 
 let prepare-body(forms: List Ast, for-test: Bool) -> List Ast {
   let tests = take-tests(forms, [])
   let body = drop-tests(forms, [])
-  if for-test -> append-asts(drop-main(body, []), [test-main(tests)])
-   | else -> body
+  if (for-test) -> append-asts(drop-main(body, []), [test-main(tests)]) | body
 }
 
 let top-let-name(form: Ast) -> Maybe Str =
   match (unwrap-pub(form))
-    | ParenNode(Cons(h, rest), _) ->
+    | ParenNode(h :: rest, _) ->
       match (sym-str(h))
         | Some(n) ->
-          if n == "let" ->
-            match (rest)
-              | Cons(name, _) -> bare-name(name)
-              | [] -> None()
-           | else -> None()
+          cond
+            | n == "let" ->
+              match (rest)
+                | name :: _ -> bare-name(name)
+                | [] -> None()
+            | else -> None()
         | None -> None()
     | _ -> None()
 
 let add-rename(forms: List Ast, path: Str, acc: Map Str Str) -> Map Str Str =
   match (forms)
     | [] -> acc
-    | Cons(f, rest) ->
+    | f :: rest ->
       match (defn-name(f))
         | Some(n) -> add-rename(rest, path, map-set(acc, n, link-of(path, n)))
         | None ->
@@ -340,11 +337,10 @@ let is-lam-name(n: Str) -> Bool =
 let add-lam-rename(forms: List Ast, path: Str, acc: Map Str Str) -> Map Str Str =
   match (forms)
     | [] -> acc
-    | Cons(f, rest) ->
+    | f :: rest ->
       match (defn-name(f))
         | Some(n) ->
-          if is-lam-name(n) -> add-lam-rename(rest, path, map-set(acc, n, link-of(path, n)))
-           | else -> add-lam-rename(rest, path, acc)
+          if (is-lam-name(n)) -> add-lam-rename(rest, path, map-set(acc, n, link-of(path, n))) | add-lam-rename(rest, path, acc)
         | None -> add-lam-rename(rest, path, acc)
 
 let extern-stub(form: Ast) -> Maybe Ast =
@@ -361,16 +357,17 @@ let fn-arity(rest: List Ast) -> Int =
 let push-fn(fns: List FnRec, name: Str, link: Str, arity: Int) -> List FnRec =
   match (fns)
     | [] -> [FnRec(name, link, arity)]
-    | Cons(FnRec(n, _, _), _) ->
-      if n == name -> fns
-       | else ->
-        match (fns)
-          | Cons(h, rest) -> Cons(h, push-fn(rest, name, link, arity))
-          | [] -> [FnRec(name, link, arity)]
+    | FnRec(n, _, _) :: _ ->
+      cond
+        | n == name -> fns
+        | else ->
+          match (fns)
+            | h :: rest -> h :: push-fn(rest, name, link, arity)
+            | [] -> [FnRec(name, link, arity)]
 
 let kind-of(form: Ast) -> Str =
   match (unwrap-pub(form))
-    | ParenNode(Cons(h, _), _) ->
+    | ParenNode(h :: _, _) ->
       match (sym-str(h))
         | Some(n) -> n
         | None -> ""
@@ -381,53 +378,52 @@ let is-pub(form: Ast) -> Bool =
 
 let ctor-names-of(form: Ast, acc: List Str) -> List Str =
   match (unwrap-pub(form))
-    | ParenNode(Cons(h, rest), _) ->
+    | ParenNode(h :: rest, _) ->
       match (sym-str(h))
         | Some(n) ->
-          if n == "variant" ->
-            match (rest)
-              | Cons(_, ctors) -> variant-ctor-names(ctors, acc)
-              | [] -> acc
-           | n == "defrec" ->
-            match (rest)
-              | Cons(name, _) ->
-                match (bare-name(name))
-                  | Some(dn) -> Cons(dn, acc)
-                  | None -> acc
-              | [] -> acc
-           | else -> acc
+          cond
+            | n == "variant" ->
+              match (rest)
+                | _ :: ctors -> variant-ctor-names(ctors, acc)
+                | [] -> acc
+            | n == "defrec" ->
+              match (rest)
+                | name :: _ ->
+                  match (bare-name(name))
+                    | Some(dn) -> dn :: acc
+                    | None -> acc
+                | [] -> acc
+            | else -> acc
         | None -> acc
     | _ -> acc
 
 let variant-ctor-names(ctors: List Ast, acc: List Str) -> List Str =
   match (ctors)
     | [] -> acc
-    | Cons(c, rest) ->
+    | c :: rest ->
       match (c)
-        | ParenNode(Cons(name, _), _) ->
+        | ParenNode(name :: _, _) ->
           match (sym-str(name))
-            | Some(n) -> variant-ctor-names(rest, Cons(n, acc))
+            | Some(n) -> variant-ctor-names(rest, n :: acc)
             | None -> variant-ctor-names(rest, acc)
         | _ -> variant-ctor-names(rest, acc)
 
 let has-str(xs: List Str, s: Str) -> Bool =
   match (xs)
     | [] -> false
-    | Cons(h, rest) ->
-      if h == s -> true
-       | else -> has-str(rest, s)
+    | h :: rest ->
+      if (h == s) -> true | has-str(rest, s)
 
 let filter-ctors(local: List CtorSeed, names: List Str, acc: List CtorRec) -> List CtorRec =
   match (local)
     | [] -> reverse-ctors(acc, [])
-    | Cons(CtorSeed(n, t, a), rest) ->
-      if has-str(names, n) -> filter-ctors(rest, names, Cons(CtorRec(n, t, a), acc))
-       | else -> filter-ctors(rest, names, acc)
+    | CtorSeed(n, t, a) :: rest ->
+      if (has-str(names, n)) -> filter-ctors(rest, names, CtorRec(n, t, a) :: acc) | filter-ctors(rest, names, acc)
 
 let reverse-ctors(xs: List CtorRec, acc: List CtorRec) -> List CtorRec =
   match (xs)
     | [] -> acc
-    | Cons(x, rest) -> reverse-ctors(rest, Cons(x, acc))
+    | x :: rest -> reverse-ctors(rest, x :: acc)
 
 record Export {
   fns: List FnRec
@@ -438,26 +434,26 @@ record Export {
 let collect-exports(forms: List Ast, path: Str, fns: List FnRec, names: List Str, stubs: List Ast) -> Export =
   match (forms)
     | [] -> Export(fns, names, stubs)
-    | Cons(f, rest) ->
-      if is-pub(f) -> collect-pub(f, rest, path, fns, names, stubs)
-       | else -> collect-exports(rest, path, fns, names, stubs)
+    | f :: rest ->
+      if (is-pub(f)) -> collect-pub(f, rest, path, fns, names, stubs) | collect-exports(rest, path, fns, names, stubs)
 
 let collect-pub(form: Ast, rest: List Ast, path: Str, fns: List FnRec, names: List Str, stubs: List Ast) -> Export {
   let k = kind-of(form)
-  if k == "defn" ->
-    match (defn-rest(form))
-      | None -> collect-exports(rest, path, fns, names, stubs)
-      | Some(r) ->
-        match (defn-name(form))
-          | None -> collect-exports(rest, path, fns, names, stubs)
-          | Some(n) ->
-            match (extern-stub(form))
-              | None -> collect-exports(rest, path, fns, names, stubs)
-              | Some(stub) -> collect-exports(rest, path, push-fn(fns, n, link-of(path, n), fn-arity(r)), names, Cons(stub, stubs))
-   | k == "variant" -> collect-exports(rest, path, fns, ctor-names-of(form, names), Cons(unwrap-pub(form), Cons(variant-forward(form), stubs)))
-   | k == "defrec" || k == "alias" || k == "extern" -> collect-exports(rest, path, fns, ctor-names-of(form, names), Cons(unwrap-pub(form), stubs))
-   | k == "let" -> collect-exports(rest, path, fns, names, Cons(unwrap-pub(form), stubs))
-   | else -> collect-exports(rest, path, fns, names, stubs)
+  cond
+    | k == "defn" ->
+      match (defn-rest(form))
+        | None -> collect-exports(rest, path, fns, names, stubs)
+        | Some(r) ->
+          match (defn-name(form))
+            | None -> collect-exports(rest, path, fns, names, stubs)
+            | Some(n) ->
+              match (extern-stub(form))
+                | None -> collect-exports(rest, path, fns, names, stubs)
+                | Some(stub) -> collect-exports(rest, path, push-fn(fns, n, link-of(path, n), fn-arity(r)), names, stub :: stubs)
+    | k == "variant" -> collect-exports(rest, path, fns, ctor-names-of(form, names), unwrap-pub(form) :: variant-forward(form) :: stubs)
+    | k == "defrec" || k == "alias" || k == "extern" -> collect-exports(rest, path, fns, ctor-names-of(form, names), unwrap-pub(form) :: stubs)
+    | k == "let" -> collect-exports(rest, path, fns, names, unwrap-pub(form) :: stubs)
+    | else -> collect-exports(rest, path, fns, names, stubs)
 }
 
 let empty-surface() -> Surface =
@@ -466,16 +462,14 @@ let empty-surface() -> Surface =
 let surface-has-fn(fns: List FnRec, name: Str) -> Bool =
   match (fns)
     | [] -> false
-    | Cons(FnRec(n, _, _), rest) ->
-      if n == name -> true
-       | else -> surface-has-fn(rest, name)
+    | FnRec(n, _, _) :: rest ->
+      if (n == name) -> true | surface-has-fn(rest, name)
 
 let surface-add-fns(fns: List FnRec, acc: List FnRec) -> List FnRec =
   match (fns)
     | [] -> acc
-    | Cons(FnRec(n, link, ar), rest) ->
-      if surface-has-fn(acc, n) -> surface-add-fns(rest, acc)
-       | else -> surface-add-fns(rest, Cons(FnRec(n, link, ar), acc))
+    | FnRec(n, link, ar) :: rest ->
+      if (surface-has-fn(acc, n)) -> surface-add-fns(rest, acc) | surface-add-fns(rest, FnRec(n, link, ar) :: acc)
 
           ; Stubs are typechecked in this order, so a dependency's variant
           ; has to precede the alias that names it.
@@ -488,7 +482,7 @@ let surface-add(iface: Iface, acc: Surface) -> Surface =
 let append-ctors(xs: List CtorRec, ys: List CtorRec) -> List CtorRec =
   match (xs)
     | [] -> ys
-    | Cons(x, rest) -> Cons(x, append-ctors(rest, ys))
+    | x :: rest -> x :: append-ctors(rest, ys)
 
 let walk-surface(path: Str, done: Map Str Iface, seen: Ref (Map Str Bool), acc: Surface) -> Surface =
   match (map-get(deref(seen), path))
@@ -508,7 +502,7 @@ let walk-deps(iface: Iface, done: Map Str Iface, seen: Ref (Map Str Bool), acc: 
 let walk-dep-list(deps: List DepRec, done: Map Str Iface, seen: Ref (Map Str Bool), acc: Surface) -> Surface =
   match (deps)
     | [] -> acc
-    | Cons(DepRec(_, path), rest) -> walk-dep-list(rest, done, seen, walk-surface(path, done, seen, acc))
+    | DepRec(_, path) :: rest -> walk-dep-list(rest, done, seen, walk-surface(path, done, seen, acc))
 
 let surface-of(deps: List DepRec, done: Map Str Iface) -> Surface =
   walk-dep-list(deps, done, ref(map-new()), empty-surface())
@@ -516,28 +510,27 @@ let surface-of(deps: List DepRec, done: Map Str Iface) -> Surface =
 let fns-to-imps(fns: List FnRec) -> List Imp =
   match (fns)
     | [] -> []
-    | Cons(FnRec(n, link, ar), rest) -> Cons(Imp(n, link, ar), fns-to-imps(rest))
+    | FnRec(n, link, ar) :: rest -> Imp(n, link, ar) :: fns-to-imps(rest)
 
 let ctors-to-seeds(ctors: List CtorRec) -> List CtorSeed =
   match (ctors)
     | [] -> []
-    | Cons(CtorRec(n, t, a), rest) -> Cons(CtorSeed(n, t, a), ctors-to-seeds(rest))
+    | CtorRec(n, t, a) :: rest -> CtorSeed(n, t, a) :: ctors-to-seeds(rest)
 
 let calls-of(names: List Str) -> List Ast =
   match (names)
     | [] -> []
-    | Cons(n, rest) -> Cons(ParenNode([sym(n)], blank()), calls-of(rest))
+    | n :: rest -> ParenNode([sym(n)], blank()) :: calls-of(rest)
 
 let imps-of-syms(names: List Str) -> List Imp =
   match (names)
     | [] -> []
-    | Cons(n, rest) -> Cons(Imp(n, n, 0), imps-of-syms(rest))
+    | n :: rest -> Imp(n, n, 0) :: imps-of-syms(rest)
 
 let bootstrap-forms(inits: List Str, main-sym: Str, unit-ret: Bool) -> List Ast {
   let calls = append-asts(calls-of(inits), [ParenNode([sym(main-sym)], blank())])
   let body =
-    if unit-ret -> append-asts(calls, [int-node(0)])
-     | else -> calls
+    if (unit-ret) -> append-asts(calls, [int-node(0)]) | calls
   [ParenNode(append-asts([sym("defn"), sym("main"), sym("->"), sym("Int")], body), blank())]
 }
 
@@ -551,8 +544,7 @@ let write-bytes(path: Str, bytes: Str) -> Bool {
 let write-if-changed(path: Str, bytes: Str) -> Bool =
   match (read-file(path))
     | Ok(old) ->
-      if old == bytes -> false
-       | else -> write-bytes(path, bytes)
+      if (old == bytes) -> false | write-bytes(path, bytes)
     | Err(_) -> write-bytes(path, bytes)
 
 let rt(runtime: Str, name: Str) -> Str =
@@ -572,19 +564,19 @@ let link-objs(cc: Str, runtime: Str, objs: List Str, bin: Str) -> Result Str Str
   match (spawn-capture(link-argv(cc, runtime, objs, tmp), ""))
     | Err(_) -> Err(str-concat("cannot spawn ", cc))
     | Ok(SpawnOutput(st, _, err)) ->
-      if exit-code(st) == 0 ->
-        match (rename(tmp, bin))
-          | Ok(_) -> Ok(bin)
-          | Err(_) -> Err(str-concat("cannot rename ", bin))
-       | else -> Err(err)
+      cond
+        | exit-code(st) == 0 ->
+          match (rename(tmp, bin))
+            | Ok(_) -> Ok(bin)
+            | Err(_) -> Err(str-concat("cannot rename ", bin))
+        | else -> Err(err)
 }
 
 let any-newer(paths: List Str, bin: Str) -> Bool =
   match (paths)
     | [] -> false
-    | Cons(p, rest) ->
-      if mtime(bin) == 0 || mtime(p) > mtime(bin) -> true
-       | else -> any-newer(rest, bin)
+    | p :: rest ->
+      if (mtime(bin) == 0 || mtime(p) > mtime(bin)) -> true | any-newer(rest, bin)
 
 let finish-fresh(abs: Str, iface: Iface, ctx: Ctx) -> Result Iface Str =
   match (ctx)
@@ -594,7 +586,7 @@ let finish-fresh(abs: Str, iface: Iface, ctx: Ctx) -> Result Iface Str =
           {
             set!(done, map-set(deref(done), abs, iface))
             set!(order, snoc-str(deref(order), object-path(abs)))
-            if str-byte-length(init) > 0 -> set!(inits, snoc-str(deref(inits), init))
+            if (str-byte-length(init) > 0) -> set!(inits, snoc-str(deref(inits), init))
             Ok(iface)
           }
 
@@ -620,7 +612,7 @@ let compile-forms(abs: Str, src: Str, display: Str, forms: List Ast, direct: Lis
 ; and externs, present only while typechecking.
 let is-let-form(ast: Ast) -> Bool =
   match (unwrap-pub(ast))
-    | ParenNode(Cons(h, _), _) ->
+    | ParenNode(h :: _, _) ->
       match (sym-str(h))
         | Some(n) -> n == "let"
         | None -> false
@@ -629,16 +621,14 @@ let is-let-form(ast: Ast) -> Bool =
 let lets-only(xs: List Ast, acc: List Ast) -> List Ast =
   match (xs)
     | [] -> reverse(acc)
-    | Cons(f, rest) ->
-      if is-let-form(f) -> lets-only(rest, Cons(f, acc))
-       | else -> lets-only(rest, acc)
+    | f :: rest ->
+      if (is-let-form(f)) -> lets-only(rest, f :: acc) | lets-only(rest, acc)
 
 let drop-let-forms(xs: List Ast, acc: List Ast) -> List Ast =
   match (xs)
     | [] -> reverse(acc)
-    | Cons(f, rest) ->
-      if is-let-form(f) -> drop-let-forms(rest, acc)
-       | else -> drop-let-forms(rest, Cons(f, acc))
+    | f :: rest ->
+      if (is-let-form(f)) -> drop-let-forms(rest, acc) | drop-let-forms(rest, f :: acc)
 
 let compile-checked(abs: Str, src: Str, display: Str, body: List Ast, exported: Export, direct: List DepRec, fns: List FnRec, ctors: List CtorRec, stubs: List Ast, for-test: Bool, ctx: Ctx, started: Int) -> Result Iface Str {
   let types = drop-let-forms(stubs, [])
@@ -682,34 +672,35 @@ let compile-store(abs: Str, src: Str, with-init: List Ast, exported: Export, dir
             let init =
               match (deref(init-ref))
                 | [] -> ""
-                | Cons(s, _) -> s
+                | s :: _ -> s
             let main-name = link-of(abs, "main")
             let main-ret =
               match (defn-return-type(with-init, main-name))
                 | Some(r) -> r
                 | None -> ""
             let main-sym =
-              if str-byte-length(main-ret) > 0 -> main-name
-               | else -> ""
+              if (str-byte-length(main-ret) > 0) -> main-name | ""
             let iface = Iface(bytes-hash(src), direct, init, main-sym, main-ret, fns, filter-ctors(local, names, []), reverse(stubs))
-            if write-bytes(object-path(abs), bytes) ->
-              if write-iface(abs, iface) -> finish-fresh(abs, iface, ctx)
-               | else ->
+            cond
+              | write-bytes(object-path(abs), bytes) ->
+                cond
+                  | write-iface(abs, iface) -> finish-fresh(abs, iface, ctx)
+                  | else ->
+                    {
+                      note-compiling(abs, ctx, since(started))
+                      Err("cannot write interface")
+                    }
+              | else ->
                 {
                   note-compiling(abs, ctx, since(started))
-                  Err("cannot write interface")
+                  Err("cannot write object")
                 }
-             | else ->
-              {
-                note-compiling(abs, ctx, since(started))
-                Err("cannot write object")
-              }
           }
 
 let ensure-list(paths: List Str, ctx: Ctx) -> Result Unit Str =
   match (paths)
     | [] -> Ok(())
-    | Cons(p, rest) ->
+    | p :: rest ->
       match (ensure-mod(p, ctx))
         | Ok(_) -> ensure-list(rest, ctx)
         | Err(e) -> Err(e)
@@ -717,35 +708,36 @@ let ensure-list(paths: List Str, ctx: Ctx) -> Result Unit Str =
 let dep-recs(paths: List Str) -> List DepRec =
   match (paths)
     | [] -> []
-    | Cons(p, rest) -> Cons(DepRec(hash-file(iface-path(p)), p), dep-recs(rest))
+    | p :: rest -> DepRec(hash-file(iface-path(p)), p) :: dep-recs(rest)
 
 let canon-specs(from: Str, specs: List Str) -> List Str =
   match (specs)
     | [] -> []
-    | Cons(spec, rest) -> Cons(canonical-path(resolve-import(from, spec)), canon-specs(from, rest))
+    | spec :: rest -> canonical-path(resolve-import(from, spec)) :: canon-specs(from, rest)
 
 let has-nl(s: Str) -> Bool =
   has-nl-from(s, 0)
 
 let has-nl-from(s: Str, i: Int) -> Bool =
-  if i >= str-byte-length(s) -> false
-   | str-byte(s, i) == 10 -> true
-   | else -> has-nl-from(s, i + 1)
+  cond
+    | i >= str-byte-length(s) -> false
+    | str-byte(s, i) == 10 -> true
+    | else -> has-nl-from(s, i + 1)
 
 let since(started: Int) -> Int {
   let d = now-ms() - started
-  if d < 0 -> 0
-   | else -> d
+  if (d < 0) -> 0 | d
 }
 
 ; Same rule as `mn.mnd`'s `note-compiling`: a tty, and not `--quiet`.
 let note-progress(verb: Str, abs: Str, ctx: Ctx, ms: Int) -> Unit =
-  if ctx-quiet(ctx) || not(isatty(2)) -> ()
-   | else ->
-    {
-      write(stderr, progress-line(verb, display-path(abs), ms))
-      ()
-    }
+  cond
+    | ctx-quiet(ctx) || not(isatty(2)) -> ()
+    | else ->
+      {
+        write(stderr, progress-line(verb, display-path(abs), ms))
+        ()
+      }
 
 let note-compiling(abs: Str, ctx: Ctx, ms: Int) -> Unit =
   note-progress("Compiling", abs, ctx, ms)
@@ -754,12 +746,13 @@ let note-linking(abs: Str, ctx: Ctx, ms: Int) -> Unit =
   note-progress("Linking", abs, ctx, ms)
 
 let note-link-label(label: Str, ctx: Ctx, ms: Int) -> Unit =
-  if ctx-quiet(ctx) || not(isatty(2)) -> ()
-   | else ->
-    {
-      write(stderr, progress-line("Linking", label, ms))
-      ()
-    }
+  cond
+    | ctx-quiet(ctx) || not(isatty(2)) -> ()
+    | else ->
+      {
+        write(stderr, progress-line("Linking", label, ms))
+        ()
+      }
 
 let compile-file(abs: Str, ctx: Ctx) -> Result Iface Str =
   compile-file-read(abs, ctx)
@@ -829,7 +822,7 @@ let ensure-mod(abs: Str, ctx: Ctx) -> Result Iface Str =
             | None ->
               {
                 set!(visiting, map-set(deref(visiting), abs, true))
-                if clean -> remove-cache(abs)
+                if (clean) -> remove-cache(abs)
                 ensure-body(abs, ctx)
               }
 
@@ -849,15 +842,14 @@ let ensure-body(abs: Str, ctx: Ctx) -> Result Iface Str =
         | Iface(_, deps, _, _, _, _, _, _) ->
           match (ensure-list(dep-paths(deps), ctx))
             | Ok(_) ->
-              if reusable(ctx, abs, iface) -> finish-fresh(abs, iface, ctx)
-               | else -> compile-file(abs, ctx)
+              if (reusable(ctx, abs, iface)) -> finish-fresh(abs, iface, ctx) | compile-file(abs, ctx)
             | Err(e) -> Err(e)
     | None -> compile-file(abs, ctx)
 
 let dep-paths(deps: List DepRec) -> List Str =
   match (deps)
     | [] -> []
-    | Cons(DepRec(_, p), rest) -> Cons(p, dep-paths(rest))
+    | DepRec(_, p) :: rest -> p :: dep-paths(rest)
 
 let boot-path(abs: Str) -> Str =
   str-concat(cache-root(), "/boot/", show(bytes-hash(abs)), ".bc")
@@ -865,44 +857,47 @@ let boot-path(abs: Str) -> Str =
 let link-closure(abs: Str, iface: Iface, ctx: Ctx, cc: Str, runtime: Str, bin: Str) -> Result Str Str =
   match (iface)
     | Iface(_, _, _, main-sym, main-ret, _, _, _) ->
-      if str-byte-length(main-sym) == 0 -> Err("program has no top-level `defn main`")
-       | else ->
-        match (ctx)
-          | Ctx(_, _, _, triple, _, _, order, inits, _, _, _) ->
-            {
-              let unit = main-ret == "Unit"
-              let syms = snoc-str(deref(inits), main-sym)
-              let forms = bootstrap-forms(deref(inits), main-sym, unit)
-              match (lower-program-sep(forms, triple, ["<bootstrap>"], imps-of-syms(syms), []))
-                | Err(msg) -> Err(msg)
-                | Ok(bytes) ->
-                  {
-                    let bp = boot-path(abs)
-                    write-if-changed(bp, bytes)
-                    let objs = snoc-str(deref(order), bp)
-                    if any-newer(objs, bin) ->
-                      {
-                        let started = now-ms()
-                        match (link-objs(cc, runtime, objs, bin))
-                          | Ok(out) ->
-                            {
-                              note-linking(abs, ctx, since(started))
-                              Ok(out)
-                            }
-                          | Err(msg) ->
-                            {
-                              note-linking(abs, ctx, since(started))
-                              if has-nl(msg) ->
+      cond
+        | str-byte-length(main-sym) == 0 -> Err("program has no top-level `defn main`")
+        | else ->
+          match (ctx)
+            | Ctx(_, _, _, triple, _, _, order, inits, _, _, _) ->
+              {
+                let unit = main-ret == "Unit"
+                let syms = snoc-str(deref(inits), main-sym)
+                let forms = bootstrap-forms(deref(inits), main-sym, unit)
+                match (lower-program-sep(forms, triple, ["<bootstrap>"], imps-of-syms(syms), []))
+                  | Err(msg) -> Err(msg)
+                  | Ok(bytes) ->
+                    {
+                      let bp = boot-path(abs)
+                      write-if-changed(bp, bytes)
+                      let objs = snoc-str(deref(order), bp)
+                      cond
+                        | any-newer(objs, bin) ->
+                          {
+                            let started = now-ms()
+                            match (link-objs(cc, runtime, objs, bin))
+                              | Ok(out) ->
                                 {
-                                  write(stderr, msg)
-                                  Err("link failed")
+                                  note-linking(abs, ctx, since(started))
+                                  Ok(out)
                                 }
-                               | else -> Err(msg)
-                            }
-                      }
-                     | else -> Ok(bin)
-                  }
-            }
+                              | Err(msg) ->
+                                {
+                                  note-linking(abs, ctx, since(started))
+                                  cond
+                                    | has-nl(msg) ->
+                                      {
+                                        write(stderr, msg)
+                                        Err("link failed")
+                                      }
+                                    | else -> Err(msg)
+                                }
+                          }
+                        | else -> Ok(bin)
+                    }
+              }
 
 pub let build-program(entry: Str, clean: Bool, for-test: Bool, cc: Str, runtime: Str, bin: Str, do-link: Bool, quiet: Bool) -> Result Str Str {
   let abs = canonical-path(entry)
@@ -910,8 +905,7 @@ pub let build-program(entry: Str, clean: Bool, for-test: Bool, cc: Str, runtime:
   let ctx = Ctx(abs, for-test, clean, triple, ref(map-new()), ref(map-new()), ref([]), ref([]), quiet, ref(map-new()), ref(map-new()))
   match (ensure-mod(abs, ctx))
     | Ok(iface) ->
-      if do-link -> link-closure(abs, iface, ctx, cc, runtime, bin)
-       | else -> Ok("")
+      if (do-link) -> link-closure(abs, iface, ctx, cc, runtime, bin) | Ok("")
     | Err(e) -> Err(e)
 }
 
@@ -923,20 +917,19 @@ record SuiteSym {
 let canon-files(displays: List Str) -> List Str =
   match (displays)
     | [] -> []
-    | Cons(d, rest) -> Cons(canonical-path(d), canon-files(rest))
+    | d :: rest -> canonical-path(d) :: canon-files(rest)
 
 let fill-suite(paths: List Str, acc: Map Str Bool) -> Map Str Bool =
   match (paths)
     | [] -> acc
-    | Cons(p, rest) -> fill-suite(rest, map-set(acc, p, true))
+    | p :: rest -> fill-suite(rest, map-set(acc, p, true))
 
 let join-key(paths: List Str, sb: StringBuffer, first: Bool) -> Unit =
   match (paths)
     | [] -> ()
-    | Cons(p, rest) ->
+    | p :: rest ->
       {
-        if first -> ()
-         | else -> sb-append-byte!(sb, 10)
+        if (first) -> () | sb-append-byte!(sb, 10)
         sb-append!(sb, p)
         join-key(rest, sb, false)
       }
@@ -955,12 +948,12 @@ let marker-call(display: Str) -> Ast =
 let case-calls(cases: List SuiteSym) -> List Ast =
   match (cases)
     | [] -> []
-    | Cons(SuiteSym(display, name), rest) -> Cons(marker-call(display), Cons(ParenNode([sym(name)], blank()), case-calls(rest)))
+    | SuiteSym(display, name) :: rest -> marker-call(display) :: ParenNode([sym(name)], blank()) :: case-calls(rest)
 
 let case-syms(cases: List SuiteSym) -> List Str =
   match (cases)
     | [] -> []
-    | Cons(SuiteSym(_, name), rest) -> Cons(name, case-syms(rest))
+    | SuiteSym(_, name) :: rest -> name :: case-syms(rest)
 
 ; Inits once, then a `file <path>` marker and that file's `mn_<hash>_main`.
 ; The marker is two string literals: a computed concat would print as a pointer.
@@ -975,30 +968,32 @@ let collect-cases(displays: List Str, paths: List Str, done: Map Str Iface) -> R
     | [] ->
       match (paths)
         | [] -> Ok([])
-        | Cons(_, _) -> Err("suite paths diverged")
-    | Cons(d, ds) ->
+        | _ :: _ -> Err("suite paths diverged")
+    | d :: ds ->
       match (paths)
         | [] -> Err("suite paths diverged")
-        | Cons(a, as) ->
+        | a :: as ->
           match (map-get(done, a))
             | None -> Err(str-concat("missing module: ", d))
             | Some(iface) ->
               {
                 let main-sym = iface-main(iface)
-                if str-byte-length(main-sym) > 0 ->
-                  match (collect-cases(ds, as, done))
-                    | Ok(rest) -> Ok(Cons(SuiteSym(d, main-sym), rest))
-                    | Err(e) -> Err(e)
-                 | else -> Err(str-concat("no main in ", d))
+                cond
+                  | str-byte-length(main-sym) > 0 ->
+                    match (collect-cases(ds, as, done))
+                      | Ok(rest) -> Ok(SuiteSym(d, main-sym) :: rest)
+                      | Err(e) -> Err(e)
+                  | else -> Err(str-concat("no main in ", d))
               }
 
 let link-failed(msg: Str) -> Result Str Str =
-  if has-nl(msg) ->
-    {
-      write(stderr, msg)
-      Err("link failed")
-    }
-   | else -> Err(msg)
+  cond
+    | has-nl(msg) ->
+      {
+        write(stderr, msg)
+        Err("link failed")
+      }
+    | else -> Err(msg)
 
 let link-suite(key: Str, cases: List SuiteSym, ctx: Ctx, cc: Str, runtime: Str, bin: Str, label: Str) -> Result Str Str =
   match (ctx)
@@ -1014,22 +1009,23 @@ let link-suite(key: Str, cases: List SuiteSym, ctx: Ctx, cc: Str, runtime: Str, 
               let bp = boot-path(key)
               write-if-changed(bp, bytes)
               let objs = snoc-str(deref(order), bp)
-              if any-newer(objs, bin) ->
-                {
-                  let started = now-ms()
-                  match (link-objs(cc, runtime, objs, bin))
-                    | Ok(out) ->
-                      {
-                        note-link-label(label, ctx, since(started))
-                        Ok(out)
-                      }
-                    | Err(msg) ->
-                      {
-                        note-link-label(label, ctx, since(started))
-                        link-failed(msg)
-                      }
-                }
-               | else -> Ok(bin)
+              cond
+                | any-newer(objs, bin) ->
+                  {
+                    let started = now-ms()
+                    match (link-objs(cc, runtime, objs, bin))
+                      | Ok(out) ->
+                        {
+                          note-link-label(label, ctx, since(started))
+                          Ok(out)
+                        }
+                      | Err(msg) ->
+                        {
+                          note-link-label(label, ctx, since(started))
+                          link-failed(msg)
+                        }
+                  }
+                | else -> Ok(bin)
             }
       }
 
@@ -1054,30 +1050,33 @@ let triple-marker() -> Str =
   "target triple = \""
 
 let bytes-match-at(s: Str, i: Int, pat: Str, j: Int) -> Bool =
-  if j >= str-byte-length(pat) -> true
-   | i + j >= str-byte-length(s) -> false
-   | str-byte(s, i + j) == str-byte(pat, j) -> bytes-match-at(s, i, pat, j + 1)
-   | else -> false
+  cond
+    | j >= str-byte-length(pat) -> true
+    | i + j >= str-byte-length(s) -> false
+    | str-byte(s, i + j) == str-byte(pat, j) -> bytes-match-at(s, i, pat, j + 1)
+    | else -> false
 
 let find-bytes(s: Str, pat: Str, i: Int) -> Int =
-  if i + str-byte-length(pat) > str-byte-length(s) -> -1
-   | bytes-match-at(s, i, pat, 0) -> i
-   | else -> find-bytes(s, pat, i + 1)
+  cond
+    | i + str-byte-length(pat) > str-byte-length(s) -> -1
+    | bytes-match-at(s, i, pat, 0) -> i
+    | else -> find-bytes(s, pat, i + 1)
 
 let copy-until(s: Str, i: Int, stop: Int, acc: Str) -> Str =
-  if i >= str-byte-length(s) -> acc
-   | str-byte(s, i) == stop -> acc
-   | else -> copy-until(s, i + 1, stop, str-concat(acc, str-slice(s, i, 1)))
+  cond
+    | i >= str-byte-length(s) -> acc
+    | str-byte(s, i) == stop -> acc
+    | else -> copy-until(s, i + 1, stop, str-concat(acc, str-slice(s, i, 1)))
 
 let triple-from-clang(cc: Str) -> Str =
   match (spawn-capture([cc, "-S", "-emit-llvm", "-o", "-", "-x", "c", "-"], "int x;"))
     | Err(_) -> ""
     | Ok(SpawnOutput(st, text, _)) ->
-      if exit-code(st) == 0 ->
-        {
-          let mark = triple-marker()
-          let at = find-bytes(text, mark, 0)
-          if at < 0 -> ""
-           | else -> copy-until(text, at + str-byte-length(mark), 34, "")
-        }
-       | else -> ""
+      cond
+        | exit-code(st) == 0 ->
+          {
+            let mark = triple-marker()
+            let at = find-bytes(text, mark, 0)
+            if (at < 0) -> "" | copy-until(text, at + str-byte-length(mark), 34, "")
+          }
+        | else -> ""

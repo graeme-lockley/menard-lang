@@ -34,11 +34,11 @@ describe("desugar", () => {
     expect(desugared("8 / 4 / 2")).toBe("8 / 4 / 2");
     expect(desugared("f+(1.0, 2.0, 3.0)")).toBe("f+(f+(1.0, 2.0), 3.0)");
     expect(desugared("f-(1.5)")).toBe("f-(0.0, 1.5)");
-    expect(desugared("1 < 2 < 3")).toBe("if 1 < 2 -> 2 < 3\n | else -> false");
+    expect(desugared("1 < 2 < 3")).toBe("if (1 < 2) -> 2 < 3 | false");
     expect(desugared("1 < 2 < 3 < 4")).toBe(
-      "if 1 < 2 ->\n  if 2 < 3 -> 3 < 4\n   | else -> false\n | else -> false",
+      "cond\n  | 1 < 2 ->\n    if (2 < 3) -> 3 < 4 | false\n  | else -> false",
     );
-    expect(desugared("1 == 2 == 3")).toBe("if 1 == 2 -> 2 == 3\n | else -> false");
+    expect(desugared("1 == 2 == 3")).toBe("if (1 == 2) -> 2 == 3 | false");
   });
 
   test("a bracket list desugars to Cons/Nil, including inside match", () => {
@@ -49,8 +49,8 @@ describe("desugar", () => {
     expect(s).toBe(
       `match (xs)
   | Nil -> 0
-  | Cons(h, Cons(t, Nil)) -> h + t
-  | _ -> f(Cons(1, Cons(2, Nil())))`,
+  | h :: t :: Nil -> h + t
+  | _ -> f(1 :: 2 :: Nil())`,
     );
   });
 

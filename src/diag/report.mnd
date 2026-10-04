@@ -34,48 +34,46 @@ let color-on() -> Bool =
   tty-color(2)
 
 let repeat-str(s: Str, n: Int, acc: Str) -> Str =
-  if n <= 0 -> acc
-   | else -> repeat-str(s, n - 1, str-concat(acc, s))
+  if (n <= 0) -> acc | repeat-str(s, n - 1, str-concat(acc, s))
 
 let pad-left(s: Str, w: Int) -> Str {
   let n = str-byte-length(s)
-  if n >= w -> s
-   | else -> str-concat(repeat-str(" ", w - n, ""), s)
+  if (n >= w) -> s | str-concat(repeat-str(" ", w - n, ""), s)
 }
 
 let digits-of(n: Int, acc: Int) -> Int =
-  if n < 10 -> acc
-   | else -> digits-of(n / 10, acc + 1)
+  if (n < 10) -> acc | digits-of(n / 10, acc + 1)
 
 ; Walk bytes up to `offset`, counting newlines. Column is 1-based.
 ; A call per byte overflows the stack on a source the size of `lower.mnd`.
 let walk-loc(src: Str, offset: Int, i: Int, line: Int, start: Int, n: Int) -> Int =
   loop (j = i, ln = line, st = start)
-    if j >= offset || j >= n -> st
-     | str-byte(src, j) == 10 -> recur(j + 1, ln + 1, j + 1)
-     | else -> recur(j + 1, ln, st)
+    cond
+      | j >= offset || j >= n -> st
+      | str-byte(src, j) == 10 -> recur(j + 1, ln + 1, j + 1)
+      | else -> recur(j + 1, ln, st)
 
 let walk-line(src: Str, offset: Int, i: Int, line: Int, n: Int) -> Int =
   loop (j = i, ln = line)
-    if j >= offset || j >= n -> ln
-     | str-byte(src, j) == 10 -> recur(j + 1, ln + 1)
-     | else -> recur(j + 1, ln)
+    cond
+      | j >= offset || j >= n -> ln
+      | str-byte(src, j) == 10 -> recur(j + 1, ln + 1)
+      | else -> recur(j + 1, ln)
 
 let line-end(src: Str, i: Int, n: Int) -> Int =
   loop (j = i)
-    if j >= n -> n
-     | str-byte(src, j) == 10 -> j
-     | else -> recur(j + 1)
+    cond
+      | j >= n -> n
+      | str-byte(src, j) == 10 -> j
+      | else -> recur(j + 1)
 
 let drop-cr(src: Str, start: Int, end: Int) -> Int =
-  if end > start && str-byte(src, end - 1) == 13 -> end - 1
-   | else -> end
+  if (end > start && str-byte(src, end - 1) == 13) -> end - 1 | end
 
 let line-text(src: Str, start: Int) -> Str {
   let n = str-byte-length(src)
   let end = drop-cr(src, start, line-end(src, start, n))
-  if start >= end -> ""
-   | else -> str-slice(src, start, end - start)
+  if (start >= end) -> "" | str-slice(src, start, end - start)
 }
 
 let loc-line(src: Str, offset: Int) -> Int =
@@ -95,20 +93,15 @@ let loc-col(src: Str, offset: Int) -> Int {
 let caret-len(src: Str, sp: Span, col: Int, text: Str) -> Int {
   let start-line = loc-line(src, span-start(sp))
   let end-off =
-    if span-end(sp) > span-start(sp) -> span-end(sp) - 1
-     | else -> span-start(sp)
+    if (span-end(sp) > span-start(sp)) -> span-end(sp) - 1 | span-start(sp)
   let end-line = loc-line(src, end-off)
   let end-col =
-    if end-line == start-line -> loc-col(src, end-off)
-     | else -> str-byte-length(text) + 1
+    if (end-line == start-line) -> loc-col(src, end-off) | str-byte-length(text) + 1
   let raw =
-    if span-end(sp) > span-start(sp) -> end-col - col + 1
-     | else -> 1
+    if (span-end(sp) > span-start(sp)) -> end-col - col + 1 | 1
   let capped =
-    if col - 1 + raw > str-byte-length(text) + 1 -> str-byte-length(text) + 1 - col - 1
-     | else -> raw
-  if capped < 1 -> 1
-   | else -> capped
+    if (col - 1 + raw > str-byte-length(text) + 1) -> str-byte-length(text) + 1 - col - 1 | raw
+  if (capped < 1) -> 1 | capped
 }
 
 let format-span(path: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str) -> Str {
@@ -118,8 +111,7 @@ let format-span(path: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str) ->
   let text = line-text(src, loc-start(src, span-start(sp)))
   let gw = digits-of(line, 1)
   let sev-color =
-    if sev == "warning" -> "[33m"
-     | else -> "[31m"
+    if (sev == "warning") -> "[33m" | "[31m"
   let carets = caret-len(src, sp, col, text)
   str-concat(paint(on, "[1m", path), ":", show(line), ":", show(col), ": ", paint(on, sev-color, sev), "[", code, "]: ", msg, nl, "  |", nl, pad-left(show(line), gw), " | ", text, nl, repeat-str(" ", gw, ""), " | ", repeat-str(" ", col - 1, ""), paint(on, sev-color, repeat-str("^", carets, "")), nl)
 }

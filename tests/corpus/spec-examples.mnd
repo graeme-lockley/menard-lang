@@ -31,14 +31,14 @@ alias Ints = List Int
 alias EnvMap = Map Str Str
 
 let sign(n: Int) -> Str =
-  if n < 0 -> "negative"
-   | n == 0 -> "zero"
-   | else -> "positive"
+  cond
+    | n < 0 -> "negative"
+    | n == 0 -> "zero"
+    | else -> "positive"
 
 let sum-to(n: Int) -> Int =
   loop (i = 0, acc = 0)
-    if i > n -> acc
-     | else -> recur(i + 1, acc + i)
+    if (i > n) -> acc | recur(i + 1, acc + i)
 
 let tree-size[a](t: Tree a) -> Int =
   match (t)

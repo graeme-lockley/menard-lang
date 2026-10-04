@@ -5,17 +5,17 @@
 let sum(...xs: List Int) -> Int =
   match (xs)
     | [] -> 0
-    | Cons(h, t) -> h + sum(...t)
+    | h :: t -> h + sum(...t)
 
 let join-more(sep: Str, head: Str, tail: List Str) -> Str =
   match (tail)
     | [] -> head
-    | Cons(h, t) -> join-more(sep, str-concat(head, sep, h), t)
+    | h :: t -> join-more(sep, str-concat(head, sep, h), t)
 
 let join(sep: Str, ...parts: List Str) -> Str =
   match (parts)
     | [] -> ""
-    | Cons(h, t) -> join-more(sep, h, t)
+    | h :: t -> join-more(sep, h, t)
 
 test "literals" = sum(1, 2, 3) == 6
 

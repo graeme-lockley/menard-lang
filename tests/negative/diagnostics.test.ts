@@ -34,8 +34,8 @@ let f(c: Color) -> Int =
     expect(ex!.category).toBe("type");
   });
 
-  test("a bar at the wrong column is a parse error", () => {
-    const src = "let f(n: Int) -> Int =\n  if n > 0 -> 1\n| else -> 0\n";
+  test("a bar that is not indented under cond is a parse error", () => {
+    const src = "let f(n: Int) -> Int =\n  cond\n| n > 0 -> 1\n";
     const diags = diagnose(src);
     expect(diags[0]!.code).toBe("E_PARSE");
     expect(diags[0]!.category).toBe("syntax");

@@ -1,0 +1,7 @@
+; A nested fn that captures a name stays a heap closure. Exit 41.
+
+let main() -> Int {
+  let n = 40
+  let add = fn (x) = x + n
+  add(1)
+}

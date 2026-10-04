@@ -53,6 +53,57 @@ describe("import specifiers", () => {
     if (r.ok && r.value.tag === "bool") expect(r.value.value).toBe(false);
   });
 
+  test("a qualified import binds the alias and hides the bare name", () => {
+    const host = createHost({
+      fs: createVirtualFs({
+        "/lib.mnd": "pub let answer() -> Int = 41\n",
+        "/main.mnd": 'import "./lib.mnd" as Lib\nLib.answer()\n',
+      }),
+    });
+    const src = host.readFile("/main.mnd");
+    if (!src.ok) return;
+    expect(diagnose(src.bytes, { path: "/main.mnd", host })).toEqual([]);
+    const r = run(src.bytes, { path: "/main.mnd", host });
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(41n);
+
+    const bare = createHost({
+      fs: createVirtualFs({
+        "/lib.mnd": "pub let answer() -> Int = 41\n",
+        "/main.mnd": 'import "./lib.mnd" as Lib\nanswer()\n',
+      }),
+    });
+    const bareSrc = bare.readFile("/main.mnd");
+    if (!bareSrc.ok) return;
+    const diags = diagnose(bareSrc.bytes, { path: "/main.mnd", host: bare });
+    expect(diags.some((d) => d.code === "E_TYPE_UNBOUND")).toBe(true);
+  });
+
+  test("a record field is selected by declaration order", () => {
+    const host = createHost({
+      fs: createVirtualFs({
+        "/main.mnd": `record Pair {
+  fst: Int
+  snd: Int
+}
+
+record Outer {
+  inner: Pair
+}
+
+let o = Outer(Pair(7, 8))
+o.inner.fst
+`,
+      }),
+    });
+    const src = host.readFile("/main.mnd");
+    if (!src.ok) return;
+    expect(diagnose(src.bytes, { path: "/main.mnd", host })).toEqual([]);
+    const r = run(src.bytes, { path: "/main.mnd", host });
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(7n);
+  });
+
   test("a bare std/list import loads the library", () => {
     const host = createHost({
       fs: createVirtualFs({

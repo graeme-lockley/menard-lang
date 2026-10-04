@@ -49,7 +49,7 @@ export type PreparedModule = {
   path: string;
   forms: Ast[];
   exports: Set<string>;
-  imports: string[];
+  imports: { path: string; alias?: string }[];
 };
 
 export type ModuleGraph = {
@@ -65,7 +65,7 @@ type RawModule = {
   path: string;
   forms: Ast[];
   exports: Set<string>;
-  imports: { path: string; spec: string; span: Span }[];
+  imports: { path: string; spec: string; span: Span; alias?: string }[];
   /** Import paths whose exports are also exports of this module. */
   reexports: string[];
 };
@@ -132,7 +132,7 @@ export function loadModuleGraph(
       return;
     }
 
-    const imports: { path: string; spec: string; span: Span }[] = [];
+    const imports: { path: string; spec: string; span: Span; alias?: string }[] = [];
     const reexports: string[] = [];
     const exports = new Set<string>();
     const body: Ast[] = [];
@@ -166,7 +166,7 @@ export function loadModuleGraph(
           continue;
         }
         const resolved = resolveImportPath(path, imp.spec, home);
-        imports.push({ path: resolved, spec: imp.spec, span: imp.span });
+        imports.push({ path: resolved, spec: imp.spec, span: imp.span, alias: imp.alias });
         if (imp.reexport) reexports.push(resolved);
         continue;
       }
@@ -355,6 +355,7 @@ export function loadModuleGraph(
     const imported = new Map<string, number>();
     const blocked = new Set<string>();
     for (const imp of m.imports) {
+      if (imp.alias) continue;
       const sigs = restExports.get(imp.path);
       if (sigs) {
         for (const [name, fixed] of sigs) imported.set(name, fixed);
@@ -376,7 +377,7 @@ export function loadModuleGraph(
       path: p,
       forms: m.forms,
       exports: m.exports,
-      imports: m.imports.map((i) => i.path),
+      imports: m.imports.map((i) => ({ path: i.path, alias: i.alias })),
     });
   }
 
@@ -384,7 +385,9 @@ export function loadModuleGraph(
   return { ok: true, graph: { order, modules } };
 }
 
-function parseImport(form: Ast): { spec: string; span: Span; reexport: boolean } | null {
+function parseImport(
+  form: Ast,
+): { spec: string; span: Span; reexport: boolean; alias?: string } | null {
   let node = form;
   let reexport = false;
   if (node.tag === "list" && node.elems.length >= 2) {
@@ -404,9 +407,12 @@ function parseImport(form: Ast): { spec: string; span: Span; reexport: boolean }
   if (h.tag !== "sym" || !nameEquals(h.name, "import")) return null;
   form = node;
   const spec = form.elems[1]!;
-  if (spec.tag === "str") return { spec: decodeBytes(spec.bytes), span: form.span, reexport };
-  if (spec.tag === "sym") return { spec: decodeBytes(spec.name), span: form.span, reexport };
-  return { spec: "", span: form.span, reexport };
+  const aliasNode = form.elems[2];
+  const alias =
+    aliasNode?.tag === "sym" ? decodeBytes(aliasNode.name) : undefined;
+  if (spec.tag === "str") return { spec: decodeBytes(spec.bytes), span: form.span, reexport, alias };
+  if (spec.tag === "sym") return { spec: decodeBytes(spec.name), span: form.span, reexport, alias };
+  return { spec: "", span: form.span, reexport, alias };
 }
 
 function unwrapPub(form: Ast): { form: Ast; exported: boolean } {

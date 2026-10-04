@@ -1,0 +1,8 @@
+; A pair of values, not owned by Map.
+; @module std/pair
+
+; fst is the first field, snd the second.
+pub record Pair[a, b] {
+  fst: a
+  snd: b
+}

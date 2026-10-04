@@ -87,10 +87,10 @@ pub let ast-list-equal(xs: List Ast, ys: List Ast) -> Bool =
       match (ys)
         | [] -> true
         | _ -> false
-    | Cons(hx, tx) ->
+    | hx :: tx ->
       match (ys)
         | [] -> false
-        | Cons(hy, ty) -> ast-equal(hx, hy) && ast-list-equal(tx, ty)
+        | hy :: ty -> ast-equal(hx, hy) && ast-list-equal(tx, ty)
 
 ; Structural equality, ignoring spans. Mirrors host astEqual (host/src/reader/ast.ts).
 pub let ast-equal(a: Ast, b: Ast) -> Bool =

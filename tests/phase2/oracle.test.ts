@@ -208,8 +208,14 @@ const fixtures: Array<{
     expectDis: /\bcall i64\b/,
   },
   {
-    name: "a nested `fn` becomes a heap closure (`mn_closure_new` / `mn_apply_1`)",
+    name: "an empty-capture nested `fn` is a direct call of the lifted function",
     entry: "tests/phase2/oracle/ret-closure.mnd",
+    expectExit: 41,
+    expectDis: /\bcall i64 @menard\.__lam0\b/,
+  },
+  {
+    name: "a nested `fn` that captures a name stays a heap closure (`mn_closure_new` / `mn_apply_1`)",
+    entry: "tests/phase2/oracle/ret-closure-capture.mnd",
     expectExit: 41,
     expectDis: /\bcall i64 @mn_(closure_new|apply_1)\b/,
   },

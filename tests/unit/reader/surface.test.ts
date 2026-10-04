@@ -45,15 +45,16 @@ let pair(x: Int, y: Int) -> Int =
     expect(text(print(body))).toBe('f(x, [y, 1], \'red)');
   });
 
-  test("if bars sit one column past the keyword and a missing else is unit", () => {
+  test("cond arms sit under the keyword and a missing else is unit", () => {
     const forms = mustAll(`
 let sign(n: Int) -> Str =
-  if n < 0 -> "negative"
-   | n == 0 -> "zero"
-   | else "positive"
+  cond
+    | n < 0 -> "negative"
+    | n == 0 -> "zero"
+    | else -> "positive"
 
 let poke() -> Unit =
-  if ready -> println("go")
+  if (ready) -> println("go")
 `);
     const sign = forms[0]!;
     const poke = forms[1]!;
@@ -87,25 +88,42 @@ alias Ints = List Int
     expect(forms.every((f, i) => astEqual(f, again[i]!))).toBe(true);
   });
 
-  test("a parameter-list let below column 0 is rejected", () => {
-    const r = readAll(`
+  test("a parameter-list let is legal below column 0", () => {
+    const forms = mustAll(`
 let outer() -> Int {
   let inner(n: Int) -> Int =
     n
   inner(1)
 }
 `);
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error.message).toContain("parameter-list");
+    expect(forms.length).toBe(1);
+    const form = forms[0];
+    if (!form || form.tag !== "list") throw new Error("expected a list");
+    const body = form.elems[form.elems.length - 1];
+    if (!body) throw new Error("expected a body");
+    expect(text(print(body))).toContain("fn");
   });
 
-  test("a bar at the wrong column is not an arm", () => {
+  test("a bar at the beginning of a line is not an if else", () => {
     const r = readAll(`
 let f(n: Int) -> Int =
-  if n == 0 -> 1
-    | else -> 2
+  if (n == 0) -> 1
+  | 2
 `);
     expect(r.ok).toBe(false);
+  });
+
+  test(":: is right-associative cons in expressions and patterns", () => {
+    const expr = mustRead("1 :: 2 :: []");
+    const again = mustRead(text(print(expr)));
+    expect(astEqual(expr, again)).toBe(true);
+    const forms = mustAll(`
+let f(xs: List Int) -> Int =
+  match (xs)
+    | x :: xs -> x
+    | [] -> 0
+`);
+    expect(astEqual(mustAll(text(printAll(forms)))[0]!, forms[0]!)).toBe(true);
   });
 
   test("operators need whitespace and bangs stay final", () => {
@@ -127,6 +145,29 @@ let f(n: Int) -> Int =
     if (!r.ok) expect(r.error.message).toContain("unclosed");
   });
 
+  test("projection and qualified import round-trip", () => {
+    const forms = mustAll(`
+import "./lexer.mnd" as Lexer
+import std/list as List
+let n(p: Int) -> Int = (p + 1).fst
+`);
+    const printed = text(printAll(forms));
+    expect(printed).toContain('import "./lexer.mnd" as Lexer');
+    expect(printed).toContain("import std/list as List");
+    expect(printed).toContain("(p + 1).fst");
+    const again = mustAll(printed);
+    expect(astEqual(forms[0]!, again[0]!)).toBe(true);
+  });
+
+  test("a chained field is nested projection", () => {
+    const a = mustRead("o.inner.n");
+    expect(text(print(a))).toBe("o.inner.n");
+    if (a.tag === "list" && a.elems[1]?.tag === "list") {
+      const inner = a.elems[1];
+      expect(inner.elems[0] && inner.elems[0].tag === "sym" ? new TextDecoder().decode(inner.elems[0].name) : "").toBe("project");
+    }
+  });
+
   test("kebab-case and glued signs stay one token", () => {
     expect(sym(mustRead("str-concat"))).toBe("str-concat");
     expect(sym(mustRead("std/list"))).toBe("std/list");
@@ -140,7 +181,7 @@ describe("missing if else", () => {
   test("a Unit arm may omit else", () => {
     const forms = mustAll(`
 let poke(ready: Bool) -> Unit =
-  if ready -> println("go")
+  if (ready) -> println("go")
 `);
     const typed = typecheckForms(forms);
     expect(typed.diagnostics.filter((d) => d.code === "E_TYPE_MISMATCH")).toEqual([]);
@@ -149,7 +190,7 @@ let poke(ready: Bool) -> Unit =
   test("a non-Unit arm without else is a type error", () => {
     const forms = mustAll(`
 let f(ready: Bool) -> Int =
-  if ready -> 1
+  if (ready) -> 1
 `);
     const typed = typecheckForms(forms);
     expect(typed.diagnostics.some((d) => d.code === "E_TYPE_MISMATCH")).toBe(true);

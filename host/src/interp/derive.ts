@@ -35,6 +35,8 @@ export function showValue(v: Value): string {
         : `(${v.ctor} ${v.payloads.map(showValue).join(" ")})`;
     case "record":
       return `(${v.name} ${v.fields.map(showValue).join(" ")})`;
+    case "module":
+      throw new Error("type module is not showable");
     case "map": {
       const { keys, vals } = mapEntries(v.map);
       const parts: string[] = [];
@@ -99,6 +101,8 @@ export function equalValue(a: Value, b: Value): boolean {
       return a === b;
     case "sb":
       return a.sb === (b as typeof a).sb;
+    case "module":
+      return a === b;
     case "map": {
       const bb = (b as typeof a).map;
       if (mapSize(a.map) !== mapSize(bb)) return false;

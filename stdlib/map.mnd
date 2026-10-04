@@ -1,17 +1,15 @@
 ; Helpers over the builtin Map.
 ; @module std/map
 
-; A pair of values. fst is the first field, snd the second.
-pub record Pair[a, b] {
-  fst: a
-  snd: b
-}
+import std/pair
+
+import std/list
 
 ; Insert each pair into acc, later pairs overwriting earlier keys.
 let from-list-onto[k, v](pairs: List (Pair k v), acc: Map k v) -> Map k v =
   match (pairs)
     | [] -> acc
-    | Cons(Pair(key, val), rest) -> from-list-onto(rest, map-set(acc, key, val))
+    | Pair(key, val) :: rest -> from-list-onto(rest, map-set(acc, key, val))
 
 ; A map holding each pair. A repeated key keeps the last value.
 ; @test map-get(from-list([Pair("a", 1)]), "a") => Some(1)
@@ -22,3 +20,37 @@ pub let from-list[k, v](pairs: List (Pair k v)) -> Map k v =
 ; @test lookup(from-list([Pair("a", 1)]), "z") => None()
 pub let lookup[k, v](m: Map k v, k2: k) -> Maybe v =
   map-get(m, k2)
+
+; One pair for each key. A missing key is skipped.
+let to-list-keys[k, v](m: Map k v, keys: List k) -> List (Pair k v) =
+  match (keys)
+    | [] -> []
+    | key :: rest -> to-list-key(m, key, rest)
+
+; The pair for key, then the rest of the keys.
+let to-list-key[k, v](m: Map k v, key: k, rest: List k) -> List (Pair k v) =
+  match (map-get(m, key))
+    | Some(val) -> Pair(key, val) :: to-list-keys(m, rest)
+    | None -> to-list-keys(m, rest)
+
+; The entries of m. Order follows map-keys.
+; @test lookup(from-list(to-list(from-list([Pair("a", 1)]))), "a") => Some(1)
+pub let to-list[k, v](m: Map k v) -> List (Pair k v) =
+  to-list-keys(m, map-keys(m))
+
+; Pairs whose key is not the one being removed.
+let pairs-without[k, v](pairs: List (Pair k v), key: k) -> List (Pair k v) =
+  match (pairs)
+    | [] -> []
+    | Pair(k2, val) :: rest ->
+      if (k2 == key) -> pairs-without(rest, key) | Pair(k2, val) :: pairs-without(rest, key)
+
+; m without key. Other entries stay. There is no map-delete builtin, so this rebuilds.
+; @test lookup(remove(from-list([Pair("a", 1), Pair("b", 2)]), "a"), "a") => None()
+pub let remove[k, v](m: Map k v, key: k) -> Map k v =
+  from-list(pairs-without(to-list(m), key))
+
+; left, then right. A key in both keeps the value from right.
+; @test lookup(merge(from-list([Pair("a", 1)]), from-list([Pair("a", 2)])), "a") => Some(2)
+pub let merge[k, v](left: Map k v, right: Map k v) -> Map k v =
+  from-list(append(to-list(left), to-list(right)))

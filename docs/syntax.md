@@ -14,10 +14,12 @@ that specification describes.
 
 Two semantic changes are part of this syntax, not just spelling:
 
-- `cond` and `when` are removed. `if` is the only conditional. A missing
-  `else` is legal only when every arm has type `Unit`; the missing arm is
-  `Unit`. An `if` that produces any other type and has no `else` is a type
-  error. The runtime panic `cond: no match` is gone.
+- `cond` is the laid-out conditional and `if` is the inline value. Both
+  lower to a nested `(if test then else)`. A missing else is legal only
+  when every arm has type `Unit`; the missing arm is `Unit`. An `if` or
+  `cond` that produces any other type and has no else is a type error.
+  The runtime panic `cond: no match` is gone. `when` is only a pattern
+  guard.
 - Equality is written `==`. The declaration token is `=`.
 
 ---
@@ -70,13 +72,25 @@ inside an identifier.
 | `<` `>` `<=` `>=` | comparison |
 | `&&` `\|\|` | short-circuit conjunction, disjunction |
 | `+` `-` `*` `/` `%` | `Int` arithmetic |
-| `->` | return type, `if` / `match` arm, function type |
+| `::` | list cons, in expressions and in patterns |
+| `->` | return type, arm body, function type |
 | `\|` | alternative, at the start of an arm or between or-patterns |
+| `.` | field or export projection, glued to both names |
 
 Unary minus and a negative numeric literal are the exception: `-` immediately
 followed by an identifier or a numeric literal, with no space, is prefix
 minus or part of the literal (`-x`, `-3`, `-0.5`). `a -b` is a lexical error.
 There is no prefix `!` operator. Logical negation is the call `not(b)`.
+
+`::` associates to the right, in the same precedence band as `+` and `-`.
+`1 :: 2 :: []` is `1 :: (2 :: [])`. It lowers to `Cons`. `:` is already the
+type separator and an identifier character, so cons cannot be a single colon.
+`[]`, `[1, 2, 3]`, and `Nil` stay. `Cons(h, t)` remains a legal constructor
+call; `::` is the spelling programs use.
+
+`.` is not a whitespace operator. It is glued to the receiver and the name:
+`pair.fst`, `Lexer.read(src)`. A call of a projection is still a call. There
+is no method call; the function takes the collection as an argument.
 
 Float arithmetic is not infix. `f+`, `f-`, `f*`, and `f/` are ordinary
 identifiers, called as functions: `f+(a, b)`. `+` is `Int` addition only.
@@ -99,13 +113,16 @@ There is no overloading.
 ### 1.5 Keywords
 
 ```
-alias  else  extern  fn  if  import  let  loop  match
+alias  cond  else  extern  fn  if  import  let  loop  match
 panic  pub  record  recur  ref  deref  return  set!  type  while  when
 ```
 
-`when` is a pattern guard, not a statement. `else` is an `if` arm test, not a
-clause terminator. `cond`, `defn`, `defrec`, `variant`, `do`, `and`, and `or`
-are not keywords.
+`when` is a pattern guard, not a statement. `else` is a `cond` or `match` arm
+test, not a clause terminator. `cond` is four letters so a bar indented two
+spaces sits under the word and the guard starts in the column after `cond`.
+`as` is not a keyword: it is special only immediately after an import path,
+and it can still be a name everywhere else. `defn`, `defrec`, `variant`,
+`do`, `and`, and `or` are not keywords.
 
 ---
 
@@ -118,7 +135,7 @@ A file is a sequence of top-level declarations, each starting at indentation
 ```
 program     = decl*
 decl        = import / extern / [pub] (alias / record / type / function)
-import      = "import" module-path
+import      = "import" module-path ["as" Upper]
 module-path = identifier / string
 extern      = "extern" identifier "(" param,* ")" "->" type
 alias       = "alias" Upper "=" type
@@ -136,7 +153,7 @@ a `List`. A lambda cannot take `...`.
 
 ```
 import std/list
-import "./lexer.mnd"
+import "./lexer.mnd" as Lexer
 import github:owner/repo@v1.2.0/console
 
 extern mn_exists(path: Str) -> Bool
@@ -191,14 +208,18 @@ let adder(n: Int) -> (Int) -> Int =
   fn (m) = n + m
 
 let join-path = fn (dir: Str, name: Str) -> Str =
-  if dir == "" || dir == "." -> name
-   | dir == "/" -> str-concat("/", name)
-   | else -> str-concat(dir, "/", name)
+  cond
+    | dir == "" || dir == "." -> name
+    | dir == "/" -> str-concat("/", name)
+    | else -> str-concat(dir, "/", name)
 ```
 
-Inside a block, `let` binds a value, not a known function. A local function
-is `let name = fn …`. A parameter-list `let` at indentation greater than 0
-is a parse error.
+A parameter-list `let` is the same declaration at any indent. Below column 0
+it lowers to a `let` of a `fn`. A local function written `let name = fn …`
+stays a lambda, including when the parameter types are inferred. A named
+local function that captures nothing is lifted to a direct call. A function
+that captures a name stays a heap closure. A recursive local name resolves
+to that lifted function inside its own body.
 
 ---
 
@@ -206,32 +227,44 @@ is a parse error.
 
 Braces terminate blocks. An arm list is terminated by indentation.
 
-The *introducer* of a `match` or a `type` is the line containing `match`, or
-the `=` of the `type`. Each arm is a line whose first token is `|`, indented
-strictly further than its introducer. The list ends at the first non-blank
-line whose indentation is less than or equal to the introducer's.
+The *introducer* of a `cond`, a `match`, or a `type` is the line containing
+that keyword, or the `=` of the `type`. Each arm is a line whose first token
+is `|`, indented strictly further than its introducer. The list ends at the
+first non-blank line whose indentation is less than or equal to the
+introducer's. A `|` at the beginning of a line belongs to `cond`, `match`,
+or `type`, never to `if`.
 
-An `if` puts its first arm on the introducer line, with no `|`:
+`cond` is the laid-out conditional. The keyword is alone on its line. Inside
+a function the bars indent two spaces further than `cond`. Four letters is
+what makes a two-space bar sit under the word and the guard start in the
+column after `cond`.
 
 ```
-if test -> expr
+cond
+  | n < 0 -> "negative"
+  | n == 0 -> "zero"
+  | else -> "positive"
 ```
 
-A further arm is a line whose first token is `|`, indented exactly one
-column further than that `if`. The word `if` and the space after it are
-three columns, and so are that one column, the `|`, and the space after the
-bar, so each later test starts in the same column as the first. A `|` at any
-other column does not belong to that `if`. The `if` ends at the first
-non-blank line that is not such an arm and whose indentation is less than or
-equal to the `if`.
+`if` is the inline expression. The test is parenthesized because there is no
+newline to end it. `| expr` is the else: no `else` keyword and no second
+`->`. The nearest `if` takes the bar. One line is the idiom, not a grammar
+rule.
+
+```
+if (n < 0) -> -n | n
+```
+
+A value-producing `if` must have the `|` arm, and both arms have the same
+type. The arm may be omitted only when it is `Unit` (`if (ready) -> ()`).
 
 Arms of one form do not include a more-indented arm list nested inside an
-arm body. A nested `if` aligns its arms to its own keyword.
+arm body. A nested `cond` aligns its arms to its own keyword.
 
-A body introduced by `=` may occupy the rest of that line. If it is `if` or
-`match`, the arm list that follows belongs to it. A body may instead be
-broken across following lines, each indented strictly further than the `=`
-line, and those lines end at the same offside column.
+A body introduced by `=` may occupy the rest of that line. If it is `if`,
+`cond`, or `match`, the arm list that follows belongs to it. A body may
+instead be broken across following lines, each indented strictly further
+than the `=` line, and those lines end at the same offside column.
 
 A block is `{` expressions `}`. Newlines separate the expressions.
 Indentation inside a block does not end the block; the closing `}` does. A
@@ -284,8 +317,10 @@ not type application.
 ## 5. Expressions
 
 ```
-expr        = if / match / loop / while / lambda / block / return / panic / bin
-if          = "if" test "->" expr arm*
+expr        = cond / if / match / loop / while / lambda / block / return / panic / bin
+cond        = "cond" cond-arm+
+cond-arm    = "|" test "->" expr
+if          = "if" "(" expr ")" "->" expr ["|" expr]
 match       = "match" "(" expr ")" arm+
 arm         = "|" test "->" expr
 test        = "else" / expr
@@ -298,8 +333,9 @@ panic       = "panic" "(" expr ")"
 block       = "{" expr+ "}"
 bin         = unary (operator unary)*
 unary       = ["-"] app
-app         = atom "(" expr,* ["..."] ")"
-            / atom
+app         = postfix "(" expr,* ["..."] ")"
+            / postfix
+postfix     = atom ("." identifier)*
 atom        = literal / identifier / "(" expr ")" / list
 list        = "[" expr,* "]"
 ```
@@ -319,8 +355,7 @@ of its body.
 ```
 let sum-to(n: Int) -> Int =
   loop (i = 0, acc = 0)
-    if i > n -> acc
-     | else -> recur(i + 1, acc + i)
+    if (i > n) -> acc | recur(i + 1, acc + i)
 
 let count-down(n: Int) -> Unit {
   let i = ref(n)
@@ -331,26 +366,27 @@ let count-down(n: Int) -> Unit {
 }
 ```
 
-### 5.1 `if`
+### 5.1 `cond` and `if`
 
-Every arm's test is a `Bool`, except `else`. `else` is the last arm or it is
-absent. Tests are tried in order. The value is the expression of the first
-test that is true.
+`cond` tries each guard in order. Every guard is a `Bool`, except `else`,
+which is the last arm or is absent. The value is the expression of the first
+guard that is true. Both forms lower to the nested four-element
+`(if test then else)`. A missing else is `()`.
 
-When `else` is absent, every arm's expression must have type `Unit`, and the
-`if` has type `Unit`. When `else` is present, every arm's expression has the
-same type, and that is the type of the `if`.
-
-The first arm has no bar. Each later bar is one column past `if`, which
-puts every test in the column where the first test begins.
+A value-producing `if` has both arms, and they have the same type. An `if`
+with no `|` arm has type `Unit`, and its arm must be `Unit`.
 
 ```
 let sign(n: Int) -> Str =
-  if n < 0 -> "negative"
-   | n == 0 -> "zero"
-   | else -> "positive"
+  cond
+    | n < 0 -> "negative"
+    | n == 0 -> "zero"
+    | else -> "positive"
 
-if failed > 0 -> print(summary)
+let abs(n: Int) -> Int =
+  if (n < 0) -> -n | n
+
+if (failed > 0) -> print(summary)
 ```
 
 ### 5.2 `match`
@@ -385,13 +421,13 @@ Precedence, tightest first. Associativity is left.
 |---|---|---|
 | 6 | prefix `-` | glued to its operand |
 | 5 | `*` `/` `%` | `Int` |
-| 4 | `+` `-` | `Int` |
+| 4 | `+` `-` `::` | `Int` arithmetic; `::` associates to the right |
 | 3 | `<` `>` `<=` `>=` | chaining, see below |
 | 3 | `==` `!=` | chaining, see below |
 | 2 | `&&` | short-circuit |
 | 1 | `\|\|` | short-circuit |
 
-`a + b + c` is `(a + b) + c`. `a < b < c` is `a < b && b < c`, and `b` is
+`a + b + c` is `(a + b) + c`. `a :: b :: c` is `a :: (b :: c)`. `a < b < c` is `a < b && b < c`, and `b` is
 evaluated twice. The same chaining rule applies to `==` and `!=` and to the
 relational operators, including mixtures that the existing desugarer already
 chains. `!=` is `not` of `==`.
@@ -418,8 +454,9 @@ A constructor pattern uses the same parentheses as a call. A nullary
 constructor is a bare name. A record pattern is positional, in field
 declaration order: `Counts(p, f)`, `Span(s, _, _, _)`. `_` matches anything
 and binds nothing. A lowercase name binds. List patterns are `[h, t]` only
-when the list's length is fixed; the open list pattern is `Cons(h, t)`, and
-`[]` is the empty list. Literals are `Int`, `Str`, and `Sym`. Patterns nest.
+when the list's length is fixed; the open list pattern is `h :: t`, and
+`[]` is the empty list. `::` in a pattern associates to the right, the same
+way it does in an expression. Literals are `Int`, `Str`, and `Sym`. Patterns nest.
 A `when` guard is a `Bool` expression and may use the names the pattern
 bound.
 
@@ -456,15 +493,20 @@ word has changed.
 | top-level `let f(ps) -> T = e` | `(defn f (ps) -> T e)` |
 | top-level `let f(ps) -> T { … }` | `(defn f (ps) -> T (do …))` |
 | `let f = fn …` | `(let f (fn …))`, a closure |
+| nested `let f(ps) -> T = e` | `(let f (fn (ps) e))` |
 | `let x = e` | `(let x e)` |
 | `{ e1 e2 e3 }` | `(do e1 e2 e3)` |
-| `if \| p -> a \| else -> b` | `(if p a b)`, nested for further arms |
-| `if` with no `else` | `(if p a ())`, and a type error unless `a` is `Unit` |
+| `cond \| p -> a \| else -> b` | `(if p a b)`, nested for further arms |
+| `if (p) -> a \| b` | `(if p a b)` |
+| `if (p) -> a` | `(if p a ())`, and a type error unless `a` is `Unit` |
 | `match (e) \| P -> a` | `(match e (P a) …)` |
 | `type Name = …` | `(variant Name …)` |
 | `record Name { … }` | `(defrec Name …)` |
 | `alias Name = T` | `(alias Name T)` |
 | `a + b`, and the other arithmetic operators | the binary intrinsic |
+| `a :: b` | `(Cons a b)` |
+| `pair.fst` | `(project pair fst)`, then the field's slot |
+| `import path as Name` | `(import path Name)`; `Name.f` resolves `f` in that module |
 | `a < b < c` | `(and (< a b) (< b c))`, middle evaluated twice |
 | `a == b` | `(= a b)` |
 | `a != b` | `(not (= a b))` |
@@ -475,10 +517,10 @@ word has changed.
 | `'red` | `(quote red)` |
 | `...` on a last parameter or an argument | the existing rest and spread sugar |
 
-A known function is never lowered to `fn`. A `fn` is never lowered to a
-known function, even when its capture set is empty. Closure conversion
-therefore keeps today's shape for the `fn` form: a heap closure and an
-indirect call.
+A known top-level function is never lowered to `fn`. A nested parameter-list
+`let` is a `fn` binding. Closure conversion lifts a named function whose
+capture set is empty to a direct call. An anonymous `fn`, and any function
+that captures a name, stays a heap closure and an indirect call.
 
 `str-concat(a, b, c)` keeps the current left fold. One argument is that
 argument. The same fold applies to `+` `*` `f+` `f*` written as calls, and
@@ -495,8 +537,7 @@ always binary; prefix `-` on a non-literal is the one-argument negation.
 | `defrec` | `record` |
 | `variant` | `type Name = \| …` |
 | `do` | a block |
-| `cond` | `if` |
-| `when` | `if` with no `else`, body of type `Unit` |
+| a `when` statement | `if` with no else, body of type `Unit` |
 | `and`, `or` | `&&`, `\|\|` |
 | a call written as a head followed by its arguments | `f(a, b)` |
 | equality written as a call | `a == b` |
@@ -519,9 +560,10 @@ pub record Counts {
 }
 
 let join-path(dir: Str, name: Str) -> Str =
-  if dir == "" || dir == "." -> name
-   | dir == "/" -> str-concat("/", name)
-   | else -> str-concat(dir, "/", name)
+  cond
+    | dir == "" || dir == "." -> name
+    | dir == "/" -> str-concat("/", name)
+    | else -> str-concat(dir, "/", name)
 
 let nl() -> Str {
   let sb = sb-new()
@@ -532,7 +574,7 @@ let nl() -> Str {
 pub let summary(c: Counts, ms: Int, on: Bool) -> Unit =
   match (c)
     | Counts(p, f) -> {
-        if f > 0 -> {
+        if (f > 0) -> {
           write(stdout, paint(on, "[31m", str-concat(show(f), " failed")))
           write(stdout, ", ")        
         }

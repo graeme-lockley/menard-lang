@@ -36,9 +36,8 @@ let no-sugar(text: Str) -> Bool =
 let codes-have(es: List DesugarError, code: Str) -> Bool =
   match (es)
     | [] -> false
-    | Cons(DesugarError(_, c, _), rest) ->
-      if c == code -> true
-       | else -> codes-have(rest, code)
+    | DesugarError(_, c, _) :: rest ->
+      if (c == code) -> true | codes-have(rest, code)
 
 let is-none-forms(path: Str) -> Bool =
   match (read-forms(path))
@@ -63,10 +62,10 @@ test "while expands to loop" =
     | None -> false
     | Some(text) -> has(text, "loop (") && not(has(text, "while"))
 
-test "bracket lists become Cons/Nil and a type-parameter list stays" =
+test "bracket lists become cons and a type-parameter list stays" =
   match (desugared-text("tests/phase2/fixtures/list-sugar.mnd"))
     | None -> false
-    | Some(text) -> has(text, "[a]") && has(text, "Cons") && has(text, "Nil") && not(has(text, "[h")) && not(has(text, "[10"))
+    | Some(text) -> has(text, "[a]") && has(text, "::") && has(text, "Nil") && not(has(text, "Cons")) && not(has(text, "[h")) && not(has(text, "[10"))
 
 test "an unclosed declaration does not parse" = is-none-forms("tests/negative/bad-parse.mnd")
 
@@ -74,4 +73,4 @@ test "a bar at the wrong column does not parse" = is-none-forms("tests/negative/
 
 test "an operator without whitespace does not parse" = is-none-forms("tests/negative/bad-desugar-arity.mnd")
 
-test "a nested parameter-list let does not parse" = is-none-forms("tests/negative/bad-desugar-while.mnd")
+test "a nested parameter-list let parses" = not(is-none-forms("tests/phase2/fixtures/nested-let.mnd"))
