@@ -12,6 +12,7 @@ with a broken memory model, *then* make it correct."
 | `src/alloc.c` | `mn_alloc` — bump-allocates from one `mmap`-reserved arena; never frees |
 | `src/panic.c` | `mn_panic` — writes the message to fd 2, then `_exit(1)`; never returns |
 | `src/print.c` | `mn_write_stdout` / `mn_print_i64` — fd-1 output, disjoint from `mn_panic`'s fd 2 |
+| `src/io.c` | `mn_write` — completes short writes, retries `EINTR`, and returns `Result Unit IoError`; used by `std/io.write` and `write-line` |
 | `src/shadow.c` | `mn_shadow_push` / `mn_shadow_pop` — no-op rooting stubs, reserved for slice 2E's collector |
 | `src/smoke_main.c` | A standalone `main` exercising the allocator (no compiled Menard code exists yet) |
 | `fixtures/` | A minimal bitcode program, for reference — see below |

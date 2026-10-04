@@ -1857,7 +1857,7 @@ let lower-ctor(hn: Str, args: List Ast, env: Map Str Int, b: Builder, funcs: Map
     | else -> lower-user-ctor(hn, args, env, b, funcs, noop, pool)
 
 let is-runtime-op(hn: Str) -> Bool =
-  str-in-list(hn, runtime-op-names())
+  hn == "write" || hn == "mn_write" || str-in-list(hn, runtime-op-names())
 
 let runtime-op-names() -> List Str =
   ["str-concat", "str-byte-length", "str-byte", "str-slice", "ref", "deref", "set!", "sb-new", "sb-append!", "sb-append-byte!", "sb-take-str!", "map-new", "map-set", "map-get", "map-has", "map-size", "map-keys", "mn-env-0", "mn-env-1", "mn-env-get", "mn-closure-new", "mn-apply-0", "mn-apply-1", "mn-apply-2", "arg-count", "arg", "read-file", "write-file", "show", "mn-env-new", "mn-env-set", "compare", "sb-length", "sb-to-str", "dump", "spawn", "spawn-capture", "getenv", "exists", "rename", "isatty", "mtime", "cwd", "ensure-dir", "list-dir", "realpath", "now-ms", "remove", "is-dir", "mn_isatty", "mn_mtime", "mn_cwd", "mn_ensure_dir", "mn_list_dir", "mn_realpath", "mn_now_ms", "mn_remove", "mn_is_dir", "mn_arg_count", "mn_arg", "mn_read_file", "mn_write_file", "mn_spawn", "mn_spawn_capture", "mn_getenv", "mn_exists", "mn_rename", "f+", "f-", "f*", "f/"]
@@ -1866,6 +1866,7 @@ let runtime-op-names() -> List Str =
 ; still use the Menard name (`exists`). Both lower to the same abs id.
 let seam-menard-name(hn: Str) -> Str =
   cond
+    | hn == "mn_write" -> "write"
     | hn == "mn_arg_count" -> "arg-count"
     | hn == "mn_arg" -> "arg"
     | hn == "mn_read_file" -> "read-file"
@@ -1892,7 +1893,6 @@ let os-menard-name(hn: Str) -> Str =
 
 let effect-alias(hn: Str) -> Str =
   cond
-    | hn == "mn_write" -> "write"
     | hn == "mn_exit" -> "exit"
     | else -> hn
 
@@ -1913,6 +1913,7 @@ let os-op-abs(hn: Str, ns: Int) -> Int =
 
 let runtime-op-abs-named(hn: Str, ns: Int) -> Int =
   cond
+    | hn == "write" -> extern-write-abs(ns)
     | str-in-list(hn, ["isatty", "mtime", "cwd", "ensure-dir", "list-dir", "realpath", "now-ms", "remove", "is-dir"]) -> os-op-abs(hn, ns)
     | hn == "f+" -> extern-fadd-abs(ns)
     | hn == "f-" -> extern-fsub-abs(ns)
@@ -2287,13 +2288,13 @@ let is-unit-noop-call-named(head: Ast, noop: Map Str Bool) -> Bool =
         | Some(_) -> true
         | None -> false
 
-; -- `println`/`print`/`write`: Unit-producing "effect" steps, usable
+; -- `println`/`print`: Unit-producing "effect" steps, usable
 ; only mid-sequence (never a body's last form — see header comment's
 ; "Unit results") — see `StrPool`'s doc comment (below `lower-program`)
 ; for the two-pass string-global scheme these lower against.
 
 let is-effect-head(s: Str) -> Bool =
-  s == "println" || s == "print" || s == "write" || s == "exit" || s == "mn_write" || s == "mn_exit"
+  s == "println" || s == "print" || s == "exit" || s == "mn_exit"
 
 let is-effect-call(f: Ast) -> Bool =
   match (f)
@@ -2343,7 +2344,7 @@ let lower-effect-known(hn: Str, rest: List Ast, env: Map Str Int, b: Builder, fu
     | hn == "println" -> lower-println(rest, env, b, funcs, noop, pool)
     | hn == "print" -> lower-print(rest, env, b, funcs, noop, pool)
     | hn == "exit" -> lower-exit(rest, env, b, funcs, noop, pool)
-    | else -> lower-write(rest, env, b, funcs, noop, pool)
+    | else -> Err(str-concat("unknown effect ", hn))
 
 ; `(exit code)` — noreturn via `mn_exit` (tagged Int in, untagged inside).
 let lower-exit(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
@@ -2374,47 +2375,6 @@ let lower-print(args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str Fun
 
 let lower-println(args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
   result-then(lower-print-args(args, env, b, funcs, noop, pool), fn () = Ok(emit-write-str-to!(b, pool, newline-str(), str-pool-write-stdout-abs(pool))))
-
-; `(write fd s)` — literal fd 1/2 with a literal or (for fd 1) any Str keeps
-; the direct stdout/stderr externs. A computed fd, or a computed Str on
-; fd 2, goes through `mn_write`.
-let lower-write-any(fd-ast: Ast, s-ast: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
-  result-bind(
-    lower-expr(fd-ast, env, b, funcs, noop, pool),
-    fn (fd) =
-      result-bind(
-        lower-expr(s-ast, env, b, funcs, noop, pool),
-        fn (s) =
-          Ok(
-            {
-              emit-call!(b, extern-write-abs(str-pool-count(pool)), [get!(b, fd), get!(b, s)])
-              ()
-            }
-          )
-      )
-  )
-
-let lower-write-str(s-ast: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool, callee-abs: Int, is-stdout: Bool) -> Result Unit Str =
-  match (s-ast)
-    | StrNode(s, _) -> Ok(emit-write-str-to!(b, pool, s, callee-abs))
-    | _ ->
-      if (is-stdout) -> result-bind(lower-expr(s-ast, env, b, funcs, noop, pool), fn (v) = Ok(emit-call-void!(b, extern-kind-print, extern-print-str-abs(str-pool-count(pool)), [get!(b, v)]))) | lower-write-any(IntNode(2, Span(0, 0, 0, 1)), s-ast, env, b, funcs, noop, pool)
-
-let lower-write(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
-  match (rest)
-    | [fd-ast, s-ast] -> lower-write-fd(fd-ast, s-ast, env, b, funcs, noop, pool)
-    | _ -> Err("write requires exactly two arguments: a file descriptor and a Str")
-
-let lower-write-fd(fd-ast: Ast, s-ast: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
-  match (fd-ast)
-    | IntNode(n, _) -> lower-write-fd-n(n, s-ast, env, b, funcs, noop, pool)
-    | _ -> lower-write-any(fd-ast, s-ast, env, b, funcs, noop, pool)
-
-let lower-write-fd-n(n: Int, s-ast: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
-  cond
-    | n == 1 -> lower-write-str(s-ast, env, b, funcs, noop, pool, str-pool-write-stdout-abs(pool), true)
-    | n == 2 -> lower-write-str(s-ast, env, b, funcs, noop, pool, str-pool-write-stderr-abs(pool), false)
-    | else -> Err("write's file descriptor must be the Int literal 1 or 2")
 
 let lower-sequence(forms: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (forms)
@@ -2856,13 +2816,13 @@ let mc-pure(hn: Str) -> Bool =
   mc-pure-body(effect-alias(seam-menard-name(hn)))
 
 let mc-pure-body(hn: Str) -> Bool =
-  str-in-list(hn, ["isatty", "mtime", "now-ms", "ensure-dir", "remove", "is-dir"]) || hn == "if" || hn == "let" || hn == "do" || hn == "loop" || hn == "recur" || hn == "match" || hn == "println" || hn == "print" || hn == "shadow-push" || hn == "shadow-pop" || hn == "write" || hn == "exit" || hn == "deref" || hn == "set!" || hn == "str-byte" || hn == "str-byte-length" || hn == "map-has" || hn == "map-size" || hn == "mn-env-get" || hn == "arg-count" || hn == "exists" || hn == "sb-length" || hn == "sb-to-str" || hn == "dump" || hn == "+" || hn == "-" || hn == "*" || hn == "/" || hn == "%" || hn == "<" || hn == ">" || hn == "<=" || hn == ">=" || hn == "=" || hn == "compare"
+  str-in-list(hn, ["isatty", "mtime", "now-ms", "ensure-dir", "remove", "is-dir"]) || hn == "if" || hn == "let" || hn == "do" || hn == "loop" || hn == "recur" || hn == "match" || hn == "println" || hn == "print" || hn == "shadow-push" || hn == "shadow-pop" || hn == "exit" || hn == "deref" || hn == "set!" || hn == "str-byte" || hn == "str-byte-length" || hn == "map-has" || hn == "map-size" || hn == "mn-env-get" || hn == "arg-count" || hn == "exists" || hn == "sb-length" || hn == "sb-to-str" || hn == "dump" || hn == "+" || hn == "-" || hn == "*" || hn == "/" || hn == "%" || hn == "<" || hn == ">" || hn == "<=" || hn == ">=" || hn == "=" || hn == "compare"
 
 let mc-alloc-name(hn: Str) -> Bool =
   mc-alloc-body(seam-menard-name(hn))
 
 let mc-alloc-body(hn: Str) -> Bool =
-  hn == "str-concat" || hn == "str-slice" || hn == "ref" || hn == "sb-new" || hn == "sb-append!" || hn == "sb-append-byte!" || hn == "sb-take-str!" || hn == "map-new" || hn == "map-set" || hn == "map-get" || hn == "map-keys" || hn == "mn-env-0" || hn == "mn-env-1" || hn == "mn-env-new" || hn == "mn-closure-new" || hn == "mn-apply-0" || hn == "mn-apply-1" || hn == "mn-apply-2" || hn == "arg" || hn == "read-file" || hn == "write-file" || hn == "show" || hn == "spawn" || hn == "spawn-capture" || hn == "getenv" || hn == "rename" || hn == "f+" || hn == "f-" || hn == "f*" || hn == "f/" || hn == "cwd" || hn == "list-dir" || hn == "realpath"
+  hn == "write" || hn == "str-concat" || hn == "str-slice" || hn == "ref" || hn == "sb-new" || hn == "sb-append!" || hn == "sb-append-byte!" || hn == "sb-take-str!" || hn == "map-new" || hn == "map-set" || hn == "map-get" || hn == "map-keys" || hn == "mn-env-0" || hn == "mn-env-1" || hn == "mn-env-new" || hn == "mn-closure-new" || hn == "mn-apply-0" || hn == "mn-apply-1" || hn == "mn-apply-2" || hn == "arg" || hn == "read-file" || hn == "write-file" || hn == "show" || hn == "spawn" || hn == "spawn-capture" || hn == "getenv" || hn == "rename" || hn == "f+" || hn == "f-" || hn == "f*" || hn == "f/" || hn == "cwd" || hn == "list-dir" || hn == "realpath"
 
 let mc-ctor-alloc(hn: Str) -> Bool =
   is-upper-name(hn) && hn != "Nil" && hn != "None"

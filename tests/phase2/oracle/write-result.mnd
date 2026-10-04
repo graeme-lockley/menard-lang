@@ -1,0 +1,25 @@
+import std/io
+
+let main() -> Int =
+  match (write(stdout, "literal"))
+    | Err(_) -> 1
+    | Ok(_) ->
+      {
+        let fd = stdout
+        let text = str-concat(" com", "puted")
+        match (write(fd, text))
+          | Err(_) -> 2
+          | Ok(_) ->
+            match (write-line(stdout, " line"))
+              | Err(_) -> 3
+              | Ok(_) ->
+                match (write-line(stderr, "error stream"))
+                  | Err(_) -> 4
+                  | Ok(_) ->
+                    match (write(-1, "must not appear"))
+                      | Ok(_) -> 5
+                      | Err(_) ->
+                        match (write-line(-1, "must not appear"))
+                          | Ok(_) -> 6
+                          | Err(_) -> 0
+      }

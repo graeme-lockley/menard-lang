@@ -209,7 +209,7 @@ MnWord mn_str_byte_length(MnWord s);
 MnWord mn_str_byte(MnWord s, MnWord i_tagged);
 MnWord mn_str_slice(MnWord s, MnWord start_t, MnWord end_t);
 void mn_print_str(MnWord s);
-/* `(write fd s)` when `fd` or `s` is not a literal. `fd` is a tagged Int, 1 or 2. Returns Unit. */
+/* Write all bytes to a tagged Int descriptor; returns Result Unit IoError. */
 MnWord mn_write(MnWord fd_tagged, MnWord s);
 MnWord mn_ref_new(MnWord v);
 MnWord mn_ref_deref(MnWord r);

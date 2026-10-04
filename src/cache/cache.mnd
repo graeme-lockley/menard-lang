@@ -3,7 +3,7 @@
 ; timestamp; both live only here.
 ;
 ; An interface is a list of forms the reader accepts:
-;   mni(1)
+;   mni(2)
 ;   src(HASH)
 ;   dep(HASH, "abs")
 ;   init("sym") or init("-")
@@ -21,6 +21,9 @@ import std/fs
 import std/io
 import std/string
 import std/sys
+
+; Version 2 invalidates objects that lowered write as Unit instead of Result.
+let iface-version = 2
 
 pub record DepRec {
   hash: Int
@@ -192,7 +195,7 @@ let iface-text(iface: Iface) -> Str =
     | Iface(src, deps, init, main-sym, main-ret, fns, ctors, stubs) ->
       {
         let sb = sb-new()
-        add-line(sb, "mni(1)")
+        add-line(sb, str-concat("mni(", show(iface-version), ")"))
         add-line(sb, call1("src", show(src)))
         write-deps(sb, deps)
         add-line(sb, call1("init", quote-str(dash(init))))
@@ -315,13 +318,20 @@ let iface-from-forms(forms: List Ast) -> Iface {
   Iface(deref(src-hash), reverse-deps(deref(deps), []), deref(init), deref(main-sym), deref(main-ret), reverse-fns(deref(fns), []), reverse-ctors(deref(ctors), []), reverse-asts(deref(stubs), []))
 }
 
+let compatible-iface(forms: List Ast) -> Bool =
+  match (forms)
+    | ParenNode([SymNode(name, _), IntNode(version, _)], _) :: _ ->
+      name == "mni" && version == iface-version
+    | _ -> false
+
 pub let read-iface(abs: Str) -> Maybe Iface =
   match (read-file(iface-path(abs)))
     | Err(_) -> None()
     | Ok(text) ->
       match (read-all(text))
         | Err(_) -> None()
-        | Ok(forms) -> Some(iface-from-forms(forms))
+        | Ok(forms) ->
+          if (compatible-iface(forms)) -> Some(iface-from-forms(forms)) | None()
 
 let deps-match(deps: List DepRec) -> Bool =
   match (deps)

@@ -258,6 +258,14 @@ const fixtures: Array<{
     expectStdout: "hello\n",
   },
   {
+    name: "write and write-line return Results for literal and computed streams",
+    entry: "tests/phase2/oracle/write-result.mnd",
+    expectExit: 0,
+    expectDis: /\bcall i64 @mn_write\b/,
+    expectStdout: "literal computed line\n",
+    expectStderr: "error stream\n",
+  },
+  {
     name: "Ref + loop mutation (sum 0..10 = 55)",
     entry: "tests/phase2/oracle/ret-ref.mnd",
     expectExit: 55,

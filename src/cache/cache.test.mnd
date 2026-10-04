@@ -4,6 +4,7 @@
 import "./cache.mnd"
 import "../reader/print.mnd"
 import "../reader/read.mnd"
+import std/io
 import std/string
 
 let forms-of(src: Str) -> List Ast =
@@ -58,4 +59,22 @@ test "an interface file round-trips" =
         match (read-iface(path))
           | Some(got) -> same(got)
           | None -> false
+  }
+
+test "an old write ABI interface is not reused" =
+  {
+    let path = round-path()
+    match (write-file(iface-path(path), "mni(1)
+src(41)
+"))
+      | Err(_) -> false
+      | Ok(_) ->
+        {
+          let rejected =
+            match (read-iface(path))
+              | Some(_) -> false
+              | None -> true
+          remove-cache(path)
+          rejected
+        }
   }

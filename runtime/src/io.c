@@ -150,6 +150,33 @@ static MnWord io_err_from_errno(int err) {
   }
 }
 
+MnWord mn_write(MnWord fd_tagged, MnWord s) {
+  int64_t fd = mn_word_to_int(fd_tagged);
+  size_t n = (size_t)str_len(s);
+  if (fd < 0 || fd > INT_MAX) {
+    return mn_err(io_err_from_errno(EBADF));
+  }
+  size_t off = 0;
+  /* Even an empty write must validate the descriptor. */
+  for (;;) {
+    ssize_t wrote = write((int)fd, str_bytes(s) + off, n - off);
+    if (wrote < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      return mn_err(io_err_from_errno(errno));
+    }
+    if (wrote == 0 && off < n) {
+      return mn_err(io_err_from_errno(EIO));
+    }
+    off += (size_t)wrote;
+    if (off == n) {
+      break;
+    }
+  }
+  return mn_ok(MN_UNIT);
+}
+
 MnWord mn_read_file(MnWord path_str) {
   char *path = str_to_cstr(path_str);
   FILE *f = fopen(path, "rb");

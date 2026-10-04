@@ -134,21 +134,6 @@ void mn_print_str(MnWord s) {
   }
 }
 
-MnWord mn_write(MnWord fd_tagged, MnWord s) {
-  int64_t fd = mn_word_to_int(fd_tagged);
-  int64_t n = str_len(s);
-  if (n > 0) {
-    if (fd == 1) {
-      mn_write_stdout(str_bytes(s), (size_t)n);
-    } else if (fd == 2) {
-      mn_write_stderr(str_bytes(s), (size_t)n);
-    } else {
-      mn_panic("mn_write: fd must be 1 or 2");
-    }
-  }
-  return MN_UNIT;
-}
-
 MnWord mn_ref_new(MnWord v) {
   MnWord vs;
   mn_root_push(&vs);
