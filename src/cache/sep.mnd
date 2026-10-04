@@ -782,14 +782,15 @@ let compile-desugar(abs: Str, src: Str, display: Str, forms: List Ast, ctx: Ctx,
     | Ok(desugared) ->
       {
         let stamped = stamp-spans(desugared, src, 0)
-        let raw-specs = specs-with-basics(abs, import-specs(stamped))
+        let qualified = rewrite-import-aliases(abs, stamped)
+        let raw-specs = specs-with-basics(abs, import-specs(qualified))
         match (note-versions(ctx-versions(ctx), raw-specs))
           | Err(e) -> Err(e)
           | Ok(_) ->
             {
               let specs = canon-specs(abs, raw-specs)
               match (ensure-list(specs, ctx))
-                | Ok(_) -> compile-forms(abs, src, display, stamped, dep-recs(specs), ctx)
+                | Ok(_) -> compile-forms(abs, src, display, qualified, dep-recs(specs), ctx)
                 | Err(e) -> Err(e)
             }
       }

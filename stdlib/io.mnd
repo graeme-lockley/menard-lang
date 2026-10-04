@@ -1,6 +1,8 @@
 ; Standard streams and file reads and writes.
 ; @module std/io
 
+import std/result as Result
+
 ; Standard input, the file descriptor `write` takes as 0.
 ; @test stdin => 0
 pub let stdin = 0
@@ -36,6 +38,19 @@ extern mn_write_file(path: Str, data: Str) -> Result Unit IoError
 ; @test write(stdout, "hi")
 pub let write(fd: Int, data: Str) -> Result Unit IoError =
   mn_write(fd, data)
+
+; A single newline string.
+let nl =
+  {
+    let sb = sb-new()
+    sb-append-byte!(sb, 10)
+    sb-take-str!(sb)
+  }
+
+; Write data and a newline to fd, or an IoError from either write.
+; @test write-line(stdout, "hi")
+pub let write-line(fd: Int, data: Str) -> Result Unit IoError =
+  Result.and-then(fn (_) = write(fd, nl), write(fd, data))
 
 ; The bytes of the file at path, or an IoError.
 ; @test read-file("no-such-file")

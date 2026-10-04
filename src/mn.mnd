@@ -49,19 +49,6 @@ import std/proc
 import std/string
 import std/sys
 
-let nl =
-  {
-    let sb = sb-new()
-    sb-append-byte!(sb, 10)
-    sb-take-str!(sb)
-  }
-
-let write-line(fd: Int, s: Str) -> Unit {
-  write(fd, s)
-  write(fd, nl)
-  ()
-}
-
 ; Flags the driver understands. A valued flag consumes the next word.
 let mn-flags() -> List Flag =
   [Flag("--dump-after=reader", false), Flag("--dump-after=desugar", false), Flag("--dump-after=type", false), Flag("--dump-after=close", false), Flag("--dump-after=root", false), Flag("--dump-after=derive", false), Flag("--show-result", false), Flag("--clean", false), Flag("--verbose", false), Flag("--quiet", false), Flag("-o", true), Flag("--cc", true), Flag("--runtime", true)]
@@ -294,7 +281,11 @@ let front-end-rooted(path: Str, forms: List Ast, paths: List Str, dump-after-roo
 }
 
 let maybe-dump-derive-plan(forms: List Ast, dump-after-derive: Bool) -> Unit =
-  if (dump-after-derive) -> write-line(2, describe-derives(forms))
+  if (dump-after-derive) ->
+    {
+      write-line(2, describe-derives(forms))
+      ()
+    }
 
 let front-end-derived(path: Str, forms: List Ast, paths: List Str, dump-after-derive: Bool, on-ok: (List Ast, List Str) -> Unit) -> Unit {
   let derived = plan-derives(forms)
@@ -646,7 +637,11 @@ let run-cached-existing(file: Str, bin: Str, do-link: Bool, and-run: Bool) -> Un
         | else -> exit(0)
     | Err(msg) ->
       {
-        if (str-byte-length(msg) > 0) -> write-line(2, str-concat("error: ", msg))
+        if (str-byte-length(msg) > 0) ->
+          {
+            write-line(2, str-concat("error: ", msg))
+            ()
+          }
         exit(1)
       }
 }

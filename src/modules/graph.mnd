@@ -44,6 +44,9 @@ pub record Flat {
   paths: List Str
 }
 
+; Paths imported through `as` in the graph currently being flattened.
+let qualified-imports = ref(map-new())
+
 ; `present` is false when the entry module has no `main`. `unit-ret` means
 ; that `main` is declared `-> Unit`, so the bootstrap returns 0 after calling it.
 record EntryMain {
@@ -620,11 +623,17 @@ let build-renames-from-list(names: List Str, pub-names: Map Str Bool, prefix: St
         | name-is-pub(pub-names, n) -> build-renames-from-list(rest, pub-names, prefix, main-sym, acc)
         | else -> build-renames-from-list(rest, pub-names, prefix, main-sym, add-rename(acc, prefix, n))
 
-let build-renames(forms: List Ast, mid: Int, main-sym: Str) -> Map Str Str {
-  let pub-list = gather-pub-forms-names(forms, [])
+let qualified-prefix(path: Str) -> Str =
+  str-concat("__q", show(path-hash(path)), "_")
+
+let build-renames(forms: List Ast, mid: Int, main-sym: Str, qualify: Bool, path: Str) -> Map Str Str {
+  let pub-list =
+    if (qualify) -> [] | gather-pub-forms-names(forms, [])
   let all-list = gather-forms-names(forms, [])
   let pub-names = list-to-bool-map(pub-list, map-new())
-  build-renames-from-list(all-list, pub-names, module-prefix(mid), main-sym, map-new())
+  let prefix =
+    if (qualify) -> qualified-prefix(path) | module-prefix(mid)
+  build-renames-from-list(all-list, pub-names, prefix, main-sym, map-new())
 }
 
 let rename-lookup(renames: Map Str Str, name: Str) -> Str =
@@ -851,9 +860,9 @@ let forms-with-bootstrap(forms: List Ast, inits: List Str, entry: EntryMain) -> 
 ; expressions into this module's init.
 let uniquify-module-body(path: Str, entry-path: Str, mid: Int, forms: List Ast, exports: Ref (Map Str Str), inits: Ref (List Str), entry: Ref EntryMain) -> Result (List Ast) Str =
   result-bind(
-    register-forms-exports!(exports, path, forms),
+    if (map-has(deref(qualified-imports), path)) -> Ok(()) | register-forms-exports!(exports, path, forms),
     fn (_) {
-      let renames = build-renames(forms, mid, main-symbol(path))
+      let renames = build-renames(forms, mid, main-symbol(path), map-has(deref(qualified-imports), path), path)
       let stripped = strip-imports-and-pub(forms, [])
       let renamed = rename-forms(stripped, renames)
       let body = with-module-init(path, renamed, inits)
@@ -914,52 +923,86 @@ let import-alias-rest(rest: List Ast) -> Maybe Str =
     | _ :: mod :: _ -> sym-str(mod)
     | _ -> None()
 
-; Every qualified-import name in this module.
-let collect-import-aliases(forms: List Ast, acc: List Str) -> List Str =
+; Map each qualified-import name to its resolved module path.
+let qualified-import-paths(from: Str, forms: List Ast, acc: Map Str Str) -> Map Str Str =
   match (forms)
-    | [] -> reverse(acc)
+    | [] -> acc
     | f :: rest ->
       match (import-alias-of(f))
-        | Some(name) -> collect-import-aliases(rest, name :: acc)
-        | None -> collect-import-aliases(rest, acc)
+        | Some(name) ->
+          match (parse-import-spec(f))
+            | Some(spec) -> qualified-import-paths(from, rest, map-set(acc, name, resolve-import-path(from, spec)))
+            | None -> qualified-import-paths(from, rest, acc)
+        | None -> qualified-import-paths(from, rest, acc)
+
+let mark-qualified-imports!(from: Str, forms: List Ast) -> Unit {
+  let paths = qualified-import-paths(from, forms, map-new())
+  let names = map-keys(paths)
+  mark-qualified-names!(names, paths)
+}
+
+let mark-qualified-names!(names: List Str, paths: Map Str Str) -> Unit =
+  match (names)
+    | [] -> ()
+    | name :: rest ->
+      {
+        match (map-get(paths, name))
+          | Some(path) -> set!(qualified-imports, map-set(deref(qualified-imports), path, true))
+          | None -> ()
+        mark-qualified-names!(rest, paths)
+      }
 
 ; Rewrite each child of a form.
-let rewrite-qual-list(elems: List Ast, aliases: List Str) -> List Ast =
+let rewrite-qual-list(elems: List Ast, aliases: Map Str Str, qualify: Bool) -> List Ast =
   match (elems)
     | [] -> []
-    | e :: rest -> rewrite-qual-ast(e, aliases) :: rewrite-qual-list(rest, aliases)
+    | e :: rest -> rewrite-qual-ast(e, aliases, qualify) :: rewrite-qual-list(rest, aliases, qualify)
 
 ; `Alias.name` becomes the export's own name in the flat program.
-let rewrite-qual-project(obj: Ast, field: Ast, sp: Span, aliases: List Str) -> Ast {
-  let obj2 = rewrite-qual-ast(obj, aliases)
-  let field2 = rewrite-qual-ast(field, aliases)
+let rewrite-qual-project(obj: Ast, field: Ast, sp: Span, aliases: Map Str Str, qualify: Bool) -> Ast {
+  let obj2 = rewrite-qual-ast(obj, aliases, qualify)
+  let field2 = rewrite-qual-ast(field, aliases, qualify)
   match (sym-str(obj2))
     | Some(name) ->
-      if (contains(aliases, name)) -> field2 | ParenNode([SymNode("project", sp), obj2, field2], sp)
+      match (map-get(aliases, name))
+        | Some(path) ->
+          match (sym-str(field2))
+            | Some(field-name) ->
+              if (qualify) -> SymNode(str-concat(qualified-prefix(path), field-name), sp) | field2
+            | None -> field2
+        | None -> ParenNode([SymNode("project", sp), obj2, field2], sp)
     | None -> ParenNode([SymNode("project", sp), obj2, field2], sp)
 }
 
 ; Qualified projection resolves here; record projection stays.
-let rewrite-qual-node(elems: List Ast, sp: Span, aliases: List Str) -> Ast =
+let rewrite-qual-node(elems: List Ast, sp: Span, aliases: Map Str Str, qualify: Bool) -> Ast =
   match (elems)
     | head :: obj :: field :: _ ->
-      if (is-sym(head, "project")) -> rewrite-qual-project(obj, field, sp, aliases) | ParenNode(rewrite-qual-list(elems, aliases), sp)
-    | _ -> ParenNode(rewrite-qual-list(elems, aliases), sp)
+      if (is-sym(head, "project")) -> rewrite-qual-project(obj, field, sp, aliases, qualify) | ParenNode(rewrite-qual-list(elems, aliases, qualify), sp)
+    | _ -> ParenNode(rewrite-qual-list(elems, aliases, qualify), sp)
 
 ; Walk one form for qualified names.
-let rewrite-qual-ast(ast: Ast, aliases: List Str) -> Ast =
+let rewrite-qual-ast(ast: Ast, aliases: Map Str Str, qualify: Bool) -> Ast =
   match (ast)
-    | ParenNode(elems, sp) -> rewrite-qual-node(elems, sp, aliases)
-    | BracketNode(elems, sp) -> BracketNode(rewrite-qual-list(elems, aliases), sp)
+    | ParenNode(elems, sp) -> rewrite-qual-node(elems, sp, aliases, qualify)
+    | BracketNode(elems, sp) -> BracketNode(rewrite-qual-list(elems, aliases, qualify), sp)
     | _ -> ast
 
-; Resolve `import … as` projections before the module is concatenated.
-let rewrite-qual-forms(forms: List Ast, aliases: List Str) -> List Ast =
+; Resolve `import … as` projections before typechecking a module.
+let rewrite-qual-forms(forms: List Ast, aliases: Map Str Str, qualify: Bool) -> List Ast =
   match (forms)
     | [] -> []
-    | f :: rest -> rewrite-qual-ast(f, aliases) :: rewrite-qual-forms(rest, aliases)
+    | f :: rest -> rewrite-qual-ast(f, aliases, qualify) :: rewrite-qual-forms(rest, aliases, qualify)
+
+; Replace qualified import projections with their exported names.
+pub let rewrite-import-aliases(from: Str, forms: List Ast) -> List Ast =
+  rewrite-qual-forms(forms, qualified-import-paths(from, forms, map-new()), false)
+
+let rewrite-flat-import-aliases(from: Str, forms: List Ast) -> List Ast =
+  rewrite-qual-forms(forms, qualified-import-paths(from, forms, map-new()), true)
 
 let load-module-deps(path: Str, entry-path: Str, forms: List Ast, visited: Ref (Map Str Bool), acc: Ref (List Ast), mid: Ref Int, exports: Ref (Map Str Str), paths: Ref (List Str), sources: Ref (Map Str Str), inits: Ref (List Str), entry: Ref EntryMain, versions: Ref (Map Str Str)) -> Result Unit Str {
+  mark-qualified-imports!(path, forms)
   let specs = specs-with-basics(path, collect-import-specs(forms, []))
   result-bind(
     note-versions(versions, specs),
@@ -975,7 +1018,7 @@ let load-module-deps(path: Str, entry-path: Str, forms: List Ast, visited: Ref (
               | Some(s) -> s
               | None -> ""
           let stamped = stamp-forms(forms, src, id)
-          let qualified = rewrite-qual-forms(stamped, collect-import-aliases(forms, []))
+          let qualified = rewrite-flat-import-aliases(path, stamped)
           result-bind(
             uniquify-module-body(path, entry-path, id, qualified, exports, inits, entry),
             fn (body) {
@@ -997,6 +1040,7 @@ let load-deps-list(from: Str, entry-path: Str, specs: List Str, visited: Ref (Ma
 ; the path of each module id, dependency-first. When the entry defines
 ; `main`, the flat list ends with the bootstrap that calls it.
 pub let flatten-module-graph(entry-path: Str, src: Str) -> Result Flat Str {
+  set!(qualified-imports, map-new())
   let visited = ref(map-new())
   let acc = ref([])
   let mid = ref(0)

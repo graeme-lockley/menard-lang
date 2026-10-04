@@ -79,6 +79,22 @@ describe("import specifiers", () => {
     expect(diags.some((d) => d.code === "E_TYPE_UNBOUND")).toBe(true);
   });
 
+  test("a qualified std/result import resolves and-then", () => {
+    const host = createHost({
+      fs: createVirtualFs({
+        "/main.mnd": `import std/result as Result
+Result.and-then(fn (n) = Ok(n + 1), Ok(1))
+`,
+      }),
+    });
+    const src = host.readFile("/main.mnd");
+    if (!src.ok) return;
+    expect(diagnose(src.bytes, { path: "/main.mnd", host })).toEqual([]);
+    const r = run(src.bytes, { path: "/main.mnd", host });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value).toEqual({ tag: "variant", ctor: "Ok", payloads: [{ tag: "int", value: 2n }] });
+  });
+
   test("a record field is selected by declaration order", () => {
     const host = createHost({
       fs: createVirtualFs({
