@@ -294,6 +294,20 @@ let skip-comment(lx: Lex) -> Unit {
   }
 }
 
+; A shebang is only the first line, and only when `#!` are the first two
+; bytes. The line is consumed, including its newline, so the next line
+; keeps its own number. `#` anywhere else stays an unexpected character.
+let skip-shebang(lx: Lex) -> Unit =
+  if (lex-peek(lx, 0) == 35 && lex-peek(lx, 1) == 33) -> {
+    while (lex-peek(lx, 0) != -1 && lex-peek(lx, 0) != 10) {
+      lex-bump(lx)
+    }
+    if (lex-peek(lx, 0) == 10) -> {
+      lex-bump(lx)
+      ()
+    }
+  } | ()
+
 let prev-byte(lx: Lex) -> Int {
   let s = deref(lx-pos(lx))
   if (s == 0) -> -1 | String.byte(s - 1, lx-src(lx))
@@ -809,6 +823,7 @@ let lex-all(src: Str) -> Result (List Tok) ParseError {
   let toks = ref(empty-toks())
   let failed = ref(no-parse-error())
   set!(lex-current, Some(lx))
+  skip-shebang(lx)
   while (deref(lx-pos(lx)) < lx-n(lx) && is-none(deref(failed))) {
     cond
       | line-ready(lx, failed) ->

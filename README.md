@@ -49,6 +49,7 @@ make bootstrap       # interpreter, stage0, stage1, stage2, and the fixed point
 ```bash
 ./mn run examples/sc.mnd
 ./mn run examples/sc.mnd -- a b          # arguments after --
+./mn examples/sc.mnd a b                 # a file path runs it; every following word is an argument
 ./mn build examples/loop-sum.mnd -o out
 ./mn test examples/sc.mnd
 ./mn test --show-output

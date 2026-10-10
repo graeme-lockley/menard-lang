@@ -1,0 +1,9 @@
+#!/usr/bin/env mn
+import std/sys
+
+let main() -> Int {
+  println(arg-count())
+  println(arg(0))
+  println(arg(1))
+  0
+}

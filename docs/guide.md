@@ -238,6 +238,7 @@ Imports do not cycle.
 ```bash
 ./mn run examples/sc.mnd
 ./mn run examples/echo-file.mnd -- a b
+./mn examples/sc.mnd a b
 ./mn build examples/loop-sum.mnd -o out
 ./mn test
 ./mn test examples/sc.mnd --show-output
@@ -246,7 +247,7 @@ Imports do not cycle.
 
 `run` compiles, links, and executes. `build` stops at the binary. `test` discovers `*.test.mnd` files and any other `.mnd` file that carries `@test`, and runs them as one process. `inter` is the reference interpreter, which is useful when you want the oracle rather than the native binary.
 
-Arguments after `--` are the program's arguments. `exit` sets the status. A panic prints to standard error and exits `1`.
+Arguments after `--` are the program's arguments. A file path in place of `run` does the same thing, and every word after that path is an argument, including words that look like driver flags. A source file may open with `#!/usr/bin/env mn`, so the file itself can be the command. `exit` sets the status. A panic prints to standard error and exits `1`.
 
 ## The compiler
 

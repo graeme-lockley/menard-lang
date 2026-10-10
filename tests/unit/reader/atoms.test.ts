@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { read, print, astEqual } from "../../../host/src/reader/index.ts";
+import { buildLineMap, offsetToLineCol } from "../../../host/src/diagnostic/line-map.ts";
+import { read, readAll, print, astEqual } from "../../../host/src/reader/index.ts";
 
 function mustRead(src: string | Uint8Array) {
   const r = read(src);
@@ -267,5 +268,41 @@ describe("comments", () => {
     const a = mustRead("; hi\n42");
     expect(a.tag).toBe("int");
     if (a.tag === "int") expect(a.value).toBe(42n);
+  });
+});
+
+describe("shebang", () => {
+  test("a leading shebang is ignored and the next line keeps its number", () => {
+    const src = "#!/usr/bin/env mn\n42";
+    const a = mustRead(src);
+    expect(a.tag).toBe("int");
+    if (a.tag === "int") {
+      expect(a.value).toBe(42n);
+      expect(offsetToLineCol(buildLineMap(new TextEncoder().encode(src)), a.span.start).line).toBe(2);
+    }
+  });
+
+  test("a shebang program matches the same program without it", () => {
+    const withShebang = readAll("#!/usr/bin/env mn\nlet main() -> Int = 0\n");
+    const plain = readAll("let main() -> Int = 0\n");
+    expect(withShebang.ok).toBe(true);
+    expect(plain.ok).toBe(true);
+    if (withShebang.ok && plain.ok) {
+      expect(withShebang.forms.length).toBe(plain.forms.length);
+      for (let i = 0; i < plain.forms.length; i++) {
+        expect(astEqual(withShebang.forms[i]!, plain.forms[i]!)).toBe(true);
+      }
+    }
+  });
+
+  test("a shebang with no following program is an empty file", () => {
+    const r = readAll("#!/usr/bin/env mn\n");
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.forms).toEqual([]);
+  });
+
+  test("a hash that is not the first two bytes is an error", () => {
+    expect(read(" #!/usr/bin/env mn\n42").ok).toBe(false);
+    expect(read("42\n#").ok).toBe(false);
   });
 });

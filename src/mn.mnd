@@ -9,7 +9,8 @@
 ; output path is given. `emit` spawns nothing.
 ; `build` emits bitcode beside `-o`, spawns the recorded `cc` with an
 ; argv list, and renames the linker output into place. `run` builds,
-; then spawns the binary.
+; then spawns the binary. A file path in place of a subcommand is `run`
+; of that file: every word after the path is a program argument.
 ;
 ; `--dump-after=reader`, `--dump-after=desugar`, `--dump-after=type`,
 ; `--dump-after=close`, `--dump-after=root`, and `--dump-after=derive`
@@ -59,41 +60,55 @@ let argv-onto(i: Int, n: Int, acc: List Str) -> List Str =
 let argv() -> List Str =
   argv-onto(0, arg-count(), [])
 
+let known-mode(s: Str) -> Bool =
+  s == "check" || s == "emit" || s == "build" || s == "run" || s == "test" || s == "inter"
+
+let starts-with-dash(s: Str) -> Bool =
+  String.length(s) > 0 && String.byte(0, s) == 45
+
+; `mn script.mnd arg…` — the first word is the file. A leading `-` stays
+; a driver flag for the subcommand forms, and a known mode name stays a mode.
+let script-invocation() -> Bool =
+  arg-count() >= 1 && not(known-mode(arg(0))) && not(starts-with-dash(arg(0)))
+
+let driver-has(name: Str) -> Bool =
+  if (script-invocation()) -> false | has-flag(argv(), name)
+
 let has-dump-after-reader() -> Bool =
-  has-flag(argv(), "--dump-after=reader")
+  driver-has("--dump-after=reader")
 
 let has-dump-after-desugar() -> Bool =
-  has-flag(argv(), "--dump-after=desugar")
+  driver-has("--dump-after=desugar")
 
 let has-dump-after-type() -> Bool =
-  has-flag(argv(), "--dump-after=type")
+  driver-has("--dump-after=type")
 
 let has-dump-after-close() -> Bool =
-  has-flag(argv(), "--dump-after=close")
+  driver-has("--dump-after=close")
 
 let has-dump-after-root() -> Bool =
-  has-flag(argv(), "--dump-after=root")
+  driver-has("--dump-after=root")
 
 let has-dump-after-derive() -> Bool =
-  has-flag(argv(), "--dump-after=derive")
+  driver-has("--dump-after=derive")
 
 let has-show-result() -> Bool =
-  has-flag(argv(), "--show-result")
+  driver-has("--show-result")
 
 let has-clean() -> Bool =
-  has-flag(argv(), "--clean")
+  driver-has("--clean")
 
 let has-verbose() -> Bool =
-  has-flag(argv(), "--verbose")
+  driver-has("--verbose")
 
 let has-show-output() -> Bool =
-  has-flag(argv(), "--show-output")
+  driver-has("--show-output")
 
 let has-quiet() -> Bool =
-  has-flag(argv(), "--quiet")
+  driver-has("--quiet")
 
 let opt(name: Str) -> Str =
-  flag-value(argv(), name)
+  if (script-invocation()) -> "" | flag-value(argv(), name)
 
 ; Progress is for a person watching a terminal. A captured stderr stays
 ; empty unless something failed. `--quiet` suppresses it even on a tty.
@@ -123,6 +138,11 @@ let test-paths() -> List Str =
 
 let prog-args() -> List Str =
   args-after(argv())
+
+; Script mode forwards every word after the file, including driver-shaped
+; flags. `mn run` still forwards only the words after `--`.
+let child-args() -> List Str =
+  if (script-invocation()) -> argv-onto(1, arg-count(), []) | prog-args()
 
 ; ---------------------------------------------------------------------------
 ; Diagnostics. Line and column come from the source bytes. `origin` on a
@@ -185,6 +205,7 @@ let fail-cannot-read(path: Str) -> Unit {
 
 let usage() -> Unit {
   write-line(2, "usage: mn <check|emit|build|run|test|inter> <file.mnd> [out.bc] [-o bin] [--cc path] [--runtime dir] [--clean] [--quiet] [--verbose] [--show-output] [--show-result] [--dump-after=reader|desugar|type|close|root|derive]")
+  write-line(2, "       mn <file.mnd> [arg…]")
   exit(2)
 }
 
@@ -517,7 +538,7 @@ let link-rename(cc: Str, runtime: Str, bc: Str, link-out: Str, bin: Str) -> Unit
       }
 
 let run-built(bin: Str) -> Unit =
-  match (spawn(bin :: prog-args()))
+  match (spawn(bin :: child-args()))
     | Err(_) -> fail-spawn(bin)
     | Ok(st) -> exit(status-exit-code(st))
 
@@ -688,6 +709,8 @@ let main() -> Unit {
   let n = positional-count()
   let mode0 = positional-arg(0)
   cond
+    | script-invocation() ->
+      dispatch("run", arg(0), false, "", "", false, false, false, false, false, false)
     | n >= 2 || n == 1 && mode0 == "test" ->
       {
         let mode = mode0

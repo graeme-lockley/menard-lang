@@ -18,6 +18,11 @@ comment that runs to the end of the line. Comments and blank lines are
 insignificant, except that a blank line does not end a layout form
 ([§3](#3-layout)).
 
+A file may open with a shebang. The first two bytes are `#!`, and that
+line, through its newline, is ignored the same way a comment is. The
+following line keeps its own line number. A `#` anywhere else is a
+lexical error.
+
 ### 1.1 Whitespace and indentation
 
 Space (`0x20`), tab (`0x09`), carriage return, and newline are whitespace.

@@ -210,6 +210,14 @@ export function lex(src: Uint8Array): { ok: true; toks: Tok[] } | { ok: false; e
     return { ok: true, cp };
   }
 
+  // A shebang is only the first line, and only when `#!` are the first two
+  // bytes. The line is consumed, including its newline, so the next line
+  // keeps its own number. `#` anywhere else stays an unexpected character.
+  if (peek() === 0x23 && peek(1) === 0x21) {
+    while (peek() !== -1 && peek() !== 0x0a) bump();
+    if (peek() === 0x0a) bump();
+  }
+
   while (i < src.length) {
     if (atLineStart) {
       const start = i;

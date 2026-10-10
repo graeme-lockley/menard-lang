@@ -212,3 +212,40 @@ test "a map entry needs a value" = {
     | Err(_) -> true
     | Ok(_) -> false
 }
+
+test "a leading shebang is ignored and the next line keeps its number" = {
+  match (read("#!/usr/bin/env mn\n42"))
+    | Err(_) -> false
+    | Ok(a) ->
+      match (a)
+        | IntNode(n, sp) -> n == 42 && span-line(sp) == 2
+        | _ -> false
+}
+
+test "a shebang program matches the same program without it" = {
+  match (read-all("#!/usr/bin/env mn\nlet main() -> Int = 0\n"))
+    | Err(_) -> false
+    | Ok(forms) ->
+      match (read-all("let main() -> Int = 0\n"))
+        | Err(_) -> false
+        | Ok(plain) -> ast-list-equal(forms, plain)
+}
+
+test "a shebang with no following program is an empty file" = {
+  match (read-all("#!/usr/bin/env mn\n"))
+    | Err(_) -> false
+    | Ok(forms) ->
+      match (forms)
+        | [] -> true
+        | _ -> false
+}
+
+test "a hash that is not the first two bytes is an error" = {
+  match (read(" #!/usr/bin/env mn\n42"))
+    | Err(_) -> true
+    | Ok(_) -> false
+} && {
+  match (read("42\n#"))
+    | Err(_) -> true
+    | Ok(_) -> false
+}

@@ -74,7 +74,8 @@ For everything except macros, integer types, byte types, unboxing, mutable array
 ### 2.1 Lexical syntax
 
 Lexical syntax, layout, and the concrete forms of declarations and expressions
-are specified in [`syntax.md`](syntax.md). `;` begins a line comment. Binary
+are specified in [`syntax.md`](syntax.md). `;` begins a line comment. A file
+may open with a `#!` line, and that line is ignored. Binary
 operators require whitespace on both sides, so `a-b` stays one identifier.
 Indentation is significant for `if` continuations and for `match` and `type`
 arms. There are no macros.
@@ -1900,6 +1901,7 @@ mn emit  <file.mnd>              ; bitcode to stdout. Spawns nothing.
 mn check <file.mnd>              ; typecheck only, no output
 mn build <file.mnd> [-o out]     ; emit bitcode, spawn cc, link, rename
 mn run   <file.mnd> [args…]      ; build, then spawn the binary
+mn <file.mnd> [arg…]             ; same as run; every following word is an argument
 ```
 
 Its rules, all of which fall out of the subsections above:
