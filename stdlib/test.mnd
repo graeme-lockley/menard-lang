@@ -25,13 +25,6 @@ let join-path(dir: Str, name: Str) -> Str =
 let skip-name(name: Str) -> Bool =
   starts-with(name, ".") || name == "node_modules" || name == "build" || name == "target"
 
-; A newline, as a one-byte string.
-let nl = {
-  let sb = sb-new()
-  sb-append-byte!(sb, 10)
-  sb-take-str!(sb)
-}
-
 ; Split s on newline bytes, dropping empty lines.
 let split-acc(s: Str, i: Int, start: Int, n: Int, acc: List Str) -> List Str =
   cond
@@ -44,19 +37,11 @@ let split-acc(s: Str, i: Int, start: Int, n: Int, acc: List Str) -> List Str =
 let lines-of(s: Str) -> List Str =
   reverse(split-acc(s, 0, 0, str-byte-length(s), []))
 
-; The `(test "` marker at the start of a line.
-let test-at-bol() -> Str {
-  let sb = sb-new()
-  sb-append-byte!(sb, 10)
-  sb-append!(sb, "test \"")
-  sb-take-str!(sb)
-}
-
 ; Whether the file source contains a test form.
 let contains-test(path: Str) -> Bool =
   match (read-file(path))
     | Err(_) -> false
-    | Ok(src) -> starts-with(src, "test \"") || has(src, test-at-bol())
+    | Ok(src) -> starts-with(src, "test \"") || has(src, "\ntest \"")
 
 ; A `*.test.mnd` file, or any other `*.mnd` file that contains `(test …)`.
 let is-test-file(path: Str) -> Bool =
@@ -133,6 +118,6 @@ pub let summary(c: Counts, ms: Int, on: Bool) -> Unit =
             }
         write(stdout, paint(on, "[32m", str-concat(show(p), " passed")))
         write(stdout, str-concat(" (", show(ms), "ms)"))
-        write(stdout, nl)
+        write(stdout, "\n")
         ()
       }

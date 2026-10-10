@@ -18,13 +18,6 @@ record Scan {
   ok: Bool
 }
 
-; A newline byte.
-let nl = {
-  let sb = sb-new()
-  sb-append-byte!(sb, 10)
-  sb-take-str!(sb)
-}
-
 ; Drop one leading space when the comment has one.
 let comment-body(line: Str) -> Str {
   let n = str-byte-length(line)
@@ -82,11 +75,11 @@ let scan-record(module: Str, name: Str, sig: Str, docs: List Str, exported: Bool
   let missing-test = exported && length(tests) == 0
   let note =
     cond
-      | missing-summary -> str-concat("error: ", module, " ", name, " has no summary", nl)
-      | missing-test -> str-concat("error: ", module, " ", name, " has no @test", nl)
+      | missing-summary -> str-concat("error: ", module, " ", name, " has no summary\n")
+      | missing-test -> str-concat("error: ", module, " ", name, " has no @test\n")
       | else -> ""
   let body =
-    if (exported) -> str-concat("module: ", module, nl, "name: ", name, nl, "signature: ", sig, nl, "summary: ", summary, nl, join(nl, tests), nl, nl) | ""
+    if (exported) -> str-concat("module: ", module, "\nname: ", name, "\nsignature: ", sig, "\nsummary: ", summary, "\n", join("\n", tests), "\n\n") | ""
   Scan(str-concat(note, body), not(missing-summary || missing-test))
 }
 
@@ -121,7 +114,7 @@ let split-keep(s: Str, i: Int, start: Int, n: Int, acc: List Str) -> List Str =
 ; Scan one library file. A missing file is a failure.
 let scan-file(path: Str) -> Scan =
   match (read-file(path))
-    | Err(_) -> Scan(str-concat("error: cannot read ", path, nl), false)
+    | Err(_) -> Scan(str-concat("error: cannot read ", path, "\n"), false)
     | Ok(src) -> scan-lines(split-keep(src, 0, 0, str-byte-length(src), []), [], "", Scan("", true))
 
 ; Library sources, not the colocated tests.

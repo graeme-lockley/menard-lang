@@ -274,12 +274,6 @@ let walk-top-forms(forms: List Ast, arities: Map Str Int, entries: Ref (List Str
 ; Dedup by byte content, sort by byte content (ADR 38/§2.2.1's own two
 ; rules), then join one entry per line.
 
-let nl = {
-  let sb = sb-new()
-  sb-append-byte!(sb, 10)
-  sb-take-str!(sb)
-}
-
 let str-insert-sorted(x: Str, xs: List Str) -> List Str =
   match (xs)
     | [] -> [x]
@@ -303,7 +297,7 @@ let join-lines(xs: List Str) -> Str =
   match (xs)
     | [] -> ""
     | [x] -> x
-    | x :: rest -> str-concat(x, nl, join-lines(rest))
+    | x :: rest -> str-concat(x, "\n", join-lines(rest))
 
 ; The static pool candidates `forms` mentions — every distinct `Str`
 ; literal and every distinct nullary constructor mention (see this

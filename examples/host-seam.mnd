@@ -7,15 +7,9 @@ import std/io
 import std/proc
 import std/sys
 
-let nl = {
-  let sb = sb-new()
-  sb-append-byte!(sb, 10)
-  sb-take-str!(sb)
-}
-
 let line(s: Str) -> Unit {
   write(stdout, s)
-  write(stdout, nl)
+  write(stdout, "\n")
   ()
 }
 

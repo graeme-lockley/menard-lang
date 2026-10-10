@@ -382,12 +382,6 @@ let walk-top-forms(forms: List Ast, ctors: Map Str CtorMeta, usages: Ref (List U
 ; plan's text is deterministic (spec §2.11) rather than dependent on
 ; `Map`/traversal order.
 
-let nl = {
-  let sb = sb-new()
-  sb-append-byte!(sb, 10)
-  sb-take-str!(sb)
-}
-
 let str-insert-sorted(x: Str, xs: List Str) -> List Str =
   match (xs)
     | [] -> [x]
@@ -440,7 +434,7 @@ let render-lines(type-names: List Str, usages: List Usage) -> Str =
   match (type-names)
     | [] -> ""
     | [t] -> render-line(t, usages)
-    | t :: rest -> str-concat(render-line(t, usages), nl, render-lines(rest, usages))
+    | t :: rest -> str-concat(render-line(t, usages), "\n", render-lines(rest, usages))
 
 let render-usages(usages: List Usage) -> Str =
   render-lines(sort-strs(collect-type-names(usages)), usages)

@@ -11,20 +11,11 @@ import std/io
 
 pub alias Span = Span
 
-let nl = {
-  let sb = sb-new()
-  sb-append-byte!(sb, 10)
-  sb-take-str!(sb)
-}
-
 ; `Compiling` / `Linking` are light grey, the file name dark grey.
 ; Color follows stderr, same rule as diagnostics.
 pub let progress-line(verb: Str, name: Str, ms: Int) -> Str {
   let on = tty-color(2)
-  let sb = sb-new()
-  sb-append-byte!(sb, 10)
-  let nl = sb-take-str!(sb)
-  str-concat(paint(on, "[38;5;248m", verb), " ", paint(on, "[38;5;240m", name), " ", paint(on, "[38;5;248m", str-concat(show(ms), "ms")), nl)
+  str-concat(paint(on, "[38;5;248m", verb), " ", paint(on, "[38;5;240m", name), " ", paint(on, "[38;5;248m", str-concat(show(ms), "ms")), "\n")
 }
 
 let color-on() -> Bool =
@@ -110,7 +101,7 @@ let format-span(path: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str) ->
   let sev-color =
     if (sev == "warning") -> "[33m" | "[31m"
   let carets = caret-len(src, sp, col, text)
-  str-concat(paint(on, "[1m", path), ":", show(line), ":", show(col), ": ", paint(on, sev-color, sev), "[", code, "]: ", msg, nl, "  |", nl, pad-left(show(line), gw), " | ", text, nl, repeat-str(" ", gw, ""), " | ", repeat-str(" ", col - 1, ""), paint(on, sev-color, repeat-str("^", carets, "")), nl)
+  str-concat(paint(on, "[1m", path), ":", show(line), ":", show(col), ": ", paint(on, sev-color, sev), "[", code, "]: ", msg, "\n  |\n", pad-left(show(line), gw), " | ", text, "\n", repeat-str(" ", gw, ""), " | ", repeat-str(" ", col - 1, ""), paint(on, sev-color, repeat-str("^", carets, "")), "\n")
 }
 
 pub let report-span(path: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str) -> Unit {
@@ -121,6 +112,6 @@ pub let report-span(path: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str
 pub let report-plain(msg: Str) -> Unit {
   write(stderr, "error: ")
   write(stderr, msg)
-  write(stderr, nl)
+  write(stderr, "\n")
   ()
 }

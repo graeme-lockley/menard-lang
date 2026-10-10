@@ -5,12 +5,6 @@ import "./ast.mnd"
 
 pub alias Ast = Ast
 
-let nl() -> Str {
-  let sb = sb-new()
-  sb-append-byte!(sb, 10)
-  sb-take-str!(sb)
-}
-
 let pad(n: Int) -> Str =
   pad-from(n, "")
 
@@ -90,12 +84,12 @@ pub let print-form(a: Ast) -> Str =
 
 pub let print-form-all(xs: List Ast) -> Str {
   let body = join-forms(xs)
-  if (body == "") -> "" | str-concat(body, nl())
+  if (body == "") -> "" | str-concat(body, "\n")
 }
 
 ; Consecutive imports have no blank line between them. Every other pair of forms keeps one.
 let form-sep(left: Ast, right: Ast) -> Str =
-  if (is-head(left, "import") && is-head(right, "import")) -> nl() | str-concat(nl(), nl())
+  if (is-head(left, "import") && is-head(right, "import")) -> "\n" | "\n\n"
 
 let join-forms(xs: List Ast) -> Str =
   match (xs)
@@ -181,7 +175,7 @@ let print-defn-body(sig: Str, bodies: List Ast, ind: Int) -> Str =
   match (bodies)
     | [] -> sig
     | only :: [] ->
-      if (is-head(only, "do") || is-head(only, "let")) -> str-concat(sig, str-concat(" ", print-as-block(bodies, ind))) | str-concat(sig, str-concat(str-concat(" =", nl()), str-concat(pad(ind + 2), print-expr(only, ind + 2))))
+      if (is-head(only, "do") || is-head(only, "let")) -> str-concat(sig, str-concat(" ", print-as-block(bodies, ind))) | str-concat(sig, " =\n", pad(ind + 2), print-expr(only, ind + 2))
     | _ -> str-concat(sig, str-concat(" ", print-as-block(bodies, ind)))
 
 let print-as-block(bodies: List Ast, ind: Int) -> Str =
@@ -247,7 +241,7 @@ let has-sym(xs: List Ast, name: Str) -> Bool =
 let print-record(a: Ast, ind: Int) -> Str =
   match (a)
     | ParenNode(_ :: name :: fields, _) ->
-      str-concat("record ", str-concat(print-defn-name(name), str-concat(" {", str-concat(nl(), str-concat(join(map-field(fields, ind), nl()), str-concat(nl(), str-concat(pad(ind), "}")))))))
+      str-concat("record ", print-defn-name(name), " {\n", join(map-field(fields, ind), "\n"), "\n", pad(ind), "}")
     | _ -> "record"
 
 let map-field(xs: List Ast, ind: Int) -> List Str =
@@ -263,7 +257,7 @@ let print-field(a: Ast) -> Str =
 let print-variant(a: Ast, ind: Int) -> Str =
   match (a)
     | ParenNode(_ :: name :: ctors, _) ->
-      if (ctors == []) -> str-concat("type ", str-concat(print-defn-name(name), str-concat(" =", nl()))) | str-concat("type ", str-concat(print-defn-name(name), str-concat(" =", str-concat(nl(), join(map-ctor(ctors, ind), nl())))))
+      if (ctors == []) -> str-concat("type ", print-defn-name(name), " =\n") | str-concat("type ", print-defn-name(name), " =\n", join(map-ctor(ctors, ind), "\n"))
     | _ -> "type"
 
 let map-ctor(xs: List Ast, ind: Int) -> List Str =
@@ -297,7 +291,7 @@ let print-extern(a: Ast) -> Str =
 let print-block(a: Ast, ind: Int) -> Str =
   match (a)
     | ParenNode(_ :: body, _) ->
-      str-concat("{", str-concat(nl(), str-concat(join(map-stmt(body, ind), nl()), str-concat(nl(), str-concat(pad(ind), "}")))))
+      str-concat("{\n", join(map-stmt(body, ind), "\n"), "\n", pad(ind), "}")
     | _ -> "{}"
 
 let map-stmt(xs: List Ast, ind: Int) -> List Str =
@@ -472,11 +466,11 @@ let print-let(rest: List Ast, ind: Int) -> Str =
 let placed(a: Ast, ind: Int) -> Str =
   cond
     | is-head(a, "do") -> str-concat(" ", print-expr(a, ind - 2))
-    | laid-out(a) -> str-concat(nl(), str-concat(pad(ind), print-expr(a, ind)))
+    | laid-out(a) -> str-concat("\n", pad(ind), print-expr(a, ind))
     | else ->
       {
         let text = print-expr(a, ind)
-        if (has-nl(text)) -> str-concat(nl(), str-concat(pad(ind), text)) | str-concat(" ", text)
+        if (has-nl(text)) -> str-concat("\n", pad(ind), text) | str-concat(" ", text)
       }
 
 let laid-out(a: Ast) -> Bool =
@@ -484,7 +478,7 @@ let laid-out(a: Ast) -> Bool =
 
 let arrow-body(body: Ast, ind: Int) -> Str {
   let text = print-expr(body, ind)
-  if (has-nl(text) || is-head(body, "if") || is-head(body, "match") || is-head(body, "loop") || is-head(body, "while") || is-head(body, "do")) -> str-concat(nl(), str-concat(pad(ind), text)) | str-concat(" ", text)
+  if (has-nl(text) || is-head(body, "if") || is-head(body, "match") || is-head(body, "loop") || is-head(body, "while") || is-head(body, "do")) -> str-concat("\n", pad(ind), text) | str-concat(" ", text)
 }
 
 let print-if(a: Ast, ind: Int) -> Str = {
@@ -541,7 +535,7 @@ let print-inline-if(arms: List IfArm, ind: Int) -> Str =
     | _ -> print-cond-arms(arms, ind)
 
 let print-cond-arms(arms: List IfArm, ind: Int) -> Str =
-  str-concat("cond", str-concat(nl(), join(cond-arm-lines(arms, ind), nl())))
+  str-concat("cond\n", join(cond-arm-lines(arms, ind), "\n"))
 
 let cond-arm-lines(arms: List IfArm, ind: Int) -> List Str =
   match (arms)
@@ -550,7 +544,7 @@ let cond-arm-lines(arms: List IfArm, ind: Int) -> List Str =
     | IfElse(body) :: rest -> str-concat(pad(ind + 2), str-concat("| else ->", arrow-body(body, ind + 4))) :: cond-arm-lines(rest, ind)
 
 let print-cond(rest: List Ast, ind: Int) -> Str =
-  str-concat("cond", str-concat(nl(), join(cond-lines(rest, ind), nl())))
+  str-concat("cond\n", join(cond-lines(rest, ind), "\n"))
 
 let cond-lines(xs: List Ast, ind: Int) -> List Str =
   match (xs)
@@ -584,7 +578,7 @@ let print-when(rest: List Ast, ind: Int) -> Str =
 
 let print-match(rest: List Ast, ind: Int) -> Str =
   match (rest)
-    | scrut :: arms -> str-concat(str-concat("match (", str-concat(print-expr(scrut, ind), ")")), str-concat(nl(), join(match-lines(arms, ind), nl())))
+    | scrut :: arms -> str-concat("match (", print-expr(scrut, ind), ")\n", join(match-lines(arms, ind), "\n"))
     | [] -> "match (())"
 
 let match-lines(xs: List Ast, ind: Int) -> List Str =
@@ -627,7 +621,7 @@ let print-fn(rest: List Ast, ind: Int) -> Str =
           | else ->
             {
               let b = print-expr(body, ind + 2)
-              if (not(has-nl(b)) && not(laid-out(body))) -> str-concat("fn (", str-concat(ps, str-concat(") = ", b))) | str-concat("fn (", str-concat(ps, str-concat(") =", str-concat(nl(), str-concat(pad(ind + 2), b)))))
+              if (not(has-nl(b)) && not(laid-out(body))) -> str-concat("fn (", str-concat(ps, str-concat(") = ", b))) | str-concat("fn (", ps, ") =\n", pad(ind + 2), b)
             }
       }
     | _ -> "fn ()"
@@ -639,7 +633,7 @@ let fn-params(a: Ast) -> Str =
 
 let print-loop(rest: List Ast, ind: Int) -> Str =
   match (rest)
-    | binds :: body :: _ -> str-concat("loop (", str-concat(loop-binds(binds), str-concat(")", str-concat(nl(), str-concat(pad(ind + 2), print-expr(body, ind + 2))))))
+    | binds :: body :: _ -> str-concat("loop (", loop-binds(binds), ")\n", pad(ind + 2), print-expr(body, ind + 2))
     | _ -> "loop ()"
 
 let loop-binds(a: Ast) -> Str =
@@ -667,7 +661,7 @@ let print-call(callee: Ast, args: List Ast, ind: Int) -> Str {
     match (callee)
       | SymNode(_, _) -> print-atom(callee)
       | _ -> str-concat("(", str-concat(print-expr(callee, ind), ")"))
-  if (call-hangs(args)) -> str-concat(f, str-concat("(", str-concat(nl(), str-concat(format-args(args, ind + 2, true), str-concat(nl(), str-concat(pad(ind), ")")))))) | str-concat(f, str-concat("(", str-concat(format-args(args, ind, false), ")")))
+  if (call-hangs(args)) -> str-concat(f, "(\n", format-args(args, ind + 2, true), "\n", pad(ind), ")") | str-concat(f, str-concat("(", str-concat(format-args(args, ind, false), ")")))
 }
 
 let call-hangs(xs: List Ast) -> Bool =
@@ -686,7 +680,7 @@ let call-hangs(xs: List Ast) -> Bool =
 
 let format-args(xs: List Ast, ind: Int, hang: Bool) -> Str {
   let sep =
-    if (hang) -> str-concat(",", nl()) | ", "
+    if (hang) -> ",\n" | ", "
   join(arg-parts(xs, ind, hang), sep)
 }
 
