@@ -1,15 +1,16 @@
-; Typer. Paths are relative to the process cwd, which `./mn test` leaves
-; as the repo root. Forms are desugared first, matching the pipeline
-; contract in src/type/check.mnd. CLI dump flags stay in
-; tests/phase2/typecheck.test.ts.
+; Typer. Fixture paths are from the repo root, and are also found when
+; `./mn test` is run from a subdirectory. Forms are desugared first,
+; matching the pipeline contract in src/type/check.mnd. CLI dump flags
+; stay in tests/phase2/typecheck.test.ts.
 
 import "../reader/read.mnd"
 import "../desugar/desugar.mnd"
+import "../test/paths.mnd"
 import "./check.mnd"
 import std/io
 
 let read-forms(path: Str) -> Maybe (List Ast) =
-  match (read-file(path))
+  match (read-file(project-file(path)))
     | Err(_) -> None()
     | Ok(src) ->
       match (read-all(src))

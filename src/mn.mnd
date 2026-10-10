@@ -467,8 +467,38 @@ let run-emit(path: Str, has-out: Bool, out: Str, dump-after-reader: Bool, dump-a
 let recorded-cc() -> Str =
   "/usr/bin/clang"
 
+let last-slash-at(s: Str, i: Int) -> Int =
+  cond
+    | i < 0 -> -1
+    | String.byte(i, s) == 47 -> i
+    | else -> last-slash-at(s, i - 1)
+
+let path-parent(path: Str) -> Str {
+  let slash = last-slash-at(path, String.length(path) - 1)
+  cond
+    | slash <= 0 -> "/"
+    | else -> String.slice(0, slash, path)
+}
+
+let join-dir(dir: Str, rel: Str) -> Str =
+  if (dir == "/") -> String.concat("/", rel) | String.concat(dir, "/", rel)
+
+; `runtime` beside the working directory, or the same directory in a parent.
+; `mn test` from `stdlib/` still links the runtime that lives at the repo root.
+let runtime-from(dir: Str) -> Str = {
+  let marker = join-dir(dir, "runtime/src/alloc.c")
+  cond
+    | exists(marker) -> join-dir(dir, "runtime")
+    | dir == "/" -> "runtime"
+    | else ->
+      {
+        let up = path-parent(dir)
+        if (up == dir) -> "runtime" | runtime-from(up)
+      }
+}
+
 let recorded-runtime() -> Str =
-  "runtime"
+  if (exists("runtime/src/alloc.c")) -> "runtime" | runtime-from(path-parent(cwd()))
 
 let chosen-cc-menard() -> Str =
   match (getenv("MENARD_CC"))

@@ -1,7 +1,9 @@
 ; Reader round-trip: read, print, read again, and the two form lists
-; match. Paths are relative to the process cwd, which `./mn test` leaves
-; as the repo root. `check` / `emit` stay in tests/phase2/reader-roundtrip.test.ts.
+; match. Fixture paths are from the repo root, and are also found when
+; `./mn test` is run from a subdirectory. `check` / `emit` stay in
+; tests/phase2/reader-roundtrip.test.ts.
 
+import "../test/paths.mnd"
 import "./ast.mnd"
 import "./read.mnd"
 import "./print.mnd"
@@ -9,7 +11,7 @@ import std/io
 import std/string as String
 
 let roundtrip(path: Str) -> Bool =
-  match (read-file(path))
+  match (read-file(project-file(path)))
     | Err(_) -> false
     | Ok(src) ->
       match (read-all(src))

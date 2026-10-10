@@ -69,9 +69,9 @@ let walk-child(dir: Str, child: Str, rest: List Str, acc: List Str) -> List Str 
     | else -> walk-names(dir, rest, acc)
 
 ; Test files under path, or a one-element list when path itself is a test file.
-; @test member("stdlib/list.test.mnd", discover("stdlib/list.test.mnd")) => true
-; @test member("stdlib/list.test.mnd", discover("stdlib")) => true
-; @test member("examples/sc.mnd", discover("examples/sc.mnd")) => true
+; @test member("stdlib/list.test.mnd", discover("stdlib/list.test.mnd")) || member("list.test.mnd", discover("list.test.mnd")) => true
+; @test member("stdlib/list.test.mnd", discover("stdlib")) || member("list.test.mnd", discover(".")) => true
+; @test member("examples/sc.mnd", discover("examples/sc.mnd")) || member("basics.mnd", discover("basics.mnd")) => true
 pub let discover(path: Str) -> List Str =
   cond
     | is-dir(path) -> reverse(walk(path, []))

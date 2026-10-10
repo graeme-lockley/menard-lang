@@ -1,13 +1,14 @@
-; Derive plan. Paths are relative to the process cwd, which `./mn test`
-; leaves as the repo root. `--dump-after=derive` stays in
-; tests/phase2/derive.test.ts.
+; Derive plan. Fixture paths are from the repo root, and are also found
+; when `./mn test` is run from a subdirectory. `--dump-after=derive`
+; stays in tests/phase2/derive.test.ts.
 
 import "../reader/read.mnd"
+import "../test/paths.mnd"
 import "./plan.mnd"
 import std/io
 
 let plan-of(path: Str) -> Maybe Str =
-  match (read-file(path))
+  match (read-file(project-file(path)))
     | Err(_) -> None()
     | Ok(src) ->
       match (read-all(src))

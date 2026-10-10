@@ -1,8 +1,10 @@
-; Desugar pass. Paths are relative to the process cwd, which `./mn test`
-; leaves as the repo root. CLI dump flags stay in tests/phase2/desugar.test.ts.
+; Desugar pass. Fixture paths are from the repo root, and are also found
+; when `./mn test` is run from a subdirectory. CLI dump flags stay in
+; tests/phase2/desugar.test.ts.
 
 import "../reader/read.mnd"
 import "../reader/print.mnd"
+import "../test/paths.mnd"
 import "./desugar.mnd"
 import std/io
 import std/string
@@ -11,7 +13,7 @@ let has-head(text: Str, name: Str) -> Bool =
   contains(concat("(", name, " "), text) || contains(concat("(", name, ")"), text)
 
 let read-forms(path: Str) -> Maybe (List Ast) =
-  match (read-file(path))
+  match (read-file(project-file(path)))
     | Err(_) -> None()
     | Ok(src) ->
       match (read-all(src))

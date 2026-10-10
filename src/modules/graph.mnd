@@ -243,9 +243,28 @@ let index-of-byte(s: Str, b: Int, i: Int) -> Int =
 let ensure-mnd(name: Str) -> Str =
   if (String.ends-with(".mnd", name)) -> name | String.concat(name, ".mnd")
 
+let join-dir(dir: Str, rel: Str) -> Str =
+  if (dir == "/") -> String.concat("/", rel) | String.concat(dir, "/", rel)
+
 ; `std/list` → `stdlib/list.mnd`, independent of the importing file.
-let std-path(spec: Str) -> Str =
-  String.concat("stdlib/", ensure-mnd(drop-prefix(spec, 4)))
+; The working directory is tried first. Each parent is tried after that,
+; so a command run inside `stdlib/` still finds `stdlib/list.mnd`.
+let std-path(spec: Str) -> Str = {
+  let rel = String.concat("stdlib/", ensure-mnd(drop-prefix(spec, 4)))
+  if (exists(rel)) -> rel | std-path-from(rel, path-dirname(cwd()))
+}
+
+let std-path-from(rel: Str, dir: Str) -> Str = {
+  let candidate = join-dir(dir, rel)
+  cond
+    | exists(candidate) -> candidate
+    | dir == "/" -> rel
+    | else ->
+      {
+        let up = path-dirname(dir)
+        if (up == dir) -> rel | std-path-from(rel, up)
+      }
+}
 
 ; Cache root for github: imports. HOME/.menard/deps, or .menard/deps.
 let deps-root() -> Str =

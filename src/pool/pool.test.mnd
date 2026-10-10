@@ -1,15 +1,17 @@
-; Static pool summary. Paths are relative to the process cwd, which
-; `./mn test` leaves as the repo root. The golden file is what
-; `pool-dump` used to print, including the newline `println` adds.
-; `emit` still running collection stays in tests/phase2/pool.test.ts.
+; Static pool summary. Fixture paths are from the repo root, and are
+; also found when `./mn test` is run from a subdirectory. The golden
+; file is what `pool-dump` used to print, including the newline
+; `println` adds. `emit` still running collection stays in
+; tests/phase2/pool.test.ts.
 
 import "../reader/read.mnd"
+import "../test/paths.mnd"
 import "./pool.mnd"
 import std/io
 import std/string as String
 
 let read-forms(path: Str) -> Maybe (List Ast) =
-  match (read-file(path))
+  match (read-file(project-file(path)))
     | Err(_) -> None()
     | Ok(src) ->
       match (read-all(src))
@@ -20,7 +22,7 @@ let summary-is(fixture: Str, golden: Str) -> Bool =
   match (read-forms(fixture))
     | None -> false
     | Some(forms) ->
-      match (read-file(golden))
+      match (read-file(project-file(golden)))
         | Err(_) -> false
         | Ok(text) -> String.concat(pool-summary(forms), "\n") == text
 

@@ -775,7 +775,7 @@ instantiation. Instantiation is a typechecker concern only — see §3.3 and §7
   to the module's exports instead of merging those values:
 
 ```
-import std/list                         ; stdlib/list.mnd, cwd-relative
+import std/list                         ; stdlib/list.mnd, from the working directory or a parent
 import "./lexer.mnd"                    ; beside the importing file
 import "./lexer.mnd" as Lexer           ; Lexer.read resolves read in that module
 import github:owner/repo@v1.2.0/console ; ~/.menard/deps/owner/repo/v1.2.0/console.mnd
@@ -791,8 +791,9 @@ import github:owner/repo@v1.2.0/console ; ~/.menard/deps/owner/repo/v1.2.0/conso
   type signatures and native link targets must select the same export.
 
   - `std/name` maps to `stdlib/name.mnd`. The path does not depend on the
-    importing file. A missing `.mnd` suffix is added; a hyphen in the name stays
-    in the filename.
+    importing file. The working directory is tried first, then each parent,
+    so a command run inside `stdlib/` still finds the library. A missing
+    `.mnd` suffix is added; a hyphen in the name stays in the filename.
   - `github:owner/repo@version/module` maps into `~/.menard/deps` (or
     `.menard/deps` when `HOME` is unset). A cache miss downloads that tag's
     tarball. A second version of the same `owner/repo` in one program is an

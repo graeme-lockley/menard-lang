@@ -1,0 +1,39 @@
+; A repo-root path, found from the working directory or a parent.
+; `./mn test` from `src/` still opens `tests/…` and `hello.mnd`.
+
+import std/fs
+import std/string as String
+
+let last-slash-at(s: Str, i: Int) -> Int =
+  cond
+    | i < 0 -> -1
+    | String.byte(i, s) == 47 -> i
+    | else -> last-slash-at(s, i - 1)
+
+let parent-dir(path: Str) -> Str {
+  let slash = last-slash-at(path, String.length(path) - 1)
+  cond
+    | slash <= 0 -> "/"
+    | else -> String.slice(0, slash, path)
+}
+
+let join-dir(dir: Str, rel: Str) -> Str =
+  if (dir == "/") -> String.concat("/", rel) | String.concat(dir, "/", rel)
+
+let find-up(rel: Str, dir: Str) -> Str = {
+  let candidate = join-dir(dir, rel)
+  cond
+    | exists(candidate) -> candidate
+    | dir == "/" -> rel
+    | else ->
+      {
+        let up = parent-dir(dir)
+        if (up == dir) -> rel | find-up(rel, up)
+      }
+}
+
+pub let project-file(path: Str) -> Str =
+  cond
+    | String.length(path) > 0 && String.byte(0, path) == 47 -> path
+    | exists(path) -> path
+    | else -> find-up(path, parent-dir(cwd()))
