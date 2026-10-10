@@ -37,11 +37,8 @@ pub let add(input: Str) -> Result Int (List Int) {
 
   cond
     | numbers |> List.any(is-negative) -> numbers |> List.filter(is-negative) |> Err()
-    | else -> Ok(sum(numbers))
+    | else -> Ok(List.sum(numbers))
 }
-
-let sum(numbers: List Int) -> Int =
-  numbers |> List.fold(fn (a, n) = a + n, 0)
 
 let is-negative(n: Int) -> Bool =
   n < 0
