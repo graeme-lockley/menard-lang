@@ -312,7 +312,7 @@ function rewriteParen(elems: Ast[], span: Span, ctx: Ctx): Ast {
   const head = elems[0]!;
   const args = elems.slice(1);
   const name = symText(head);
-  if (name === "quote") return list("paren", elems, span);
+  if (name === "quote" || name === "char") return list("paren", elems, span);
   if (name === "fn" || name === "lambda") return rewriteLambda(elems, span, ctx);
   if (name === "...") {
     push(ctx.diags, span, "E_TYPE_SPREAD", "`...` marks the next argument; it is not a call");

@@ -111,11 +111,12 @@ There is no overloading.
 | `Bool` | `true`, `false` |
 | `Str` | `"` … `"`, with the escapes below |
 | `Sym` | `'` glued to an identifier (`'red`) |
+| `Char` | `'A'`, one Unicode scalar between quotes, or one escape (`'\n'`, `'\''`, `'\u{1F600}'`) |
 | `Unit` | `()` |
 | list | `[e, …]`, or `[]` |
 | map | `{k => v, …}`, `{...m, …}`, or `{}` |
 
-`Char` has no literal syntax. `=>` separates a map key from its value. A
+`=>` separates a map key from its value. A
 spread `...` splices a map. Entries run left to right and a later entry
 replaces an earlier one with the same key. `{}` is the empty map. A `{`
 that is not empty, not a leading spread, and not an expression followed by
@@ -134,6 +135,11 @@ and bytes that are not UTF-8:
 | `\r` | `0x0D` |
 | `\t` | `0x09` |
 | `\u{` hex `}` | the UTF-8 encoding of one Unicode scalar |
+
+A character literal is one Unicode scalar between `'` quotes: `'A'`, `'😀'`.
+The escapes are `\n`, `\r`, `\t`, `\'`, `\\`, and `\u{` hex `}` with the same
+hex rules as a string. `'red` is still a symbol, because a symbol is not
+closed by a second quote. `''` is a lexical error.
 
 Hex is one to six digits (`0-9`, `a-f`, `A-F`). The scalar is a code point
 in `U+0000`–`U+10FFFF` excluding the surrogate range `U+D800`–`U+DFFF`. Any
@@ -544,20 +550,39 @@ bound.
 
 ## 7. Test annotations
 
-`; @module` and `; @test` stay line comments. The text after the tag is
-source in this syntax, read by the test runner and the docs tool.
+`; @module`, `; @test`, and `; @test-import` stay line comments. `./mn test`
+extracts them into a generated module under the cache and runs that module.
+With no path it tests the current directory. Each further argument is another
+path, so a shell glob is every file it expands to.
+A compile error or a failed assertion is reported against the original file.
+
+The generated module imports the file the tests came from, copies that
+file's own `import` lines, and adds one import per `; @test-import`. An
+`@test-import` uses the same grammar as `import`, including `as`.
+`; @module` replaces the default import (`import std/list` instead of the
+source path).
+
+An `@test` starts at that tag and continues through following comment lines
+until every `{`, `(`, and `[` is closed. A blank line, a non-comment line, or
+the next `@test` ends it.
 
 ```
 ; @module std/list
+; @test-import std/maybe as Maybe
 ; @test length([1, 2, 3]) => 3
 ; @test nth([10, 20], 1) => Some(20)
 ; @test map(fn (n) = n + 1, [1, 2]) => [2, 3]
+; @test {
+;   let xs = [1, 2, 3]
+;   length(xs)
+; } => 3
 ; @test summary(Counts(1, 0), 1, false)
 ```
 
-`=>` separates the expression from its expected value and is not an operator
-of the language. An annotation with no `=>` expects the expression to
-evaluate without a panic.
+The assertion separator is the `=>` at bracket depth 0, outside a string.
+`=>` inside `{}` stays a map entry (§1.4). `{1 => 2} => true` keeps the entry
+arrow. An annotation with no depth-0 `=>` expects the expression to return.
+`; @test exit(...)` is not run.
 
 ---
 

@@ -157,7 +157,7 @@ let snoc-ast(xs: List Ast, x: Ast) -> List Ast =
     | h :: t -> h :: snoc-ast(t, x)
 
 let pipe-blocked(n: Str) -> Bool =
-  n == "project" || n == "if" || n == "do" || n == "cond" || n == "when" || n == "match" || n == "fn" || n == "let" || n == "loop" || n == "while" || n == "and" || n == "or" || n == "quote" || n == "Cons" || n == "Nil" || n == "+" || n == "-" || n == "*" || n == "/" || n == "%" || n == "<" || n == ">" || n == "<=" || n == ">=" || n == "=" || n == "|>" || n == "f+" || n == "f-" || n == "f*" || n == "f/" || n == "::"
+  n == "project" || n == "if" || n == "do" || n == "cond" || n == "when" || n == "match" || n == "fn" || n == "let" || n == "loop" || n == "while" || n == "and" || n == "or" || n == "quote" || n == "char" || n == "Cons" || n == "Nil" || n == "+" || n == "-" || n == "*" || n == "/" || n == "%" || n == "<" || n == ">" || n == "<=" || n == ">=" || n == "=" || n == "|>" || n == "f+" || n == "f-" || n == "f*" || n == "f/" || n == "::"
 
 let pipe-callee-ok(head: Ast) -> Bool =
   match (head)

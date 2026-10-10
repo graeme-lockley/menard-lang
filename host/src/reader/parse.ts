@@ -656,6 +656,14 @@ class P {
       this.i++;
       return { ok: true, ast: paren([sym("quote", t.span), sym(t.text, t.span)], t.span) };
     }
+    if (t.kind === "char") {
+      this.i++;
+      const v = BigInt.asIntN(63, BigInt(t.text));
+      return {
+        ok: true,
+        ast: paren([sym("char", t.span), { tag: "int", value: v, span: t.span }], t.span),
+      };
+    }
     if (t.kind === "ident" || (t.kind === "kw" && (t.text === "true" || t.text === "false"))) {
       this.i++;
       if (t.text === "true" || t.text === "false") {
@@ -789,7 +797,7 @@ class P {
       return { ok: true, ast: sym("_", t.span) };
     }
     if (t.kind === "punct" && t.text === "[") return this.parseList();
-    if (t.kind === "int" || t.kind === "str" || t.kind === "sym" || t.text === "true" || t.text === "false") {
+    if (t.kind === "int" || t.kind === "str" || t.kind === "sym" || t.kind === "char" || t.text === "true" || t.text === "false") {
       return this.parseAtom();
     }
     if (t.kind === "ident") {

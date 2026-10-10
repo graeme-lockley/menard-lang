@@ -30,6 +30,7 @@ export const enum Sf {
   Set = 11,
   Decl = 12, // defn/defrec/variant/alias — no-op as expression
   Project = 13,
+  Char = 14,
 }
 
 const SF_BY_NAME: Record<string, Sf> = {
@@ -44,6 +45,7 @@ const SF_BY_NAME: Record<string, Sf> = {
   fn: Sf.Fn,
   lambda: Sf.Fn,
   quote: Sf.Quote,
+  char: Sf.Char,
   "set!": Sf.Set,
   defn: Sf.Decl,
   defrec: Sf.Decl,

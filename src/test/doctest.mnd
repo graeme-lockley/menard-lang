@@ -1,0 +1,647 @@
+; Extract `; @test` annotations into a generated module under the cache.
+; `./mn test` compiles that module. The source tree is left unchanged.
+;
+; A generated file is rewritten only when it is missing, its `; #gen`
+; version disagrees, or the source is newer. Identical text is not
+; rewritten, so the object cache does not see a new mtime.
+
+import "../cache/cache.mnd"
+import "../diag/report.mnd"
+import "../modules/graph.mnd"
+import "../reader/ast.mnd"
+import std/fs
+import std/io
+import std/list
+import std/string as String
+import std/string-buffer as Buf
+
+let gen-version = "; #gen 1\n"
+
+pub record DocCase {
+  generated: Str
+  original: Str
+}
+
+record Line {
+  num: Int
+  start: Int
+  text: Str
+}
+
+record Part {
+  line: Int
+  start: Int
+  text: Str
+}
+
+record Step {
+  text: Str
+  depth: Int
+  in-str: Bool
+  done: Bool
+  before: Str
+}
+
+record Draft {
+  line: Int
+  raw: Str
+  before: Str
+  compared: Bool
+  parts: List Part
+}
+
+record Imp {
+  line: Int
+  start: Int
+  text: Str
+  spec: Str
+  tail: Str
+}
+
+record Scan {
+  module: Str
+  module-line: Int
+  module-start: Int
+  imports: List Imp
+  extras: List Imp
+  tests: List Draft
+  saw-test: Bool
+}
+
+record Named {
+  name: Str
+  compared: Bool
+  parts: List Part
+}
+
+let blank-span() -> Span =
+  Span(0, 1, 0, 1)
+
+let spaces(n: Int, acc: Str) -> Str =
+  if (n <= 0) -> acc | spaces(n - 1, String.concat(acc, " "))
+
+let is-ws(b: Int) -> Bool =
+  b == 32 || b == 9 || b == 10 || b == 13
+
+let trim-left(s: Str, i: Int, n: Int) -> Int =
+  if (i >= n || not(is-ws(String.byte(i, s)))) -> i | trim-left(s, i + 1, n)
+
+let trim-right(s: Str, i: Int) -> Int =
+  if (i <= 0 || not(is-ws(String.byte(i - 1, s)))) -> i | trim-right(s, i - 1)
+
+let trim(s: Str) -> Str {
+  let n = String.length(s)
+  let a = trim-left(s, 0, n)
+  let b = trim-right(s, n)
+  if (a >= b) -> "" | String.slice(a, b - a, s)
+}
+
+let escape-into(sb: StringBuffer, s: Str, i: Int, n: Int) -> Unit =
+  if (i >= n) -> () | {
+    let b = String.byte(i, s)
+    if (b == 34 || b == 92) -> Buf.append-byte!(sb, 92)
+    Buf.append-byte!(sb, b)
+    escape-into(sb, s, i + 1, n)
+  }
+
+let quoted(s: Str) -> Str {
+  let sb = Buf.new()
+  Buf.append-byte!(sb, 34)
+  escape-into(sb, s, 0, String.length(s))
+  Buf.append-byte!(sb, 34)
+  Buf.take-str!(sb)
+}
+
+let collapse-at(sb: StringBuffer, s: Str, i: Int, n: Int, gap: Bool, started: Bool) -> Unit =
+  if (i >= n) -> () | {
+    let b = String.byte(i, s)
+    if (is-ws(b)) -> collapse-at(sb, s, i + 1, n, started, started) | {
+      if (gap) -> Buf.append-byte!(sb, 32)
+      Buf.append-byte!(sb, b)
+      collapse-at(sb, s, i + 1, n, false, true)
+    }
+  }
+
+let collapse(s: Str) -> Str {
+  let sb = Buf.new()
+  collapse-at(sb, s, 0, String.length(s), false, false)
+  Buf.take-str!(sb)
+}
+
+let trim-name(s: Str) -> Str =
+  if (String.length(s) <= 60) -> s | String.concat(String.slice(0, 57, s), "...")
+
+let with-line(base: Str, line: Int) -> Str {
+  let suf = String.concat(" (line ", String.concat(show(line), ")"))
+  let budget = 60 - String.length(suf)
+  let cut =
+    if (String.length(base) <= budget) -> base | String.concat(String.slice(0, budget - 3, base), "...")
+  String.concat(cut, suf)
+}
+
+let member(name: Str, used: List Str) -> Bool =
+  match (used)
+    | [] -> false
+    | h :: t ->
+      if (h == name) -> true | member(name, t)
+
+let line-text(s: Str, start: Int, i: Int) -> Str {
+  let end =
+    if (i > start && String.byte(i - 1, s) == 13) -> i - 1 | i
+  if (end <= start) -> "" | String.slice(start, end - start, s)
+}
+
+; A call per byte overflows the C stack on `lower.mnd` (~140KB). `recur`
+; is a jump, so the scan stays one frame.
+let lines-of(s: Str) -> List Line {
+  let n = String.length(s)
+  reverse(loop (i = 0, start = 0, num = 1, out = [])
+    cond
+      | i > n -> out
+      | i == n || String.byte(i, s) == 10 -> recur(i + 1, i + 1, num + 1, Line(num, start, line-text(s, start, i)) :: out)
+      | else -> recur(i + 1, start, num, out))
+}
+
+let is-comment(text: Str) -> Bool =
+  String.length(text) > 0 && String.byte(0, text) == 59
+
+let comment-body(text: Str) -> Str {
+  let rest = String.slice(1, String.length(text) - 1, text)
+  if (String.length(rest) > 0 && String.byte(0, rest) == 32) -> String.slice(1, String.length(rest) - 1, rest) | rest
+}
+
+let is-ident-cont(b: Int) -> Bool =
+  (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || (b >= 48 && b <= 57) || b == 45 || b == 95
+
+; `exit(...)` as the whole expression, not a longer name.
+let is-exit-call(s: Str) -> Bool {
+  let t = trim(s)
+  let n = String.length(t)
+  if (n < 4 || not(String.starts-with("exit", t))) -> false | {
+    let rest = skip-gap(t, 4, n)
+    rest < n && String.byte(rest, t) == 40 && not(is-ident-cont(String.byte(4, t)))
+  }
+}
+
+let skip-gap(s: Str, i: Int, n: Int) -> Int =
+  if (i >= n || not(is-ws(String.byte(i, s)))) -> i | skip-gap(s, i + 1, n)
+
+let open-bracket(b: Int) -> Bool =
+  b == 123 || b == 40 || b == 91
+
+let close-bracket(b: Int) -> Bool =
+  b == 125 || b == 41 || b == 93
+
+let bump-depth(depth: Int, b: Int) -> Int =
+  cond
+    | open-bracket(b) -> depth + 1
+    | close-bracket(b) && depth > 0 -> depth - 1
+    | else -> depth
+
+; Rewrite the depth-0 `=>` separator to `==`. Both are two bytes, so
+; columns stay aligned. A `=>` inside `{}` or a string is a map entry.
+let rewrite(s: Str, i: Int, n: Int, depth: Int, in-str: Bool, esc: Bool, done: Bool, before: Str, sb: StringBuffer) -> Step =
+  if (i >= n) -> Step(Buf.take-str!(sb), depth, in-str, done, before) | {
+    let b = String.byte(i, s)
+    cond
+      | in-str && esc ->
+        {
+          Buf.append-byte!(sb, b)
+          rewrite(s, i + 1, n, depth, true, false, done, before, sb)
+        }
+      | in-str && b == 92 ->
+        {
+          Buf.append-byte!(sb, b)
+          rewrite(s, i + 1, n, depth, true, true, done, before, sb)
+        }
+      | in-str && b == 34 ->
+        {
+          Buf.append-byte!(sb, b)
+          rewrite(s, i + 1, n, depth, false, false, done, before, sb)
+        }
+      | in-str ->
+        {
+          Buf.append-byte!(sb, b)
+          rewrite(s, i + 1, n, depth, true, false, done, before, sb)
+        }
+      | b == 34 ->
+        {
+          Buf.append-byte!(sb, b)
+          rewrite(s, i + 1, n, depth, true, false, done, String.concat(before, String.slice(i, 1, s)), sb)
+        }
+      | not(done) && depth == 0 && b == 61 && i + 1 < n && String.byte(i + 1, s) == 62 ->
+        {
+          Buf.append!(sb, "==")
+          rewrite(s, i + 2, n, depth, false, false, true, before, sb)
+        }
+      | else ->
+        {
+          Buf.append-byte!(sb, b)
+          let pre =
+            if (done) -> before | String.concat(before, String.slice(i, 1, s))
+          rewrite(s, i + 1, n, bump-depth(depth, b), false, false, done, pre, sb)
+        }
+  }
+
+let rewrite-from(s: Str, depth: Int, in-str: Bool, done: Bool, before: Str) -> Step =
+  rewrite(s, 0, String.length(s), depth, in-str, false, done, before, Buf.new())
+
+let tag-end(text: Str) -> Int {
+  let n = String.length(text)
+  let at = find-tag(text, 0, n)
+  let after = at + 5
+  if (after < n && String.byte(after, text) == 32) -> after + 1 | after
+}
+
+let find-tag(text: Str, i: Int, n: Int) -> Int =
+  cond
+    | i + 5 > n -> 0
+    | String.slice(i, 5, text) == "@test" && (i + 5 == n || String.byte(i + 5, text) != 45) -> i
+    | else -> find-tag(text, i + 1, n)
+
+let join-raw(prev: Str, more: Str) -> Str =
+  if (prev == "") -> more | String.concat(prev, String.concat("\n", more))
+
+let directive-body(body: Str) -> Bool =
+  String.starts-with("@test", body) || String.starts-with("@module", body)
+
+let take-continuations(rest: List Line, depth: Int, in-str: Bool, done: Bool, parts: List Part, raw: Str, before: Str) -> Draft =
+  if (depth == 0) -> Draft(0, raw, before, done, reverse(parts)) | match (rest)
+    | [] -> Draft(0, raw, before, done, reverse(parts))
+    | Line(_, _, text) :: more ->
+      if (text == "" || not(is-comment(text)) || directive-body(comment-body(text))) -> Draft(0, raw, before, done, reverse(parts)) | {
+        let code =
+          if (String.length(text) == 0) -> "" | String.slice(1, String.length(text) - 1, text)
+        let step = rewrite-from(code, depth, in-str, done, before)
+        match (step)
+          | Step(rewritten, depth2, in2, done2, before2) ->
+            match (rest)
+              | Line(num, start, _) :: _ ->
+                take-continuations(more, depth2, in2, done2, Part(num, start, String.concat(" ", rewritten)) :: parts, join-raw(raw, code), before2)
+              | [] -> Draft(0, raw, before, done, reverse(parts))
+      }
+
+let start-test(line: Line, rest: List Line) -> Draft =
+  match (line)
+    | Line(num, start, text) ->
+      {
+        let cut = tag-end(text)
+        let body =
+          if (cut >= String.length(text)) -> "" | String.slice(cut, String.length(text) - cut, text)
+        let step = rewrite-from(body, 0, false, false, "")
+        match (step)
+          | Step(rewritten, depth, in-str, done, before) ->
+            {
+              let first = Part(num, start, String.concat(spaces(cut, ""), rewritten))
+              let cont = take-continuations(rest, depth, in-str, done, [first], body, before)
+              match (cont)
+                | Draft(_, raw, before2, compared, parts) -> Draft(num, raw, before2, compared, parts)
+            }
+      }
+
+; How many source lines a draft consumed, including the first.
+let draft-span(d: Draft) -> Int =
+  match (d)
+    | Draft(_, _, _, _, parts) -> length(parts)
+
+let drop-lines(xs: List Line, n: Int) -> List Line =
+  if (n <= 0) -> xs | match (xs)
+    | [] -> []
+    | _ :: t -> drop-lines(t, n - 1)
+
+let keep-spec(spec: Str) -> Bool =
+  String.starts-with("std/", spec) || String.starts-with("github:", spec)
+
+let read-quoted(s: Str, i: Int, n: Int) -> Int =
+  if (i >= n) -> n | if (String.byte(i, s) == 34) -> i | if (String.byte(i, s) == 92 && i + 1 < n) -> read-quoted(s, i + 2, n) | read-quoted(s, i + 1, n)
+
+let read-word(s: Str, i: Int, n: Int) -> Int =
+  if (i >= n || is-ws(String.byte(i, s))) -> i | read-word(s, i + 1, n)
+
+; spec is the import path text, tail is the remainder (` as Name`).
+let split-spec(s: Str) -> Imp {
+  let n = String.length(s)
+  let i = trim-left(s, 0, n)
+  if (i < n && String.byte(i, s) == 34) -> {
+    let end = read-quoted(s, i + 1, n)
+    let spec =
+      if (end > i + 1) -> String.slice(i + 1, end - i - 1, s) | ""
+    let tail-at =
+      if (end < n && String.byte(end, s) == 34) -> end + 1 | end
+    Imp(0, 0, "", spec, if (tail-at >= n) -> "" | String.slice(tail-at, n - tail-at, s))
+  } | {
+    let end = read-word(s, i, n)
+    Imp(0, 0, "", String.slice(i, end - i, s), if (end >= n) -> "" | String.slice(end, n - end, s))
+  }
+}
+
+let imp-of(line: Line, body: Str) -> Imp =
+  match (line)
+    | Line(num, start, text) ->
+      match (split-spec(body))
+        | Imp(_, _, _, spec, tail) -> Imp(num, start, text, spec, tail)
+
+let empty-scan() -> Scan =
+  Scan("", 0, 0, [], [], [], false)
+
+let add-test(sc: Scan, d: Draft) -> Scan =
+  match (sc)
+    | Scan(m, ml, ms, imps, ex, tests, _) ->
+      if (is-exit-call(draft-before(d))) -> Scan(m, ml, ms, imps, ex, tests, true) | Scan(m, ml, ms, imps, ex, d :: tests, true)
+
+let draft-before(d: Draft) -> Str =
+  match (d)
+    | Draft(_, _, b, _, _) -> b
+
+let scan-module(num: Int, start: Int, body: Str, rest: List Line, sc: Scan) -> Scan =
+  match (sc)
+    | Scan(m, ml, ms, imps, ex, tests, saw) ->
+      if (m == "") -> scan-lines(rest, Scan(trim(String.slice(8, String.length(body) - 8, body)), num, start, imps, ex, tests, saw)) | scan-lines(rest, sc)
+
+let scan-extra(line: Line, body: Str, rest: List Line, sc: Scan) -> Scan {
+  let after = if (String.length(body) > 12 && String.byte(12, body) == 32) -> String.slice(13, String.length(body) - 13, body) | String.slice(12, String.length(body) - 12, body)
+  match (sc)
+    | Scan(m, ml, ms, imps, ex, tests, saw) -> scan-lines(rest, Scan(m, ml, ms, imps, imp-of(line, after) :: ex, tests, saw))
+}
+
+let scan-comment(line: Line, rest: List Line, sc: Scan, body: Str) -> Scan =
+  match (line)
+    | Line(num, start, _) ->
+      cond
+        | String.starts-with("@module ", body) -> scan-module(num, start, body, rest, sc)
+        | String.starts-with("@test-import", body) -> scan-extra(line, body, rest, sc)
+        | String.starts-with("@test", body) ->
+          {
+            let d = start-test(line, rest)
+            scan-lines(drop-lines(rest, draft-span(d) - 1), add-test(sc, d))
+          }
+        | else -> scan-lines(rest, sc)
+
+let scan-import(line: Line, rest: List Line, sc: Scan) -> Scan =
+  match (sc)
+    | Scan(m, ml, ms, imps, ex, tests, saw) ->
+      match (line)
+        | Line(_, _, text) -> scan-lines(rest, Scan(m, ml, ms, imp-of(line, String.slice(7, String.length(text) - 7, text)) :: imps, ex, tests, saw))
+
+let scan-code(line: Line, rest: List Line, sc: Scan) -> Scan =
+  match (line)
+    | Line(_, _, text) ->
+      if (String.starts-with("import ", text)) -> scan-import(line, rest, sc) | scan-lines(rest, sc)
+
+let scan-lines(ls: List Line, sc: Scan) -> Scan =
+  match (ls)
+    | [] -> sc
+    | line :: rest ->
+      match (line)
+        | Line(_, _, text) ->
+          if (is-comment(text)) -> scan-comment(line, rest, sc, comment-body(text)) | scan-code(line, rest, sc)
+
+let finish-scan(sc: Scan) -> Scan =
+  match (sc)
+    | Scan(m, ml, ms, imps, ex, tests, saw) -> Scan(m, ml, ms, reverse(imps), reverse(ex), reverse(tests), saw)
+
+let choose-name(base: Str, line: Int, used: List Str) -> Str {
+  let plain =
+    if (base == "") -> "test" | trim-name(base)
+  if (not(member(plain, used))) -> plain | {
+    let lined = with-line(plain, line)
+    if (not(member(lined, used))) -> lined | String.concat(lined, show(line))
+  }
+}
+
+let name-drafts(ds: List Draft, used: List Str, acc: List Named) -> List Named =
+  match (ds)
+    | [] -> reverse(acc)
+    | d :: rest ->
+      match (d)
+        | Draft(line, raw, _, compared, parts) ->
+          {
+            let name = choose-name(collapse(raw), line, used)
+            name-drafts(rest, name :: used, Named(name, compared, parts) :: acc)
+          }
+
+let emit-source(sb: StringBuffer, display: Str, line: Int, start: Int) -> Unit {
+  Buf.append!(sb, "; #source ")
+  Buf.append!(sb, quoted(display))
+  Buf.append!(sb, " ")
+  Buf.append!(sb, show(line))
+  Buf.append!(sb, " ")
+  Buf.append!(sb, show(start))
+  Buf.append!(sb, "\n")
+  ()
+}
+
+let emit-parts(sb: StringBuffer, display: Str, parts: List Part) -> Unit =
+  match (parts)
+    | [] -> ()
+    | p :: rest ->
+      match (p)
+        | Part(line, start, text) ->
+          {
+            emit-source(sb, display, line, start)
+            Buf.append!(sb, text)
+            Buf.append!(sb, "\n")
+            emit-parts(sb, display, rest)
+          }
+
+let emit-test(sb: StringBuffer, display: Str, t: Named) -> Unit =
+  match (t)
+    | Named(name, compared, parts) ->
+      {
+        Buf.append!(sb, "test ")
+        Buf.append!(sb, quoted(name))
+        if (compared) -> Buf.append!(sb, " =\n") | Buf.append!(sb, " = {\n")
+        emit-parts(sb, display, parts)
+        if (not(compared)) -> Buf.append!(sb, "true\n}\n")
+        ()
+      }
+
+let emit-tests(sb: StringBuffer, display: Str, ts: List Named) -> Unit =
+  match (ts)
+    | [] -> ()
+    | t :: rest ->
+      {
+        emit-test(sb, display, t)
+        emit-tests(sb, display, rest)
+      }
+
+let resolved-spec(from: Str, spec: Str) -> Str =
+  if (keep-spec(spec)) -> spec | resolve-import(from, spec)
+
+; An import path is an identifier when it starts with a letter (`std/list`).
+; An absolute path starts with `/`, which is not an identifier start, so it
+; is a string literal.
+let import-spec-text(spec: Str) -> Str =
+  if (String.length(spec) > 0 && String.byte(0, spec) == 47) -> quoted(spec) | spec
+
+let emit-import(sb: StringBuffer, display: Str, from: Str, imp: Imp, verbatim: Bool) -> Unit =
+  match (imp)
+    | Imp(line, start, text, spec, tail) ->
+      {
+        emit-source(sb, display, line, start)
+        if (verbatim && keep-spec(spec)) -> Buf.append!(sb, text) | {
+          Buf.append!(sb, "import ")
+          Buf.append!(sb, import-spec-text(resolved-spec(from, spec)))
+          Buf.append!(sb, tail)
+        }
+        Buf.append!(sb, "\n")
+        ()
+      }
+
+let emit-imports(sb: StringBuffer, display: Str, from: Str, imps: List Imp, verbatim: Bool) -> Unit =
+  match (imps)
+    | [] -> ()
+    | h :: t ->
+      {
+        emit-import(sb, display, from, h, verbatim)
+        emit-imports(sb, display, from, t, verbatim)
+      }
+
+; No `@module` imports the file the tests were extracted from.
+let module-spec(from: Str, m: Str) -> Str =
+  if (m == "") -> from | resolved-spec(from, m)
+
+let module-line(ml: Int) -> Int =
+  if (ml == 0) -> 1 | ml
+
+let render(display: Str, from: Str, sc: Scan, named: List Named) -> Str =
+  match (sc)
+    | Scan(m, ml, ms, imps, ex, _, _) ->
+      {
+        let sb = Buf.new()
+        Buf.append!(sb, gen-version)
+        emit-source(sb, display, module-line(ml), ms)
+        Buf.append!(sb, "import ")
+        Buf.append!(sb, import-spec-text(module-spec(from, m)))
+        Buf.append!(sb, "\n")
+        emit-imports(sb, display, from, imps, true)
+        emit-imports(sb, display, from, ex, false)
+        emit-tests(sb, display, named)
+        Buf.take-str!(sb)
+      }
+
+let dirname-of(path: Str) -> Str {
+  let n = String.length(path)
+  let slash = last-slash(path, n - 1)
+  cond
+    | slash < 0 -> "."
+    | slash == 0 -> "/"
+    | else -> String.slice(0, slash, path)
+}
+
+let last-slash(s: Str, i: Int) -> Int =
+  cond
+    | i < 0 -> -1
+    | String.byte(i, s) == 47 -> i
+    | else -> last-slash(s, i - 1)
+
+let write-if-changed(path: Str, bytes: Str) -> Bool {
+  ensure-dir(dirname-of(path))
+  match (read-file(path))
+    | Ok(old) ->
+      if (old == bytes) -> true | match (write-file(path, bytes))
+        | Ok(_) -> true
+        | Err(_) -> false
+    | Err(_) ->
+      match (write-file(path, bytes))
+        | Ok(_) -> true
+        | Err(_) -> false
+}
+
+let gen-fresh(src: Str, gen: Str) -> Bool {
+  let sm = mtime(src)
+  let gm = mtime(gen)
+  gm > 0 && sm <= gm && match (read-file(gen))
+    | Ok(t) -> String.starts-with(gen-version, t)
+    | Err(_) -> false
+}
+
+let drop-gen(abs: Str) -> Unit {
+  let p = doctest-path(abs)
+  if (mtime(p) > 0) -> {
+    remove(p)
+    ()
+  }
+  ()
+}
+
+let one-source(abs: Str, display: Str, src: Str, failed: Ref Bool) -> Maybe DocCase {
+  let sc = finish-scan(scan-lines(lines-of(src), empty-scan()))
+  match (sc)
+    | Scan(_, _, _, _, _, tests, saw) ->
+      if (not(saw)) -> {
+        drop-gen(abs)
+        None()
+      } | if (tests == []) -> {
+        drop-gen(abs)
+        None()
+      } | {
+        let gen = doctest-path(abs)
+        if (gen-fresh(abs, gen)) -> Some(DocCase(gen, display)) | {
+          let text = render(display, abs, sc, name-drafts(tests, [], []))
+          if (write-if-changed(gen, text)) -> Some(DocCase(gen, display)) | {
+            set!(failed, true)
+            report-span(display, src, blank-span(), "error", "E_TEST", "cannot write generated tests")
+            None()
+          }
+        }
+      }
+}
+
+let consider(path: Str, failed: Ref Bool, acc: List DocCase) -> List DocCase =
+  if (String.ends-with(".test.mnd", path) || not(String.ends-with(".mnd", path))) -> acc | {
+    let abs = canonical-path(path)
+    let display = display-path(abs)
+    match (read-file(abs))
+      | Err(_) -> acc
+      | Ok(src) ->
+        match (one-source(abs, display, src, failed))
+          | Some(c) -> c :: acc
+          | None -> acc
+  }
+
+let under-cache(path: Str) -> Bool {
+  let abs = canonical-path(path)
+  let root = cache-root()
+  abs == root || String.starts-with(String.concat(root, "/"), abs)
+}
+
+let skip-name(name: Str) -> Bool =
+  String.starts-with(".", name) || name == "node_modules" || name == "build" || name == "target"
+
+let join-path(dir: Str, name: Str) -> Str =
+  cond
+    | dir == "" || dir == "." -> name
+    | dir == "/" -> String.concat("/", name)
+    | else -> String.concat(dir, "/", name)
+
+let split-names(s: Str, i: Int, start: Int, n: Int, acc: List Str) -> List Str =
+  cond
+    | i > n -> reverse(acc)
+    | i == n || String.byte(i, s) == 10 ->
+      if (i == start) -> split-names(s, i + 1, i + 1, n, acc) | split-names(s, i + 1, i + 1, n, String.slice(start, i - start, s) :: acc)
+    | else -> split-names(s, i + 1, start, n, acc)
+
+let walk(dir: Str, failed: Ref Bool, acc: List DocCase) -> List DocCase =
+  if (under-cache(dir)) -> acc | walk-names(dir, sort(split-names(list-dir(dir), 0, 0, String.length(list-dir(dir)), [])), failed, acc)
+
+let walk-names(dir: Str, names: List Str, failed: Ref Bool, acc: List DocCase) -> List DocCase =
+  match (names)
+    | [] -> acc
+    | name :: rest ->
+      if (skip-name(name)) -> walk-names(dir, rest, failed, acc) | walk-child(dir, join-path(dir, name), rest, failed, acc)
+
+let walk-child(dir: Str, child: Str, rest: List Str, failed: Ref Bool, acc: List DocCase) -> List DocCase =
+  cond
+    | is-dir(child) -> walk-names(dir, rest, failed, walk(child, failed, acc))
+    | else -> walk-names(dir, rest, failed, consider(child, failed, acc))
+
+pub let prepare-doctests(path: Str) -> Result (List DocCase) Str {
+  let failed = ref(false)
+  let cases =
+    cond
+      | is-dir(path) -> reverse(walk(path, failed, []))
+      | under-cache(path) -> []
+      | else -> reverse(consider(path, failed, []))
+  if (deref(failed)) -> Err("") | Ok(cases)
+}

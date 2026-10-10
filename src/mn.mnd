@@ -115,6 +115,12 @@ let positional-arg(want: Int) -> Str =
 let positional-count() -> Int =
   length(positionals(argv(), mn-flags()))
 
+; Every path after `test`. None means the current directory.
+let test-paths() -> List Str =
+  match (positionals(argv(), mn-flags()))
+    | [] -> []
+    | _ :: rest -> rest
+
 let prog-args() -> List Str =
   args-after(argv())
 
@@ -666,7 +672,7 @@ let dispatch(mode: Str, file: Str, has-out: Bool, out: Str, bin: Str, dump-after
     | mode == "test" ->
       exit(
         run-suite(
-          if (String.length(file) > 0) -> file | ".",
+          test-paths(),
           has-clean(),
           has-verbose(),
           has-show-output(),

@@ -737,6 +737,11 @@ function beginEval(
             return { tag: "value", value: evalLambda(ast, env) };
           case Sf.Quote:
             return { tag: "value", value: quoteValue(ast.elems[1] ?? ast) };
+          case Sf.Char: {
+            const n = ast.elems[1];
+            if (!n || n.tag !== "int") throw new PanicError("char literal", ast.span);
+            return { tag: "value", value: vInt(n.value) };
+          }
           case Sf.Project: {
             const field = ast.elems[2];
             if (!ast.elems[1] || field?.tag !== "sym") {
@@ -1085,6 +1090,15 @@ function matchPat(pat: Ast, v: Value, env: Env): boolean {
     );
   }
   if (pat.tag === "bool") return v.tag === "bool" && v.value === pat.value;
+  if (
+    pat.tag === "list" &&
+    pat.elems.length === 2 &&
+    pat.elems[0]!.tag === "sym" &&
+    symName(pat.elems[0]!) === "char" &&
+    pat.elems[1]!.tag === "int"
+  ) {
+    return v.tag === "int" && v.value === pat.elems[1]!.value;
+  }
   if (pat.tag === "list" && pat.elems.length >= 1 && pat.elems[0]!.tag === "sym") {
     const cn = symName(pat.elems[0]!);
     if (v.tag === "variant" && v.ctor === cn) {

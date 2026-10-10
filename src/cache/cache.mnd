@@ -119,6 +119,17 @@ pub let object-path(abs: Str) -> Str =
 pub let cache-bin(abs: Str) -> Str =
   String.concat(cache-root(), "/out/", show(bytes-hash(abs)))
 
+; Generated `@test` modules. The path is the cache root, `doctest`, then the
+; canonical absolute source path, so the original file can be recovered
+; from the generated path.
+pub let doctest-path(abs: Str) -> Str =
+  String.concat(String.concat(cache-root(), "/doctest"), abs)
+
+pub let doctest-origin(path: Str) -> Str {
+  let prefix = String.concat(cache-root(), "/doctest")
+  if (String.starts-with(prefix, path) && String.length(path) > String.length(prefix)) -> String.slice(String.length(prefix), String.length(path) - String.length(prefix), path) | ""
+}
+
 pub let ensure-parent(path: Str) -> Bool =
   ensure-dir(dirname-of(path))
 

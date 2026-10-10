@@ -1454,6 +1454,7 @@ let lower-apply-clo(clo: Int, args: List Ast, sp: Span, env: Map Str Int, b: Bui
 
 let lower-named(hn: Str, rest: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   cond
+    | hn == "char" -> lower-char-lit(rest, b)
     | hn == "if" -> lower-if(rest, env, b, funcs, noop, pool)
     | hn == "let" -> lower-let-inline(rest, env, b, funcs, noop, pool)
     | hn == "do" -> lower-sequence(rest, env, b, funcs, noop, pool)
@@ -1473,6 +1474,11 @@ let lower-named(hn: Str, rest: List Ast, sp: Span, env: Map Str Int, b: Builder,
             | is-effect-head(hn) -> Result.and-then(fn (_) = Ok(const-unit!(b)), lower-effect-op(hn, rest, env, b, funcs, noop, pool))
             | is-unsupported-form(hn) -> Err(String.concat("cannot lower `", hn, "` with the real instruction lowerer yet"))
             | else -> lower-call(hn, rest, sp, env, b, funcs, noop, pool)
+
+let lower-char-lit(rest: List Ast, b: Builder) -> Result Int Str =
+  match (rest)
+    | IntNode(n, _) :: _ -> Ok(const-tagged!(b, n))
+    | _ -> Err("char literal requires a code point")
 
 ; -- if --
 
@@ -2038,7 +2044,8 @@ let bind-pat!(pat: Ast, val: Int, else-bb: BB, env: Map Str Int, b: Builder, poo
         | else -> Ok(bind-name!(n, val, env, b))
     | ParenNode(head :: args, _) ->
       match (sym-str(head))
-        | Some(cname) -> bind-ctor-pat!(cname, args, val, else-bb, env, b, pool)
+        | Some(cname) ->
+          if (cname == "char") -> bind-char-pat!(args, val, else-bb, env, b) | bind-ctor-pat!(cname, args, val, else-bb, env, b, pool)
         | None -> Err("unsupported match pattern")
     | IntNode(n, _) -> bind-int-pat!(n, val, else-bb, env, b)
     | BoolNode(flag, _) -> bind-bool-pat!(flag, val, else-bb, env, b)
@@ -2080,6 +2087,11 @@ let bind-bool-pat!(flag: Bool, val: Int, else-bb: BB, env: Map Str Int, b: Build
     env,
     b
   )
+
+let bind-char-pat!(args: List Ast, val: Int, else-bb: BB, env: Map Str Int, b: Builder) -> Result (Map Str Int) Str =
+  match (args)
+    | IntNode(n, _) :: _ -> bind-int-pat!(n, val, else-bb, env, b)
+    | _ -> Err("unsupported match pattern")
 
 let bind-int-pat!(n: Int, val: Int, else-bb: BB, env: Map Str Int, b: Builder) -> Result (Map Str Int) Str {
   let lit = const-tagged!(b, n)

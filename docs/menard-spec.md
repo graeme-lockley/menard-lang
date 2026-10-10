@@ -128,7 +128,6 @@ projects like this.
 
 - `Arr`, and `arr-new` / `arr-length` / `arr-nth` (§2.8.2)
 - `str-chars` (§2.8.2)
-- character literals — `Char` has no reader syntax; `String.from-char` is the conversion that exists
 - `map-entries` (§2.8.2). `Map.keys` returns that same order and is implemented by the runtime
 - the library function `find-on-path` (§2.8.3)
 
@@ -558,9 +557,11 @@ These rules make byte-level I/O well defined:
   `show` (§2.13) still escapes only `\` and `"`.
 - **`Char` is a Unicode *scalar value*** — a code point excluding the surrogate
   range `U+D800–U+DFFF`. This makes `String.from-char` **total** and never failing,
-  while `str-chars` (decode) is the **fallible** direction. **Not in this
-  version (§1.4):** there is no character-literal syntax, and `str-chars` is
-  not implemented. `String.from-char` is.
+  while `str-chars` (decode) is the **fallible** direction. A character literal
+  is one scalar between `'` quotes (`'A'`, `'😀'`, or one escape `\n` `\r` `\t`
+  `\'` `\\` `\u{` hex `}`); the spelling is in [syntax.md](syntax.md) §1.4.
+  An unclosed `'name` is still a symbol. **Not in this version (§1.4):**
+  `str-chars` is not implemented. `String.from-char` is.
 - **There is no `Byte` type.** Bytes are `Int`s in a documented `0..255` range,
   reached through `String.byte`. The compiler's byte-critical paths — reader,
   hashing, I/O — are exactly the paths where a range assertion is a test. If

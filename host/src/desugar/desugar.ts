@@ -178,6 +178,7 @@ const PIPE_BLOCKED = new Set([
   "and",
   "or",
   "quote",
+  "char",
   "Cons",
   "Nil",
   "+",

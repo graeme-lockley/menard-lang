@@ -6,6 +6,7 @@ export type TokKind =
   | "float"
   | "str"
   | "sym"
+  | "char"
   | "kw"
   | "op"
   | "punct"
@@ -89,6 +90,49 @@ function hexVal(b: number): number {
   if (b >= 0x61 && b <= 0x66) return b - 0x61 + 10;
   if (b >= 0x41 && b <= 0x46) return b - 0x41 + 10;
   return -1;
+}
+
+function utf8Width(b: number): number {
+  if (b >= 0 && b < 0x80) return 1;
+  if (b >= 0xc0 && b <= 0xdf) return 2;
+  if (b >= 0xe0 && b <= 0xef) return 3;
+  if (b >= 0xf0 && b <= 0xf7) return 4;
+  return 0;
+}
+
+function isCont(b: number): boolean {
+  return b >= 0x80 && b < 0xc0;
+}
+
+/** One scalar at `off`, or -1 when the bytes are not a scalar. */
+function scalarAt(src: Uint8Array, off: number): { cp: number; width: number } | null {
+  if (off >= src.length) return null;
+  const b0 = src[off]!;
+  const w = utf8Width(b0);
+  if (w === 0 || off + w > src.length) return null;
+  const b1 = w > 1 ? src[off + 1]! : 0;
+  const b2 = w > 2 ? src[off + 2]! : 0;
+  const b3 = w > 3 ? src[off + 3]! : 0;
+  if (w > 1 && !isCont(b1)) return null;
+  if (w > 2 && !isCont(b2)) return null;
+  if (w > 3 && !isCont(b3)) return null;
+  let cp = b0;
+  if (w === 2) cp = ((b0 - 0xc0) << 6) + (b1 - 0x80);
+  if (w === 3) cp = ((b0 - 0xe0) << 12) + ((b1 - 0x80) << 6) + (b2 - 0x80);
+  if (w === 4) cp = ((b0 - 0xf0) << 18) + ((b1 - 0x80) << 12) + ((b2 - 0x80) << 6) + (b3 - 0x80);
+  if (cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) return null;
+  if (w === 2 && cp < 0x80) return null;
+  if (w === 3 && cp < 0x800) return null;
+  if (w === 4 && cp < 0x10000) return null;
+  return { cp, width: w };
+}
+
+/** Width of one scalar at `off` closed by `'`, otherwise 0. */
+function closedCharWidth(src: Uint8Array, off: number): number {
+  const sc = scalarAt(src, off);
+  if (!sc) return 0;
+  if (off + sc.width < src.length && src[off + sc.width] === 0x27) return sc.width;
+  return 0;
 }
 
 /** UTF-8 of one Unicode scalar. The caller has already rejected non-scalars. */
@@ -255,6 +299,59 @@ export function lex(src: Uint8Array): { ok: true; toks: Tok[] } | { ok: false; e
     }
 
     if (b === 0x27) {
+      if (peek(1) === 0x5c) {
+        bump();
+        const escAt = i;
+        bump();
+        const e = peek();
+        if (e < 0) return err(start, i, "unterminated character literal");
+        let cp = -1;
+        if (e === 0x75 && peek(1) === 0x7b) {
+          bump();
+          const scalar = readUnicodeScalar(escAt, start);
+          if (!scalar.ok) {
+            return err(scalar.error.span.start, scalar.error.span.end, scalar.error.message.includes("unterminated") ? "unterminated character literal" : "invalid character escape");
+          }
+          cp = scalar.cp;
+        } else {
+          bump();
+          if (e === 0x6e) cp = 0x0a;
+          else if (e === 0x72) cp = 0x0d;
+          else if (e === 0x74) cp = 0x09;
+          else if (e === 0x27 || e === 0x5c) cp = e;
+          if (cp < 0) return err(start, i, "invalid character escape");
+        }
+        if (peek() !== 0x27) return err(start, i, "unterminated character literal");
+        bump();
+        toks.push({
+          kind: "char",
+          text: String(cp),
+          span: { start, end: i },
+          col: tokCol,
+          indent: tokIndent,
+          bol: tokBol,
+          line: tokLine,
+        });
+        continue;
+      }
+      const width = closedCharWidth(src, i + 1);
+      if (width > 0) {
+        const sc = scalarAt(src, i + 1)!;
+        bump();
+        for (let k = 0; k < width; k++) bump();
+        bump();
+        toks.push({
+          kind: "char",
+          text: String(sc.cp),
+          span: { start, end: i },
+          col: tokCol,
+          indent: tokIndent,
+          bol: tokBol,
+          line: tokLine,
+        });
+        continue;
+      }
+      if (peek(1) === 0x27) return err(start, start + 2, "empty character literal");
       bump();
       if (!isLetter(peek())) return err(start, i, "symbol literal requires an identifier");
       const ns = i;

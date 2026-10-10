@@ -103,15 +103,19 @@ let line-search-mid(m: Map Int Int, lo: Int, hi: Int, offset: Int, mid: Int) -> 
     | Some(s) ->
       if (s > offset) -> line-search(m, lo, mid, offset) | line-search(m, mid + 1, hi, offset)
 
-let span-at(sp: Span, origin: Int, m: Map Int Int, n: Int) -> Span {
-  let line = line-search(m, 0, n, span-start(sp))
-  Span(
-    span-start(sp),
-    span-end(sp),
-    origin,
-    if (line < 1) -> 1 | line
-  )
-}
+; A span whose origin is already set names another file (`#source`).
+; Its offsets and line are in that file, so they must not be recomputed
+; from the buffer being stamped.
+let span-at(sp: Span, origin: Int, m: Map Int Int, n: Int) -> Span =
+  if (span-origin(sp) != 0) -> sp | {
+    let line = line-search(m, 0, n, span-start(sp))
+    Span(
+      span-start(sp),
+      span-end(sp),
+      origin,
+      if (line < 1) -> 1 | line
+    )
+  }
 
 let stamp-forms(forms: List Ast, src: Str, origin: Int) -> List Ast {
   let starts = line-starts(src)
@@ -642,7 +646,7 @@ let rename-lookup(renames: Map Str Str, name: Str) -> Str =
 let rename-paren(xs: List Ast, sp: Span, renames: Map Str Str) -> Ast =
   match (xs)
     | head :: rest ->
-      if (is-sym(head, "quote")) -> ParenNode(xs, sp) | ParenNode(rename-ast-list(xs, renames), sp)
+      if (is-sym(head, "quote") || is-sym(head, "char")) -> ParenNode(xs, sp) | ParenNode(rename-ast-list(xs, renames), sp)
     | [] -> ParenNode(xs, sp)
 
 let rename-ast(a: Ast, renames: Map Str Str) -> Ast =
@@ -1271,7 +1275,7 @@ let fold-runtime-call(name: Str, args: List Ast, sp: Span, whole: List Ast) -> A
 let fold-runtime-paren(elems: List Ast, sp: Span) -> Ast =
   match (elems)
     | head :: args ->
-      if (is-sym(head, "quote")) -> ParenNode(elems, sp) | fold-runtime-paren-call(head, args, elems, sp)
+      if (is-sym(head, "quote") || is-sym(head, "char")) -> ParenNode(elems, sp) | fold-runtime-paren-call(head, args, elems, sp)
     | [] -> ParenNode(elems, sp)
 
 let fold-runtime-paren-call(head: Ast, args: List Ast, elems: List Ast, sp: Span) -> Ast =
@@ -1322,7 +1326,7 @@ let rewrite-runtime-call(name: Str, args: List Ast, sp: Span, whole: List Ast) -
 let rewrite-runtime-paren(elems: List Ast, sp: Span) -> Ast =
   match (elems)
     | head :: args ->
-      if (is-sym(head, "quote")) -> ParenNode(elems, sp) | rewrite-runtime-paren-call(head, args, elems, sp)
+      if (is-sym(head, "quote") || is-sym(head, "char")) -> ParenNode(elems, sp) | rewrite-runtime-paren-call(head, args, elems, sp)
     | [] -> ParenNode(elems, sp)
 
 let rewrite-runtime-paren-call(head: Ast, args: List Ast, elems: List Ast, sp: Span) -> Ast =

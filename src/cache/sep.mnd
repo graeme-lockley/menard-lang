@@ -158,30 +158,40 @@ let parse-code(msg: Str) -> Str =
     | String.has("unterminated", msg) -> "E_PARSE_STRING"
     | else -> "E_PARSE"
 
-let report-parse(path: Str, src: Str, e: ParseError) -> Unit =
-  match (e)
-    | ParseError(sp, msg) -> report-span(path, src, sp, "error", parse-code(msg), msg)
+; Origin 0 is the file being compiled. Origin 1 is the source a
+; generated `@test` module was extracted from.
+let report-at(abs: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str) -> Unit =
+  if (span-origin(sp) == 0) -> report-span(display-path(abs), src, sp, sev, code, msg) | {
+    let orig = doctest-origin(abs)
+    match (read-file(orig))
+      | Ok(text) -> report-span(display-path(orig), text, sp, sev, code, msg)
+      | Err(_) -> report-span(display-path(abs), src, sp, sev, code, msg)
+  }
 
-let report-casing(path: Str, src: Str, e: CasingError) -> Unit =
+let report-parse(abs: Str, src: Str, e: ParseError) -> Unit =
   match (e)
-    | CasingError(sp, msg) -> report-span(path, src, sp, "error", "E_CASING", msg)
+    | ParseError(sp, msg) -> report-at(abs, src, sp, "error", parse-code(msg), msg)
 
-let report-desugar(path: Str, src: Str, es: List DesugarError) -> Unit =
+let report-casing(abs: Str, src: Str, e: CasingError) -> Unit =
+  match (e)
+    | CasingError(sp, msg) -> report-at(abs, src, sp, "error", "E_CASING", msg)
+
+let report-desugar(abs: Str, src: Str, es: List DesugarError) -> Unit =
   match (es)
     | [] -> ()
     | DesugarError(sp, code, msg) :: rest ->
       {
-        report-span(path, src, sp, "error", code, msg)
-        report-desugar(path, src, rest)
+        report-at(abs, src, sp, "error", code, msg)
+        report-desugar(abs, src, rest)
       }
 
-let report-types(path: Str, src: Str, es: List TypeError) -> Unit =
+let report-types(abs: Str, src: Str, es: List TypeError) -> Unit =
   match (es)
     | [] -> ()
     | TypeError(sp, code, msg) :: rest ->
       {
-        report-span(path, src, sp, "error", code, msg)
-        report-types(path, src, rest)
+        report-at(abs, src, sp, "error", code, msg)
+        report-types(abs, src, rest)
       }
 
 let before-arrow(xs: List Ast, acc: List Ast) -> List Ast =
@@ -718,7 +728,7 @@ let compile-checked(abs: Str, src: Str, display: Str, body: List Ast, exported: 
     | Err(es) ->
       {
         note-compiling(abs, ctx, since(started))
-        report-types(display, src, es)
+        report-types(abs, src, es)
         Err("")
       }
     | Ok(checked) -> compile-lower(abs, src, display, drop-n(length(types), checked), exported, direct, fns, ctors, for-test, ctx, started)
@@ -735,7 +745,7 @@ let compile-lower(abs: Str, src: Str, display: Str, body: List Ast, exported: Ex
   let derived = plan-derives(rooted)
   let seeds = ctors-to-seeds(ctors)
   let info = ctor-info(derived, seeds)
-  match (lower-program-sep(derived, ctx-triple(ctx), [display], fns-to-imps(fns), seeds))
+  match (lower-program-sep(derived, ctx-triple(ctx), emit-paths(abs), fns-to-imps(fns), seeds))
     | Err(msg) ->
       {
         note-compiling(abs, ctx, since(started))
@@ -821,8 +831,24 @@ let note-progress(verb: Str, abs: Str, ctx: Ctx, ms: Int) -> Unit =
         ()
       }
 
-let note-compiling(abs: Str, ctx: Ctx, ms: Int) -> Unit =
-  note-progress("Compiling", abs, ctx, ms)
+; `examples/sc.mnd` → `examples/sc.doctest.mnd`. The generated module is not
+; the source file; errors in an annotation still use the source path.
+let doctest-label(shown: Str) -> Str =
+  if (String.ends-with(".mnd", shown)) -> String.concat(String.slice(0, String.length(shown) - 4, shown), ".doctest.mnd") | String.concat(shown, ".doctest.mnd")
+
+let note-compiling(abs: Str, ctx: Ctx, ms: Int) -> Unit = {
+  let orig = doctest-origin(abs)
+  let name =
+    if (String.length(orig) == 0) -> abs | doctest-label(display-path(orig))
+  note-progress("Compiling", name, ctx, ms)
+}
+
+; Panic frames for a generated test module name the original source
+; at origin 1 and the generated file at origin 0.
+let emit-paths(abs: Str) -> List Str = {
+  let orig = doctest-origin(abs)
+  if (String.length(orig) == 0) -> [display-path(abs)] | [display-path(abs), display-path(orig)]
+}
 
 let note-linking(abs: Str, ctx: Ctx, ms: Int) -> Unit =
   note-progress("Linking", abs, ctx, ms)
@@ -854,7 +880,7 @@ let compile-src(abs: Str, src: Str, ctx: Ctx) -> Result Iface Str {
     | Err(e) ->
       {
         note-compiling(abs, ctx, since(started))
-        report-parse(display, src, e)
+        report-parse(abs, src, e)
         Err("")
       }
     | Ok(forms) -> compile-casing(abs, src, display, forms, ctx, started)
@@ -865,7 +891,7 @@ let compile-casing(abs: Str, src: Str, display: Str, forms: List Ast, ctx: Ctx, 
     | Err(e) ->
       {
         note-compiling(abs, ctx, since(started))
-        report-casing(display, src, e)
+        report-casing(abs, src, e)
         Err("")
       }
     | Ok(_) -> compile-desugar(abs, src, display, forms, ctx, started)
@@ -875,7 +901,7 @@ let compile-desugar(abs: Str, src: Str, display: Str, forms: List Ast, ctx: Ctx,
     | Err(es) ->
       {
         note-compiling(abs, ctx, since(started))
-        report-desugar(display, src, es)
+        report-desugar(abs, src, es)
         Err("")
       }
     | Ok(desugared) ->

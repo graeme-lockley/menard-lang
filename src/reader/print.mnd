@@ -341,6 +341,28 @@ let print-paren(elems: List Ast, whole: Ast, ind: Int) -> Str =
         | Some(n) -> print-headed(n, rest, whole, ind)
         | None -> print-call(h, rest, ind)
 
+let ascii-printables() -> Str =
+  " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+
+let hex-digit(n: Int) -> Str =
+  String.slice(n, 1, "0123456789abcdef")
+
+let hex-of(n: Int) -> Str =
+  if (n < 16) -> hex-digit(n) | String.concat(hex-of(n / 16), hex-digit(n % 16))
+
+let print-char-body(n: Int) -> Str =
+  cond
+    | n == 10 -> "\\n"
+    | n == 13 -> "\\r"
+    | n == 9 -> "\\t"
+    | n == 92 -> "\\\\"
+    | n == 39 -> "\\'"
+    | n >= 32 && n < 127 -> String.slice(n - 32, 1, ascii-printables())
+    | else -> String.concat("\\u{", String.concat(hex-of(n), "}"))
+
+let print-char-lit(n: Int) -> Str =
+  String.concat("'", String.concat(print-char-body(n), "'"))
+
 let print-headed(n: Str, rest: List Ast, whole: Ast, ind: Int) -> Str =
   cond
     | n == "do" -> print-block(whole, ind)
@@ -357,6 +379,10 @@ let print-headed(n: Str, rest: List Ast, whole: Ast, ind: Int) -> Str =
       match (rest)
         | s :: _ -> String.concat("'", print-atom(s))
         | [] -> "'"
+    | n == "char" ->
+      match (rest)
+        | IntNode(v, _) :: _ -> print-char-lit(v)
+        | _ -> "''"
     | n == "and" -> print-logic(rest, "&&", 3, ind)
     | n == "or" -> print-logic(rest, "||", 2, ind)
     | n == "?" -> print-ques(rest, ind)

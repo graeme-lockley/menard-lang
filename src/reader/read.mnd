@@ -26,6 +26,22 @@ record Tok {
   indent: Int
   bol: Bool
   line: Int
+  origin: Int
+}
+
+; A `; #source` comment maps the next line onto another file. `line-start`
+; is the generated line's first byte. `map-line` / `map-base` are the
+; original line number and the original line's first byte. `pending-*`
+; becomes the map when the directive's newline is consumed. `saw` makes
+; every unmapped token in that file zero-width, so synthetic wrapper
+; tokens are not reported.
+record SrcMap {
+  line-start: Int
+  map-line: Int
+  map-base: Int
+  pending-line: Int
+  pending-base: Int
+  saw: Bool
 }
 
 record Lex {
@@ -37,6 +53,7 @@ record Lex {
   indent: Ref Int
   bol: Ref Bool
   at-start: Ref Bool
+  map: Ref SrcMap
 }
 
 record Ps {
@@ -65,80 +82,115 @@ let empty-toks() -> List Tok =
 
 let lx-src(lx: Lex) -> Str =
   match (lx)
-    | Lex(s, _, _, _, _, _, _, _) -> s
+    | Lex(s, _, _, _, _, _, _, _, _) -> s
 
 let lx-n(lx: Lex) -> Int =
   match (lx)
-    | Lex(_, n, _, _, _, _, _, _) -> n
+    | Lex(_, n, _, _, _, _, _, _, _) -> n
 
 let lx-pos(lx: Lex) -> Ref Int =
   match (lx)
-    | Lex(_, _, p, _, _, _, _, _) -> p
+    | Lex(_, _, p, _, _, _, _, _, _) -> p
 
 let lx-line(lx: Lex) -> Ref Int =
   match (lx)
-    | Lex(_, _, _, n, _, _, _, _) -> n
+    | Lex(_, _, _, n, _, _, _, _, _) -> n
 
 let lx-col(lx: Lex) -> Ref Int =
   match (lx)
-    | Lex(_, _, _, _, c, _, _, _) -> c
+    | Lex(_, _, _, _, c, _, _, _, _) -> c
 
 let lx-indent(lx: Lex) -> Ref Int =
   match (lx)
-    | Lex(_, _, _, _, _, i, _, _) -> i
+    | Lex(_, _, _, _, _, i, _, _, _) -> i
 
 let lx-bol(lx: Lex) -> Ref Bool =
   match (lx)
-    | Lex(_, _, _, _, _, _, b, _) -> b
+    | Lex(_, _, _, _, _, _, b, _, _) -> b
 
 let lx-at-start(lx: Lex) -> Ref Bool =
   match (lx)
-    | Lex(_, _, _, _, _, _, _, a) -> a
+    | Lex(_, _, _, _, _, _, _, a, _) -> a
+
+let lx-map(lx: Lex) -> Ref SrcMap =
+  match (lx)
+    | Lex(_, _, _, _, _, _, _, _, m) -> m
 
 let tok-kind(t: Tok) -> Str =
   match (t)
-    | Tok(k, _, _, _, _, _, _, _) -> k
+    | Tok(k, _, _, _, _, _, _, _, _) -> k
 
 let tok-text(t: Tok) -> Str =
   match (t)
-    | Tok(_, s, _, _, _, _, _, _) -> s
+    | Tok(_, s, _, _, _, _, _, _, _) -> s
 
 let tok-start(t: Tok) -> Int =
   match (t)
-    | Tok(_, _, s, _, _, _, _, _) -> s
+    | Tok(_, _, s, _, _, _, _, _, _) -> s
 
 let tok-end(t: Tok) -> Int =
   match (t)
-    | Tok(_, _, _, e, _, _, _, _) -> e
+    | Tok(_, _, _, e, _, _, _, _, _) -> e
 
 let tok-col(t: Tok) -> Int =
   match (t)
-    | Tok(_, _, _, _, c, _, _, _) -> c
+    | Tok(_, _, _, _, c, _, _, _, _) -> c
 
 let tok-indent(t: Tok) -> Int =
   match (t)
-    | Tok(_, _, _, _, _, i, _, _) -> i
+    | Tok(_, _, _, _, _, i, _, _, _) -> i
 
 let tok-bol(t: Tok) -> Bool =
   match (t)
-    | Tok(_, _, _, _, _, _, b, _) -> b
+    | Tok(_, _, _, _, _, _, b, _, _) -> b
 
 let tok-line(t: Tok) -> Int =
   match (t)
-    | Tok(_, _, _, _, _, _, _, n) -> n
+    | Tok(_, _, _, _, _, _, _, n, _) -> n
+
+let tok-origin(t: Tok) -> Int =
+  match (t)
+    | Tok(_, _, _, _, _, _, _, _, o) -> o
 
 let ps-rest(ps: Ps) -> Ref (List Tok) =
   match (ps)
     | Ps(r) -> r
 
+; Set for the duration of `lex-all`, so a lexical error on a mapped
+; line is reported against the original file.
+let fresh-lex-current() -> Ref (Maybe Lex) =
+  ref(None())
+
+let lex-current = fresh-lex-current()
+
+let locate-span(start: Int, end: Int, line: Int) -> Span =
+  match (deref(lex-current))
+    | None -> Span(start, end, 0, line)
+    | Some(lx) ->
+      match (deref(lx-map(lx)))
+        | SrcMap(ls, map-line, map-base, _, _, saw) ->
+          if (map-line != 0) -> Span(map-base + (start - ls), map-base + (end - ls), 1, map-line) | if (saw) -> Span(start, start, 0, line) | Span(start, end, 0, line)
+
 let perr-at(start: Int, end: Int, line: Int, message: Str) -> ParseError =
-  ParseError(Span(start, end, 0, line), message)
+  ParseError(locate-span(start, end, line), message)
 
 let tok-span(t: Tok) -> Span =
-  Span(tok-start(t), tok-end(t), 0, tok-line(t))
+  Span(tok-start(t), tok-end(t), tok-origin(t), tok-line(t))
 
-let span-join(a: Span, b: Span) -> Span =
-  Span(span-start(a), span-end(b), 0, span-line(a))
+; Keep a mapped origin. Joining a mapped token with another mapped
+; token stays in the original file; a synthetic token does not wipe it.
+let span-join(a: Span, b: Span) -> Span {
+  let origin =
+    if (span-origin(a) != 0) -> span-origin(a) | span-origin(b)
+  let line =
+    if (span-origin(a) != 0) -> span-line(a) | span-line(b)
+  Span(span-start(a), span-end(b), origin, line)
+}
+
+let make-tok(kind: Str, text: Str, start: Int, end: Int, col: Int, ind: Int, bol: Bool, line: Int) -> Tok {
+  let sp = locate-span(start, end, line)
+  Tok(kind, text, span-start(sp), span-end(sp), col, ind, bol, span-line(sp), span-origin(sp))
+}
 
 let perr[a](t: Tok, message: Str) -> Result a ParseError =
   Err(ParseError(tok-span(t), message))
@@ -175,15 +227,72 @@ let lex-bump(lx: Lex) -> Int {
       {
         set!(lx-line(lx), deref(lx-line(lx)) + 1)
         set!(lx-col(lx), 0)
+        match (deref(lx-map(lx)))
+          | SrcMap(_, _, _, pending-line, pending-base, saw) ->
+            if (pending-line != 0) -> set!(lx-map(lx), SrcMap(p + 1, pending-line, pending-base, 0, 0, true)) | set!(lx-map(lx), SrcMap(p + 1, 0, 0, 0, 0, saw))
       }
     | else -> set!(lx-col(lx), deref(lx-col(lx)) + 1)
   b
 }
 
-let skip-comment(lx: Lex) -> Unit =
+let match-text(lx: Lex, s: Str) -> Bool =
+  match-text-at(lx, s, 0, String.length(s))
+
+let match-text-at(lx: Lex, s: Str, i: Int, n: Int) -> Bool =
+  if (i >= n) -> true | if (lex-peek(lx, i) != String.byte(i, s)) -> false | match-text-at(lx, s, i + 1, n)
+
+let bump-n(lx: Lex, n: Int) -> Unit =
+  if (n <= 0) -> () | {
+    lex-bump(lx)
+    bump-n(lx, n - 1)
+  }
+
+let read-directive-int(lx: Lex, acc: Int, any: Bool) -> Int =
+  cond
+    | lex-peek(lx, 0) >= 48 && lex-peek(lx, 0) <= 57 ->
+      {
+        let d = lex-peek(lx, 0) - 48
+        lex-bump(lx)
+        read-directive-int(lx, acc * 10 + d, true)
+      }
+    | any -> acc
+    | else -> -1
+
+let skip-directive-spaces(lx: Lex) -> Unit =
+  while (lex-peek(lx, 0) == 32) {
+    lex-bump(lx)
+  }
+
+; `; #source "path" line base` arms the next line. A malformed comment
+; stays an ordinary comment.
+let note-directive(lx: Lex) -> Unit =
+  if (not(match-text(lx, " #source \""))) -> () | {
+    bump-n(lx, 10)
+    while (lex-peek(lx, 0) != -1 && lex-peek(lx, 0) != 10 && lex-peek(lx, 0) != 34) {
+      if (lex-peek(lx, 0) == 92) -> {
+        lex-bump(lx)
+        ()
+      }
+      lex-bump(lx)
+    }
+    if (lex-peek(lx, 0) != 34) -> () | {
+      lex-bump(lx)
+      skip-directive-spaces(lx)
+      let line = read-directive-int(lx, 0, false)
+      skip-directive-spaces(lx)
+      let base = read-directive-int(lx, 0, false)
+      if (line < 1 || base < 0) -> () | match (deref(lx-map(lx)))
+        | SrcMap(ls, map-line, map-base, _, _, _) -> set!(lx-map(lx), SrcMap(ls, map-line, map-base, line, base, true))
+    }
+  }
+
+let skip-comment(lx: Lex) -> Unit {
+  lex-bump(lx)
+  note-directive(lx)
   while (lex-peek(lx, 0) != -1 && lex-peek(lx, 0) != 10) {
     lex-bump(lx)
   }
+}
 
 let prev-byte(lx: Lex) -> Int {
   let s = deref(lx-pos(lx))
@@ -346,7 +455,114 @@ let scan-string(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), s
   }
   cond
     | is-none(deref(failed)) && not(deref(closed)) -> set!(failed, Some(perr-at(start, deref(lx-pos(lx)), line, "unterminated string")))
-    | deref(closed) -> push-tok(toks, Tok("str", Buf.take-str!(sb), start, deref(lx-pos(lx)), col, ind, bol, line))
+    | deref(closed) -> push-tok(toks, make-tok("str", Buf.take-str!(sb), start, deref(lx-pos(lx)), col, ind, bol, line))
+}
+
+let utf8-width(b: Int) -> Int =
+  cond
+    | b >= 0 && b < 128 -> 1
+    | b >= 192 && b <= 223 -> 2
+    | b >= 224 && b <= 239 -> 3
+    | b >= 240 && b <= 247 -> 4
+    | else -> 0
+
+let is-cont-byte(b: Int) -> Bool =
+  b >= 128 && b < 192
+
+let peek-cp-at(lx: Lex, off: Int) -> Int {
+  let b0 = lex-peek(lx, off)
+  let b1 = lex-peek(lx, off + 1)
+  let b2 = lex-peek(lx, off + 2)
+  let b3 = lex-peek(lx, off + 3)
+  cond
+    | b0 < 128 -> b0
+    | b0 >= 192 && b0 <= 223 && is-cont-byte(b1) -> (b0 - 192) * 64 + (b1 - 128)
+    | b0 >= 224 && b0 <= 239 && is-cont-byte(b1) && is-cont-byte(b2) -> (b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128)
+    | b0 >= 240 && b0 <= 247 && is-cont-byte(b1) && is-cont-byte(b2) && is-cont-byte(b3) -> (b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128)
+    | else -> -1
+}
+
+let scalar-fits(cp: Int, w: Int) -> Bool =
+  cp >= 0 && cp <= 1114111 && not (cp >= 55296 && cp <= 57343) &&
+    cond
+      | w == 1 -> true
+      | w == 2 -> cp >= 128
+      | w == 3 -> cp >= 2048
+      | w == 4 -> cp >= 65536
+      | else -> false
+
+; Width of one scalar at `off` that is closed by `'`, otherwise 0.
+let closed-char-width(lx: Lex, off: Int) -> Int {
+  let w = utf8-width(lex-peek(lx, off))
+  if (w <= 0) -> 0 | {
+    let cp = peek-cp-at(lx, off)
+    if (scalar-fits(cp, w) && lex-peek(lx, off + w) == 39) -> w | 0
+  }
+}
+
+let push-char!(lx: Lex, toks: Ref (List Tok), cp: Int, start: Int, col: Int, ind: Int, bol: Bool, line: Int) -> Unit {
+  push-tok(toks, make-tok("char", show(cp), start, deref(lx-pos(lx)), col, ind, bol, line))
+}
+
+let scan-char-hex(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), start: Int, col: Int, ind: Int, bol: Bool, line: Int) -> Unit {
+  lex-bump(lx)
+  let cp = ref(0)
+  let digits = ref(0)
+  while (deref(digits) < 6 && hex-val(lex-peek(lx, 0)) >= 0) {
+    let v = hex-val(lex-peek(lx, 0))
+    lex-bump(lx)
+    set!(cp, deref(cp) * 16 + v)
+    set!(digits, deref(digits) + 1)
+  }
+  let cpv = deref(cp)
+  let n = deref(digits)
+  cond
+    | lex-peek(lx, 0) == -1 -> set!(failed, Some(perr-at(start, deref(lx-pos(lx)), line, "unterminated character literal")))
+    | n == 0 || lex-peek(lx, 0) != 125 || cpv > 1114111 || (cpv >= 55296 && cpv <= 57343) ->
+      set!(failed, Some(perr-at(start, deref(lx-pos(lx)), line, "invalid character escape")))
+    | else ->
+      {
+        lex-bump(lx)
+        cond
+          | lex-peek(lx, 0) != 39 -> set!(failed, Some(perr-at(start, deref(lx-pos(lx)), line, "unterminated character literal")))
+          | else ->
+            {
+              lex-bump(lx)
+              push-char!(lx, toks, cpv, start, col, ind, bol, line)
+            }
+      }
+}
+
+; The opening `'` is already consumed. The next byte is `\`.
+let scan-char-escape(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), start: Int, col: Int, ind: Int, bol: Bool, line: Int) -> Unit {
+  lex-bump(lx)
+  let e = lex-peek(lx, 0)
+  cond
+    | e < 0 -> set!(failed, Some(perr-at(start, deref(lx-pos(lx)), line, "unterminated character literal")))
+    | e == 117 && lex-peek(lx, 1) == 123 ->
+      {
+        lex-bump(lx)
+        scan-char-hex(lx, toks, failed, start, col, ind, bol, line)
+      }
+    | else ->
+      {
+        lex-bump(lx)
+        let cp =
+          cond
+            | e == 110 -> 10
+            | e == 114 -> 13
+            | e == 116 -> 9
+            | e == 39 || e == 92 -> e
+            | else -> -1
+        cond
+          | cp < 0 -> set!(failed, Some(perr-at(start, deref(lx-pos(lx)), line, "invalid character escape")))
+          | lex-peek(lx, 0) != 39 -> set!(failed, Some(perr-at(start, deref(lx-pos(lx)), line, "unterminated character literal")))
+          | else ->
+            {
+              lex-bump(lx)
+              push-char!(lx, toks, cp, start, col, ind, bol, line)
+            }
+      }
 }
 
 let scan-symbol(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), start: Int, col: Int, ind: Int, bol: Bool, line: Int) -> Unit {
@@ -361,8 +577,29 @@ let scan-symbol(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), s
           lex-bump(lx)
         }
         let name = String.slice(ns, deref(lx-pos(lx)) - ns, lx-src(lx))
-        if (String.byte(String.length(name) - 1, name) != 33 && has-bang(name)) -> set!(failed, Some(perr-at(ns, deref(lx-pos(lx)), line, "'!' may appear only as the final character of an identifier"))) | push-tok(toks, Tok("sym", name, start, deref(lx-pos(lx)), col, ind, bol, line))
+        if (String.byte(String.length(name) - 1, name) != 33 && has-bang(name)) -> set!(failed, Some(perr-at(ns, deref(lx-pos(lx)), line, "'!' may appear only as the final character of an identifier"))) | push-tok(toks, make-tok("sym", name, start, deref(lx-pos(lx)), col, ind, bol, line))
       }
+}
+
+; `'` plus one scalar or one escape, closed by `'`, is a Char (`'A'`, `'\n'`,
+; `'\u{1F600}'`). Anything else stays a symbol (`'red`).
+let scan-quote(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), start: Int, col: Int, ind: Int, bol: Bool, line: Int) -> Unit {
+  cond
+    | lex-peek(lx, 1) == 92 ->
+      {
+        lex-bump(lx)
+        scan-char-escape(lx, toks, failed, start, col, ind, bol, line)
+      }
+    | closed-char-width(lx, 1) > 0 ->
+      {
+        lex-bump(lx)
+        let cp = peek-cp-at(lx, 0)
+        bump-n(lx, closed-char-width(lx, 0))
+        lex-bump(lx)
+        push-char!(lx, toks, cp, start, col, ind, bol, line)
+      }
+    | lex-peek(lx, 1) == 39 -> set!(failed, Some(perr-at(start, start + 2, line, "empty character literal")))
+    | else -> scan-symbol(lx, toks, failed, start, col, ind, bol, line)
 }
 
 let has-bang(s: Str) -> Bool =
@@ -421,7 +658,7 @@ let scan-number(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), s
         let text = String.slice(start, deref(lx-pos(lx)) - start, lx-src(lx))
         let kind =
           if (deref(saw-dot) || deref(saw-exp)) -> "float" | "int"
-        push-tok(toks, Tok(kind, text, start, deref(lx-pos(lx)), col, ind, bol, line))
+        push-tok(toks, make-tok(kind, text, start, deref(lx-pos(lx)), col, ind, bol, line))
       }
 }
 
@@ -486,7 +723,7 @@ let scan-ident(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), st
     | is-none(deref(failed)) ->
       {
         let text = String.slice(start, deref(lx-pos(lx)) - start, lx-src(lx))
-        push-tok(toks, Tok(kind-of(text), text, start, deref(lx-pos(lx)), col, ind, bol, line))
+        push-tok(toks, make-tok(kind-of(text), text, start, deref(lx-pos(lx)), col, ind, bol, line))
       }
 }
 
@@ -501,28 +738,28 @@ let scan-real(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError)) -> 
   let prev = prev-byte(lx)
   cond
     | b == 34 -> scan-string(lx, toks, failed, start, col, ind, bol, line)
-    | b == 39 -> scan-symbol(lx, toks, failed, start, col, ind, bol, line)
+    | b == 39 -> scan-quote(lx, toks, failed, start, col, ind, bol, line)
     | b == 46 && lex-peek(lx, 1) == 46 && lex-peek(lx, 2) == 46 ->
       {
         lex-bump(lx)
         lex-bump(lx)
         lex-bump(lx)
-        push-tok(toks, Tok("ident", "...", start, deref(lx-pos(lx)), col, ind, bol, line))
+        push-tok(toks, make-tok("ident", "...", start, deref(lx-pos(lx)), col, ind, bol, line))
       }
     | b == 46 ->
       {
         lex-bump(lx)
-        push-tok(toks, Tok("punct", ".", start, deref(lx-pos(lx)), col, ind, bol, line))
+        push-tok(toks, make-tok("punct", ".", start, deref(lx-pos(lx)), col, ind, bol, line))
       }
     | is-punct(b) ->
       {
         lex-bump(lx)
-        push-tok(toks, Tok("punct", chr(b), start, deref(lx-pos(lx)), col, ind, bol, line))
+        push-tok(toks, make-tok("punct", chr(b), start, deref(lx-pos(lx)), col, ind, bol, line))
       }
     | not(prev-ident(prev)) && b == 45 && (is-letter(lex-peek(lx, 1)) || lex-peek(lx, 1) == 40) && not(is-digit(lex-peek(lx, 1))) ->
       {
         lex-bump(lx)
-        push-tok(toks, Tok("op", "u-", start, deref(lx-pos(lx)), col, ind, bol, line))
+        push-tok(toks, make-tok("op", "u-", start, deref(lx-pos(lx)), col, ind, bol, line))
       }
     | is-digit(b) || (b == 45 || b == 43) && is-digit(lex-peek(lx, 1)) && not(prev-ident(prev)) -> scan-number(lx, toks, failed, start, col, ind, bol, line)
     | prev-ws(prev) && match-op(lx) != "" ->
@@ -533,7 +770,7 @@ let scan-real(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError)) -> 
           lex-bump(lx)
           set!(k, deref(k) + 1)
         }
-        push-tok(toks, Tok("op", op, start, deref(lx-pos(lx)), col, ind, bol, line))
+        push-tok(toks, make-tok("op", op, start, deref(lx-pos(lx)), col, ind, bol, line))
       }
     | is-letter(b) || b == 95 -> scan-ident(lx, toks, failed, start, col, ind, bol, line)
     | b == 63 -> set!(failed, Some(perr-at(start, start + 1, line, "operator ? requires whitespace on both sides")))
@@ -568,20 +805,22 @@ let scan-one(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError)) -> U
 }
 
 let lex-all(src: Str) -> Result (List Tok) ParseError {
-  let lx = Lex(src, String.length(src), ref(0), ref(1), ref(0), ref(0), ref(true), ref(true))
+  let lx = Lex(src, String.length(src), ref(0), ref(1), ref(0), ref(0), ref(true), ref(true), ref(SrcMap(0, 0, 0, 0, 0, false)))
   let toks = ref(empty-toks())
   let failed = ref(no-parse-error())
+  set!(lex-current, Some(lx))
   while (deref(lx-pos(lx)) < lx-n(lx) && is-none(deref(failed))) {
     cond
       | line-ready(lx, failed) ->
         if (is-none(deref(failed))) -> scan-one(lx, toks, failed)
   }
+  set!(lex-current, None())
   match (deref(failed))
     | Some(e) -> Err(e)
     | None ->
       {
         let n = lx-n(lx)
-        let eof = Tok("eof", "", n, n, 0, 0, true, deref(lx-line(lx)))
+        let eof = Tok("eof", "", n, n, 0, 0, true, deref(lx-line(lx)), 0)
         Ok(rev(eof :: deref(toks), []))
       }
 }
@@ -595,7 +834,7 @@ let empty-asts() -> List Ast =
 let peek(ps: Ps) -> Tok =
   match (deref(ps-rest(ps)))
     | h :: _ -> h
-    | [] -> Tok("eof", "", 0, 0, 0, 0, true, 1)
+    | [] -> Tok("eof", "", 0, 0, 0, 0, true, 1, 0)
 
 let advance(ps: Ps) -> Unit =
   match (deref(ps-rest(ps)))
@@ -897,6 +1136,11 @@ let parse-atom(ps: Ps) -> Result Ast ParseError {
       {
         advance(ps)
         Ok(paren-at([sym-at("quote", tok-span(t)), sym-at(tok-text(t), tok-span(t))], tok-span(t)))
+      }
+    | tok-kind(t) == "char" ->
+      {
+        advance(ps)
+        Ok(paren-at([sym-at("char", tok-span(t)), IntNode(int-value(tok-text(t)), tok-span(t))], tok-span(t)))
       }
     | tok-kind(t) == "ident" ->
       {
@@ -1248,7 +1492,7 @@ let parse-pattern-atom(ps: Ps) -> Result Ast ParseError {
         Ok(sym-at("_", tok-span(t)))
       }
     | tok-kind(t) == "punct" && tok-text(t) == "[" -> parse-list(ps)
-    | tok-kind(t) == "int" || tok-kind(t) == "str" || tok-kind(t) == "sym" || tok-text(t) == "true" || tok-text(t) == "false" -> parse-atom(ps)
+    | tok-kind(t) == "int" || tok-kind(t) == "str" || tok-kind(t) == "sym" || tok-kind(t) == "char" || tok-text(t) == "true" || tok-text(t) == "false" -> parse-atom(ps)
     | tok-kind(t) == "ident" ->
       {
         advance(ps)

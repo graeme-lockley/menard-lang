@@ -140,7 +140,7 @@ function foldConcatCall(head: Ast, args: Ast[], span: Ast["span"]): Ast {
 
 function foldConcatAst(ast: Ast, bare: boolean, aliases: Set<string>): Ast {
   if (ast.tag !== "list") return ast;
-  if (ast.elems.length > 0 && isSymNamed(ast.elems[0]!, "quote")) return ast;
+  if (ast.elems.length > 0 && (isSymNamed(ast.elems[0]!, "quote") || isSymNamed(ast.elems[0]!, "char"))) return ast;
   const elems = ast.elems.map((e) => foldConcatAst(e, bare, aliases));
   const head = elems[0];
   if (head && isStringConcatHead(head, bare, aliases) && elems.length !== 3) {

@@ -1529,7 +1529,10 @@ let bind-pattern-ctor-named(env: TypeEnv, cname-ast: Ast, arg-pats: List Ast, ps
   match (sym-str(cname-ast))
     | None -> ()
     | Some(cname) ->
-      match (ctor-get(env, cname))
+      if (cname == "char") -> {
+        unify(env, scrut, t-char(), psp)
+        ()
+      } | match (ctor-get(env, cname))
         | None -> ()
         | Some(ctor) -> bind-pattern-ctor-info(env, cname, ctor, arg-pats, psp, scrut, loc, covered)
 
@@ -1807,6 +1810,7 @@ let infer-paren-named(env: TypeEnv, hn: Str, elems: List Ast, rest: List Ast, sp
     | "fn" -> infer-lambda(env, elems, sp, local)
     | "lambda" -> infer-lambda(env, elems, sp, local)
     | "quote" -> infer-quote-form(rest)
+    | "char" -> t-char()
     | "set!" -> infer-set-bang(env, elems, sp, local)
     | _ -> infer-app(env, elems, sp, local)
 

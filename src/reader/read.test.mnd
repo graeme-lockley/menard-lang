@@ -60,6 +60,39 @@ test "dollar is not interpolation" = {
         | _ -> false
 }
 
+test "a closed quote is a character" = {
+  match (read("'A'"))
+    | Err(_) -> false
+    | Ok(a) ->
+      match (a)
+        | ParenNode(_ :: IntNode(n, _) :: _, _) -> n == 65 && print-form(a) == "'A'"
+        | _ -> false
+}
+
+test "a character escape is one scalar" = {
+  match (read("'\\n'"))
+    | Err(_) -> false
+    | Ok(a) ->
+      match (a)
+        | ParenNode(_ :: IntNode(n, _) :: _, _) -> n == 10
+        | _ -> false
+}
+
+test "a unicode character literal round-trips" = {
+  match (read("'\\u{1F600}'"))
+    | Err(_) -> false
+    | Ok(a) ->
+      match (read(print-form(a)))
+        | Err(_) -> false
+        | Ok(b) -> ast-equal(a, b) && print-form(a) == "'\\u{1f600}'"
+}
+
+test "an unclosed quote stays a symbol" = {
+  match (read("'red"))
+    | Err(_) -> false
+    | Ok(a) -> print-form(a) == "'red"
+}
+
 test "an escaped newline round-trips through print" = {
   match (read("\"\\n\""))
     | Err(_) -> false

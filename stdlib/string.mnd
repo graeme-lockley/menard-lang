@@ -18,7 +18,8 @@ pub runtime slice(start: Int, len: Int, s: Str) -> Str
 pub runtime concat(a: Str, b: Str) -> Str
 
 ; c encoded as UTF-8. A scalar outside 0..U+10FFFF encodes as U+FFFD.
-; @test from-char(c) => "A"
+; @test from-char('A') => "A"
+; @test from-char('\n') => "\n"
 pub runtime from-char(c: Char) -> Str
 
 ; Whether s begins with prefix.

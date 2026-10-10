@@ -1048,6 +1048,7 @@ function infer(
       if (hn === "quote") {
         return inferQuote(ast.elems[1] ?? ast);
       }
+      if (hn === "char") return prim("Char");
       if (hn === "project") return inferProject(env, ast, local, subst);
       if (hn === "set!") {
         // (set! r v)
@@ -1420,6 +1421,10 @@ function bindPattern(
   }
   if (pat.tag === "str") {
     expectType(env, scrut, prim("Str"), subst, pat.span);
+    return;
+  }
+  if (pat.tag === "list" && pat.elems.length === 2 && symStr(pat.elems[0]!) === "char") {
+    expectType(env, scrut, prim("Char"), subst, pat.span);
     return;
   }
   if (pat.tag === "list" && pat.elems.length >= 1) {

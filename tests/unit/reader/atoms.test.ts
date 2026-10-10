@@ -224,6 +224,44 @@ describe("floats", () => {
   });
 });
 
+describe("character literals", () => {
+  function charValue(src: string): bigint {
+    const a = mustRead(src);
+    if (a.tag !== "list" || a.elems[1]?.tag !== "int") {
+      throw new Error("expected a char literal");
+    }
+    return a.elems[1].value;
+  }
+
+  test("one scalar between quotes", () => {
+    expect(charValue("'A'")).toBe(65n);
+    expect(new TextDecoder().decode(print(mustRead("'A'")))).toBe("'A'");
+    expect(charValue("'😀'")).toBe(0x1f600n);
+  });
+
+  test("escapes", () => {
+    expect(charValue("'\\n'")).toBe(10n);
+    expect(charValue("'\\''")).toBe(39n);
+    expect(charValue("'\\\\'")).toBe(92n);
+    expect(charValue("'\\u{1F600}'")).toBe(0x1f600n);
+    expect(new TextDecoder().decode(print(mustRead("'\\u{1F600}'")))).toBe("'\\u{1f600}'");
+  });
+
+  test("an unclosed quote is a symbol", () => {
+    const a = mustRead("'red");
+    expect(a.tag).toBe("list");
+    if (a.tag === "list" && a.elems[1]?.tag === "sym") {
+      expect(new TextDecoder().decode(a.elems[1].name)).toBe("red");
+    }
+  });
+
+  test("empty quotes are rejected", () => {
+    const r = read("''");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.message).toBe("empty character literal");
+  });
+});
+
 describe("comments", () => {
   test("line comments are skipped", () => {
     const a = mustRead("; hi\n42");

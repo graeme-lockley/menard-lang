@@ -233,6 +233,7 @@ function printExpr(a: Ast, ind: number): string {
   }
   if (h === "loop") return printLoop(a, ind);
   if (h === "while") return printWhile(a, ind);
+  if (h === "char" && a.elems[1]?.tag === "int") return printChar(a.elems[1].value);
   if (h === "quote" && a.elems[1]) return `'${printAtom(a.elems[1])}`;
   if (h === "|>") return printOp(a, "|>", ind);
   if (h === "?") return printQues(a, ind);
@@ -566,6 +567,17 @@ function printAtom(a: Ast): string {
   if (a.tag === "int") return a.value.toString();
   if (a.tag === "bool") return a.value ? "true" : "false";
   return printExpr(a, 0);
+}
+
+function printChar(n: bigint): string {
+  const c = Number(n);
+  if (c === 10) return `'\\n'`;
+  if (c === 13) return `'\\r'`;
+  if (c === 9) return `'\\t'`;
+  if (c === 92) return `'\\\\'`;
+  if (c === 39) return `'\\''`;
+  if (c >= 32 && c < 127) return `'${String.fromCharCode(c)}'`;
+  return `'\\u{${c.toString(16)}}'`;
 }
 
 function quoteStr(bytes: Uint8Array): string {

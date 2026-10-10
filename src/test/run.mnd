@@ -1,6 +1,7 @@
-; `mn test`. Discovers `*.test.mnd` beside source, and any other
-; `*.mnd` that contains a `(test …)` form. The runner binary is linked
-; under `~/.menard`, never in the working tree.
+; `mn test`. Discovers `*.test.mnd` beside source, and generates a
+; module for every other `.mnd` that carries `@test`. Status lines are
+; cwd-relative and sorted together. The runner binary is linked under
+; `~/.menard`, never in the working tree.
 ;
 ; One line per file, then `N passed (…ms)` or `M failed, N passed (…ms)`.
 ; The suite is one binary and one process. A `file <path>` line on its
@@ -12,9 +13,12 @@ import "../reader/ast.mnd"
 import "../reader/read.mnd"
 import "../cache/cache.mnd"
 import "../cache/sep.mnd"
+import "./doctest.mnd"
 import std/console
 import std/fs
 import std/io
+import std/list
+import std/map as Map
 import std/proc
 import std/string as String
 import std/test
@@ -104,29 +108,45 @@ let find-named(forms: List Ast, name: Str) -> Maybe Ast =
         | Some(expr) -> Some(expr)
         | None -> find-named(rest, name)
 
-let explain-one(path: Str, src: Str, forms: List Ast, name: Str) -> Unit =
+; The suite marker for a generated module is the generated path. The
+; map sends that path back to the source the annotation was copied from.
+let shown-path(path: Str, originals: Map Str Str) -> Str =
+  match (Map.lookup(originals, path))
+    | Some(orig) -> orig
+    | None -> path
+
+let explain-one(path: Str, src: Str, shown: Str, original: Str, forms: List Ast, name: Str) -> Unit =
   match (find-named(forms, name))
-    | Some(expr) -> report-span(path, src, ast-span(expr), "error", "E_TEST", String.concat("assertion failed: ", name))
+    | Some(expr) ->
+      {
+        let sp = ast-span(expr)
+        if (span-origin(sp) != 0) -> report-span(shown, original, sp, "error", "E_TEST", String.concat("assertion failed: ", name)) | report-span(path, src, sp, "error", "E_TEST", String.concat("assertion failed: ", name))
+      }
     | None -> report-plain(String.concat("assertion failed: ", name))
 
-let explain-fails(path: Str, src: Str, forms: List Ast, lines: List Str) -> Unit =
+let explain-fails(path: Str, src: Str, shown: Str, original: Str, forms: List Ast, lines: List Str) -> Unit =
   match (lines)
     | [] -> ()
     | line :: rest ->
       {
         match (fail-name(line))
-          | Some(name) -> explain-one(path, src, forms, name)
+          | Some(name) -> explain-one(path, src, shown, original, forms, name)
           | None -> ()
-        explain-fails(path, src, forms, rest)
+        explain-fails(path, src, shown, original, forms, rest)
       }
 
-let explain-file(path: Str, lines: List Str) -> Unit =
+let explain-parsed(path: Str, src: Str, shown: Str, forms: List Ast, lines: List Str) -> Unit =
+  if (shown == path) -> explain-fails(path, src, shown, src, forms, lines) | match (read-file(shown))
+    | Ok(original) -> explain-fails(path, src, shown, original, forms, lines)
+    | Err(_) -> explain-fails(path, src, path, src, forms, lines)
+
+let explain-file(path: Str, lines: List Str, originals: Map Str Str) -> Unit =
   match (read-file(path))
     | Err(_) -> ()
     | Ok(src) ->
       match (read-all(src))
         | Err(_) -> ()
-        | Ok(forms) -> explain-fails(path, src, forms, lines)
+        | Ok(forms) -> explain-parsed(path, src, shown-path(path, originals), forms, lines)
 
 let file-line(path: Str, ok: Bool, on: Bool) -> Unit {
   write(stdout, path)
@@ -157,7 +177,7 @@ record RunAcc {
 
 ; `exit-bad` is the process status, applied only to the file that was
 ; running when the process stopped. A panic aborts the rest of the suite.
-let flush-file(path: Str, lines: List Str, verbose: Bool, show-output: Bool, on: Bool, exit-bad: Bool) -> Counts =
+let flush-file(path: Str, lines: List Str, verbose: Bool, show-output: Bool, on: Bool, exit-bad: Bool, originals: Map Str Str) -> Counts =
   cond
     | String.length(path) == 0 ->
       if (exit-bad) -> Counts(0, 1) | Counts(0, 0)
@@ -169,13 +189,13 @@ let flush-file(path: Str, lines: List Str, verbose: Bool, show-output: Bool, on:
           | Counts(p, f) ->
             {
               let bad = f > 0 || exit-bad
-              file-line(path, not(bad), on)
-              if (f > 0) -> explain-file(path, ordered)
+              file-line(shown-path(path, originals), not(bad), on)
+              if (f > 0) -> explain-file(path, ordered, originals)
               if (bad && f == 0) -> Counts(p, 1) | Counts(p, f)
             }
       }
 
-let take-lines(lines: List Str, acc: RunAcc, verbose: Bool, show-output: Bool, on: Bool) -> RunAcc =
+let take-lines(lines: List Str, acc: RunAcc, verbose: Bool, show-output: Bool, on: Bool, originals: Map Str Str) -> RunAcc =
   match (lines)
     | [] -> acc
     | line :: rest ->
@@ -183,15 +203,15 @@ let take-lines(lines: List Str, acc: RunAcc, verbose: Bool, show-output: Bool, o
         | RunAcc(path, buf, passed, failed) ->
           match (file-path(line))
             | Some(next) ->
-              match (flush-file(path, buf, verbose, show-output, on, false))
-                | Counts(p, f) -> take-lines(rest, RunAcc(next, [], passed + p, failed + f), verbose, show-output, on)
-            | None -> take-lines(rest, RunAcc(path, line :: buf, passed, failed), verbose, show-output, on)
+              match (flush-file(path, buf, verbose, show-output, on, false, originals))
+                | Counts(p, f) -> take-lines(rest, RunAcc(next, [], passed + p, failed + f), verbose, show-output, on, originals)
+            | None -> take-lines(rest, RunAcc(path, line :: buf, passed, failed), verbose, show-output, on, originals)
 
-let finish-acc(acc: RunAcc, verbose: Bool, show-output: Bool, on: Bool, exit-bad: Bool, err: Str) -> Counts =
+let finish-acc(acc: RunAcc, verbose: Bool, show-output: Bool, on: Bool, exit-bad: Bool, err: Str, originals: Map Str Str) -> Counts =
   match (acc)
     | RunAcc(path, buf, passed, failed) ->
       {
-        match (flush-file(path, buf, verbose, show-output, on, exit-bad))
+        match (flush-file(path, buf, verbose, show-output, on, exit-bad, originals))
           | Counts(p, f) ->
             {
               cond
@@ -211,32 +231,118 @@ let report-suite-error(msg: Str, started: Int, on: Bool) -> Int {
   1
 }
 
-pub let run-suite(path: Str, clean: Bool, verbose: Bool, show-output: Bool, quiet: Bool, cc: Str, runtime: Str) -> Int {
-  let files = discover(path)
-  match (files)
-    | [] ->
-      {
-        report-plain(String.concat("no tests found in ", path))
-        1
-      }
-    | _ :: _ ->
-      {
-        let on = tty-color(1)
-        let started = now-ms()
-        match (build-suite(files, path, clean, cc, runtime, quiet))
-          | Err(msg) -> report-suite-error(msg, started, on)
-          | Ok(bin) ->
-            match (spawn-capture([bin], ""))
-              | Err(_) -> report-suite-error(String.concat("cannot spawn ", bin), started, on)
-              | Ok(SpawnOutput(st, text, err)) ->
-                {
-                  let exit-bad = status-exit-code(st) != 0
-                  let acc = take-lines(split-lines(text), RunAcc("", [], 0, 0), verbose, show-output, on)
-                  let totals = finish-acc(acc, verbose, show-output, on, exit-bad, err)
-                  summary(totals, now-ms() - started, on)
-                  match (totals)
-                    | Counts(_, f) ->
-                      if (f > 0) -> 1 | 0
-                }
-      }
+let cat(xs: List Str, ys: List Str) -> List Str =
+  match (xs)
+    | [] -> ys
+    | h :: t -> h :: cat(t, ys)
+
+let case-files(cases: List DocCase) -> List Str =
+  match (cases)
+    | [] -> []
+    | DocCase(gen, _) :: rest -> gen :: case-files(rest)
+
+let originals-of(cases: List DocCase, acc: Map Str Str) -> Map Str Str =
+  match (cases)
+    | [] -> acc
+    | DocCase(gen, orig) :: rest -> originals-of(rest, Map.set(acc, gen, orig))
+
+record Gathered {
+  files: List Str
+  originals: Map Str Str
+}
+
+let same-path(a: Str, b: Str) -> Bool =
+  canonical-path(a) == canonical-path(b)
+
+let has-path(p: Str, xs: List Str) -> Bool =
+  match (xs)
+    | [] -> false
+    | h :: t -> same-path(p, h) || has-path(p, t)
+
+let cat-new(xs: List Str, ys: List Str) -> List Str =
+  match (ys)
+    | [] -> xs
+    | h :: t ->
+      if (has-path(h, xs)) -> cat-new(xs, t) | cat-new(snoc-str(xs, h), t)
+
+let snoc-str(xs: List Str, x: Str) -> List Str =
+  match (xs)
+    | [] -> [x]
+    | h :: t -> h :: snoc-str(t, x)
+
+let join-sp(xs: List Str) -> Str =
+  match (xs)
+    | [] -> ""
+    | h :: [] -> h
+    | h :: t -> String.concat(h, String.concat(" ", join-sp(t)))
+
+; The path as it should be printed: relative to the working directory,
+; without a leading `./`.
+let present(path: Str) -> Str =
+  display-path(canonical-path(path))
+
+let present-list(xs: List Str) -> List Str =
+  match (xs)
+    | [] -> []
+    | h :: t -> present(h) :: present-list(t)
+
+let gather(paths: List Str, got: Gathered) -> Result Gathered Str =
+  match (paths)
+    | [] -> Ok(got)
+    | p :: rest ->
+      match (prepare-doctests(p))
+        | Err(_) -> Err("")
+        | Ok(cases) ->
+          match (got)
+            | Gathered(files, originals) ->
+              gather(rest, Gathered(cat-new(files, cat(present-list(discover(p)), case-files(cases))), originals-of(cases, originals)))
+
+let run-files(path: Str, files: List Str, originals: Map Str Str, clean: Bool, verbose: Bool, show-output: Bool, quiet: Bool, cc: Str, runtime: Str) -> Int {
+  let on = tty-color(1)
+  let started = now-ms()
+  match (build-suite(files, path, clean, cc, runtime, quiet))
+    | Err(msg) -> report-suite-error(msg, started, on)
+    | Ok(bin) ->
+      match (spawn-capture([bin], ""))
+        | Err(_) -> report-suite-error(String.concat("cannot spawn ", bin), started, on)
+        | Ok(SpawnOutput(st, text, err)) ->
+          {
+            let exit-bad = status-exit-code(st) != 0
+            let acc = take-lines(split-lines(text), RunAcc("", [], 0, 0), verbose, show-output, on, originals)
+            let totals = finish-acc(acc, verbose, show-output, on, exit-bad, err, originals)
+            summary(totals, now-ms() - started, on)
+            match (totals)
+              | Counts(_, f) ->
+                if (f > 0) -> 1 | 0
+          }
+}
+
+pub let run-suite(paths: List Str, clean: Bool, verbose: Bool, show-output: Bool, quiet: Bool, cc: Str, runtime: Str) -> Int {
+  let roots =
+    match (paths)
+      | [] -> ["."]
+      | _ -> paths
+  match (gather(roots, Gathered([], Map.empty())))
+    | Err(_) -> 1
+    | Ok(got) ->
+      match (got)
+        | Gathered(files, originals) ->
+          match (files)
+            | [] ->
+              {
+                report-plain(String.concat("no tests found in ", join-sp(roots)))
+                1
+              }
+            | _ :: _ ->
+              run-files(
+                join-sp(roots),
+                sort-by(fn (p) = shown-path(p, originals), files),
+                originals,
+                clean,
+                verbose,
+                show-output,
+                quiet,
+                cc,
+                runtime
+              )
 }
