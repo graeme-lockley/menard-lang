@@ -1,6 +1,5 @@
 import std/int as Int
 import std/list as List
-import std/maybe as Maybe
 import std/string as String
 
 ; Reports all negative values in encounter order; values above 1000 are ignored.
@@ -23,7 +22,7 @@ pub let add(input: Str) -> Result Int (List Int) {
     cond
       | input == "" -> []
       | starts-with("//[") -> {
-          let idx = String.index-of("\n", input) |> Maybe.with-default(0)
+          let idx = String.index-of("\n", input) ? 0
           let separators = String.slice(3, idx - 4, input) |> String.split("][")
 
           input |> String.drop(idx + 1) |> String.split-using(separators)
