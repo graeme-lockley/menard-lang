@@ -2,7 +2,10 @@ import std/int as Int
 import std/list as List
 import std/string as String
 
-; Reports all negative values in encounter order; values above 1000 are ignored.
+; The sum of the numbers in input. Commas and newlines separate them, or a
+; `//` header names the separators. A number above 1000 is left out. A
+; negative is not summed: the error is every negative, in encounter order.
+;
 ; @test add("") => Ok(0)
 ; @test add("1") => Ok(1)
 ; @test add("1,2") => Ok(3)
