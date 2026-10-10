@@ -501,7 +501,7 @@ let collect-noop-names(lds: List LDefn) -> Map Str Bool =
     | ld :: rest -> collect-noop-names-cons(ld, rest)
 
 let collect-noop-names-cons(ld: LDefn, rest: List LDefn) -> Map Str Bool =
-  if (is-unit-noop-ldefn(ld)) -> Map.set(collect-noop-names(rest), ldefn-name(ld), true) | collect-noop-names(rest)
+  if (is-unit-noop-ldefn(ld)) -> Map.set(ldefn-name(ld), true, collect-noop-names(rest)) | collect-noop-names(rest)
 
 let find-ldefn-named(lds: List LDefn, name: Str) -> Maybe LDefn =
   match (lds)
@@ -527,7 +527,7 @@ let func-ref-arity(fr: FuncRef) -> Int =
 let build-func-refs(lds: List LDefn, idx: Int) -> Map Str FuncRef =
   match (lds)
     | [] -> Map.empty()
-    | ld :: rest -> Map.set(build-func-refs(rest, idx + 1), ldefn-name(ld), FuncRef(idx, param-arity-of(ldefn-params(ld))))
+    | ld :: rest -> Map.set(ldefn-name(ld), FuncRef(idx, param-arity-of(ldefn-params(ld))), build-func-refs(rest, idx + 1))
 
 ; ---------------------------------------------------------------------------
 ; `Builder` — see header comment's "The one piece of mutable state per
@@ -1184,15 +1184,15 @@ let str-pool-count(p: StrPool) -> Int =
   str-pool-next(p)
 
 let str-pool-add(p: StrPool, s: Str) -> StrPool =
-  match (Map.lookup(str-pool-by-content(p), s))
+  match (Map.lookup(s, str-pool-by-content(p)))
     | Some(_) -> p
-    | None -> StrPool(s :: str-pool-order-rev(p), Map.set(str-pool-by-content(p), s, str-pool-next(p)), str-pool-next(p) + 1, str-pool-write-stdout-abs(p), str-pool-print-i64-abs(p), str-pool-write-stderr-abs(p), str-pool-ctors(p), str-pool-origins(p), str-pool-file-gids(p))
+    | None -> StrPool(s :: str-pool-order-rev(p), Map.set(s, str-pool-next(p), str-pool-by-content(p)), str-pool-next(p) + 1, str-pool-write-stdout-abs(p), str-pool-print-i64-abs(p), str-pool-write-stderr-abs(p), str-pool-ctors(p), str-pool-origins(p), str-pool-file-gids(p))
 
 ; Always found once `str-pool-add` has run over every occurrence
 ; `collect-str-pool` sees — see that function's header comment for why
 ; this content-keyed lookup never depends on traversal order matching.
 let str-pool-get(p: StrPool, s: Str) -> Int =
-  match (Map.lookup(str-pool-by-content(p), s))
+  match (Map.lookup(s, str-pool-by-content(p)))
     | Some(id) -> id
     | None -> -1
 
@@ -1245,12 +1245,12 @@ let span-line-clamped(sp: Span) -> Int {
 let file-gid-of(pool: StrPool, origin: Int) -> Int {
   let path = origin-path(pool, origin)
   let gids = str-pool-file-gids(pool)
-  match (Map.lookup(deref(gids), path))
+  match (Map.lookup(path, deref(gids)))
     | Some(id) -> id
     | None ->
       {
         let id = str-pool-get(pool, c-str(path))
-        set!(gids, Map.set(deref(gids), path, id))
+        set!(gids, Map.set(path, id, deref(gids)))
         id
       }
 }
@@ -1359,10 +1359,10 @@ let emit-slot-set!(b: Builder, pool: StrPool, name: Str, w: Int) -> Unit {
 }
 
 let lower-sym(name: Str, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, pool: StrPool) -> Result Int Str =
-  match (Map.lookup(env, name))
+  match (Map.lookup(name, env))
     | Some(slot) -> Ok(emit-load!(b, slot))
     | None ->
-      match (Map.lookup(funcs, name))
+      match (Map.lookup(name, funcs))
         | Some(fr) -> lower-func-as-value(fr, b, pool)
         | None ->
           if (str-in-list(name, deref(b-slots(b)))) -> Ok(emit-slot-get!(b, pool, name)) | lower-sym-ctor-or-err(name, b, pool)
@@ -1466,7 +1466,7 @@ let lower-named(hn: Str, rest: List Ast, sp: Span, env: Map Str Int, b: Builder,
     | is-cmp-op(hn) -> lower-cmp-value(rest, hn, env, b, funcs, noop, pool)
     | is-ctor-name(hn, pool) -> lower-ctor(hn, rest, env, b, funcs, noop, pool)
     | else ->
-      match (Map.lookup(funcs, hn))
+      match (Map.lookup(hn, funcs))
         | Some(_) -> lower-call(hn, rest, sp, env, b, funcs, noop, pool)
         | None ->
           cond
@@ -1596,7 +1596,7 @@ let lower-loop-bind-all(pairs: List Ast, body: Ast, result-slot: Int, env: Map S
                 fn (v) {
                   let slot = root-alloca!(b)
                   emit-store!(b, slot, get!(b, v))
-                  lower-loop-bind-all(rest, body, result-slot, env, b, funcs, noop, pool, name :: names-acc, slot :: slots-acc, Map.set(env-acc, name, slot))
+                  lower-loop-bind-all(rest, body, result-slot, env, b, funcs, noop, pool, name :: names-acc, slot :: slots-acc, Map.set(name, slot, env-acc))
                 },
                 lower-expr(init-ast, env, b, funcs, noop, pool)
               )
@@ -1674,7 +1674,7 @@ let decl-name-of(name-part: Ast) -> Maybe Str =
 let register-ctor-spec(acc: Map Str CtorSpec, name: Str, arity: Int, tag-ref: Ref Int) -> Map Str CtorSpec {
   let tag = deref(tag-ref)
   set!(tag-ref, tag + 1)
-  Map.set(acc, name, CtorSpec(tag, arity))
+  Map.set(name, CtorSpec(tag, arity), acc)
 }
 
 let register-one-variant-ctor(c: Ast, acc: Map Str CtorSpec, tag-ref: Ref Int) -> Map Str CtorSpec =
@@ -1742,7 +1742,7 @@ let is-builtin-ctor(hn: Str) -> Bool =
   hn == "Nil" || hn == "Cons" || hn == "None" || hn == "Some" || hn == "Ok" || hn == "Err"
 
 let is-user-ctor(hn: Str, pool: StrPool) -> Bool =
-  match (Map.lookup(str-pool-ctors(pool), hn))
+  match (Map.lookup(hn, str-pool-ctors(pool)))
     | Some(_) -> true
     | None -> false
 
@@ -1784,7 +1784,7 @@ let ctor-tag-of(hn: Str, pool: StrPool) -> Maybe Int =
   match (builtin-ctor-tag-of(hn))
     | Some(t) -> Some(t)
     | None ->
-      match (Map.lookup(str-pool-ctors(pool), hn))
+      match (Map.lookup(hn, str-pool-ctors(pool)))
         | Some(spec) -> Some(ctor-spec-tag(spec))
         | None -> None()
 
@@ -1804,7 +1804,7 @@ let ctor-arity-of(hn: Str, pool: StrPool) -> Int =
         | hn == "Cons" -> 2
         | hn == "Some" || hn == "Ok" || hn == "Err" -> 1
         | else ->
-          match (Map.lookup(str-pool-ctors(pool), hn))
+          match (Map.lookup(hn, str-pool-ctors(pool)))
             | Some(spec) -> ctor-spec-arity(spec)
             | None -> -1
 
@@ -1828,7 +1828,7 @@ let lower-user-ctor-fill(obj: Int, avs: List Int, i: Int, b: Builder, pool: StrP
       }
 
 let lower-user-ctor(hn: Str, args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  match (Map.lookup(str-pool-ctors(pool), hn))
+  match (Map.lookup(hn, str-pool-ctors(pool)))
     | None -> Err(String.concat("unknown constructor ", hn))
     | Some(spec) ->
       if (length(args) == ctor-spec-arity(spec)) ->
@@ -1996,7 +1996,7 @@ let lower-closure-new(args: List Ast, env: Map Str Int, b: Builder, funcs: Map S
       match (sym-str(code-ast))
         | None -> Err("mn-closure-new requires a function name as its first argument")
         | Some(lam-name) ->
-          match (Map.lookup(funcs, lam-name))
+          match (Map.lookup(lam-name, funcs))
             | None -> Err(String.concat("mn-closure-new: unknown function ", lam-name))
             | Some(fr) ->
               {
@@ -2029,7 +2029,7 @@ let is-upper-name(s: Str) -> Bool {
 let bind-name!(name: Str, val: Int, env: Map Str Int, b: Builder) -> Map Str Int {
   let slot = root-alloca!(b)
   emit-store!(b, slot, val)
-  Map.set(env, name, slot)
+  Map.set(name, slot, env)
 }
 
 ; Bind `pat` against `val`. Constructor and literal mismatches branch to
@@ -2260,7 +2260,7 @@ let lower-let-inline-bind(name: Str, v: Int, body: List Ast, env: Map Str Int, b
   let w = get!(b, v)
   let slot = root-alloca!(b)
   emit-store!(b, slot, w)
-  lower-let-inline-continue(body, Map.set(env, name, slot), b, funcs, noop, pool, w)
+  lower-let-inline-continue(body, Map.set(name, slot, env), b, funcs, noop, pool, w)
 }
 
 let lower-let-inline-continue(body: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool, v: Int) -> Result Int Str =
@@ -2300,7 +2300,7 @@ let is-unit-noop-call-named(head: Ast, noop: Map Str Bool) -> Bool =
   match (sym-str(head))
     | None -> false
     | Some(name) ->
-      match (Map.lookup(noop, name))
+      match (Map.lookup(name, noop))
         | Some(_) -> true
         | None -> false
 
@@ -2445,7 +2445,7 @@ let slot-store(b: Builder, name: Str, env: Map Str Int) -> Bool =
     | deref(b-slot-arm(b)) ->
       cond
         | str-in-list(name, deref(b-slots(b))) ->
-          match (Map.lookup(env, name))
+          match (Map.lookup(name, env))
             | None -> true
             | Some(_) -> false
         | else -> false
@@ -2456,7 +2456,7 @@ let lower-sequence-let-bind(name: Str, v: Int, rest: List Ast, env: Map Str Int,
   if (slot-store(b, name, env)) -> emit-slot-set!(b, pool, name, w)
   let slot = root-alloca!(b)
   emit-store!(b, slot, w)
-  lower-sequence-rest(rest, Map.set(env, name, slot), b, funcs, noop, pool, w)
+  lower-sequence-rest(rest, Map.set(name, slot, env), b, funcs, noop, pool, w)
 }
 
 let lower-sequence-rest(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool, fallback: Int) -> Result Int Str =
@@ -2478,13 +2478,13 @@ let lower-args-cons(v: Int, rest: List Ast, env: Map Str Int, b: Builder, funcs:
   Result.and-then(fn (vs) = Ok(v :: vs), lower-args(rest, env, b, funcs, noop, pool))
 
 let lower-call(name: Str, arg-asts: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  match (Map.lookup(funcs, name))
+  match (Map.lookup(name, funcs))
     | Some(fr) -> lower-call-with-ref(fr, name, arg-asts, sp, env, b, funcs, noop, pool)
     | None -> lower-call-local-or-err(name, arg-asts, sp, env, b, funcs, noop, pool)
 
 ; A local holding a heap closure: `(f arg)` → `mn_apply_1`.
 let lower-call-local-or-err(name: Str, arg-asts: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  match (Map.lookup(env, name))
+  match (Map.lookup(name, env))
     | None -> Err(String.concat("cannot lower a call to ", name))
     | Some(slot) -> lower-apply-local(slot, name, arg-asts, sp, env, b, funcs, noop, pool)
 
@@ -2534,7 +2534,7 @@ let bind-params-cons!(b: Builder, n: Str, rest: List Str, start: Int, i: Int) ->
   let param-abs = start + i
   let slot = root-alloca!(b)
   emit-store!(b, slot, param-abs)
-  Map.set(bind-params!(b, rest, start, i + 1), n, slot)
+  Map.set(n, slot, bind-params!(b, rest, start, i + 1))
 }
 
 let finish-return!(b: Builder, is-main: Bool, result-abs: Int) -> Unit {
@@ -2559,7 +2559,7 @@ let lower-one-func(ld: LDefn, num-globals: Int, funcs: Map Str FuncRef, noop: Ma
     if (is-main) -> 2 | param-arity-of(ldefn-params(ld))
   let b = builder-new(num-globals + llvm-nparams)
   let flag =
-    match (Map.lookup(mc, ldefn-name(ld)))
+    match (Map.lookup(ldefn-name(ld), mc))
       | Some(f) -> f
       | None -> true
   set!(b-rooting(b), flag)
@@ -2678,7 +2678,7 @@ let add-int-constant-named(name-ast: Ast, expr: Ast, acc: Map Str Int) -> Map St
     | None -> acc
     | Some(n) ->
       match (expr)
-        | IntNode(k, _) -> Map.set(acc, n, k)
+        | IntNode(k, _) -> Map.set(n, k, acc)
         | _ -> acc
 
 let collect-int-constants-from(forms: List Ast, acc: Map Str Int) -> Map Str Int =
@@ -2704,7 +2704,7 @@ let subst-sym(name: Str, sp: Span, consts: Map Str Int, bound: List Str) -> Ast 
   cond
     | name-is-bound(name, bound) -> SymNode(name, sp)
     | else ->
-      match (Map.lookup(consts, name))
+      match (Map.lookup(name, consts))
         | Some(k) -> IntNode(k, sp)
         | None -> SymNode(name, sp)
 
@@ -2866,7 +2866,7 @@ let mc-note-head(hn: Str, names: Map Str Bool) -> McWalk =
     | mc-pure(hn) -> mc-walk-empty()
     | mc-alloc-name(hn) || mc-ctor-alloc(hn) -> McWalk(true, [])
     | else ->
-      match (Map.lookup(names, hn))
+      match (Map.lookup(hn, names))
         | Some(_) -> McWalk(false, [hn])
         | None -> McWalk(true, [])
 
@@ -2950,18 +2950,18 @@ let mc-walk-paren(elems: List Ast, names: Map Str Bool) -> McWalk =
 let mc-seed(lds: List LDefn) -> Map Str Bool =
   match (lds)
     | [] -> Map.empty()
-    | ld :: rest -> Map.set(mc-seed(rest), ldefn-name(ld), false)
+    | ld :: rest -> Map.set(ldefn-name(ld), false, mc-seed(rest))
 
 let mc-build(lds: List LDefn, names: Map Str Bool) -> Map Str McWalk =
   match (lds)
     | [] -> Map.empty()
-    | ld :: rest -> Map.set(mc-build(rest, names), ldefn-name(ld), mc-walk-forms(ldefn-body(ld), names))
+    | ld :: rest -> Map.set(ldefn-name(ld), mc-walk-forms(ldefn-body(ld), names), mc-build(rest, names))
 
 let mc-any-callee(xs: List Str, flags: Map Str Bool) -> Bool =
   match (xs)
     | [] -> false
     | n :: rest ->
-      match (Map.lookup(flags, n))
+      match (Map.lookup(n, flags))
         | Some(f) ->
           if (f) -> true | mc-any-callee(rest, flags)
         | None -> mc-any-callee(rest, flags)
@@ -2979,27 +2979,27 @@ let mc-apply(lds: List LDefn, info: Map Str McWalk, flags: Map Str Bool) -> Map 
 let mc-apply-one(ld: LDefn, rest: List LDefn, info: Map Str McWalk, flags: Map Str Bool) -> Map Str Bool {
   let name = ldefn-name(ld)
   let now =
-    match (Map.lookup(flags, name))
+    match (Map.lookup(name, flags))
       | Some(f) -> f
       | None -> false
   let next-flag =
     cond
       | now -> true
       | else ->
-        match (Map.lookup(info, name))
+        match (Map.lookup(name, info))
           | Some(w) -> mc-body-true(w, flags)
           | None -> true
-  mc-apply(rest, info, Map.set(flags, name, next-flag))
+  mc-apply(rest, info, Map.set(name, next-flag, flags))
 }
 
 let mc-flags-equal(lds: List LDefn, a: Map Str Bool, b: Map Str Bool) -> Bool =
   match (lds)
     | [] -> true
     | ld :: rest ->
-      match (Map.lookup(a, ldefn-name(ld)))
+      match (Map.lookup(ldefn-name(ld), a))
         | None -> false
         | Some(fa) ->
-          match (Map.lookup(b, ldefn-name(ld)))
+          match (Map.lookup(ldefn-name(ld), b))
             | None -> false
             | Some(fb) ->
               if (fa == fb) -> mc-flags-equal(rest, a, b) | false
@@ -3034,7 +3034,7 @@ pub record CtorTable {
 let seed-specs(seeds: List CtorSeed, acc: Map Str CtorSpec) -> Map Str CtorSpec =
   match (seeds)
     | [] -> acc
-    | CtorSeed(n, t, a) :: rest -> seed-specs(rest, Map.set(acc, n, CtorSpec(t, a)))
+    | CtorSeed(n, t, a) :: rest -> seed-specs(rest, Map.set(n, CtorSpec(t, a), acc))
 
 let max-seed-tag(seeds: List CtorSeed, acc: Int) -> Int =
   match (seeds)
@@ -3053,14 +3053,14 @@ let reverse-seeds(xs: List CtorSeed, acc: List CtorSeed) -> List CtorSeed =
     | x :: rest -> reverse-seeds(rest, x :: acc)
 
 let note-ctor(acc: Map Str CtorSpec, name: Str, arity: Int, tag-ref: Ref Int, local: Ref (List CtorSeed)) -> Map Str CtorSpec =
-  match (Map.lookup(acc, name))
+  match (Map.lookup(name, acc))
     | Some(_) -> acc
     | None ->
       {
         let tag = deref(tag-ref)
         set!(tag-ref, tag + 1)
         set!(local, CtorSeed(name, tag, arity) :: deref(local))
-        Map.set(acc, name, CtorSpec(tag, arity))
+        Map.set(name, CtorSpec(tag, arity), acc)
       }
 
 let note-one-variant(c: Ast, acc: Map Str CtorSpec, tag-ref: Ref Int, local: Ref (List CtorSeed)) -> Map Str CtorSpec =
@@ -3131,9 +3131,9 @@ let add-imp-refs(imps: List Imp, idx: Int, acc: Map Str FuncRef) -> Map Str Func
   match (imps)
     | [] -> acc
     | Imp(name, _, ar) :: rest ->
-      match (Map.lookup(acc, name))
+      match (Map.lookup(name, acc))
         | Some(_) -> add-imp-refs(rest, idx + 1, acc)
-        | None -> add-imp-refs(rest, idx + 1, Map.set(acc, name, FuncRef(idx, ar)))
+        | None -> add-imp-refs(rest, idx + 1, Map.set(name, FuncRef(idx, ar), acc))
 
 ; A non-integer top-level `(let name expr)`. Integer lets are already
 ; folded away before this runs.

@@ -182,11 +182,11 @@ describe("intrinsics via run", () => {
   let n = {...m, "b" => 4, "c" => 1}
   let from-none = None() ? 2
   let from-some = Some(1) ? panic("no")
-  match (Map.lookup(n, "a"))
+  match (Map.lookup("a", n))
     | Some(a) ->
-      match (Map.lookup(n, "b"))
+      match (Map.lookup("b", n))
         | Some(b) ->
-          match (Map.lookup(n, "c"))
+          match (Map.lookup("c", n))
             | Some(c) -> a + b + c + from-none + from-some
             | None -> 0
         | None -> 0
@@ -201,8 +201,8 @@ describe("intrinsics via run", () => {
     const src = `import std/map as Map
 {
   let m = Map.empty()
-  let m2 = Map.set(m, "a", 1)
-  Map.lookup(m2, "a")
+  let m2 = Map.set("a", 1, m)
+  Map.lookup("a", m2)
 }`;
     const r = run(src, { path: "map-round.mnd", host: createHost() });
     expect(r.ok).toBe(true);

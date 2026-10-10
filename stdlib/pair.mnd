@@ -6,3 +6,21 @@ pub record Pair[a, b] {
   fst: a
   snd: b
 }
+
+; f applied to fst. snd stays.
+; @test map-fst(fn (n) = n + 1, Pair(1, "a")) => Pair(2, "a")
+pub let map-fst[a, b, c](f: (a) -> c, p: Pair a b) -> Pair c b =
+  match (p)
+    | Pair(a, b) -> Pair(f(a), b)
+
+; f applied to snd. fst stays.
+; @test map-snd(fn (s) = s == "a", Pair(1, "a")) => Pair(1, true)
+pub let map-snd[a, b, c](f: (b) -> c, p: Pair a b) -> Pair a c =
+  match (p)
+    | Pair(a, b) -> Pair(a, f(b))
+
+; f applied to both fields.
+; @test map-both(fn (n) = n + 1, fn (s) = s == "a", Pair(1, "a")) => Pair(2, true)
+pub let map-both[a, b, c, d](f: (a) -> c, g: (b) -> d, p: Pair a b) -> Pair c d =
+  match (p)
+    | Pair(a, b) -> Pair(f(a), g(b))

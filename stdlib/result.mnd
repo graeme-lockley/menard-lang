@@ -1,4 +1,5 @@
 ; Helpers over the language Result type.
+; Turn a Result into a Maybe with to-maybe, then fill a missing value with `?`.
 ; @module std/result
 
 ; Apply f to an Ok value and leave Err in place.
@@ -18,9 +19,41 @@ pub let and-then[a, b, e](f: (a) -> Result b e, r: Result a e) -> Result b e =
     | Ok(v) -> f(v)
     | Err(e) -> Err(e)
 
-; The Ok value, or default when r is Err.
-; @test unwrap-or(Err("x"), 0) => 0
-pub let unwrap-or[a, e](r: Result a e, default: a) -> a =
+; Apply f when both values are Ok. The error type is shared.
+; @test map2(fn (a, b) = a + b, Ok(1), Ok(2)) => Ok(3)
+; @test map2(fn (a, b) = a + b, Err("x"), Ok(2)) => Err("x")
+; @test (Ok(2) |> map2(fn (a, b) = a + b, Ok(1))) => Ok(3)
+pub let map2[a, b, c, e](f: (a, b) -> c, ra: Result a e, rb: Result b e) -> Result c e =
+  match (ra)
+    | Err(e) -> Err(e)
+    | Ok(a) ->
+      match (rb)
+        | Err(e) -> Err(e)
+        | Ok(b) -> Ok(f(a, b))
+
+; Replace an Err value and leave Ok in place.
+; @test map-error(fn (e) = e + 1, Err(1)) => Err(2)
+; @test map-error(fn (e) = e + 1, Ok(1)) => Ok(1)
+pub let map-error[a, e, f](g: (e) -> f, r: Result a e) -> Result a f =
   match (r)
-    | Ok(v) -> v
-    | Err(_) -> default
+    | Ok(v) -> Ok(v)
+    | Err(e) -> Err(g(e))
+
+; The Ok value, or None. The error is dropped.
+; @test to-maybe(Ok(1)) => Some(1)
+; @test to-maybe(Err("x")) => None()
+; @test (to-maybe(Err("x")) ? 0) => 0
+; @test (to-maybe(Ok(3)) ? 0) => 3
+pub let to-maybe[a, e](r: Result a e) -> Maybe a =
+  match (r)
+    | Ok(v) -> Some(v)
+    | Err(_) -> None()
+
+; Ok of the Some value, or Err(err) when m is None.
+; @test from-maybe("missing", Some(1)) => Ok(1)
+; @test from-maybe("missing", None()) => Err("missing")
+; @test (None() |> from-maybe("missing")) => Err("missing")
+pub let from-maybe[a, e](err: e, m: Maybe a) -> Result a e =
+  match (m)
+    | Some(v) -> Ok(v)
+    | None -> Err(err)

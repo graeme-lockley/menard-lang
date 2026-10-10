@@ -14,6 +14,35 @@ import std/string as String
 pub let parse(n: Str) -> Int =
   if (String.starts-with("-", n)) -> -parse-rest(n, 1) | parse-rest(n, 0)
 
+; Some of the integer when every byte of n is part of it. Empty, a lone minus, and trailing junk are None.
+; @test from-str("123") => Some(123)
+; @test from-str("-123") => Some(-123)
+; @test from-str("0") => Some(0)
+; @test from-str("") => None()
+; @test from-str("-") => None()
+; @test from-str("456abc") => None()
+; @test from-str("abc") => None()
+pub let from-str(n: Str) -> Maybe Int =
+  if (n == "") -> None() | from-signed(n)
+
+; from-str after the empty string has been refused.
+let from-signed(n: Str) -> Maybe Int =
+  if (String.starts-with("-", n)) -> from-digits(n, 1, 0, true, false) | from-digits(n, 0, 0, false, false)
+
+; The integer spelled by every remaining byte, or None when a byte is not a digit or no digit was seen.
+let from-digits(n: Str, i: Int, acc: Int, neg: Bool, seen: Bool) -> Maybe Int =
+  if (i >= String.length(n)) -> from-done(acc, neg, seen) | from-digit(n, i, acc, neg, seen)
+
+; Finish when the scan has consumed n.
+let from-done(acc: Int, neg: Bool, seen: Bool) -> Maybe Int =
+  if (seen) -> Some(if (neg) -> -acc | acc) | None()
+
+; Take one byte when it is a digit.
+let from-digit(n: Str, i: Int, acc: Int, neg: Bool, seen: Bool) -> Maybe Int {
+  let d = String.byte(i, n)
+  if (d > 47 && d < 58) -> from-digits(n, i + 1, acc * 10 + d - 48, neg, true) | None()
+}
+
 ; Whether d is an ASCII digit byte.
 let is-digit(d: Int) -> Bool =
   d > 47 && d < 58

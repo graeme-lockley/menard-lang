@@ -19,8 +19,8 @@ let build-list(n: Int) -> List Int =
 let fill-map(n: Int) -> Int {
   let m =
     loop (i = 0, acc = Map.empty())
-      if (i == n) -> acc | recur(i + 1, Map.set(acc, i, i * 2))
-  match (Map.lookup(m, n - 1))
+      if (i == n) -> acc | recur(i + 1, Map.set(i, i * 2, acc))
+  match (Map.lookup(n - 1, m))
     | Some(v) -> v
     | None -> 0
 }

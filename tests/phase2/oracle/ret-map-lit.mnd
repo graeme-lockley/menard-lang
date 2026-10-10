@@ -8,11 +8,11 @@ let main() -> Int {
   let n = {...m, "b" => 4, "c" => 1}
   let from-none = None() ? 2
   let from-some = Some(1) ? (1 / 0)
-  match (Map.lookup(n, "a"))
+  match (Map.lookup("a", n))
     | Some(a) ->
-      match (Map.lookup(n, "b"))
+      match (Map.lookup("b", n))
         | Some(b) ->
-          match (Map.lookup(n, "c"))
+          match (Map.lookup("c", n))
             | Some(c) -> a + b + c + from-none + from-some
             | None -> 0
         | None -> 0

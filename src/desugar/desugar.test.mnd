@@ -8,7 +8,7 @@ import std/io
 import std/string
 
 let has-head(text: Str, name: Str) -> Bool =
-  has(concat("(", name, " "), text) || has(concat("(", name, ")"), text)
+  contains(concat("(", name, " "), text) || contains(concat("(", name, ")"), text)
 
 let read-forms(path: Str) -> Maybe (List Ast) =
   match (read-file(path))
@@ -51,17 +51,17 @@ let desugar-has-code(path: Str, code: Str) -> Bool =
 test "and/or/while expand to if and loop" =
   match (desugared-text("tests/phase2/fixtures/desugar-ok.mnd"))
     | None -> false
-    | Some(text) -> has("if ", text) && has("loop (", text) && not(has("while", text)) && not(has("&&", text)) && not(has("||", text))
+    | Some(text) -> contains("if ", text) && contains("loop (", text) && not(contains("while", text)) && not(contains("&&", text)) && not(contains("||", text))
 
 test "while expands to loop" =
   match (desugared-text("tests/phase2/fixtures/desugar-while.mnd"))
     | None -> false
-    | Some(text) -> has("loop (", text) && not(has("while", text))
+    | Some(text) -> contains("loop (", text) && not(contains("while", text))
 
 test "bracket lists become cons and a type-parameter list stays" =
   match (desugared-text("tests/phase2/fixtures/list-sugar.mnd"))
     | None -> false
-    | Some(text) -> has("[a]", text) && has("::", text) && has("Nil", text) && not(has("Cons", text)) && not(has("[h", text)) && not(has("[10", text))
+    | Some(text) -> contains("[a]", text) && contains("::", text) && contains("Nil", text) && not(contains("Cons", text)) && not(contains("[h", text)) && not(contains("[10", text))
 
 let desugars-to(src: Str, want: Str) -> Bool =
   match (read(src))
@@ -118,7 +118,7 @@ test "question lowers to a match and keeps the default in the None arm" = {
             | h :: [] ->
               {
                 let text = print-form(h)
-                has("match (Some(1))", text) && has("None -> panic(\"no\")", text) && has("Some(mn-ques) -> mn-ques", text)
+                contains("match (Some(1))", text) && contains("None -> panic(\"no\")", text) && contains("Some(mn-ques) -> mn-ques", text)
               }
             | _ -> false
 }

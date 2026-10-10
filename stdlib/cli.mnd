@@ -75,7 +75,7 @@ pub let positionals(args: List Str, flags: List Flag) -> List Str =
 ; The positional at index, or "" when there are fewer.
 ; @test positional(["check", "a.mnd"], [], 1) => "a.mnd"
 pub let positional(args: List Str, flags: List Flag, index: Int) -> Str =
-  match (nth(positionals(args, flags), index))
+  match (nth(index, positionals(args, flags)))
     | Some(s) -> s
     | None -> ""
 

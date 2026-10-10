@@ -1,25 +1,12 @@
-# Menard — Surface syntax
+# Menard — Syntax
 
-The syntax of Menard source files (`.mnd`). This document is the input to a
-migration of both front ends (the TypeScript interpreter and the Menard
-reader), the desugarers, the standard library, the compiler, the examples, and
-the `; @test` annotations.
+The syntax of Menard source files (`.mnd`). The language guide is [guide.md](guide.md). The semantic rules are in [menard-spec.md](menard-spec.md). Where this document is silent, that specification stands: types are declared and never inferred at a polymorphic definition, there are no macros, no overloading, no currying, and no implicit conversions.
 
-[`menard-spec.md`](menard-spec.md) remains the semantic specification. Where
-this document is silent, that specification stands: types are still declared
-and never inferred at a polymorphic definition, there are still no macros, no
-overloading, no currying, and no implicit conversions. Section
-[Lowering](#lowering) is the contract between the new surface and the language
-that specification describes.
+[Lowering](#8-lowering) is how this surface becomes the core the two front ends share. Both the interpreter and the Menard reader accept and reject the same programs.
 
-Two semantic changes are part of this syntax, not just spelling:
+Two facts about conditionals are part of the syntax, not just spelling:
 
-- `cond` is the laid-out conditional and `if` is the inline value. Both
-  lower to a nested `(if test then else)`. A missing else is legal only
-  when every arm has type `Unit`; the missing arm is `Unit`. An `if` or
-  `cond` that produces any other type and has no else is a type error.
-  The runtime panic `cond: no match` is gone. `when` is only a pattern
-  guard.
+- `cond` is the laid-out conditional and `if` is the inline value. Both lower to a nested `(if test then else)`. A missing else is legal only when every arm has type `Unit`; the missing arm is `Unit`. An `if` or `cond` that produces any other type and has no else is a type error. `when` is only a pattern guard.
 - Equality is written `==`. The declaration token is `=`.
 
 ---
@@ -638,10 +625,12 @@ prefix `-` on a non-literal is the one-argument negation.
 
 ---
 
-## 9. Removed forms
+## 9. These are not Menard
 
-| Removed | Write instead |
-|---|---|
+The reader does not accept an older spelling beside the one in this document. A program is written as it is described above.
+
+| Not Menard | Write |
+| --- | --- |
 | `defn` | top-level `let f(…) -> T =` or `let f(…) -> T { }` |
 | `defrec` | `record` |
 | `variant` | `type Name = \| …` |
@@ -651,10 +640,7 @@ prefix `-` on a non-literal is the one-argument negation.
 | a call written as a head followed by its arguments | `f(a, b)` |
 | equality written as a call | `a == b` |
 
-The forms in the table above are not accepted as source. There is no reader
-mode that parses an older spelling beside this one. The interpreter and the
-Menard reader accept and reject the same programs, and they report the same
-diagnostic code at the same primary span.
+The interpreter and the Menard reader report the same diagnostic code at the same primary span.
 
 ---
 

@@ -131,9 +131,9 @@ let prog-args() -> List Str =
 
 let parse-code(msg: Str) -> Str =
   cond
-    | String.has("unclosed", msg) -> "E_PARSE_UNCLOSED"
-    | String.has("'!'", msg) -> "E_PARSE_BANG"
-    | String.has("unterminated", msg) -> "E_PARSE_STRING"
+    | String.contains("unclosed", msg) -> "E_PARSE_UNCLOSED"
+    | String.contains("'!'", msg) -> "E_PARSE_BANG"
+    | String.contains("unterminated", msg) -> "E_PARSE_STRING"
     | else -> "E_PARSE"
 
 let report-parse-error(path: Str, src: Str, e: ParseError) -> Unit =
@@ -158,7 +158,7 @@ let report-desugar-errors(path: Str, src: Str, es: List DesugarError) -> Unit =
       }
 
 let nth-path(paths: List Str, i: Int, fallback: Str) -> Str =
-  nth-with-default(paths, i, fallback)
+  nth(i, paths) ? fallback
 
 let report-type-errors(paths: List Str, es: List TypeError) -> Unit =
   match (es)

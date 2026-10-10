@@ -37,13 +37,13 @@ let split-acc(s: Str, i: Int, start: Int, n: Int, acc: List Str) -> List Str =
 let lines-of(s: Str) -> List Str =
   reverse(split-acc(s, 0, 0, String.length(s), []))
 
-; Whether the file source contains a test form.
+; Whether the file source carries an `@test` annotation.
 let contains-test(path: Str) -> Bool =
   match (read-file(path))
     | Err(_) -> false
-    | Ok(src) -> String.starts-with("test \"", src) || String.has("\ntest \"", src)
+    | Ok(src) -> String.contains("@test", src)
 
-; A `*.test.mnd` file, or any other `*.mnd` file that contains `(test …)`.
+; A `*.test.mnd` file, or any other `*.mnd` file that carries `@test`.
 let is-test-file(path: Str) -> Bool =
   cond
     | String.ends-with(".test.mnd", path) -> true
@@ -69,8 +69,9 @@ let walk-child(dir: Str, child: Str, rest: List Str, acc: List Str) -> List Str 
     | else -> walk-names(dir, rest, acc)
 
 ; Test files under path, or a one-element list when path itself is a test file.
-; @test contains(discover("stdlib/list.test.mnd"), "stdlib/list.test.mnd") => true
-; @test contains(discover("stdlib"), "stdlib/list.test.mnd") => true
+; @test member("stdlib/list.test.mnd", discover("stdlib/list.test.mnd")) => true
+; @test member("stdlib/list.test.mnd", discover("stdlib")) => true
+; @test member("examples/sc.mnd", discover("examples/sc.mnd")) => true
 pub let discover(path: Str) -> List Str =
   cond
     | is-dir(path) -> reverse(walk(path, []))

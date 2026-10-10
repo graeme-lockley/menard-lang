@@ -111,7 +111,7 @@ let find-named(forms: List Ast, name: Str) -> Maybe Ast =
 ; The suite marker for a generated module is the generated path. The
 ; map sends that path back to the source the annotation was copied from.
 let shown-path(path: Str, originals: Map Str Str) -> Str =
-  match (Map.lookup(originals, path))
+  match (Map.lookup(path, originals))
     | Some(orig) -> orig
     | None -> path
 
@@ -244,7 +244,7 @@ let case-files(cases: List DocCase) -> List Str =
 let originals-of(cases: List DocCase, acc: Map Str Str) -> Map Str Str =
   match (cases)
     | [] -> acc
-    | DocCase(gen, orig) :: rest -> originals-of(rest, Map.set(acc, gen, orig))
+    | DocCase(gen, orig) :: rest -> originals-of(rest, Map.set(gen, orig, acc))
 
 record Gathered {
   files: List Str

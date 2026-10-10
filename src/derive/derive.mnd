@@ -195,7 +195,7 @@ let gen-used(names: List Str, types: Map Str (List DeriveCtor)) -> List Ast =
   match (names)
     | [] -> []
     | n :: rest ->
-      match (Map.lookup(types, n))
+      match (Map.lookup(n, types))
         | None -> gen-used(rest, types)
         | Some(ctors) -> append-ast(gen-type(n, ctors), gen-used(rest, types))
 
@@ -209,7 +209,7 @@ let insert-name(x: Str, xs: List Str) -> List Str =
         | else -> h :: insert-name(x, rest)
 
 let ctor-type-of(name: Str, ctors: Map Str Str) -> Maybe Str =
-  Map.lookup(ctors, name)
+  Map.lookup(name, ctors)
 
 let classify-user(ast: Ast, ctors: Map Str Str) -> Maybe Str =
   match (ast)
@@ -307,7 +307,7 @@ let rewrite-forms(forms: List Ast, ctors: Map Str Str) -> List Ast =
     | f :: rest -> rewrite(f, ctors) :: rewrite-forms(rest, ctors)
 
 let add-ctor(ctors: Map Str Str, cname: Str, ty: Str) -> Map Str Str =
-  Map.set(ctors, cname, ty)
+  Map.set(cname, ty, ctors)
 
 let variant-ctors(cs: List Ast, ty: Str, ctors: Map Str Str, acc: List DeriveCtor) -> List DeriveCtor =
   match (cs)
@@ -338,11 +338,11 @@ record TypeAcc {
 
 let acc-add-defrec(acc: TypeAcc, name: Str, arity: Int) -> TypeAcc =
   match (acc)
-    | TypeAcc(types, ctors) -> TypeAcc(Map.set(types, name, [DeriveCtor(name, arity)]), add-ctor(ctors, name, name))
+    | TypeAcc(types, ctors) -> TypeAcc(Map.set(name, [DeriveCtor(name, arity)], types), add-ctor(ctors, name, name))
 
 let acc-add-variant(acc: TypeAcc, name: Str, cs: List Ast) -> TypeAcc =
   match (acc)
-    | TypeAcc(types, ctors) -> TypeAcc(Map.set(types, name, variant-ctors(cs, name, ctors, [])), remember-variant(cs, name, ctors))
+    | TypeAcc(types, ctors) -> TypeAcc(Map.set(name, variant-ctors(cs, name, ctors, []), types), remember-variant(cs, name, ctors))
 
 let take-name(ast: Ast) -> Maybe Str =
   match (ast)

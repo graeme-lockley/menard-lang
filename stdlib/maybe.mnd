@@ -1,4 +1,6 @@
 ; Helpers over the language Maybe type.
+; A missing value is filled in with `?`, which leaves the fallback unevaluated
+; when the value is present.
 ; @module std/maybe
 
 ; Apply f to a Some value and leave None in place.
@@ -11,22 +13,20 @@ pub let map[a, b](f: (a) -> b, m: Maybe a) -> Maybe b =
 
 ; Replace a Some value with the Maybe that f returns.
 ; @test and-then(fn (n) = Some(n + 1), Some(1)) => Some(2)
+; @test and-then(fn (n) = Some(n + 1), None()) => None()
 pub let and-then[a, b](f: (a) -> Maybe b, m: Maybe a) -> Maybe b =
   match (m)
     | Some(v) -> f(v)
     | None -> None()
 
-; The Some value, or default when m is None.
-; @test unwrap-or(None(), 0) => 0
-pub let unwrap-or[a](m: Maybe a, default: a) -> a =
-  match (m)
-    | Some(v) -> v
-    | None -> default
-
-; Return the Some value, using default when m is None.
-; @test with-default(100, Some(42)) => 42
-; @test with-default(100, None()) => 100
-; @test with-default("unknown", Some("known")) => "known"
-; @test with-default("unknown", None()) => "unknown"
-pub let with-default[a](default: a, m: Maybe a) -> a =
-  unwrap-or(m, default)
+; Apply f when both values are present.
+; @test map2(fn (a, b) = a + b, Some(1), Some(2)) => Some(3)
+; @test map2(fn (a, b) = a + b, None(), Some(2)) => None()
+; @test (Some(2) |> map2(fn (a, b) = a + b, Some(1))) => Some(3)
+pub let map2[a, b, c](f: (a, b) -> c, ma: Maybe a, mb: Maybe b) -> Maybe c =
+  match (ma)
+    | None -> None()
+    | Some(a) ->
+      match (mb)
+        | None -> None()
+        | Some(b) -> Some(f(a, b))

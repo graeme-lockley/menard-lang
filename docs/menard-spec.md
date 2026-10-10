@@ -1,46 +1,21 @@
 # Menard — Language Specification
 
-A small, statically typed, self-hosting language that compiles to LLVM bitcode, with
-first-class closures, explicit type parameters, and a precise garbage collector.
+A small, statically typed language that compiles to LLVM bitcode, with first-class closures, explicit type parameters, and a precise garbage collector. The compiler is written in Menard. A reference interpreter runs that compiler, and the native binary built from its output compiles the same source again. The two executions emit byte-identical bitcode.
 
-> *Menard did not want to write another Quixote, which is easy. He wanted to
-> write the Quixote: to arrive, by a separate and independent act of authorship,
-> at a text word for word identical to Cervantes'.*
+> *Menard did not want to write another Quixote, which is easy. He wanted to write the Quixote: to arrive, by a separate and independent act of authorship, at a text word for word identical to Cervantes'.*
 > — the argument of Borges' *Pierre Menard, Author of the Quixote*, paraphrased
 
-That is this project's headline criterion. There is **one** compiler, written
-once, in Menard. It is executed by two entirely separate routes — read by a
-reference interpreter written in TypeScript, and run as native code built from
-its own output — and both executions, given the compiler's own source, must emit
-byte-identical output. Not the same text by copying, but the same text arrived at
-through two different worlds.
+That is the compiler's fixed point. There is one compiler, written once. It is executed by two routes, and both, given the compiler's own source, emit the same bytes. The guide to writing Menard is [guide.md](guide.md). This document is the rules.
 
 ---
 
 ## 0. Executive summary
 
-Menard answers one question: *can a language small enough for one person to
-finish express its own compiler, compile to LLVM bitcode, and still have closures and
-a real collector?*
+Menard is a language small enough to keep in one person's head, expressive enough to be pleasant to write, and able to compile itself.
 
-Every decision below trades features for finishability. The design keeps the
-**frontend small** (the surface in [`syntax.md`](syntax.md)), the **type system plain** (explicit type
-parameters, declared never inferred), the **syntax closed** (no macros, ever),
-the **numeric model narrow** (one integer type, one float type), and the
-**backend boring** (emit naive IR, let LLVM do the work). The two hard parts —
-closure conversion and the collector — are isolated behind narrow interfaces and
-deferred to late phases. And the **bootstrap is single-sourced**: the compiler
-is written only in Menard, and the reference interpreter runs it until it can
-compile itself (§3.5).
+The frontend is the surface in [syntax.md](syntax.md). Type parameters are declared, never inferred. The syntax is closed: no macros. There is one integer type and one float type. The emitter is naive on purpose, and LLVM does the optimisation. Closures and the collector are part of the language, each behind a narrow interface. The compiler is written only in Menard. The reference interpreter runs it, and once that output is linked, the native compiler compiles the same source. `bc0 == bc1`.
 
-The proof of agreement is a single byte-comparison: `bc0 == bc1` — the IR the
-interpreted compiler emits for its own source equals the IR the native compiler
-emits for the same source.
-
-**§2.14 is a necessary companion to that gate.** It proves that two executions of
-one compiler *agree*. It does not prove that the compiler is *correct*, and the
-difference is not academic: a deterministically wrong compiler passes it every
-time.
+That comparison shows the two executions agree. [§2.14](#214-what-the-bootstrap-gate-proves-and-what-it-does-not) says what it does not show: a deterministically wrong compiler passes it every time. The interpreter, a separate implementation, is the correctness oracle.
 
 ---
 
@@ -48,87 +23,48 @@ time.
 
 ### 1.1 What Menard is
 
-- A **real language**, not a toy: closures, heap data, generic records and
-  variants, exhaustive matching, a standard library, diagnostics with source
-  spans.
-- A **self-hosting compiler**: the Menard compiler is written in Menard and
-  compiles itself to LLVM bitcode. It is the **only** compiler: there is no bootstrap
-  compiler in another language. The reference interpreter runs it until it has
-  compiled itself.
-- A **build tool written in its own language** (`mn`, §2.15): emit bitcode, invoke the
-  C toolchain, link the runtime, produce a binary. The top-level build command is
-  Menard code, not a shell script.
-- **Finishable by one person.** This is the primary constraint, and it outranks
-  every feature request.
-- **Not a general-purpose systems language.** If a feature is not required for
-  self-hosting, it is out of scope.
+- A language for writing programs: closures, heap data, records and variants with type parameters, exhaustive matching, a standard library, and diagnostics with source spans.
+- A self-hosting compiler: the Menard compiler is written in Menard and compiles itself to LLVM bitcode. It is the only compiler. The reference interpreter runs it, and the native binary takes over from there.
+- A build tool written in the language (`mn`, §2.15): emit bitcode, invoke the C toolchain, link the runtime, produce a binary.
+- Small on purpose. Finishability is the constraint that chose this shape. A feature that would double the backend, and that self-hosting does not need, stays out.
+- Not a general-purpose systems language. The host seam is the filesystem, the environment, and process spawning as an argument vector.
 
 ### 1.2 Success criteria
 
-All eight must hold, and each is testable.
+All eight hold, and each is testable.
 
 **Agreement — proven by the bootstrap gate:**
 
-1. The compiler compiles itself identically by both routes: the IR emitted by
-   **stage0** (the compiler running on the interpreter) and by **stage1** (the
-   native binary built from stage0's IR) is **byte-identical** — `bc0 == bc1` —
-   and consequently `stage1` and `stage2` are byte-identical binaries (§3.5).
-2. The determinism obligations of §2.11 hold, and are checked in CI rather than
-   asserted in prose.
-3. The **artifact the Menard driver produces is byte-identical to the artifact
-   the test harness produces** for the same source (§2.15). This is the driver's
-   end-to-end test, and it exercises the runtime's strings, lists, file I/O,
-   argv, exit codes and process spawning in one comparison.
+1. The compiler compiles itself identically by both routes: the IR emitted by **stage0** (the compiler running on the interpreter) and by **stage1** (the native binary built from stage0's IR) is **byte-identical** — `bc0 == bc1` — and consequently `stage1` and `stage2` are byte-identical binaries (§3.5).
+2. The determinism obligations of §2.11 hold, and are checked in CI rather than asserted in prose.
+3. The **artifact the Menard driver produces is byte-identical to the artifact the test harness produces** for the same source (§2.15). This is the driver's end-to-end test, and it exercises the runtime's strings, lists, file I/O, argv, exit codes and process spawning in one comparison.
 
 **Correctness — proven by the oracle and the test suite, not by the gate:**
 
-4. The **reference interpreter** (§5, phase 1) agrees with the compiled program
-   on the whole corpus: every corpus program produces the same output when
-   interpreted as when compiled by stage0 and by stage1. This is the project's
-   principal evidence of correctness, and it is why phase 1 is not optional.
-5. Programs using closures, type-parametric records and variants, GC'd heap
-   objects, exhaustive `match` and the standard library run correctly.
-6. The collector is **precise** (no conservative scanning in the final build)
-   and a stress corpus runs in bounded memory.
+4. The **reference interpreter** agrees with the compiled program on the corpus: every corpus program produces the same output when interpreted as when compiled by stage0 and by stage1. Stage2 is byte-identical to stage1, so it is the same compiler.
+5. Programs using closures, type-parametric records and variants, GC'd heap objects, exhaustive `match` and the standard library run correctly.
+6. The collector is **precise** (no conservative scanning) and a stress corpus runs in bounded memory.
 
 **Project hygiene:**
 
-7. A clean checkout bootstraps with one command, `make bootstrap`, from
-   **source alone**: Bun and the pinned LLVM toolchain are the only
-   prerequisites, and no pre-built compiler binary is committed or downloaded.
+7. A clean checkout bootstraps with one command, `make bootstrap`, from **source alone**: Bun and the pinned LLVM toolchain are the only prerequisites, and no pre-built compiler binary is committed or downloaded.
 8. All parse and type errors report a source span.
 
 ### 1.3 Non-goals
 
-Macros (**permanently — see §2.9**), **inferred** generics (Hindley–Milner
-inference, let-generalization), higher-kinded type parameters, type classes,
-**effect systems**, subtyping, row polymorphism, structural union types, classes
-or inheritance, exceptions, concurrency/threads, FFI beyond libc, finalizers,
-weak references, incremental compilation, a package manager, a REPL,
-self-hosting the runtime, **additional integer types**, **a `Byte` type**,
-**unboxed fields**, **general mutable arrays**, **debug text as a value**
-(§2.16), **`null`** (§2.10), **a second compiler** in any other language
-(§3.5), and **shell-string command execution, `fork`, signal handling, child
-timeouts, per-spawn environment or working directory, and streaming child I/O**
-(§2.15).
+Macros (**permanently — see §2.9**), **inferred** generics (Hindley–Milner inference, let-generalization), higher-kinded type parameters, type classes, **effect systems**, subtyping, row polymorphism, structural union types, classes or inheritance, exceptions, concurrency/threads, FFI beyond libc, finalizers, weak references, incremental compilation, a package manager, a REPL, self-hosting the runtime, **additional integer types**, **a `Byte` type**, **unboxed fields**, **general mutable arrays**, **debug text as a value** (§2.16), **`null`** (§2.10), **a second compiler** in any other language (§3.5), and **shell-string command execution, `fork`, signal handling, child timeouts, per-spawn environment or working directory, and streaming child I/O** (§2.15).
 
-For everything except macros, integer types, byte types, unboxing, mutable
-arrays, debug-as-value, null, a second compiler and that last group, these are
-v2 conversations.
-Each is listed specifically because it is an attractive detour that kills
-projects like this.
+For everything except macros, integer types, byte types, unboxing, mutable arrays, debug-as-value, null, a second compiler and that last group, these are later conversations. Each is listed because it is an attractive detour, and the language is better for having declined it.
 
 ### 1.4 Guiding principle
 
-> Every feature must be payable by one implementer. If a feature doubles backend
-> work without being required for self-hosting, it is deferred.
+> Every feature must be payable by one implementer. If a feature doubles backend work without being required for the language as it stands, it waits.
 
-**Not in this version.** The following are specified below and not implemented.
-§1.4 defers them: none is required to self-host.
+**Specified, and not in this version.** None of these is required to compile the compiler or to write the programs in `examples/`:
 
 - `Arr`, and `arr-new` / `arr-length` / `arr-nth` (§2.8.2)
 - `str-chars` (§2.8.2)
-- `map-entries` (§2.8.2). `Map.keys` returns that same order and is implemented by the runtime
+- `map-entries` (§2.8.2). `Map.keys` returns that same order, and `Map.to-list` returns the entries as pairs
 - the library function `find-on-path` (§2.8.3)
 
 ---
@@ -1003,12 +939,15 @@ nothing.
 #### 2.8.2 Runtime-backed operations
 
 These need either in-place mutation or an opaque representation, so they cannot
-be written in Menard at acceptable cost. `std/string`, `std/map`, and
-`std/string-buffer` publish them. Each call is one direct runtime call. The
+be written in Menard at acceptable cost. `std/string` and `std/string-buffer`
+publish them as direct runtime calls. `std/map` publishes `empty`, `size`, and
+`keys` that way. `set`, `lookup`, and `has` are Menard wrappers. The
 nominal types are built in; the operations are not ambient names, except
 the four intrinsics a map literal lowers to (`map-new`, `map-set`,
 `map-get`, `map-keys`). Those schemes exist so a literal needs no import.
-`std/map` still publishes `empty`, `set`, `lookup`, and `keys`.
+`map-set(map, key, value)`, `map-get(map, key)`, and `map-has(map, key)`
+take the map first. The published functions in `std/map` are ordinary
+Menard wrappers, and the map is their last parameter, so a pipe can fill it.
 
 ```
 ; std/string — byte-level and scalar-level access (§2.3)
@@ -1025,10 +964,11 @@ arr-length[a, n](xs: Arr a n) -> Int
 arr-nth[a, n](xs: Arr a n, i: Int) -> Maybe a
 
 ; std/map — persistent, value semantics, keys orderable (§2.3)
+; Published wrappers. The map is last. Intrinsics keep the map first.
 empty[k, v]() -> Map k v
-lookup[k, v](m: Map k v, k2: k) -> Maybe v
-set[k, v](m: Map k v, k2: k, v2: v) -> Map k v
-has[k, v](m: Map k v, k2: k) -> Bool
+set[k, v](k2: k, v2: v, m: Map k v) -> Map k v          ; calls map-set(m, k2, v2)
+lookup[k, v](k2: k, m: Map k v) -> Maybe v              ; calls map-get(m, k2)
+has[k, v](k2: k, m: Map k v) -> Bool                    ; calls map-has(m, k2)
 size[k, v](m: Map k v) -> Int
 keys[k, v](m: Map k v) -> List k
 map-entries[k, v](m: Map k v) -> List k, List v ; not in this version (§1.4)
@@ -1143,21 +1083,22 @@ import (§2.7).
 
 | Import | Publishes |
 |---|---|
-| `std/basics` | `id`, `not`, `min`, `max`, `abs`, `clamp` (implicit) |
-| `std/pair` | `Pair` |
-| `std/list` | `length`, `nth`, `append`, `reverse`, `map`, `filter`, `fold`, `zip`, `contains`, `sort`, `find`, `any`, `all`, `concat`, `flat-map`, `take`, `drop`, `sort-by` |
-| `std/map` | `empty`, `lookup`, `set`, `has`, `size`, `keys`, `from-list`, `to-list`, `remove`, `merge` |
-| `std/string` | `length`, `byte`, `slice`, `concat`, `from-char`, `starts-with`, `ends-with`, `has`, `join`, `split`, `lines` |
+| `std/basics` | `id`, `always`, `not`, `min`, `max`, `abs`, `clamp` (implicit) |
+| `std/pair` | `Pair`, `map-fst`, `map-snd`, `map-both` |
+| `std/list` | `length`, `is-empty`, `head`, `tail`, `singleton`, `repeat`, `range`, `nth`, `append`, `reverse`, `map`, `indexed-map`, `filter`, `filter-map`, `partition`, `intersperse`, `fold`, `sum`, `product`, `minimum`, `maximum`, `zip`, `unzip`, `member`, `sort`, `sort-by`, `find`, `any`, `all`, `concat`, `flat-map`, `take`, `drop` |
+| `std/map` | `empty`, `singleton`, `set`, `lookup`, `has`, `size`, `is-empty`, `keys`, `values`, `from-list`, `to-list`, `map`, `filter`, `fold`, `remove`, `merge` |
+| `std/string` | `length`, `byte`, `slice`, `concat`, `from-char`, `from-int`, `is-empty`, `starts-with`, `ends-with`, `contains`, `drop`, `drop-right`, `left`, `right`, `repeat`, `replace`, `trim`, `trim-left`, `trim-right`, `index-of`, `index-of-from`, `split`, `split-using`, `join`, `lines`, `words` |
+| `std/char` | `is-digit`, `is-upper`, `is-lower`, `is-alpha`, `is-whitespace`, `to-upper`, `to-lower` |
+| `std/int` | `parse`, `from-str` |
 | `std/string-buffer` | `new`, `append!`, `append-byte!`, `length`, `clear!`, `to-str`, `take-str!`, `append-show!` |
-| `std/result`, `std/maybe` | `map`, `and-then`, `unwrap-or` |
+| `std/result` | `map`, `and-then`, `map2`, `map-error`, `to-maybe`, `from-maybe` |
+| `std/maybe` | `map`, `and-then`, `map2` |
 | `std/io`, `std/fs`, `std/proc`, `std/sys` | the host-seam wrappers (§2.15) |
 | `std/console` | `tty-color`, `paint` |
 | `std/cli` | flag and positional parsing over an argument list |
 | `std/test` | discovery, pass/fail counts, the summary line |
 
-Names are flat. `std/string` publishes `has` rather than `contains`, because
-`std/list` already publishes `contains`. `map` on lists, results, and maybes is
-the same name in three modules; a program imports one of them.
+The collection, the string, the `Maybe`, and the `Result` are the last parameter, so `|>` can fill them. A missing `Maybe` is `?`. `to-maybe(r) ? default` is the same step for a `Result`. `member` is the list predicate and `contains` is the string predicate, so the two can be imported together. `map` on lists, results, maybes, and maps is the same name in four modules; a program imports one of them, or qualifies it.
 
 **`sort` takes no comparator.** It uses the derived canonical order — with
 `compare` if a Menard-level comparator is wanted internally, but there is no
@@ -2884,80 +2825,32 @@ hottest path in the compiler.
 
 ---
 
-## 5. Phasing
+## 5. How it was built
 
-Each phase is independently useful, and each has an acceptance test. Do not start
-a phase before the previous one's test passes.
+The compiler was built in steps. Each step had an acceptance test, and the next step started when that test passed. All of them have passed. `make bootstrap` is the chain.
 
-| Phase | Deliverable | Acceptance test | Est. |
-|---|---|---|---|
-| **0** | Reader, printer, AST, spans, casing check, test harness (TypeScript) | Round-trips the whole corpus, including invalid UTF-8; fuzzing finds no crashes | 1–2 wk |
-| **1** | **Reference interpreter** in TypeScript — full semantics, no LLVM; §2.8.2 built-ins; **virtual and real filesystem** for the seam; **modules**; fit to be a **build host** (§3.5): host-stack-independent recursion, asymptotically honest built-ins, adequate throughput | Runs the prelude and a test suite and becomes the semantic oracle; **and** passes the build-host benchmark (§3.7) — a multi-module program that reads and writes files, recurses deeply and builds large maps, within its time budget | 4–5 wk |
-| **2** | **The compiler, in Menard, run as stage0**: reader, desugar, typing + instantiation, closure conversion, derive engine, **LLVM bitcode** emission, **static pool**, **leaking allocator**; the minimal C runtime | Compiles real programs with closures, parameterised records and variants; binaries run; every corpus program's compiled output matches the interpreter's; `show` and order match the golden corpus | 8–12 wk |
-| **3** | **Self-hosting**: stage0 compiles the compiler; `stage1`, `stage2`; **the `mn` driver** (§2.15) built natively | **`bc0 == bc1`** and `stage1 == stage2`; **and the driver's artifact is byte-identical to the harness's** | 2–4 wk |
-| **4** | Precise collector: copying nursery, remembered set, mark-sweep old space only when it grows; layout-kind and location scanning | GC stress corpus runs; heap-verify asserts the §2.2 scan rule (immediate, empty word, or aligned object) and is clean | done |
-| **5** | Performance and polish: derived `show` prints the source name, native `spawn-capture`, `-O2` on both link paths | Stage0 emits `src/mn.mnd` in under 2 minutes | done |
+| Step | What landed | Acceptance test |
+|---|---|---|
+| **0** | Reader, printer, AST, spans, casing check, test harness (TypeScript) | Round-trips the corpus, including invalid UTF-8; fuzzing finds no crashes |
+| **1** | Reference interpreter: full semantics, the built-ins, a virtual and a real filesystem, modules, and a build host that recurses on its own stack | Runs the library and the suite, and is the semantic oracle. The build-host benchmark stays inside its time budget |
+| **2** | The compiler, in Menard, run on the interpreter: reader, desugar, typing, closure conversion, derive, LLVM bitcode, the static pool, and a C runtime | Programs with closures and parameterised types compile and run. Corpus output matches the interpreter |
+| **3** | Self-hosting: stage0, stage1, stage2, and the `mn` driver | `bc0 == bc1`, `stage1 == stage2`, and the driver's artifact matches the harness |
+| **4** | A precise collector: a copying nursery, a remembered set, and mark-sweep of old space only when it grows | The GC stress corpus runs, and heap-verify is clean |
+| **5** | Derived `show` prints the source name, `spawn-capture` is native, and both link paths use `-O2` | Stage0 emits `src/mn.mnd` in under two minutes |
 
-**Phase 1 cannot be skipped**, for two reasons. §2.14: the gate cannot detect a
-bug in the compiler's own logic, so the interpreter is the project's principal
-correctness oracle. And §3.5: the interpreter is the only way the compiler runs
-before it can run itself — there is no other bootstrap compiler. It freezes the
-semantics before you touch IR, and every weakness it has as a build host becomes
-a weakness of phase 2's inner loop, which is why its build-host requirements are
-part of its acceptance test rather than deferred to when they hurt.
+The interpreter came first, and it is still the oracle. The gate cannot see a bug that both executions share, because they are the same source (§2.14). It also cannot run the compiler before the compiler can run itself (§3.5). A feature reaches the interpreter before the compiler uses it (§3.8).
 
-**Phase 1 is also when Menard tooling starts.** Anything written in Menard — the
-compiler included, but also prelude libraries, a formatter, a test runner,
-`find-on-path`, span handling — runs on the interpreter from the moment it
-works, so it can be written and tested against the oracle long before a native
-binary exists.
+The compiler was written in Menard from the first line, and developed by running it on the interpreter. Self-hosting landed on a leaking allocator, so a collector bug and a bootstrap failure would not arrive together. The nursery replaced that allocator. `mn` is a Menard program: emit, link, rename into place. Comparing its artifact with the harness is an end-to-end test of strings, files, `Result`, exit codes, and `posix_spawn`.
 
-**Phase 2 is written in the language it implements, from the first line.** The
-compiler is developed on the interpreter: `menard run src/mn.mnd -- file.mnd`
-is stage0 compiling one file. That makes phase 2 the language's first large
-program as well as its compiler, and it is where interpreter bugs and missing
-features surface. The rule from §3.8 governs: a feature reaches the interpreter
-before the compiler uses it.
+The collector is precise. A minor collection copies nursery survivors from the shadow stack and the remembered set. A major mark-sweep runs only after old space crosses a growth threshold. Static objects are leaves.
 
-**Phase 2 shipped on a leaking bump allocator.** Self-hosting landed before the
-collector, because a collector bug and a bootstrap failure at the same time is
-how this kind of project loses months. Phase 4 replaced that bump with the
-nursery. (`dump` has been available since phase 1.)
-
-**Phase 3 is short because phase 2 did the work.** Once stage0 compiles every
-construct the compiler uses, self-hosting is running stage0 on the compiler's own
-source and fixing what the gate shows. What remains is the determinism
-obligations that only a program as large as the compiler exercises.
-
-**The driver lands with self-hosting, and it is a second acceptance test rather
-than a second deliverable.** `mn` is a Menard program, so it runs on the
-interpreter as soon as the interpreter can spawn, and `make bootstrap` may use it
-there or drive `clang` from a script. Once stage1 exists, running the whole chain
-through a native `mn build` and byte-comparing against the script's artifact is a
-genuine end-to-end test of the runtime — arena construction, `argv`, file I/O,
-`Result`, exit codes and `posix_spawn` — that no IR comparison would catch.
-
-**Phase 4 is a precise collector, not a conservative scan.** Shapes, layout
-kinds, and the shadow stack already existed, so a Boehm-style scan of the
-address space was not built. A minor collection copies nursery survivors from
-the shadow stack and the remembered set. A major mark-sweep runs only after old
-space crosses a growth threshold. Layout kind and location decide what is
-scanned; static objects are leaves.
-
-**Phase 5 is performance and polish.** Derived `show` and `dump` print the
-constructor name from the source, with the module prefix removed. `spawn-capture`
-is a native `mn_spawn_capture` as well as the host builtin, and the driver's
-clang triple probe reads that capture instead of leaving probe files beside the
-binary. Both link paths use `-O2`. The acceptance budget is two minutes for
-stage0 to emit `src/mn.mnd`; the clang link is outside that budget. NaN-boxing
-stays out: it would unbox `Float` at the cost of ~48 bits of `Int` payload,
-rejected in §2.2, and the static pool's float literals would become moot.
+Derived `show` and `dump` print the constructor name from the source, with the module prefix removed. The driver's clang triple probe reads `spawn-capture` instead of leaving probe files beside the binary. NaN-boxing stays out: it would unbox `Float` by giving up most of the `Int` payload (§2.2).
 
 ---
 
 ## 6. Known hazards
 
-The failure modes this design is most exposed to, and what holds each one off.
+These are the invariants the implementation watches. Each row is a way the representation or the bootstrap can go quietly wrong, and the check that holds it.
 
 | Hazard | Likelihood | Impact | Mitigation |
 |---|---|---|---|
@@ -3098,7 +2991,8 @@ in two well-understood places.
 ## 8. Definition of done
 
 - [ ] All eight success criteria (§1.2) hold, with correctness and agreement
-      evidenced separately.
+      evidenced separately. Gap: §2.11 is not checked row by row, and no test
+      measures a memory bound for the stress corpus.
 - [x] `make bootstrap` builds from a clean checkout, one command, from source
       alone — interpreter, then stage0, stage1, stage2 — and, once `mn` exists,
       that command runs the Menard driver.
@@ -3107,37 +3001,54 @@ in two well-understood places.
 - [x] `make check-fixed-point` passes in CI: `bc0 == bc1` and `stage1 == stage2`,
       **and** the driver's artifact matches the harness's byte for byte.
 - [ ] All determinism obligations (§2.11, including §2.11.B) hold and are checked
-      in CI, not asserted in prose.
-- [ ] The reference interpreter agrees with programs compiled by stage0, stage1
-      and stage2 on the whole corpus — the correctness evidence the gate cannot
-      supply.
-- [ ] The interpreter meets its build-host requirements (§3.5): recursion bounded
-      by memory rather than the host stack, built-ins with the complexity this
-      specification states, and stage0 compiling the compiler within the
-      benchmark's budget.
+      in CI, not asserted in prose. Gap: `bc0 == bc1` checks the compiler's own
+      emission. No test walks the order, identity, text, arithmetic, boundary,
+      and seed rows one by one.
+- [x] The reference interpreter agrees with programs compiled by stage0 and by
+      stage1 on the hermetic corpus (`tests/corpus/oracle.test.ts`, run from
+      `make check-fixed-point` with `MENARD_STAGE1`). Stage2 is byte-identical
+      to stage1, so it is the same compiler.
+- [x] The interpreter meets its build-host requirements (§3.5).
+      `tests/bench/build-host.test.ts` recurses 100k frames, walks a long loop,
+      and builds large maps inside a time budget, and `make check-fixed-point`
+      refuses a stage0 emit of `src/mn.mnd` that takes longer than two minutes.
 - [x] The interpreter's typer and the compiler's agree on every negative fixture.
 - [ ] The collector is precise, and the GC stress corpus runs in bounded memory.
+      Gap: `tests/phase2/print-values.test.ts` runs one program with
+      `MENARD_GC_STRESS` and `MENARD_HEAP_VERIFY`. Nothing measures a memory bound.
 - [ ] **The §2.2 invariants hold and are asserted in the heap-verify build**,
       including that every slot word matches its declared **layout kind**, that
       every object — heap and static — is 8-byte aligned, and that **every
       scanned slot word is an immediate, the empty word, or an aligned object**.
+      Gap: heap-verify checks reachable words after a collection, and only
+      `print-values` turns it on. It does not walk the static pool, and it is
+      not run over the corpus.
 - [x] **`Float` is a `bytes` object**: its f64 payload is never scanned as slots,
       and no boxed float can be traced as a pointer.
 - [ ] **Static objects are 8-byte aligned, deduplicated by byte content, and
       emitted sorted by byte content**, identically by stage0 and stage1.
+      Gap: `src/pool/pool.test.mnd` checks dedup and byte-sort on one fixture.
+      Alignment of every static, and a pool-only comparison of stage0 with
+      stage1, are not a separate test.
 - [ ] **Static-ness is unobservable**: no operation — including `show`, `=`,
       `compare` and `dump` — distinguishes a static `Str`, `Float` or nullary
-      constructor from a heap-allocated one.
+      constructor from a heap-allocated one. Gap: no test compares those
+      operations on a static value and a heap value.
 - [ ] **Every nullary variant constructor is a single-word static object**,
       including `None` and every payload-free constructor of a user variant,
-      shared across all instantiations.
+      shared across all instantiations. Gap: the pool summary names a nullary
+      constructor. Its size, and sharing across instantiations, are not asserted.
 - [ ] **A `StringBuffer`'s backing store is always heap-owned**; no static payload
-      is ever written.
+      is ever written. Gap: no test tries to place a buffer's bytes in the
+      static pool.
 - [ ] **No static object holds word slots**, or, if one does, the
-      statics-hold-only-immediates invariant is stated and asserted.
+      statics-hold-only-immediates invariant is stated and asserted. Gap: the
+      pool emitter keeps statics as bytes or header-only. Heap-verify does not
+      scan the pool for word slots.
 - [ ] **There is no `null`**: no operation returns one, no `deref` needs a null
       check, and the empty word appears in no Menard type, no canonical text form
-      (§2.13), and no `dump` output (§2.16).
+      (§2.13), and no `dump` output (§2.16). Gap: no test rejects an empty-word
+      result or scans `dump` output for one.
 - [x] **On the published surface (`stdlib/`), `!` appears on exactly one
       special form and five functions** — `set!`, the four `StringBuffer`
       operations that mutate, and `Buf.append-show!` — and on nothing that merely
@@ -3157,22 +3068,34 @@ in two well-understood places.
 - [x] Every parse and type error carries a source span.
 - [x] No macros. The special-form list in §2.5 is the whole language.
 - [ ] One integer type, and no `Byte`. The width and operation rules in §2.2 hold
-      everywhere, and the host never models the tag.
+      everywhere, and the host never models the tag. Gap: no test rejects a
+      second integer width.
 - [ ] Type parameters are declared, never inferred, and no higher-kinded
       parameters, type classes, effect systems or subtyping have crept in.
+      Gap: negative fixtures reject an unbound name. Nothing fails a program
+      for inferring a parameter, because inference is absent.
 - [ ] No alias name appears in any emitted byte, and no absolute path does either.
+      Gap: the gate compares two runs that see the same paths. No test compiles
+      one program under two alias spellings.
 - [ ] No Unicode normalisation anywhere; string equality and order are byte-based;
       `Str` values that are not valid UTF-8 are handled, not assumed away.
+      Gap: the reader round-trips `tests/corpus/invalid-utf8.mnd`. Nothing
+      asserts that equality skips normalisation.
 - [ ] `Map` is persistent and its keys are orderable; nothing in the compiler or
-      the prelude relies on aliasing.
+      the prelude relies on aliasing. Gap: map round-trips are tested. No test
+      shows that updating one binding leaves another binding of the same map
+      unchanged.
 - [x] Exactly two reference types — `Ref` and `StringBuffer` — both non-showable,
       both non-orderable, neither reaching an output path. The buffer's
       copy-on-write rule is implemented in the interpreter and the runtime, and
       tested.
 - [ ] **Debug text cannot reach the artifact**: `dump` writes only to fd 2, has no
       value form and no accessor, and no diagnostic path calls it. A forgotten
-      `dump` does not change `bc0 == bc1`. (§2.16)
-- [ ] Every fixed bug has a permanent corpus file.
+      `dump` does not change `bc0 == bc1`. (§2.16) Gap: no test asserts that a
+      `dump` call is absent from bitcode, or that adding one leaves `bc0 == bc1`
+      unchanged.
+- [ ] Every fixed bug has a permanent corpus file. Gap: nothing checks that a
+      fix added one.
 - [x] The reference interpreter is retained and documented as the reference
       semantics, and it runs every revision of the compiler.
 - [x] This specification states plainly what the bootstrap gate does *not* prove

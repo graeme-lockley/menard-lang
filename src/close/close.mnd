@@ -218,14 +218,14 @@ let apply-subst-paren-head(head: Ast, args: List Ast, sp: Span, subst: Map Str L
     | Some(name) -> apply-subst-paren-named(name, head, args, sp, subst)
 
 let apply-subst-paren-named(name: Str, head: Ast, args: List Ast, sp: Span, subst: Map Str LiftedInfo) -> Ast =
-  match (Map.lookup(subst, name))
+  match (Map.lookup(name, subst))
     | None -> ParenNode(head :: apply-subst-list(args, subst), sp)
     | Some(_) -> rewrite-call(name, args, sp, subst)
 
 ; `(name arg…)` for a known let-bound function. An empty capture is a
 ; direct call of the lifted `defn`. A capture stays `mn-apply-0/1/2`.
 let rewrite-call(name: Str, args: List Ast, sp: Span, subst: Map Str LiftedInfo) -> Ast =
-  match (Map.lookup(subst, name))
+  match (Map.lookup(name, subst))
     | None -> ParenNode(SymNode(name, sp) :: apply-subst-list(args, subst), sp)
     | Some(info) -> rewrite-call-info(name, info, args, sp, subst)
 
@@ -355,7 +355,7 @@ let free-vars-in-scope-order(scope: List Str, used: List Str, exclude: List Str)
     | s :: rest -> free-vars-in-scope-order-cons(s, rest, used, exclude)
 
 let free-vars-in-scope-order-cons(s: Str, rest: List Str, used: List Str, exclude: List Str) -> List Str =
-  if (contains(used, s) && not(contains(exclude, s))) -> s :: free-vars-in-scope-order(rest, used, exclude) | free-vars-in-scope-order(rest, used, exclude)
+  if (member(s, used) && not(member(s, exclude))) -> s :: free-vars-in-scope-order(rest, used, exclude) | free-vars-in-scope-order(rest, used, exclude)
 
 let fresh-lam-name(counter: Ref Int) -> Str {
   let n = deref(counter)
@@ -414,7 +414,7 @@ let is-direct-lift(bind-name: Maybe Str, free-vars: List Str) -> Bool =
 let direct-body-subst(subst: Map Str LiftedInfo, bind-name: Maybe Str, lam-name: Str, direct: Bool) -> Map Str LiftedInfo =
   match (bind-name)
     | Some(name) ->
-      if (direct) -> Map.set(subst, name, LiftedInfo(lam-name, [])) | subst
+      if (direct) -> Map.set(name, LiftedInfo(lam-name, []), subst) | subst
     | None -> subst
 
 let lifted-params(direct: Bool, param-names: List Str) -> List Ast =
@@ -427,7 +427,7 @@ let lifted-body(direct: Bool, free-vars: List Str, body: Ast) -> Ast =
 let lift-bind-subst(subst: Map Str LiftedInfo, bind-name: Maybe Str, lam-name: Str, free-vars: List Str) -> Map Str LiftedInfo =
   match (bind-name)
     | None -> subst
-    | Some(name) -> Map.set(subst, name, LiftedInfo(lam-name, free-vars))
+    | Some(name) -> Map.set(name, LiftedInfo(lam-name, free-vars), subst)
 
 ; ---------------------------------------------------------------------------
 ; close-expr / close-body

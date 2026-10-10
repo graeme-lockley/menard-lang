@@ -1,5 +1,8 @@
 # Menard — Decision record
 
+The language these decisions produced is described in [guide.md](guide.md).
+This file is the history: what was chosen, what was turned down, and when.
+
 Dated ratifications and reversals, newest first, plus the index of the standing
 decisions.
 

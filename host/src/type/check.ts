@@ -128,6 +128,10 @@ function installBuiltins(env: TypeEnv): void {
     params: ["k", "v"],
     type: tFn([mapType, mapKey], tMaybe(mapVal)),
   });
+  env.values.set("map-has", {
+    params: ["k", "v"],
+    type: tFn([mapType, mapKey], B),
+  });
   env.values.set("map-keys", {
     params: ["k", "v"],
     type: tFn([mapType], tList(mapKey)),

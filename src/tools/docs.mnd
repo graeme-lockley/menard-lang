@@ -99,7 +99,7 @@ let scan-lines(ls: List Str, docs: List Str, module: Str, acc: Scan) -> Scan =
         let line = raw
         cond
           | line == "" -> scan-lines(rest, [], module, acc)
-          | String.byte(0, line) == 59 -> scan-lines(rest, append(docs, [comment-body(line)]), module-of(comment-body(line), module), acc)
+          | String.byte(0, line) == 59 -> scan-lines(rest, append([comment-body(line)], docs), module-of(comment-body(line), module), acc)
           | is-defn(line) ->
             {
               let rec = scan-record(module, defn-name(line), line, docs, is-pub(line))

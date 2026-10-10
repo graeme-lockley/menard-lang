@@ -85,7 +85,7 @@ let line-starts(src: Str) -> List Int =
 let index-line-starts(starts: List Int, i: Int, m: Map Int Int) -> Map Int Int =
   match (starts)
     | [] -> m
-    | s :: rest -> index-line-starts(rest, i + 1, Map.set(m, i, s))
+    | s :: rest -> index-line-starts(rest, i + 1, Map.set(i, s, m))
 
 let line-start-count(starts: List Int) -> Int =
   match (starts)
@@ -98,7 +98,7 @@ let line-search(m: Map Int Int, lo: Int, hi: Int, offset: Int) -> Int =
   if (lo >= hi) -> lo | line-search-mid(m, lo, hi, offset, (lo + hi) / 2)
 
 let line-search-mid(m: Map Int Int, lo: Int, hi: Int, offset: Int, mid: Int) -> Int =
-  match (Map.lookup(m, mid))
+  match (Map.lookup(mid, m))
     | None -> lo
     | Some(s) ->
       if (s > offset) -> line-search(m, lo, mid, offset) | line-search(m, mid + 1, hi, offset)
@@ -412,10 +412,10 @@ let note-version(versions: Ref (Map Str Str), spec: Str) -> Result Unit Str =
   match (github-ver(spec))
     | None -> Ok(())
     | Some(GithubVer(key, version)) ->
-      match (Map.lookup(deref(versions), key))
+      match (Map.lookup(key, deref(versions)))
         | None ->
           {
-            set!(versions, Map.set(deref(versions), key, version))
+            set!(versions, Map.set(key, version, deref(versions)))
             Ok(())
           }
         | Some(prev) ->
@@ -584,10 +584,10 @@ let gather-pub-forms-names(forms: List Ast, acc: List Str) -> List Str =
 let list-to-bool-map(xs: List Str, acc: Map Str Bool) -> Map Str Bool =
   match (xs)
     | [] -> acc
-    | n :: rest -> list-to-bool-map(rest, Map.set(acc, n, true))
+    | n :: rest -> list-to-bool-map(rest, Map.set(n, true, acc))
 
 let name-is-pub(pub-names: Map Str Bool, name: Str) -> Bool =
-  match (Map.lookup(pub-names, name))
+  match (Map.lookup(name, pub-names))
     | Some(_) -> true
     | None -> false
 
@@ -595,7 +595,7 @@ let module-prefix(mid: Int) -> Str =
   String.concat("__m", show(mid), "_")
 
 let add-rename(renames: Map Str Str, prefix: Str, name: Str) -> Map Str Str =
-  Map.set(renames, name, String.concat(prefix, name))
+  Map.set(name, String.concat(prefix, name), renames)
 
 ; Polynomial hash of the path bytes. The modulus keeps every step inside a
 ; 63-bit Int. The same path always yields the same symbol.
@@ -620,7 +620,7 @@ let build-renames-from-list(names: List Str, pub-names: Map Str Bool, prefix: St
     | [] -> acc
     | n :: rest ->
       cond
-        | n == "main" -> build-renames-from-list(rest, pub-names, prefix, main-sym, Map.set(acc, n, main-sym))
+        | n == "main" -> build-renames-from-list(rest, pub-names, prefix, main-sym, Map.set(n, main-sym, acc))
         | name-is-pub(pub-names, n) -> build-renames-from-list(rest, pub-names, prefix, main-sym, acc)
         | else -> build-renames-from-list(rest, pub-names, prefix, main-sym, add-rename(acc, prefix, n))
 
@@ -638,7 +638,7 @@ let build-renames(forms: List Ast, mid: Int, main-sym: Str, qualify: Bool, path:
 }
 
 let rename-lookup(renames: Map Str Str, name: Str) -> Str =
-  match (Map.lookup(renames, name))
+  match (Map.lookup(name, renames))
     | Some(n) -> n
     | None -> name
 
@@ -679,10 +679,10 @@ let shared-io-ctor(name: Str) -> Bool =
   name == "NotFound" || name == "Permission"
 
 let register-one-export!(exports: Ref (Map Str Str), path: Str, name: Str, kind: Str) -> Result Unit Str =
-  match (Map.lookup(deref(exports), name))
+  match (Map.lookup(name, deref(exports)))
     | None ->
       {
-        set!(exports, Map.set(deref(exports), name, path))
+        set!(exports, Map.set(name, path, deref(exports)))
         Ok(())
       }
     | Some(prev) ->
@@ -865,7 +865,7 @@ let uniquify-module-body(path: Str, entry-path: Str, mid: Int, forms: List Ast, 
     | None ->
       Result.and-then(
         fn (_) {
-          let renames = build-renames(forms, mid, main-symbol(path), Map.has(deref(qualified-imports), path), path)
+          let renames = build-renames(forms, mid, main-symbol(path), Map.has(path, deref(qualified-imports)), path)
           note-renamed-runtime!(path, forms, renames)
           let stripped = strip-imports-and-pub(forms, [])
           let renamed = rename-forms(stripped, renames)
@@ -873,18 +873,18 @@ let uniquify-module-body(path: Str, entry-path: Str, mid: Int, forms: List Ast, 
           note-entry!(path, entry-path, body, entry)
           Ok(body)
         },
-        if (Map.has(deref(qualified-imports), path)) -> Ok(()) | register-forms-exports!(exports, path, forms)
+        if (Map.has(path, deref(qualified-imports))) -> Ok(()) | register-forms-exports!(exports, path, forms)
       )
 
 ; ---------------------------------------------------------------------------
 ; Module graph load
 
 let load-module-into(path: Str, entry-path: Str, visited: Ref (Map Str Bool), acc: Ref (List Ast), mid: Ref Int, exports: Ref (Map Str Str), paths: Ref (List Str), sources: Ref (Map Str Str), inits: Ref (List Str), entry: Ref EntryMain, versions: Ref (Map Str Str)) -> Result Unit Str =
-  match (Map.lookup(deref(visited), path))
+  match (Map.lookup(path, deref(visited)))
     | Some(_) -> Ok(())
     | None ->
       {
-        set!(visited, Map.set(deref(visited), path, true))
+        set!(visited, Map.set(path, true, deref(visited)))
         Result.and-then(
           fn (_) =
             match (read-file(path))
@@ -895,7 +895,7 @@ let load-module-into(path: Str, entry-path: Str, visited: Ref (Map Str Bool), ac
       }
 
 let load-module-source(path: Str, entry-path: Str, src: Str, visited: Ref (Map Str Bool), acc: Ref (List Ast), mid: Ref Int, exports: Ref (Map Str Str), paths: Ref (List Str), sources: Ref (Map Str Str), inits: Ref (List Str), entry: Ref EntryMain, versions: Ref (Map Str Str)) -> Result Unit Str {
-  set!(sources, Map.set(deref(sources), path, src))
+  set!(sources, Map.set(path, src, deref(sources)))
   match (read-all(src))
     | Err(e) -> Err(String.concat("parse error in ", path))
     | Ok(forms) -> load-module-casing(path, entry-path, forms, visited, acc, mid, exports, paths, sources, inits, entry, versions)
@@ -936,7 +936,7 @@ let qualified-import-paths(from: Str, forms: List Ast, acc: Map Str Str) -> Map 
       match (import-alias-of(f))
         | Some(name) ->
           match (parse-import-spec(f))
-            | Some(spec) -> qualified-import-paths(from, rest, Map.set(acc, name, resolve-import-path(from, spec)))
+            | Some(spec) -> qualified-import-paths(from, rest, Map.set(name, resolve-import-path(from, spec), acc))
             | None -> qualified-import-paths(from, rest, acc)
         | None -> qualified-import-paths(from, rest, acc)
 
@@ -951,8 +951,8 @@ let mark-qualified-names!(names: List Str, paths: Map Str Str) -> Unit =
     | [] -> ()
     | name :: rest ->
       {
-        match (Map.lookup(paths, name))
-          | Some(path) -> set!(qualified-imports, Map.set(deref(qualified-imports), path, true))
+        match (Map.lookup(name, paths))
+          | Some(path) -> set!(qualified-imports, Map.set(path, true, deref(qualified-imports)))
           | None -> ()
         mark-qualified-names!(rest, paths)
       }
@@ -969,7 +969,7 @@ let rewrite-qual-project(obj: Ast, field: Ast, sp: Span, aliases: Map Str Str, q
   let field2 = rewrite-qual-ast(field, aliases, qualify)
   match (sym-str(obj2))
     | Some(name) ->
-      match (Map.lookup(aliases, name))
+      match (Map.lookup(name, aliases))
         | Some(path) ->
           match (sym-str(field2))
             | Some(field-name) ->
@@ -1024,7 +1024,7 @@ let load-module-deps(path: Str, entry-path: Str, forms: List Ast, visited: Ref (
           set!(mid, id + 1)
           set!(paths, snoc-str(deref(paths), path))
           let src =
-            match (Map.lookup(deref(sources), path))
+            match (Map.lookup(path, deref(sources)))
               | Some(s) -> s
               | None -> ""
           let stamped = stamp-forms(forms, src, id)
@@ -1066,7 +1066,7 @@ pub let flatten-module-graph(entry-path: Str, src: Str) -> Result Flat Str {
   let inits = ref([])
   let entry = ref(EntryMain("", false, false))
   let versions = ref(Map.empty())
-  set!(visited, Map.set(deref(visited), entry-path, true))
+  set!(visited, Map.set(entry-path, true, deref(visited)))
   Result.and-then(fn (_) = Ok(Flat(forms-with-bootstrap(deref(acc), deref(inits), deref(entry)), deref(paths))), load-module-source(entry-path, entry-path, src, visited, acc, mid, exports, paths, sources, inits, entry, versions))
 }
 
@@ -1126,9 +1126,6 @@ let string-op(name: Str) -> Maybe Str =
 let map-op(name: Str) -> Maybe Str =
   cond
     | name == "empty" -> Some("map-new")
-    | name == "lookup" -> Some("map-get")
-    | name == "set" -> Some("map-set")
-    | name == "has" -> Some("map-has")
     | name == "size" -> Some("map-size")
     | name == "keys" -> Some("map-keys")
     | else -> None()
@@ -1164,7 +1161,7 @@ let runtime-binding(path: Str, name: Str) -> Maybe Str =
     | else -> None()
 
 let note-runtime!(symbol: Str, op: Str) -> Unit =
-  set!(runtime-ops, Map.set(deref(runtime-ops), symbol, op))
+  set!(runtime-ops, Map.set(symbol, op, deref(runtime-ops)))
 
 let runtime-decl-name(form: Ast) -> Maybe Str =
   match (unwrap-pub-form(form))
@@ -1206,7 +1203,7 @@ let note-local-runtime-list!(path: Str, forms: List Ast) -> Unit =
 let runtime-names(path: Str) -> List Str =
   cond
     | path-ends(path, "/stdlib/string.mnd") -> ["length", "byte", "slice", "concat", "from-char"]
-    | path-ends(path, "/stdlib/map.mnd") -> ["empty", "lookup", "set", "has", "size", "keys"]
+    | path-ends(path, "/stdlib/map.mnd") -> ["empty", "size", "keys"]
     | path-ends(path, "/stdlib/string-buffer.mnd") -> ["new", "append!", "append-byte!", "length", "clear!", "to-str", "take-str!"]
     | else -> []
 
@@ -1267,7 +1264,7 @@ let fold-runtime-list(xs: List Ast) -> List Ast =
     | x :: rest -> fold-runtime-ast(x) :: fold-runtime-list(rest)
 
 let fold-runtime-call(name: Str, args: List Ast, sp: Span, whole: List Ast) -> Ast =
-  match (Map.lookup(deref(runtime-ops), name))
+  match (Map.lookup(name, deref(runtime-ops)))
     | Some(op) ->
       if (op == "str-concat") -> fold-concat-args(name, fold-runtime-list(args), sp) | ParenNode(sym-node-span(name, sp) :: fold-runtime-list(args), sp)
     | None -> ParenNode(fold-runtime-list(whole), sp)
@@ -1319,7 +1316,7 @@ let rewrite-runtime-list(xs: List Ast) -> List Ast =
     | x :: rest -> rewrite-runtime-ast(x) :: rewrite-runtime-list(rest)
 
 let rewrite-runtime-call(name: Str, args: List Ast, sp: Span, whole: List Ast) -> Ast =
-  match (Map.lookup(deref(runtime-ops), name))
+  match (Map.lookup(name, deref(runtime-ops)))
     | Some(op) -> ParenNode(sym-node-span(op, sp) :: permute-args(op, rewrite-runtime-list(args)), sp)
     | None -> ParenNode(rewrite-runtime-list(whole), sp)
 

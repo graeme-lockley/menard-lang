@@ -1,8 +1,8 @@
 ; Operations on the language List type.
+; The list is the last parameter, so a pipe can fill it.
 ; @module std/list
 
 import std/pair
-import std/maybe as Maybe
 
 ; Number of elements in xs.
 ; @test length([1, 2, 3]) => 3
@@ -11,31 +11,66 @@ pub let length[a](xs: List a) -> Int =
     | [] -> 0
     | _ :: t -> 1 + length(t)
 
+; Whether xs has no elements.
+; @test is-empty([]) => true
+; @test is-empty([1]) => false
+pub let is-empty[a](xs: List a) -> Bool =
+  match (xs)
+    | [] -> true
+    | _ -> false
+
+; The first element, or None when xs is empty.
+; @test head([10, 20]) => Some(10)
+; @test head([]) => None()
+pub let head[a](xs: List a) -> Maybe a =
+  match (xs)
+    | [] -> None()
+    | h :: _ -> Some(h)
+
+; xs without its first element, or None when xs is empty.
+; @test tail([10, 20]) => Some([20])
+; @test tail([]) => None()
+pub let tail[a](xs: List a) -> Maybe (List a) =
+  match (xs)
+    | [] -> None()
+    | _ :: t -> Some(t)
+
+; A list of one element.
+; @test singleton(1) => [1]
+pub let singleton[a](x: a) -> List a =
+  [x]
+
+; n copies of x. A non-positive count is empty.
+; @test repeat(3, 1) => [1, 1, 1]
+; @test repeat(0, 1) => []
+pub let repeat[a](n: Int, x: a) -> List a =
+  if (n <= 0) -> [] | x :: repeat(n - 1, x)
+
+; The integers from lo through hi, inclusive. Empty when lo is greater than hi.
+; @test range(1, 3) => [1, 2, 3]
+; @test range(3, 1) => []
+pub let range(lo: Int, hi: Int) -> List Int =
+  if (lo > hi) -> [] | lo :: range(lo + 1, hi)
+
 ; The element at i, or None when i is past the end.
-; @test nth([10, 20], 1) => Some(20)
-; @test nth([10], 3) => None()
-pub let nth[a](xs: List a, i: Int) -> Maybe a =
+; A non-positive index selects the first element.
+; @test nth(1, [10, 20]) => Some(20)
+; @test nth(3, [10]) => None()
+; @test (nth(1, [10, 20]) ? 0) => 20
+; @test (nth(3, [10]) ? 0) => 0
+pub let nth[a](i: Int, xs: List a) -> Maybe a =
   match (xs)
     | [] -> None()
     | h :: t ->
-      if (i <= 0) -> Some(h) | nth(t, i - 1)
+      if (i <= 0) -> Some(h) | nth(i - 1, t)
 
-; The element at zero-based i, or default when xs is empty or i is past the end.
-; Non-positive indices select the first element.
-; @test nth-with-default([10, 20], 1, 0) => 20
-; @test nth-with-default([10, 20], 2, 0) => 0
-; @test nth-with-default([], 0, 42) => 42
-; @test nth-with-default([10, 20], -1, 0) => 10
-; @test nth-with-default(["first", "second"], 1, "fallback") => "second"
-pub let nth-with-default[a](xs: List a, i: Int, default: a) -> a =
-  Maybe.with-default(default, nth(xs, i))
-
-; The elements of xs followed by the elements of ys.
-; @test append([1], [2, 3]) => [1, 2, 3]
-pub let append[a](xs: List a, ys: List a) -> List a =
+; The elements of xs followed by the elements of extra.
+; @test append([2, 3], [1]) => [1, 2, 3]
+; @test ([1] |> append([2, 3])) => [1, 2, 3]
+pub let append[a](extra: List a, xs: List a) -> List a =
   match (xs)
-    | [] -> ys
-    | h :: t -> h :: append(t, ys)
+    | [] -> extra
+    | h :: t -> h :: append(extra, t)
 
 ; xs reversed onto acc.
 let reverse-onto[a](xs: List a, acc: List a) -> List a =
@@ -50,10 +85,22 @@ pub let reverse[a](xs: List a) -> List a =
 
 ; f applied to each element, in order.
 ; @test map(fn (n) = n + 1, [1, 2]) => [2, 3]
+; @test ([1, 2] |> map(always(0))) => [0, 0]
 pub let map[a, b](f: (a) -> b, xs: List a) -> List b =
   match (xs)
     | [] -> []
     | h :: t -> f(h) :: map(f, t)
+
+; f applied to each index and element, starting at zero.
+; @test indexed-map(fn (i, n) = i + n, [10, 20]) => [10, 21]
+pub let indexed-map[a, b](f: (Int, a) -> b, xs: List a) -> List b =
+  indexed-from(f, 0, xs)
+
+; indexed-map from index i.
+let indexed-from[a, b](f: (Int, a) -> b, i: Int, xs: List a) -> List b =
+  match (xs)
+    | [] -> []
+    | h :: t -> f(i, h) :: indexed-from(f, i + 1, t)
 
 ; Elements for which f returns true, in order.
 ; @test filter(fn (n) = n > 1, [1, 2, 3]) => [2, 3]
@@ -62,12 +109,82 @@ pub let filter[a](f: (a) -> Bool, xs: List a) -> List a =
     | [] -> []
     | h :: t -> if (f(h)) -> h :: filter(f, t) | filter(f, t)
 
+; The Some values of f, in order.
+; @test filter-map(fn (n) = if (n > 1) -> Some(n) | None(), [1, 2, 3]) => [2, 3]
+pub let filter-map[a, b](f: (a) -> Maybe b, xs: List a) -> List b =
+  match (xs)
+    | [] -> []
+    | h :: t ->
+      match (f(h))
+        | Some(v) -> v :: filter-map(f, t)
+        | None -> filter-map(f, t)
+
+; Elements that pass f, then elements that do not. Order within each is kept.
+; @test partition(fn (n) = n > 1, [1, 2, 3]) => Pair([2, 3], [1])
+pub let partition[a](f: (a) -> Bool, xs: List a) -> Pair (List a) (List a) =
+  match (xs)
+    | [] -> Pair([], [])
+    | h :: t ->
+      match (partition(f, t))
+        | Pair(yes, no) ->
+          if (f(h)) -> Pair(h :: yes, no) | Pair(yes, h :: no)
+
+; sep between the elements of xs.
+; @test intersperse(0, [1, 2, 3]) => [1, 0, 2, 0, 3]
+; @test intersperse(0, [1]) => [1]
+; @test intersperse(0, []) => []
+pub let intersperse[a](sep: a, xs: List a) -> List a =
+  match (xs)
+    | [] -> []
+    | h :: [] -> [h]
+    | h :: t -> h :: sep :: intersperse(sep, t)
+
 ; f folded from the left, starting at acc.
 ; @test fold(fn (a, n) = a + n, 0, [1, 2, 3]) => 6
 pub let fold[a, b](f: (b, a) -> b, acc: b, xs: List a) -> b =
   match (xs)
     | [] -> acc
     | h :: t -> fold(f, f(acc, h), t)
+
+; The sum of xs. An empty list sums to 0.
+; @test sum([1, 2, 3]) => 6
+; @test sum([]) => 0
+pub let sum(xs: List Int) -> Int =
+  fold(fn (a, n) = a + n, 0, xs)
+
+; The product of xs. An empty list multiplies to 1.
+; @test product([2, 3, 4]) => 24
+; @test product([]) => 1
+pub let product(xs: List Int) -> Int =
+  fold(fn (a, n) = a * n, 1, xs)
+
+; The smallest element, or None when xs is empty.
+; @test minimum([3, 1, 2]) => Some(1)
+; @test minimum([]) => None()
+pub let minimum(xs: List Int) -> Maybe Int =
+  match (xs)
+    | [] -> None()
+    | h :: t -> Some(minimum-onto(t, h))
+
+; The smallest of best and the elements of xs.
+let minimum-onto(xs: List Int, best: Int) -> Int =
+  match (xs)
+    | [] -> best
+    | h :: t -> minimum-onto(t, if (h < best) -> h | best)
+
+; The largest element, or None when xs is empty.
+; @test maximum([3, 1, 2]) => Some(3)
+; @test maximum([]) => None()
+pub let maximum(xs: List Int) -> Maybe Int =
+  match (xs)
+    | [] -> None()
+    | h :: t -> Some(maximum-onto(t, h))
+
+; The largest of best and the elements of xs.
+let maximum-onto(xs: List Int, best: Int) -> Int =
+  match (xs)
+    | [] -> best
+    | h :: t -> maximum-onto(t, if (h > best) -> h | best)
 
 ; Pairs of elements taken until either list ends.
 ; @test zip([1, 2], ["a", "b"]) => [Pair(1, "a"), Pair(2, "b")]
@@ -79,13 +196,24 @@ pub let zip[a, b](xs: List a, ys: List b) -> List (Pair a b) =
         | [] -> []
         | y :: yt -> Pair(x, y) :: zip(xt, yt)
 
+; The firsts and seconds of pairs, in order.
+; @test unzip([Pair(1, "a"), Pair(2, "b")]) => Pair([1, 2], ["a", "b"])
+; @test unzip([]) => Pair([], [])
+pub let unzip[a, b](pairs: List (Pair a b)) -> Pair (List a) (List b) =
+  match (pairs)
+    | [] -> Pair([], [])
+    | Pair(a, b) :: rest ->
+      match (unzip(rest))
+        | Pair(as, bs) -> Pair(a :: as, b :: bs)
+
 ; Whether x occurs in xs, compared with =.
-; @test contains([1, 2, 3], 2) => true
-pub let contains[a](xs: List a, x: a) -> Bool =
+; @test member(2, [1, 2, 3]) => true
+; @test member(9, [1, 2, 3]) => false
+pub let member[a](x: a, xs: List a) -> Bool =
   match (xs)
     | [] -> false
     | h :: t ->
-      if (h == x) -> true | contains(t, x)
+      if (h == x) -> true | member(x, t)
 
 ; Insert x into an already sorted list.
 let insert[a](x: a, xs: List a) -> List a =
@@ -135,14 +263,14 @@ pub let all[a](f: (a) -> Bool, xs: List a) -> Bool =
 pub let concat[a](xss: List (List a)) -> List a =
   match (xss)
     | [] -> []
-    | h :: t -> append(h, concat(t))
+    | h :: t -> append(concat(t), h)
 
 ; The lists returned by f, joined in order.
 ; @test flat-map(fn (n) = [n, n], [1, 2]) => [1, 1, 2, 2]
 pub let flat-map[a, b](f: (a) -> List b, xs: List a) -> List b =
   match (xs)
     | [] -> []
-    | h :: t -> append(f(h), flat-map(f, t))
+    | h :: t -> append(flat-map(f, t), f(h))
 
 ; The first n elements. Fewer when xs is shorter. None when n is not positive.
 ; @test take(2, [1, 2, 3]) => [1, 2]

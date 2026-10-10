@@ -30,3 +30,9 @@ pub let abs(n: Int) -> Int =
 ; @test clamp(0, 10, 15) => 10
 pub let clamp(lo: Int, hi: Int, n: Int) -> Int =
   min(hi, max(lo, n))
+
+; The function that ignores its argument and returns x.
+; @test always(1)(2) => 1
+; @test always("a")(false) => "a"
+pub let always[a, b](x: a) -> (b) -> a =
+  fn (_) = x

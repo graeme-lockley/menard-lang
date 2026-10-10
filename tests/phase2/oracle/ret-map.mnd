@@ -4,9 +4,9 @@ import std/map as Map
 
 let main() -> Int {
   let m0 = Map.empty()
-  let m1 = Map.set(m0, 1, 10)
-  let m2 = Map.set(m1, 2, 20)
-  match (Map.lookup(m2, 1))
+  let m1 = Map.set(1, 10, m0)
+  let m2 = Map.set(2, 20, m1)
+  match (Map.lookup(1, m2))
     | Some(v) -> v + Map.size(m2)
     | None -> 0
 }

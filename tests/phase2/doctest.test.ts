@@ -33,7 +33,7 @@ describe.skipIf(!Bun.which("clang"))("mn test @test annotations", () => {
 ; @test kept(1) => 1
 ; @test kept(1) => 1
 ; @test H.marker() => 7
-; @test Map.lookup({1 => 2}, 1) => Some(2)
+; @test Map.lookup(1, {1 => 2}) => Some(2)
 ; @test {
 ;   let inner = 1
 ;   kept(inner)

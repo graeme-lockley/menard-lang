@@ -94,7 +94,7 @@ let ctx-suite(c: Ctx) -> Ref (Map Str Bool) =
 ; A suite member gets a generated test `main`. A dependency compiled in
 ; the same context does not, even when `for-test` is set on the context.
 let suite-member(ctx: Ctx, abs: Str) -> Bool =
-  match (Map.lookup(deref(ctx-suite(ctx)), abs))
+  match (Map.lookup(abs, deref(ctx-suite(ctx))))
     | Some(_) -> true
     | None -> false
 
@@ -153,9 +153,9 @@ let unwrap-pub(form: Ast) -> Ast =
 
 let parse-code(msg: Str) -> Str =
   cond
-    | String.has("unclosed", msg) -> "E_PARSE_UNCLOSED"
-    | String.has("'!'", msg) -> "E_PARSE_BANG"
-    | String.has("unterminated", msg) -> "E_PARSE_STRING"
+    | String.contains("unclosed", msg) -> "E_PARSE_UNCLOSED"
+    | String.contains("'!'", msg) -> "E_PARSE_BANG"
+    | String.contains("unterminated", msg) -> "E_PARSE_STRING"
     | else -> "E_PARSE"
 
 ; Origin 0 is the file being compiled. Origin 1 is the source a
@@ -318,10 +318,10 @@ let add-rename(forms: List Ast, path: Str, acc: Map Str Str) -> Map Str Str =
     | [] -> acc
     | f :: rest ->
       match (defn-name(f))
-        | Some(n) -> add-rename(rest, path, Map.set(acc, n, link-of(path, n)))
+        | Some(n) -> add-rename(rest, path, Map.set(n, link-of(path, n), acc))
         | None ->
           match (top-let-name(f))
-            | Some(n) -> add-rename(rest, path, Map.set(acc, n, link-of(path, n)))
+            | Some(n) -> add-rename(rest, path, Map.set(n, link-of(path, n), acc))
             | None -> add-rename(rest, path, acc)
 
 ; Closure conversion runs after defn renaming, so each module's lifted
@@ -335,7 +335,7 @@ let add-lam-rename(forms: List Ast, path: Str, acc: Map Str Str) -> Map Str Str 
     | f :: rest ->
       match (defn-name(f))
         | Some(n) ->
-          if (is-lam-name(n)) -> add-lam-rename(rest, path, Map.set(acc, n, link-of(path, n))) | add-lam-rename(rest, path, acc)
+          if (is-lam-name(n)) -> add-lam-rename(rest, path, Map.set(n, link-of(path, n), acc)) | add-lam-rename(rest, path, acc)
         | None -> add-lam-rename(rest, path, acc)
 
 let extern-stub(form: Ast) -> Maybe Ast =
@@ -481,12 +481,12 @@ let append-ctors(xs: List CtorRec, ys: List CtorRec) -> List CtorRec =
     | x :: rest -> x :: append-ctors(rest, ys)
 
 let walk-surface(path: Str, done: Map Str Iface, seen: Ref (Map Str Bool), acc: Surface) -> Surface =
-  match (Map.lookup(deref(seen), path))
+  match (Map.lookup(path, deref(seen)))
     | Some(_) -> acc
     | None ->
       {
-        set!(seen, Map.set(deref(seen), path, true))
-        match (Map.lookup(done, path))
+        set!(seen, Map.set(path, true, deref(seen)))
+        match (Map.lookup(path, done))
           | None -> acc
           | Some(iface) -> surface-add(iface, walk-deps(iface, done, seen, acc))
       }
@@ -519,7 +519,7 @@ let direct-surfaces(paths: List Str, done: Map Str Iface, acc: Surface) -> Surfa
   match (paths)
     | [] -> acc
     | path :: rest ->
-      match (Map.lookup(done, path))
+      match (Map.lookup(path, done))
         | None -> direct-surfaces(rest, done, acc)
         | Some(Iface(_, _, _, _, _, fns, _, stubs)) ->
           match (acc)
@@ -548,7 +548,7 @@ let qualified-renames(stubs: List Ast, prefix: Str, acc: Map Str Str) -> Map Str
       match (unwrap-pub(stub))
         | ParenNode(_ :: name :: _, _) ->
           match (bare-name(name))
-            | Some(n) -> qualified-renames(rest, prefix, Map.set(acc, n, String.concat(prefix, n)))
+            | Some(n) -> qualified-renames(rest, prefix, Map.set(n, String.concat(prefix, n), acc))
             | None -> qualified-renames(rest, prefix, acc)
         | _ -> qualified-renames(rest, prefix, acc)
 
@@ -563,7 +563,7 @@ let stub-name-shadowed(stub: Ast, names: Map Str Str) -> Bool =
     | ParenNode(_ :: name :: _, _) ->
       match (bare-name(name))
         | Some(n) ->
-          match (Map.lookup(names, n))
+          match (Map.lookup(n, names))
             | Some(_) -> true
             | None -> false
         | None -> false
@@ -579,7 +579,7 @@ let alias-surfaces(from: Str, forms: List Ast, done: Map Str Iface, acc: Surface
         | Some(name) ->
           match (import-specs([form]))
             | spec :: _ ->
-              match (Map.lookup(done, canonical-path(resolve-import(from, spec))))
+              match (Map.lookup(canonical-path(resolve-import(from, spec)), done))
                 | None -> alias-surfaces(from, rest, done, acc)
                 | Some(Iface(_, _, _, _, _, fns, _, stubs)) ->
                   match (acc)
@@ -674,7 +674,7 @@ let finish-fresh(abs: Str, iface: Iface, ctx: Ctx) -> Result Iface Str =
       match (iface)
         | Iface(_, _, init, _, _, _, _, _) ->
           {
-            set!(done, Map.set(deref(done), abs, iface))
+            set!(done, Map.set(abs, iface, deref(done)))
             set!(order, snoc-str(deref(order), object-path(abs)))
             if (String.length(init) > 0) -> set!(inits, snoc-str(deref(inits), init))
             Ok(iface)
@@ -929,14 +929,14 @@ let compile-desugared(abs: Str, src: Str, display: Str, qualified: List Ast, ctx
 let ensure-mod(abs: Str, ctx: Ctx) -> Result Iface Str =
   match (ctx)
     | Ctx(_, _, clean, _, done, visiting, _, _, _, _, _) ->
-      match (Map.lookup(deref(done), abs))
+      match (Map.lookup(abs, deref(done)))
         | Some(iface) -> Ok(iface)
         | None ->
-          match (Map.lookup(deref(visiting), abs))
+          match (Map.lookup(abs, deref(visiting)))
             | Some(_) -> Err(String.concat("import cycle: ", display-path(abs)))
             | None ->
               {
-                set!(visiting, Map.set(deref(visiting), abs, true))
+                set!(visiting, Map.set(abs, true, deref(visiting)))
                 if (clean) -> remove-cache(abs)
                 ensure-body(abs, ctx)
               }
@@ -1037,7 +1037,7 @@ let canon-files(displays: List Str) -> List Str =
 let fill-suite(paths: List Str, acc: Map Str Bool) -> Map Str Bool =
   match (paths)
     | [] -> acc
-    | p :: rest -> fill-suite(rest, Map.set(acc, p, true))
+    | p :: rest -> fill-suite(rest, Map.set(p, true, acc))
 
 let join-key(paths: List Str, sb: StringBuffer, first: Bool) -> Unit =
   match (paths)
@@ -1088,7 +1088,7 @@ let collect-cases(displays: List Str, paths: List Str, done: Map Str Iface) -> R
       match (paths)
         | [] -> Err("suite paths diverged")
         | a :: as ->
-          match (Map.lookup(done, a))
+          match (Map.lookup(a, done))
             | None -> Err(String.concat("missing module: ", d))
             | Some(iface) ->
               {

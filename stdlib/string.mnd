@@ -73,10 +73,10 @@ let bytes-eq(s: Str, i: Int, pat: Str, j: Int, n: Int) -> Bool =
     | else -> false
 
 ; Whether s contains needle as a byte substring.
-; Named `has` so a program can import std/list, which also publishes `contains`.
-; @test has("ell", "hello") => true
-; @test has("x", "hello") => false
-pub let has(needle: Str, s: Str) -> Bool {
+; @test contains("ell", "hello") => true
+; @test contains("x", "hello") => false
+; @test ("hello" |> contains("ell")) => true
+pub let contains(needle: Str, s: Str) -> Bool {
   let n = length(needle)
   let sn = length(s)
   loop (i = 0)
@@ -203,3 +203,108 @@ pub let lines(s: Str) -> List Str =
 ; Split on sep, then drop the empty piece a trailing separator would leave.
 let lines-split(s: Str, sep: Str) -> List Str =
   if (ends-with(sep, s)) -> drop-trailing-empty(split(sep, s)) | split(sep, s)
+
+; Whether s has no bytes.
+; @test is-empty("") => true
+; @test is-empty("a") => false
+pub let is-empty(s: Str) -> Bool =
+  length(s) == 0
+
+; n copies of s joined. A non-positive count is empty.
+; @test repeat(3, "ab") => "ababab"
+; @test repeat(0, "ab") => ""
+; @test repeat(-1, "ab") => ""
+pub let repeat(n: Int, s: Str) -> Str =
+  if (n <= 0) -> "" | concat(s, repeat(n - 1, s))
+
+; Every from in s replaced by to. An empty from is not a replacement.
+; @test replace("a", "b", "abaca") => "bbbcb"
+; @test replace("", "x", "ab") => "ab"
+pub let replace(from: Str, to: Str, s: Str) -> Str =
+  if (length(from) == 0) -> s | join(to, split(from, s))
+
+; The first n bytes. A non-positive count is empty. A count past the end is s.
+; @test left(2, "hello") => "he"
+; @test left(0, "hello") => ""
+; @test left(9, "hello") => "hello"
+pub let left(n: Int, s: Str) -> Str =
+  if (n <= 0) -> "" | slice(0, n, s)
+
+; The last n bytes. A non-positive count is empty. A count past the end is s.
+; @test right(2, "hello") => "lo"
+; @test right(0, "hello") => ""
+; @test right(9, "hello") => "hello"
+pub let right(n: Int, s: Str) -> Str =
+  if (n <= 0) -> "" | drop(length(s) - n, s)
+
+; Drop the last n bytes. Non-positive counts keep s; counts past the end return "".
+; @test drop-right(2, "hello") => "hel"
+; @test drop-right(0, "hello") => "hello"
+; @test drop-right(9, "hello") => ""
+pub let drop-right(n: Int, s: Str) -> Str {
+  let l = length(s)
+
+  cond
+    | n <= 0 -> s
+    | n >= l -> ""
+    | else -> slice(0, l - n, s)
+}
+
+; Whether b is ASCII space, tab, newline, or carriage return.
+let is-space(b: Int) -> Bool =
+  b == 32 || b == 9 || b == 10 || b == 13
+
+; s without leading ASCII whitespace.
+; @test trim-left("  hi") => "hi"
+; @test trim-left("hi") => "hi"
+pub let trim-left(s: Str) -> Str =
+  trim-left-from(s, 0)
+
+; trim-left from byte i.
+let trim-left-from(s: Str, i: Int) -> Str =
+  if (i >= length(s)) -> "" | trim-left-byte(s, i)
+
+; Drop byte i when it is whitespace.
+let trim-left-byte(s: Str, i: Int) -> Str =
+  if (is-space(byte(i, s))) -> trim-left-from(s, i + 1) | slice(i, length(s) - i, s)
+
+; s without trailing ASCII whitespace.
+; @test trim-right("hi  ") => "hi"
+; @test trim-right("hi") => "hi"
+pub let trim-right(s: Str) -> Str =
+  trim-right-at(s, length(s))
+
+; trim-right keeping the first n bytes.
+let trim-right-at(s: Str, n: Int) -> Str =
+  if (n <= 0) -> "" | trim-right-byte(s, n)
+
+; Drop the last kept byte when it is whitespace.
+let trim-right-byte(s: Str, n: Int) -> Str =
+  if (is-space(byte(n - 1, s))) -> trim-right-at(s, n - 1) | slice(0, n, s)
+
+; s without leading or trailing ASCII whitespace.
+; @test trim("  hi \n") => "hi"
+; @test trim("hi") => "hi"
+pub let trim(s: Str) -> Str =
+  trim-right(trim-left(s))
+
+; Drop empty pieces.
+let drop-empty(parts: List Str) -> List Str =
+  match (parts)
+    | [] -> []
+    | h :: t ->
+      if (h == "") -> drop-empty(t) | h :: drop-empty(t)
+
+; s split on ASCII whitespace. Empty pieces are dropped.
+; @test words("a  b\nc") => ["a", "b", "c"]
+; @test words("  ") => []
+; @test words("") => []
+pub let words(s: Str) -> List Str =
+  drop-empty(split-using([" ", "\n", "\t", "\r"], s))
+
+; The decimal spelling of n.
+; @test from-int(42) => "42"
+; @test from-int(-3) => "-3"
+; @test from-int(0) => "0"
+pub let from-int(n: Int) -> Str =
+  show(n)

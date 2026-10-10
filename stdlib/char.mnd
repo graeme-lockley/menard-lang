@@ -1,0 +1,71 @@
+; Predicates and ASCII case on Char.
+; Comparisons use character literals. There is no code-point conversion.
+; @module std/char
+
+import std/pair
+
+; Whether c is an ASCII digit.
+; @test is-digit('0') => true
+; @test is-digit('9') => true
+; @test is-digit('a') => false
+pub let is-digit(c: Char) -> Bool =
+  compare(c, '0') >= 0 && compare(c, '9') <= 0
+
+; Whether c is an ASCII uppercase letter.
+; @test is-upper('A') => true
+; @test is-upper('Z') => true
+; @test is-upper('a') => false
+pub let is-upper(c: Char) -> Bool =
+  compare(c, 'A') >= 0 && compare(c, 'Z') <= 0
+
+; Whether c is an ASCII lowercase letter.
+; @test is-lower('a') => true
+; @test is-lower('z') => true
+; @test is-lower('A') => false
+pub let is-lower(c: Char) -> Bool =
+  compare(c, 'a') >= 0 && compare(c, 'z') <= 0
+
+; Whether c is an ASCII letter.
+; @test is-alpha('Q') => true
+; @test is-alpha('q') => true
+; @test is-alpha('7') => false
+pub let is-alpha(c: Char) -> Bool =
+  is-upper(c) || is-lower(c)
+
+; Whether c is space, tab, newline, or carriage return.
+; @test is-whitespace(' ') => true
+; @test is-whitespace('\n') => true
+; @test is-whitespace('\t') => true
+; @test is-whitespace('\r') => true
+; @test is-whitespace('a') => false
+pub let is-whitespace(c: Char) -> Bool =
+  c == ' ' || c == '\n' || c == '\t' || c == '\r'
+
+; ASCII lowercase letters and the uppercase letter each becomes.
+let upper-pairs() -> List (Pair Char Char) =
+  [Pair('a', 'A'), Pair('b', 'B'), Pair('c', 'C'), Pair('d', 'D'), Pair('e', 'E'), Pair('f', 'F'), Pair('g', 'G'), Pair('h', 'H'), Pair('i', 'I'), Pair('j', 'J'), Pair('k', 'K'), Pair('l', 'L'), Pair('m', 'M'), Pair('n', 'N'), Pair('o', 'O'), Pair('p', 'P'), Pair('q', 'Q'), Pair('r', 'R'), Pair('s', 'S'), Pair('t', 'T'), Pair('u', 'U'), Pair('v', 'V'), Pair('w', 'W'), Pair('x', 'X'), Pair('y', 'Y'), Pair('z', 'Z')]
+
+; ASCII uppercase letters and the lowercase letter each becomes.
+let lower-pairs() -> List (Pair Char Char) =
+  [Pair('A', 'a'), Pair('B', 'b'), Pair('C', 'c'), Pair('D', 'd'), Pair('E', 'e'), Pair('F', 'f'), Pair('G', 'g'), Pair('H', 'h'), Pair('I', 'i'), Pair('J', 'j'), Pair('K', 'k'), Pair('L', 'l'), Pair('M', 'm'), Pair('N', 'n'), Pair('O', 'o'), Pair('P', 'p'), Pair('Q', 'q'), Pair('R', 'r'), Pair('S', 's'), Pair('T', 't'), Pair('U', 'u'), Pair('V', 'v'), Pair('W', 'w'), Pair('X', 'x'), Pair('Y', 'y'), Pair('Z', 'z')]
+
+; The image of c in pairs, or c when it is absent.
+let fold-case(pairs: List (Pair Char Char), c: Char) -> Char =
+  match (pairs)
+    | [] -> c
+    | Pair(from, to) :: rest ->
+      if (from == c) -> to | fold-case(rest, c)
+
+; c as an ASCII uppercase letter. Other characters stay.
+; @test to-upper('a') => 'A'
+; @test to-upper('Z') => 'Z'
+; @test to-upper('7') => '7'
+pub let to-upper(c: Char) -> Char =
+  fold-case(upper-pairs(), c)
+
+; c as an ASCII lowercase letter. Other characters stay.
+; @test to-lower('A') => 'a'
+; @test to-lower('z') => 'z'
+; @test to-lower('7') => '7'
+pub let to-lower(c: Char) -> Char =
+  fold-case(lower-pairs(), c)

@@ -103,26 +103,26 @@ let unwrap-pub-head(head: Ast, rest: List Ast, sp: Span, ast: Ast) -> Ast =
 
 let builtin-ctor-arities() -> Map Str Int {
   let m0 = Map.empty()
-  let m1 = Map.set(m0, "None", 0)
-  let m2 = Map.set(m1, "Some", 1)
-  let m3 = Map.set(m2, "Ok", 1)
-  let m4 = Map.set(m3, "Err", 1)
-  let m5 = Map.set(m4, "Nil", 0)
-  let m6 = Map.set(m5, "Cons", 2)
-  let m7 = Map.set(m6, "NotFound", 0)
-  let m8 = Map.set(m7, "Permission", 0)
-  let m9 = Map.set(m8, "Exists", 0)
-  let m10 = Map.set(m9, "IsADirectory", 0)
-  let m11 = Map.set(m10, "NotADirectory", 0)
-  let m12 = Map.set(m11, "InvalidPath", 0)
-  let m13 = Map.set(m12, "TooLarge", 0)
-  Map.set(m13, "Other", 1)
+  let m1 = Map.set("None", 0, m0)
+  let m2 = Map.set("Some", 1, m1)
+  let m3 = Map.set("Ok", 1, m2)
+  let m4 = Map.set("Err", 1, m3)
+  let m5 = Map.set("Nil", 0, m4)
+  let m6 = Map.set("Cons", 2, m5)
+  let m7 = Map.set("NotFound", 0, m6)
+  let m8 = Map.set("Permission", 0, m7)
+  let m9 = Map.set("Exists", 0, m8)
+  let m10 = Map.set("IsADirectory", 0, m9)
+  let m11 = Map.set("NotADirectory", 0, m10)
+  let m12 = Map.set("InvalidPath", 0, m11)
+  let m13 = Map.set("TooLarge", 0, m12)
+  Map.set("Other", 1, m13)
 }
 
 let register-ctor-arity(cname-ast: Ast, arity: Int, acc: Map Str Int) -> Map Str Int =
   match (sym-str(cname-ast))
     | None -> acc
-    | Some(cname) -> Map.set(acc, cname, arity)
+    | Some(cname) -> Map.set(cname, arity, acc)
 
 let register-one-variant-ctor-arity(c: Ast, acc: Map Str Int) -> Map Str Int =
   match (c)
@@ -147,7 +147,7 @@ let collect-defrec-decl-arities(rest: List Ast, acc: Map Str Int) -> Map Str Int
 let collect-defrec-decl-arities-named(name-part: Ast, fields: List Ast, acc: Map Str Int) -> Map Str Int =
   match (decl-name-of(name-part))
     | None -> acc
-    | Some(type-name) -> Map.set(acc, type-name, length(fields))
+    | Some(type-name) -> Map.set(type-name, length(fields), acc)
 
 let collect-arities-named(hn: Str, rest: List Ast, acc: Map Str Int) -> Map Str Int =
   cond
@@ -177,7 +177,7 @@ let all-ctor-arities(forms: List Ast) -> Map Str Int =
   collect-arities(forms, builtin-ctor-arities())
 
 let is-nullary-ctor(name: Str, arities: Map Str Int) -> Bool =
-  match (Map.lookup(arities, name))
+  match (Map.lookup(name, arities))
     | None -> false
     | Some(a) -> a == 0
 
@@ -288,7 +288,7 @@ let sort-strs(xs: List Str) -> List Str =
     | h :: rest -> str-insert-sorted(h, sort-strs(rest))
 
 let insert-distinct(x: Str, xs: List Str) -> List Str =
-  if (contains(xs, x)) -> xs | x :: xs
+  if (member(x, xs)) -> xs | x :: xs
 
 let dedup-list(xs: List Str) -> List Str =
   match (xs)

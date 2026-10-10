@@ -124,20 +124,20 @@ let ctor-meta-arity(c: CtorMeta) -> Int =
 
 let builtin-ctor-metas() -> Map Str CtorMeta {
   let m0 = Map.empty()
-  let m1 = Map.set(m0, "None", CtorMeta("Maybe", 0))
-  let m2 = Map.set(m1, "Some", CtorMeta("Maybe", 1))
-  let m3 = Map.set(m2, "Ok", CtorMeta("Result", 1))
-  let m4 = Map.set(m3, "Err", CtorMeta("Result", 1))
-  let m5 = Map.set(m4, "Nil", CtorMeta("List", 0))
-  let m6 = Map.set(m5, "Cons", CtorMeta("List", 2))
-  let m7 = Map.set(m6, "NotFound", CtorMeta("IoError", 0))
-  let m8 = Map.set(m7, "Permission", CtorMeta("IoError", 0))
-  let m9 = Map.set(m8, "Exists", CtorMeta("IoError", 0))
-  let m10 = Map.set(m9, "IsADirectory", CtorMeta("IoError", 0))
-  let m11 = Map.set(m10, "NotADirectory", CtorMeta("IoError", 0))
-  let m12 = Map.set(m11, "InvalidPath", CtorMeta("IoError", 0))
-  let m13 = Map.set(m12, "TooLarge", CtorMeta("IoError", 0))
-  Map.set(m13, "Other", CtorMeta("IoError", 1))
+  let m1 = Map.set("None", CtorMeta("Maybe", 0), m0)
+  let m2 = Map.set("Some", CtorMeta("Maybe", 1), m1)
+  let m3 = Map.set("Ok", CtorMeta("Result", 1), m2)
+  let m4 = Map.set("Err", CtorMeta("Result", 1), m3)
+  let m5 = Map.set("Nil", CtorMeta("List", 0), m4)
+  let m6 = Map.set("Cons", CtorMeta("List", 2), m5)
+  let m7 = Map.set("NotFound", CtorMeta("IoError", 0), m6)
+  let m8 = Map.set("Permission", CtorMeta("IoError", 0), m7)
+  let m9 = Map.set("Exists", CtorMeta("IoError", 0), m8)
+  let m10 = Map.set("IsADirectory", CtorMeta("IoError", 0), m9)
+  let m11 = Map.set("NotADirectory", CtorMeta("IoError", 0), m10)
+  let m12 = Map.set("InvalidPath", CtorMeta("IoError", 0), m11)
+  let m13 = Map.set("TooLarge", CtorMeta("IoError", 0), m12)
+  Map.set("Other", CtorMeta("IoError", 1), m13)
 }
 
 let register-one-variant-ctor(type-name: Str, c: Ast, acc: Map Str CtorMeta) -> Map Str CtorMeta =
@@ -148,7 +148,7 @@ let register-one-variant-ctor(type-name: Str, c: Ast, acc: Map Str CtorMeta) -> 
 let register-ctor-named(type-name: Str, cname-ast: Ast, arity: Int, acc: Map Str CtorMeta) -> Map Str CtorMeta =
   match (sym-str(cname-ast))
     | None -> acc
-    | Some(cname) -> Map.set(acc, cname, CtorMeta(type-name, arity))
+    | Some(cname) -> Map.set(cname, CtorMeta(type-name, arity), acc)
 
 let register-variant-ctors(type-name: Str, ctor-asts: List Ast, acc: Map Str CtorMeta) -> Map Str CtorMeta =
   match (ctor-asts)
@@ -173,7 +173,7 @@ let collect-defrec-decl(rest: List Ast, acc: Map Str CtorMeta) -> Map Str CtorMe
 let collect-defrec-decl-named(name-part: Ast, fields: List Ast, acc: Map Str CtorMeta) -> Map Str CtorMeta =
   match (decl-name-of(name-part))
     | None -> acc
-    | Some(type-name) -> Map.set(acc, type-name, CtorMeta(type-name, length(fields)))
+    | Some(type-name) -> Map.set(type-name, CtorMeta(type-name, length(fields)), acc)
 
 let collect-ctors-named(hn: Str, rest: List Ast, acc: Map Str CtorMeta) -> Map Str CtorMeta =
   cond
@@ -214,13 +214,13 @@ let is-bool-op(name: Str) -> Bool =
   name == "<" || name == ">" || name == "<=" || name == ">=" || name == "="
 
 let classify-sym(name: Str, ctors: Map Str CtorMeta) -> Maybe Str =
-  match (Map.lookup(ctors, name))
+  match (Map.lookup(name, ctors))
     | None -> None()
     | Some(meta) ->
       if (ctor-meta-arity(meta) == 0) -> Some(ctor-meta-type(meta)) | None()
 
 let classify-ctor-call(hn: Str, args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
-  match (Map.lookup(ctors, hn))
+  match (Map.lookup(hn, ctors))
     | None -> None()
     | Some(meta) ->
       if (ctor-meta-arity(meta) == length(args)) -> Some(ctor-meta-type(meta)) | None()
@@ -396,7 +396,7 @@ let sort-strs(xs: List Str) -> List Str =
     | h :: rest -> str-insert-sorted(h, sort-strs(rest))
 
 let insert-distinct(x: Str, xs: List Str) -> List Str =
-  if (contains(xs, x)) -> xs | x :: xs
+  if (member(x, xs)) -> xs | x :: xs
 
 let collect-type-names(usages: List Usage) -> List Str =
   match (usages)

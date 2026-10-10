@@ -19,12 +19,12 @@ let print-got(v: Maybe Int) -> Int =
 
 let main() -> Int {
   let m0 = Map.empty()
-  let m1 = Map.set(m0, 1, 10)
-  let m2 = Map.set(m1, 2, 20)
+  let m1 = Map.set(1, 10, m0)
+  let m2 = Map.set(2, 20, m1)
   print("1 -> ")
-  print-got(Map.lookup(m2, 1))
+  print-got(Map.lookup(1, m2))
   print(", 2 -> ")
-  print-got(Map.lookup(m2, 2))
+  print-got(Map.lookup(2, m2))
   print(", size ")
   println(Map.size(m2))
   0

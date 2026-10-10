@@ -1,44 +1,60 @@
 ; Helpers over the builtin Map.
+; The map is the last parameter. set, lookup, and has call the intrinsics
+; map-set, map-get, and map-has, which still take the map first.
 ; @module std/map
 
 import std/pair
-import std/list
 
 ; A map with no entries.
 ; @test size(empty()) => 0
 pub runtime empty[k, v]() -> Map k v
 
 ; m with k2 mapped to v2. A key already present keeps v2.
-; @test lookup(set(empty(), "a", 1), "a") => Some(1)
-pub runtime set[k, v](m: Map k v, k2: k, v2: v) -> Map k v
+; @test lookup("a", set("a", 1, empty())) => Some(1)
+; @test (empty() |> set("a", 1) |> lookup("a")) => Some(1)
+pub let set[k, v](k2: k, v2: v, m: Map k v) -> Map k v =
+  map-set(m, k2, v2)
 
 ; The value stored at k2, or None when the key is absent.
-; @test lookup(set(empty(), "a", 1), "z") => None()
-pub runtime lookup[k, v](m: Map k v, k2: k) -> Maybe v
+; @test lookup("z", set("a", 1, empty())) => None()
+pub let lookup[k, v](k2: k, m: Map k v) -> Maybe v =
+  map-get(m, k2)
 
 ; Whether k2 is a key of m.
-; @test has(set(empty(), "a", 1), "a") => true
-; @test has(set(empty(), "a", 1), "z") => false
-pub runtime has[k, v](m: Map k v, k2: k) -> Bool
+; @test has("a", set("a", 1, empty())) => true
+; @test has("z", set("a", 1, empty())) => false
+pub let has[k, v](k2: k, m: Map k v) -> Bool =
+  map-has(m, k2)
 
 ; How many keys m holds.
-; @test size(set(empty(), "a", 1)) => 1
+; @test size(set("a", 1, empty())) => 1
 pub runtime size[k, v](m: Map k v) -> Int
 
 ; The keys of m, in key order.
-; @test keys(set(set(empty(), "b", 2), "a", 1)) => ["a", "b"]
+; @test keys(set("a", 1, set("b", 2, empty()))) => ["a", "b"]
 pub runtime keys[k, v](m: Map k v) -> List k
+
+; A map of one entry.
+; @test lookup("a", singleton("a", 1)) => Some(1)
+pub let singleton[k, v](k2: k, v2: v) -> Map k v =
+  set(k2, v2, empty())
+
+; Whether m has no entries.
+; @test is-empty(empty()) => true
+; @test is-empty(singleton("a", 1)) => false
+pub let is-empty[k, v](m: Map k v) -> Bool =
+  size(m) == 0
 
 ; Insert each pair into acc, later pairs overwriting earlier keys.
 let from-list-onto[k, v](pairs: List (Pair k v), acc: Map k v) -> Map k v =
   match (pairs)
     | [] -> acc
-    | Pair(key, val) :: rest -> from-list-onto(rest, set(acc, key, val))
+    | Pair(key, val) :: rest -> from-list-onto(rest, set(key, val, acc))
 
 ; A map holding each pair. A repeated key keeps the last value.
-; @test lookup(from-list([Pair("a", 1)]), "a") => Some(1)
-; @test lookup(from-list([Pair("a", 1)]), "z") => None()
-; @test lookup(from-list([Pair("a", 1), Pair("a", 2)]), "a") => Some(2)
+; @test lookup("a", from-list([Pair("a", 1)])) => Some(1)
+; @test lookup("z", from-list([Pair("a", 1)])) => None()
+; @test lookup("a", from-list([Pair("a", 1), Pair("a", 2)])) => Some(2)
 pub let from-list[k, v](pairs: List (Pair k v)) -> Map k v =
   from-list-onto(pairs, empty())
 
@@ -50,14 +66,75 @@ let to-list-keys[k, v](m: Map k v, ks: List k) -> List (Pair k v) =
 
 ; The pair for key, then the rest of the keys.
 let to-list-key[k, v](m: Map k v, key: k, rest: List k) -> List (Pair k v) =
-  match (lookup(m, key))
+  match (lookup(key, m))
     | Some(val) -> Pair(key, val) :: to-list-keys(m, rest)
     | None -> to-list-keys(m, rest)
 
 ; The entries of m. Order follows keys.
-; @test lookup(from-list(to-list(from-list([Pair("a", 1)]))), "a") => Some(1)
+; @test lookup("a", from-list(to-list(from-list([Pair("a", 1)])))) => Some(1)
 pub let to-list[k, v](m: Map k v) -> List (Pair k v) =
   to-list-keys(m, keys(m))
+
+; The values of m, in key order.
+; @test values(from-list([Pair("b", 2), Pair("a", 1)])) => [1, 2]
+pub let values[k, v](m: Map k v) -> List v =
+  values-of(m, keys(m))
+
+; The value for each key, skipping a key that has disappeared.
+let values-of[k, v](m: Map k v, ks: List k) -> List v =
+  match (ks)
+    | [] -> []
+    | key :: rest ->
+      match (lookup(key, m))
+        | Some(val) -> val :: values-of(m, rest)
+        | None -> values-of(m, rest)
+
+; m with f applied to each value. Keys stay.
+; @test lookup("a", map(fn (k, v) = v + 1, singleton("a", 1))) => Some(2)
+pub let map[k, a, b](f: (k, a) -> b, m: Map k a) -> Map k b =
+  map-onto(f, m, keys(m), empty())
+
+; set each transformed value into acc.
+let map-onto[k, a, b](f: (k, a) -> b, m: Map k a, ks: List k, acc: Map k b) -> Map k b =
+  match (ks)
+    | [] -> acc
+    | key :: rest ->
+      match (lookup(key, m))
+        | Some(val) -> map-onto(f, m, rest, set(key, f(key, val), acc))
+        | None -> map-onto(f, m, rest, acc)
+
+; The entries for which f returns true.
+; @test keys(filter(fn (k, v) = v > 1, from-list([Pair("a", 1), Pair("b", 2)]))) => ["b"]
+pub let filter[k, v](f: (k, v) -> Bool, m: Map k v) -> Map k v =
+  filter-onto(f, m, keys(m), empty())
+
+; Keep each entry that passes f.
+let filter-onto[k, v](f: (k, v) -> Bool, m: Map k v, ks: List k, acc: Map k v) -> Map k v =
+  match (ks)
+    | [] -> acc
+    | key :: rest ->
+      match (lookup(key, m))
+        | Some(val) ->
+          if (f(key, val)) -> filter-onto(f, m, rest, set(key, val, acc)) | filter-onto(f, m, rest, acc)
+        | None -> filter-onto(f, m, rest, acc)
+
+; f folded over the entries, in key order, starting at acc.
+; The entry is a pair: a function value is applied with at most two arguments.
+; @test fold(fn (a, p) = {
+;   match (p)
+;     | Pair(_, v) -> a + v
+; }, 0, from-list([Pair("a", 1), Pair("b", 2)])) => 3
+pub let fold[k, v, b](f: (b, Pair k v) -> b, acc: b, m: Map k v) -> b =
+  fold-onto(f, m, keys(m), acc)
+
+; Fold the remaining keys into acc.
+let fold-onto[k, v, b](f: (b, Pair k v) -> b, m: Map k v, ks: List k, acc: b) -> b =
+  match (ks)
+    | [] -> acc
+    | key :: rest ->
+      match (lookup(key, m))
+        | Some(val) -> fold-onto(f, m, rest, f(acc, Pair(key, val)))
+        | None -> fold-onto(f, m, rest, acc)
 
 ; Pairs whose key is not the one being removed.
 let pairs-without[k, v](pairs: List (Pair k v), key: k) -> List (Pair k v) =
@@ -67,13 +144,20 @@ let pairs-without[k, v](pairs: List (Pair k v), key: k) -> List (Pair k v) =
       if (k2 == key) -> pairs-without(rest, key) | Pair(k2, val) :: pairs-without(rest, key)
 
 ; m without key. Other entries stay. There is no map-delete builtin, so this rebuilds.
-; @test lookup(remove(from-list([Pair("a", 1), Pair("b", 2)]), "a"), "a") => None()
-; @test lookup(remove(from-list([Pair("a", 1), Pair("b", 2)]), "a"), "b") => Some(2)
-pub let remove[k, v](m: Map k v, key: k) -> Map k v =
+; @test lookup("a", remove("a", from-list([Pair("a", 1), Pair("b", 2)]))) => None()
+; @test lookup("b", remove("a", from-list([Pair("a", 1), Pair("b", 2)]))) => Some(2)
+pub let remove[k, v](key: k, m: Map k v) -> Map k v =
   from-list(pairs-without(to-list(m), key))
 
-; left, then right. A key in both keeps the value from right.
-; @test lookup(merge(from-list([Pair("a", 1)]), from-list([Pair("a", 2)])), "a") => Some(2)
-; @test lookup(merge(from-list([Pair("a", 1)]), from-list([Pair("a", 2), Pair("b", 3)])), "b") => Some(3)
-pub let merge[k, v](left: Map k v, right: Map k v) -> Map k v =
-  from-list(append(to-list(left), to-list(right)))
+; xs, then extra. Later pairs overwrite, so extra is the overlay.
+let pairs-then[k, v](xs: List (Pair k v), extra: List (Pair k v)) -> List (Pair k v) =
+  match (xs)
+    | [] -> extra
+    | h :: t -> h :: pairs-then(t, extra)
+
+; base, then overlay. A key in both keeps the value from overlay.
+; @test lookup("a", merge(from-list([Pair("a", 2)]), from-list([Pair("a", 1)]))) => Some(2)
+; @test lookup("b", merge(from-list([Pair("b", 3)]), from-list([Pair("a", 1)]))) => Some(3)
+; @test (from-list([Pair("a", 1)]) |> merge(from-list([Pair("a", 2)])) |> lookup("a")) => Some(2)
+pub let merge[k, v](overlay: Map k v, base: Map k v) -> Map k v =
+  from-list(pairs-then(to-list(base), to-list(overlay)))
