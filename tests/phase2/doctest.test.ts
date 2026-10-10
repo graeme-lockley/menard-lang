@@ -104,7 +104,7 @@ pub let kept(n: Int) -> Int = n
   test("reports against the original file and skips a rebuild", () => {
     const first = runTest(pass, ["--verbose"]);
     expect(first.status).toBe(0);
-    expect(first.stdout).toContain(`${pass} ... ok`);
+    expect(first.stdout).toContain(`${pass.replace(/\.mnd$/, ".doctest.mnd")} ... ok`);
     expect(first.stdout).not.toContain("/doctest/");
     expect(first.stdout).toContain("pass kept(1) => 1 (line 5)");
     expect(first.stdout).not.toContain("exit");
@@ -136,7 +136,7 @@ pub let kept(n: Int) -> Int = n
 
     const assertOut = runTest(assertFile);
     expect(assertOut.status).toBe(1);
-    expect(assertOut.stdout).toContain(`${assertFile} ... FAILED`);
+    expect(assertOut.stdout).toContain(`${assertFile.replace(/\.mnd$/, ".doctest.mnd")} ... FAILED`);
     expect(assertOut.stdout).not.toContain("/doctest/");
     expect(assertOut.stderr).toContain(`${assertFile}:2:`);
     expect(assertOut.stderr).toContain("assertion failed: kept(1) => 2");
@@ -145,7 +145,7 @@ pub let kept(n: Int) -> Int = n
 
     const missingOut = runTest(missing);
     expect(missingOut.status).toBe(0);
-    expect(missingOut.stdout).toContain(`${missing} ... ok`);
+    expect(missingOut.stdout).toContain(`${missing.replace(/\.mnd$/, ".doctest.mnd")} ... ok`);
     expect(missingOut.stdout).not.toContain("/doctest/");
   }, 180_000);
 });

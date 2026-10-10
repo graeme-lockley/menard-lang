@@ -833,7 +833,7 @@ let note-progress(verb: Str, abs: Str, ctx: Ctx, ms: Int) -> Unit =
 
 ; `examples/sc.mnd` → `examples/sc.doctest.mnd`. The generated module is not
 ; the source file; errors in an annotation still use the source path.
-let doctest-label(shown: Str) -> Str =
+pub let doctest-label(shown: Str) -> Str =
   if (String.ends-with(".mnd", shown)) -> String.concat(String.slice(0, String.length(shown) - 4, shown), ".doctest.mnd") | String.concat(shown, ".doctest.mnd")
 
 let note-compiling(abs: Str, ctx: Ctx, ms: Int) -> Unit = {

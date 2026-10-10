@@ -109,10 +109,16 @@ let find-named(forms: List Ast, name: Str) -> Maybe Ast =
         | None -> find-named(rest, name)
 
 ; The suite marker for a generated module is the generated path. The
-; map sends that path back to the source the annotation was copied from.
-let shown-path(path: Str, originals: Map Str Str) -> Str =
+; status line names it beside the source (`examples/sc.doctest.mnd`).
+; Diagnostics still read the source the annotation was copied from.
+let source-path(path: Str, originals: Map Str Str) -> Str =
   match (Map.lookup(path, originals))
     | Some(orig) -> orig
+    | None -> path
+
+let shown-path(path: Str, originals: Map Str Str) -> Str =
+  match (Map.lookup(path, originals))
+    | Some(orig) -> doctest-label(orig)
     | None -> path
 
 let explain-one(path: Str, src: Str, shown: Str, original: Str, forms: List Ast, name: Str) -> Unit =
@@ -146,7 +152,7 @@ let explain-file(path: Str, lines: List Str, originals: Map Str Str) -> Unit =
     | Ok(src) ->
       match (read-all(src))
         | Err(_) -> ()
-        | Ok(forms) -> explain-parsed(path, src, shown-path(path, originals), forms, lines)
+        | Ok(forms) -> explain-parsed(path, src, source-path(path, originals), forms, lines)
 
 let file-line(path: Str, ok: Bool, on: Bool) -> Unit {
   write(stdout, path)
@@ -241,6 +247,18 @@ let case-files(cases: List DocCase) -> List Str =
     | [] -> []
     | DocCase(gen, _) :: rest -> gen :: case-files(rest)
 
+; A source that produced a generated module is run as that module.
+let is-origin(p: Str, cases: List DocCase) -> Bool =
+  match (cases)
+    | [] -> false
+    | DocCase(_, orig) :: rest -> same-path(p, orig) || is-origin(p, rest)
+
+let without-origins(xs: List Str, cases: List DocCase) -> List Str =
+  match (xs)
+    | [] -> []
+    | h :: t ->
+      if (is-origin(h, cases)) -> without-origins(t, cases) | h :: without-origins(t, cases)
+
 let originals-of(cases: List DocCase, acc: Map Str Str) -> Map Str Str =
   match (cases)
     | [] -> acc
@@ -295,7 +313,7 @@ let gather(paths: List Str, got: Gathered) -> Result Gathered Str =
         | Ok(cases) ->
           match (got)
             | Gathered(files, originals) ->
-              gather(rest, Gathered(cat-new(files, cat(present-list(discover(p)), case-files(cases))), originals-of(cases, originals)))
+              gather(rest, Gathered(cat-new(files, cat(without-origins(present-list(discover(p)), cases), case-files(cases))), originals-of(cases, originals)))
 
 let run-files(path: Str, files: List Str, originals: Map Str Str, clean: Bool, verbose: Bool, show-output: Bool, quiet: Bool, cc: Str, runtime: Str) -> Int {
   let on = tty-color(1)
