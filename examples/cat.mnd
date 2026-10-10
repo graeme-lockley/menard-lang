@@ -1,0 +1,54 @@
+#!/usr/bin/env mn
+
+; Concatenate files onto standard output, in the order given.
+; Run: ./examples/cat.mnd a.txt b.txt
+; A missing file is reported on standard error and the rest are still copied.
+; The process exits 1 when any file fails.
+
+import std/io
+import std/string as String
+import std/sys
+
+let reason(e: IoError) -> Str =
+  match (e)
+    | NotFound -> "No such file or directory"
+    | Permission -> "Permission denied"
+    | IsADirectory -> "Is a directory"
+    | NotADirectory -> "Not a directory"
+    | InvalidPath -> "Invalid path"
+    | TooLarge -> "File too large"
+    | Exists -> "File exists"
+    | Other(_) -> "Input/output error"
+
+let report(path: Str, e: IoError) -> Unit = {
+  write-line(stderr, String.concat("cat: ", path, ": ", reason(e)))
+  ()
+}
+
+let emit(path: Str) -> Int =
+  match (read-file(path))
+    | Ok(text) ->
+      match (write(stdout, text))
+        | Ok(_) -> 0
+        | Err(e) ->
+          {
+            report("stdout", e)
+            1
+          }
+    | Err(e) ->
+      {
+        report(path, e)
+        1
+      }
+
+let cat-from(i: Int, status: Int) -> Int =
+  if (i >= arg-count()) -> status | {
+    let next = emit(arg(i))
+    cat-from(i + 1, if (next == 0) -> status | 1)
+  }
+
+let main() -> Int =
+  if (arg-count() == 0) -> {
+    write-line(stderr, "cat: standard input is not available")
+    1
+  } | cat-from(0, 0)

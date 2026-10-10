@@ -26,6 +26,7 @@ Short programs. Each one that defines `main` prints a result and exits 0. Run on
 | `float-ops.mnd` | `Float` arithmetic, including `-0.0` |
 | `derive-show.mnd` | Derived `show` for a record and a variant |
 | `echo-file.mnd` | `read-file`, `write`, `exit` |
+| `cat.mnd` | Concatenate files to standard output. `./examples/cat.mnd a.txt b.txt` |
 | `mod-main.mnd`, `mod-util.mnd` | Two modules compiled into one binary |
 | `host-seam.mnd` | `exists`, `getenv`, `spawn`, `rename`. Run it from the repo root |
 | `heap-churn.mnd` | A long list, a large map, a growing buffer, and nested closures |
