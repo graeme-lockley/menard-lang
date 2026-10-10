@@ -440,7 +440,9 @@ let match-op(lx: Lex) -> Str {
     | b0 == 124 && b1 == 124 && after-ws(byte-or-end(s, i + 2, n)) -> "||"
     | b0 == 124 && b1 == 62 && after-ws(byte-or-end(s, i + 2, n)) -> "|>"
     | b0 == 45 && b1 == 62 && after-ws(byte-or-end(s, i + 2, n)) -> "->"
+    | b0 == 61 && b1 == 62 && after-ws(byte-or-end(s, i + 2, n)) -> "=>"
     | b0 == 58 && b1 == 58 && after-ws(byte-or-end(s, i + 2, n)) -> "::"
+    | b0 == 63 && after-ws(b1) -> "?"
     | b0 == 43 && after-ws(b1) -> "+"
     | b0 == 45 && after-ws(b1) -> "-"
     | b0 == 42 && after-ws(b1) -> "*"
@@ -457,7 +459,7 @@ let byte-or-end(s: Str, i: Int, n: Int) -> Int =
   if (i < n) -> String.byte(i, s) | -1
 
 let op-len(op: Str) -> Int =
-  if (op == "==" || op == "!=" || op == "<=" || op == ">=" || op == "&&" || op == "||" || op == "->" || op == "::" || op == "|>") -> 2 | 1
+  if (op == "==" || op == "!=" || op == "<=" || op == ">=" || op == "&&" || op == "||" || op == "->" || op == "=>" || op == "::" || op == "|>") -> 2 | 1
 
 let scan-ident(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), start: Int, col: Int, ind: Int, bol: Bool, line: Int) -> Unit {
   lex-bump(lx)
@@ -534,6 +536,8 @@ let scan-real(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError)) -> 
         push-tok(toks, Tok("op", op, start, deref(lx-pos(lx)), col, ind, bol, line))
       }
     | is-letter(b) || b == 95 -> scan-ident(lx, toks, failed, start, col, ind, bol, line)
+    | b == 63 -> set!(failed, Some(perr-at(start, start + 1, line, "operator ? requires whitespace on both sides")))
+    | b == 61 && lex-peek(lx, 1) == 62 -> set!(failed, Some(perr-at(start, start + 2, line, "operator => requires whitespace on both sides")))
     | else -> set!(failed, Some(perr-at(start, start + 1, line, "unexpected character")))
 }
 
@@ -625,12 +629,13 @@ let delim(ps: Ps, text: Str) -> Bool {
 
 let prec-of(op: Str) -> Int =
   cond
-    | op == "|>" -> 0
-    | op == "||" -> 1
-    | op == "&&" -> 2
-    | op == "==" || op == "!=" || op == "<" || op == ">" || op == "<=" || op == ">=" -> 3
-    | op == "+" || op == "-" || op == "::" -> 4
-    | op == "*" || op == "/" || op == "%" -> 5
+    | op == "?" -> 0
+    | op == "|>" -> 1
+    | op == "||" -> 2
+    | op == "&&" -> 3
+    | op == "==" || op == "!=" || op == "<" || op == ">" || op == "<=" || op == ">=" -> 4
+    | op == "+" || op == "-" || op == "::" -> 5
+    | op == "*" || op == "/" || op == "%" -> 6
     | else -> -1
 
 let is-cmp(op: Str) -> Bool =
@@ -723,7 +728,7 @@ let parse-prec-rest(ps: Ps, min: Int, stop: Str, stopping: Bool, left: Ast) -> R
     | else ->
       {
         advance(ps)
-        let right-min = if (tok-text(op) == "::") -> prec-of(tok-text(op)) | prec-of(tok-text(op)) + 1
+        let right-min = if (tok-text(op) == "::" || tok-text(op) == "?") -> prec-of(tok-text(op)) | prec-of(tok-text(op)) + 1
         match (parse-prec(ps, right-min, stop, stopping))
           | Err(e) -> Err(e)
           | Ok(right) -> parse-prec-rest(ps, min, stop, stopping, paren-at([sym-at(core-op(tok-text(op)), tok-span(op)), left, right], span-join(ast-span(left), ast-span(right))))
@@ -901,6 +906,7 @@ let parse-atom(ps: Ps) -> Result Ast ParseError {
           | tok-text(t) == "false" -> Ok(BoolNode(false, tok-span(t)))
           | else -> Ok(sym-at(tok-text(t), tok-span(t)))
       }
+    | tok-kind(t) == "op" && tok-text(t) == "=>" -> perr(t, "=> is only valid in a map")
     | tok-text(t) == "panic" || tok-text(t) == "ref" || tok-text(t) == "deref" || tok-text(t) == "set!" || tok-text(t) == "recur" ->
       {
         advance(ps)
@@ -963,10 +969,73 @@ let collect-until-acc(ps: Ps, close: Str, step: (Ps) -> Result Ast ParseError, a
 let parse-block(ps: Ps) -> Result Ast ParseError =
   match (eat(ps, "{"))
     | None -> perr(peek(ps), "expected {")
-    | Some(open) -> parse-block-rest(ps, open)
+    | Some(open) -> parse-brace(ps, open)
 
-let parse-block-rest(ps: Ps, open: Tok) -> Result Ast ParseError =
-  match (collect-stmts(ps, []))
+let is-spread-tok(ps: Ps) -> Bool =
+  tok-kind(peek(ps)) == "ident" && tok-text(peek(ps)) == "..."
+
+let is-fat-arrow(ps: Ps) -> Bool =
+  tok-kind(peek(ps)) == "op" && tok-text(peek(ps)) == "=>"
+
+let is-block-stmt(a: Ast) -> Bool =
+  match (a)
+    | ParenNode(h :: _, _) ->
+      match (h)
+        | SymNode(n, _) -> n == "let" || n == "return"
+        | _ -> false
+    | _ -> false
+
+let finish-map(ps: Ps, open: Tok, entries: List Ast) -> Result Ast ParseError =
+  match (eat(ps, "}"))
+    | None -> perr(peek(ps), "unclosed {")
+    | Some(close) -> Ok(paren-at(sym-at("map-lit", tok-span(open)) :: rev(entries, []), span-join(tok-span(open), tok-span(close))))
+
+let parse-map-after(ps: Ps, open: Tok, entries: List Ast) -> Result Ast ParseError =
+  cond
+    | delim(ps, "}") -> finish-map(ps, open, entries)
+    | tok-text(peek(ps)) == "," ->
+      {
+        advance(ps)
+        if (delim(ps, "}")) -> finish-map(ps, open, entries) | parse-map-entry(ps, open, entries)
+      }
+    | else -> perr(peek(ps), "expected , or }")
+
+let parse-map-entry(ps: Ps, open: Tok, entries: List Ast) -> Result Ast ParseError =
+  cond
+    | is-spread-tok(ps) ->
+      {
+        let dots = peek(ps)
+        advance(ps)
+        match (parse-expr(ps))
+          | Err(e) -> Err(e)
+          | Ok(expr) -> parse-map-after(ps, open, paren-at([sym-at("...", tok-span(dots)), expr], span-join(tok-span(dots), ast-span(expr))) :: entries)
+      }
+    | else ->
+      match (parse-expr(ps))
+        | Err(e) -> Err(e)
+        | Ok(key) -> parse-map-pair(ps, open, key, entries)
+
+let parse-map-pair(ps: Ps, open: Tok, key: Ast, entries: List Ast) -> Result Ast ParseError =
+  match (eat(ps, "=>"))
+    | None -> perr(peek(ps), "expected =>")
+    | Some(arrow) ->
+      match (parse-expr(ps))
+        | Err(e) -> Err(e)
+        | Ok(val) -> parse-map-after(ps, open, paren-at([sym-at("=>", tok-span(arrow)), key, val], span-join(ast-span(key), ast-span(val))) :: entries)
+
+let parse-brace(ps: Ps, open: Tok) -> Result Ast ParseError =
+  cond
+    | delim(ps, "}") -> finish-map(ps, open, [])
+    | tok-kind(peek(ps)) == "eof" -> perr(open, "unclosed {")
+    | is-spread-tok(ps) -> parse-map-entry(ps, open, [])
+    | else ->
+      match (parse-stmt(ps))
+        | Err(e) -> Err(e)
+        | Ok(first) ->
+          if (is-fat-arrow(ps) && not(is-block-stmt(first))) -> parse-map-pair(ps, open, first, []) | parse-block-rest(ps, open, [first])
+
+let parse-block-rest(ps: Ps, open: Tok, acc: List Ast) -> Result Ast ParseError =
+  match (collect-stmts(ps, acc))
     | Err(e) -> Err(e)
     | Ok(body) ->
       match (eat(ps, "}"))

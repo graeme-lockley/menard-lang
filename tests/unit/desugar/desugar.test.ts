@@ -77,6 +77,20 @@ describe("desugar", () => {
     expect(desugared("s |> String.index-of-from(sep, i)")).toBe("(String.index-of-from)(sep, i, s)");
   });
 
+  test("a map literal becomes map-set and a spread mentions map-keys once", () => {
+    expect(desugared('{"a" => 1, "b" => 2}')).toBe('map-set(map-set(map-new(), "a", 1), "b", 2)');
+    const spread = desugared("{...x, \"a\" => 1}");
+    expect(spread.split("map-keys").length - 1).toBe(1);
+    expect(spread).toContain("map-set");
+  });
+
+  test("question lowers to a match whose None arm holds the default", () => {
+    const text = desugared('Some(1) ? panic("no")');
+    expect(text).toContain("match (Some(1))");
+    expect(text).toContain('| None -> panic("no")');
+    expect(text).toContain("| Some(mn-ques) -> mn-ques");
+  });
+
   test("a bare name is not a pipe target", () => {
     const r = desugarSrc("xs |> List.map");
     expect(r.ok).toBe(false);

@@ -357,8 +357,10 @@ let print-headed(n: Str, rest: List Ast, whole: Ast, ind: Int) -> Str =
       match (rest)
         | s :: _ -> String.concat("'", print-atom(s))
         | [] -> "'"
-    | n == "and" -> print-logic(rest, "&&", 2, ind)
-    | n == "or" -> print-logic(rest, "||", 1, ind)
+    | n == "and" -> print-logic(rest, "&&", 3, ind)
+    | n == "or" -> print-logic(rest, "||", 2, ind)
+    | n == "?" -> print-ques(rest, ind)
+    | n == "map-lit" -> print-map(rest, ind)
     | n == "not" -> print-not(rest, ind)
     | n == "project" -> print-project(rest, ind)
     | n == "Cons" -> print-cons(rest, ind)
@@ -383,11 +385,11 @@ let project-left(obj: Ast, ind: Int) -> Str =
 let needs-project-paren(obj: Ast) -> Bool =
   match (sym-str-of-head(obj))
     | None -> false
-    | Some(h) -> h == "if" || h == "cond" || h == "match" || h == "and" || h == "or" || h == "Cons" || h == "-" || is-op(h)
+    | Some(h) -> h == "if" || h == "cond" || h == "match" || h == "and" || h == "or" || h == "?" || h == "Cons" || h == "-" || is-op(h)
 
 let print-cons(rest: List Ast, ind: Int) -> Str =
   match (rest)
-    | a :: b :: _ -> String.concat(wrap-operand(4, a, true, ind), String.concat(" :: ", wrap-operand(4, b, false, ind)))
+    | a :: b :: _ -> String.concat(wrap-operand(5, a, true, ind), String.concat(" :: ", wrap-operand(5, b, false, ind)))
     | _ -> "Cons()"
 
 let is-op(n: Str) -> Bool =
@@ -401,28 +403,30 @@ let print-not(rest: List Ast, ind: Int) -> Str =
 
 let print-neq(inner: Ast, ind: Int) -> Str =
   match (inner)
-    | ParenNode(_ :: a :: b :: _, _) -> String.concat(wrap-operand(3, a, false, ind), String.concat(" != ", wrap-operand(3, b, true, ind)))
+    | ParenNode(_ :: a :: b :: _, _) -> String.concat(wrap-operand(4, a, false, ind), String.concat(" != ", wrap-operand(4, b, true, ind)))
     | _ -> "!= "
 
 let op-prec(op: Str) -> Int =
   cond
-    | op == "|>" -> 0
-    | op == "||" -> 1
-    | op == "&&" -> 2
-    | op == "=" || op == "==" || op == "<" || op == ">" || op == "<=" || op == ">=" -> 3
-    | op == "+" || op == "-" -> 4
-    | op == "*" || op == "/" || op == "%" -> 5
+    | op == "?" -> 0
+    | op == "|>" -> 1
+    | op == "||" -> 2
+    | op == "&&" -> 3
+    | op == "=" || op == "==" || op == "<" || op == ">" || op == "<=" || op == ">=" -> 4
+    | op == "+" || op == "-" -> 5
+    | op == "*" || op == "/" || op == "%" -> 6
     | else -> -1
 
 let expr-prec(a: Ast) -> Int =
   match (sym-str-of-head(a))
     | Some(n) ->
       cond
-        | n == "or" -> 1
-        | n == "and" -> 2
-        | n == "not" && is-neq(a) -> 3
-        | n == "-" && is-unary-minus(a) -> 6
-        | n == "Cons" -> 4
+        | n == "?" -> 0
+        | n == "or" -> 2
+        | n == "and" -> 3
+        | n == "not" && is-neq(a) -> 4
+        | n == "-" && is-unary-minus(a) -> 7
+        | n == "Cons" -> 5
         | else -> op-prec(n)
     | None -> -1
 
@@ -454,10 +458,37 @@ let wrap-operand(parent: Int, child: Ast, right: Bool, ind: Int) -> Str {
 let print-logic(rest: List Ast, surface: Str, prec: Int, ind: Int) -> Str =
   print-op-from(rest, surface, prec, true, ind)
 
+let print-ques(rest: List Ast, ind: Int) -> Str =
+  match (rest)
+    | a :: b :: _ -> String.concat(wrap-operand(0, a, true, ind), String.concat(" ? ", wrap-operand(0, b, false, ind)))
+    | _ -> "?"
+
+let print-map(rest: List Ast, ind: Int) -> Str =
+  match (rest)
+    | [] -> "{}"
+    | _ -> String.concat("{", String.concat(join(map-entries(rest, ind), ", "), "}"))
+
+let map-entries(xs: List Ast, ind: Int) -> List Str =
+  match (xs)
+    | [] -> []
+    | h :: t -> print-map-entry(h, ind) :: map-entries(t, ind)
+
+let print-map-entry(e: Ast, ind: Int) -> Str =
+  cond
+    | is-head(e, "...") ->
+      match (e)
+        | ParenNode(_ :: a :: _, _) -> String.concat("...", print-expr(a, ind))
+        | _ -> "..."
+    | is-head(e, "=>") ->
+      match (e)
+        | ParenNode(_ :: k :: v :: _, _) -> String.concat(print-expr(k, ind), String.concat(" => ", print-expr(v, ind)))
+        | _ -> "=>"
+    | else -> print-expr(e, ind)
+
 let print-minus(rest: List Ast, ind: Int) -> Str =
   match (rest)
-    | a :: [] -> String.concat("-", wrap-operand(6, a, true, ind))
-    | a :: b :: _ -> String.concat(wrap-operand(4, a, false, ind), String.concat(" - ", wrap-operand(4, b, true, ind)))
+    | a :: [] -> String.concat("-", wrap-operand(7, a, true, ind))
+    | a :: b :: _ -> String.concat(wrap-operand(5, a, false, ind), String.concat(" - ", wrap-operand(5, b, true, ind)))
     | _ -> "-"
 
 let print-op(op: Str, rest: List Ast, ind: Int) -> Str {

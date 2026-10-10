@@ -1128,6 +1128,7 @@ function installBuiltins(env: Env): void {
     "f+", "f-", "f*", "f/",
     "show", "print", "println", "=", "compare", "dump",
     "ref", "deref",
+    "map-new", "map-set", "map-get", "map-keys",
     "None", "Some", "Ok", "Err", "Nil", "Cons",
     "exit", "arg-count", "arg", "write", "read-file", "write-file",
     "getenv", "exists", "rename",

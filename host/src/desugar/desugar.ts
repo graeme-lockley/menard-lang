@@ -137,6 +137,8 @@ function desugarNode(ast: Ast, diags: Diagnostic[]): Ast {
   if (nameEquals(head.name, "when")) return desugarWhen(ast, diags);
   if (nameEquals(head.name, "while")) return desugarWhile(ast, diags);
   if (nameEquals(head.name, "|>")) return desugarPipe(ast, diags);
+  if (nameEquals(head.name, "?")) return desugarQues(ast, diags);
+  if (nameEquals(head.name, "map-lit")) return desugarMapLit(ast, diags);
   const op = headText(head);
   if (op !== null && FOLD_OPS.has(op)) return desugarFold(op, ast, diags);
   if (op !== null && SUB_OPS.has(op)) return desugarSub(op, ast, diags);
@@ -214,6 +216,18 @@ function desugarPipe(ast: Ast & { tag: "list" }, diags: Diagnostic[]): Ast {
     pushArity(diags, ast.span, "|>", "a value and a call");
     return list("paren", mapElems(ast.elems, diags), ast.span);
   }
+  if (isMapLit(rhs)) {
+    diags.push(
+      diagnostic({
+        severity: "error",
+        category: "semantic",
+        code: "E_DESUGAR_PIPE",
+        message: "pipe expects a call",
+        span: ast.span,
+      }),
+    );
+    return list("paren", [sym("|>", ast.span), desugarNode(lhs, diags), desugarNode(rhs, diags)], ast.span);
+  }
   const left = desugarNode(lhs, diags);
   const right = desugarNode(rhs, diags);
   if (!isPipeCall(right)) {
@@ -229,6 +243,137 @@ function desugarPipe(ast: Ast & { tag: "list" }, diags: Diagnostic[]): Ast {
     return list("paren", [sym("|>", ast.span), left, right], ast.span);
   }
   return list("paren", [...right.elems, left], ast.span);
+}
+
+function isMapLit(ast: Ast): boolean {
+  return ast.tag === "list" && ast.kind === "paren" && ast.elems[0]?.tag === "sym" && nameEquals(ast.elems[0].name, "map-lit");
+}
+
+/** `(? lhs rhs)` → `(match lhs (Some mn-ques) mn-ques (None) rhs)`. The right arm is the only place `rhs` runs. */
+function desugarQues(ast: Ast & { tag: "list" }, diags: Diagnostic[]): Ast {
+  const lhs = ast.elems[1];
+  const rhs = ast.elems[2];
+  if (!lhs || !rhs || ast.elems.length !== 3) {
+    pushArity(diags, ast.span, "?", "a Maybe and a default");
+    return list("paren", mapElems(ast.elems, diags), ast.span);
+  }
+  const left = desugarNode(lhs, diags);
+  const right = desugarNode(rhs, diags);
+  const binder = sym("mn-ques", ast.span);
+  return list(
+    "paren",
+    [
+      sym("match", ast.span),
+      left,
+      list("paren", [sym("Some", ast.span), binder], ast.span),
+      binder,
+      list("paren", [sym("None", ast.span)], ast.span),
+      right,
+    ],
+    ast.span,
+  );
+}
+
+/** `(map-lit entry…)` folds onto `(map-new)`. A pair is `map-set`. A spread merges once. */
+function desugarMapLit(ast: Ast & { tag: "list" }, diags: Diagnostic[]): Ast {
+  let acc: Ast = list("paren", [sym("map-new", ast.span)], ast.span);
+  for (const entry of ast.elems.slice(1)) {
+    acc = desugarMapEntry(entry, acc, ast.span, diags);
+  }
+  return acc;
+}
+
+function desugarMapEntry(entry: Ast, acc: Ast, span: Ast["span"], diags: Diagnostic[]): Ast {
+  if (entry.tag === "list" && entry.kind === "paren" && entry.elems[0]?.tag === "sym") {
+    const head = entry.elems[0];
+    if (nameEquals(head.name, "=>") && entry.elems.length === 3) {
+      return list(
+        "paren",
+        [sym("map-set", span), acc, desugarNode(entry.elems[1]!, diags), desugarNode(entry.elems[2]!, diags)],
+        span,
+      );
+    }
+    if (nameEquals(head.name, "...") && entry.elems.length === 2) {
+      return desugarMapSpread(acc, desugarNode(entry.elems[1]!, diags), span);
+    }
+  }
+  diags.push(
+    diagnostic({
+      severity: "error",
+      category: "semantic",
+      code: "E_DESUGAR_MAP",
+      message: "map entry must be a pair or a spread",
+      span: entry.span,
+    }),
+  );
+  return acc;
+}
+
+/** Bind the base and the spread outside the loop so neither captures the other. */
+function desugarMapSpread(base: Ast, src: Ast, span: Ast["span"]): Ast {
+  const baseName = sym("mn-map-base", span);
+  const srcName = sym("mn-map-src", span);
+  const accName = sym("mn-map-acc", span);
+  const ksName = sym("mn-map-ks", span);
+  const keyName = sym("mn-map-k", span);
+  const restName = sym("mn-map-rest", span);
+  const valName = sym("mn-map-v", span);
+  const recurSome = list(
+    "paren",
+    [sym("recur", span), list("paren", [sym("map-set", span), accName, keyName, valName], span), restName],
+    span,
+  );
+  const recurNone = list("paren", [sym("recur", span), accName, restName], span);
+  const inner = list(
+    "paren",
+    [
+      sym("match", span),
+      list("paren", [sym("map-get", span), srcName, keyName], span),
+      list("paren", [sym("Some", span), valName], span),
+      recurSome,
+      list("paren", [sym("None", span)], span),
+      recurNone,
+    ],
+    span,
+  );
+  const outer = list(
+    "paren",
+    [
+      sym("match", span),
+      ksName,
+      list("paren", [sym("Nil", span)], span),
+      accName,
+      list("paren", [sym("Cons", span), keyName, restName], span),
+      inner,
+    ],
+    span,
+  );
+  const loop = list(
+    "paren",
+    [
+      sym("loop", span),
+      list(
+        "paren",
+        [
+          list("paren", [accName, baseName], span),
+          list("paren", [ksName, list("paren", [sym("map-keys", span), srcName], span)], span),
+        ],
+        span,
+      ),
+      outer,
+    ],
+    span,
+  );
+  return list(
+    "paren",
+    [
+      sym("let", span),
+      baseName,
+      base,
+      list("paren", [sym("let", span), srcName, src, loop], span),
+    ],
+    span,
+  );
 }
 
 function pushArity(diags: Diagnostic[], span: Ast["span"], name: string, how: string): void {

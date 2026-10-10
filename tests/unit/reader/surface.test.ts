@@ -230,6 +230,53 @@ let n(p: Int) -> Int = (p + 1).fst
   });
 });
 
+describe("map literals and question", () => {
+  function roundTrip(src: string) {
+    const a = mustRead(src);
+    const printed = text(print(a));
+    const b = mustRead(printed);
+    expect(astEqual(a, b)).toBe(true);
+    expect(text(print(b))).toBe(printed);
+  }
+
+  test("empty map, pairs, spreads, and question round-trip", () => {
+    roundTrip("{}");
+    roundTrip('{"a" => 1, "b" => 2}');
+    roundTrip('{...x, "a" => 1, ...y}');
+    roundTrip("a ? b ? c");
+  });
+
+  test("a brace around one expression stays a block", () => {
+    const ast = mustRead("{ 1 }");
+    expect(headOf(ast)).toBe("do");
+    expect(text(print(ast))).toContain("{");
+    expect(text(print(mustRead("{}"))).trim()).toBe("{}");
+  });
+
+  test("question is looser than pipe and associates right", () => {
+    const piped = mustRead("xs |> List.head() ? 0");
+    expect(headOf(piped)).toBe("?");
+    if (piped.tag === "list") expect(headOf(piped.elems[1]!)).toBe("|>");
+    const chain = mustRead("a ? b ? c");
+    expect(headOf(chain)).toBe("?");
+    if (chain.tag === "list") expect(headOf(chain.elems[2]!)).toBe("?");
+  });
+
+  test("question and fat arrow need whitespace on both sides", () => {
+    const ques = lex(Buffer.from("a?b"));
+    expect(ques.ok).toBe(false);
+    if (!ques.ok) expect(ques.error.message).toContain("whitespace");
+    const arrow = lex(Buffer.from('"a"=>1'));
+    expect(arrow.ok).toBe(false);
+    if (!arrow.ok) expect(arrow.error.message).toContain("whitespace");
+  });
+
+  test("a map entry needs a value", () => {
+    const r = read('{"a" => }');
+    expect(r.ok).toBe(false);
+  });
+});
+
 describe("missing if else", () => {
   test("a Unit arm may omit else", () => {
     const forms = mustAll(`

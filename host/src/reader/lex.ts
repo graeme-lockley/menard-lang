@@ -73,7 +73,7 @@ function isIdentCont(b: number): boolean {
   );
 }
 
-const OPS = ["==", "!=", "<=", ">=", "&&", "||", "->", "::", "|>", "+", "-", "*", "/", "%", "<", ">", "=", "|"];
+const OPS = ["==", "!=", "<=", ">=", "&&", "||", "->", "::", "|>", "=>", "+", "-", "*", "/", "%", "<", ">", "=", "|", "?"];
 
 /** Kestrel's simple escapes. `-1` means this byte is not one of them. */
 function simpleEscape(e: number): number {
@@ -446,6 +446,8 @@ export function lex(src: Uint8Array): { ok: true; toks: Tok[] } | { ok: false; e
       continue;
     }
 
+    if (b === 0x3f) return err(start, start + 1, "operator ? requires whitespace on both sides");
+    if (b === 0x3d && peek(1) === 0x3e) return err(start, start + 2, "operator => requires whitespace on both sides");
     return err(start, start + 1, `unexpected character`);
   }
 

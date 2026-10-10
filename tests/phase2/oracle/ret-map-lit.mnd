@@ -1,0 +1,20 @@
+; Map literal, last key wins, spread overwrite, and short-circuit `?` → 11.
+; `1 / 0` is the default. It must not run, or the process panics.
+
+import std/map as Map
+
+let main() -> Int {
+  let m = {"a" => 10, "b" => 20, "a" => 3}
+  let n = {...m, "b" => 4, "c" => 1}
+  let from-none = None() ? 2
+  let from-some = Some(1) ? (1 / 0)
+  match (Map.lookup(n, "a"))
+    | Some(a) ->
+      match (Map.lookup(n, "b"))
+        | Some(b) ->
+          match (Map.lookup(n, "c"))
+            | Some(c) -> a + b + c + from-none + from-some
+            | None -> 0
+        | None -> 0
+    | None -> 0
+}

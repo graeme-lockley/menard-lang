@@ -144,6 +144,8 @@ let desugar-paren-named(name: Str, elems: List Ast, sp: Span, diags: Ref (List D
     | name == "when" -> desugar-when(elems, sp, diags)
     | name == "while" -> desugar-while(elems, sp, diags)
     | name == "|>" -> desugar-pipe(elems, sp, diags)
+    | name == "?" -> desugar-ques(elems, sp, diags)
+    | name == "map-lit" -> desugar-map-lit(elems, sp, diags)
     | else -> desugar-operator(name, elems, sp, diags)
 
 ; ---------------------------------------------------------------------------
@@ -168,10 +170,18 @@ let pipe-call(ast: Ast) -> Bool =
     | ParenNode(h :: _, _) -> pipe-callee-ok(h)
     | _ -> false
 
+let is-map-lit(ast: Ast) -> Bool =
+  match (ast)
+    | ParenNode(h :: _, _) -> is-sym(h, "map-lit")
+    | _ -> false
+
 let desugar-pipe(elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
   match (elems)
     | _ :: lhs :: rhs :: [] ->
-      {
+      if (is-map-lit(rhs)) -> {
+        push-diag!(diags, sp, "E_DESUGAR_PIPE", "pipe expects a call")
+        ParenNode([mk-sym("|>", sp), desugar-node(lhs, diags), desugar-node(rhs, diags)], sp)
+      } | {
         let left = desugar-node(lhs, diags)
         let right = desugar-node(rhs, diags)
         if (pipe-call(right)) -> pipe-append(right, left) | {
@@ -189,6 +199,65 @@ let pipe-append(call: Ast, arg: Ast) -> Ast =
   match (call)
     | ParenNode(elems, sp) -> ParenNode(snoc-ast(elems, arg), sp)
     | _ -> call
+
+; `(? lhs rhs)` → one match. `rhs` sits in the None arm, so a Some never runs it.
+
+let desugar-ques(elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (elems)
+    | _ :: lhs :: rhs :: [] ->
+      {
+        let left = desugar-node(lhs, diags)
+        let right = desugar-node(rhs, diags)
+        let binder = mk-sym("mn-ques", sp)
+        ParenNode([mk-sym("match", sp), left, ParenNode([mk-sym("Some", sp), binder], sp), binder, ParenNode([mk-sym("None", sp)], sp), right], sp)
+      }
+    | _ ->
+      {
+        push-diag!(diags, sp, "E_DESUGAR_ARITY", "? expects a Maybe and a default")
+        ParenNode(map-desugar(elems, diags), sp)
+      }
+
+; `(map-lit entry…)` folds onto `(map-new)`. A pair is `map-set`. A spread merges once.
+
+let desugar-map-lit(elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  desugar-map-entries(elems-tail(elems), ParenNode([mk-sym("map-new", sp)], sp), sp, diags)
+
+let desugar-map-entries(entries: List Ast, acc: Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (entries)
+    | [] -> acc
+    | e :: rest -> desugar-map-entries(rest, desugar-map-entry(e, acc, sp, diags), sp, diags)
+
+let desugar-map-entry(entry: Ast, acc: Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (entry)
+    | ParenNode(head :: k :: v :: [], _) ->
+      if (is-sym(head, "=>")) -> ParenNode([mk-sym("map-set", sp), acc, desugar-node(k, diags), desugar-node(v, diags)], sp) | desugar-map-bad(entry, acc, diags)
+    | ParenNode(head :: expr :: [], _) ->
+      if (is-sym(head, "...")) -> desugar-map-spread(acc, desugar-node(expr, diags), sp) | desugar-map-bad(entry, acc, diags)
+    | _ -> desugar-map-bad(entry, acc, diags)
+
+let desugar-map-bad(entry: Ast, acc: Ast, diags: Ref (List DesugarError)) -> Ast {
+  push-diag!(diags, ast-span(entry), "E_DESUGAR_MAP", "map entry must be a pair or a spread")
+  acc
+}
+
+; The base and the spread are bound before the loop, so neither expression sees the loop names.
+
+let desugar-map-spread(base: Ast, src: Ast, sp: Span) -> Ast {
+  let base-name = mk-sym("mn-map-base", sp)
+  let src-name = mk-sym("mn-map-src", sp)
+  let acc-name = mk-sym("mn-map-acc", sp)
+  let ks-name = mk-sym("mn-map-ks", sp)
+  let key-name = mk-sym("mn-map-k", sp)
+  let rest-name = mk-sym("mn-map-rest", sp)
+  let val-name = mk-sym("mn-map-v", sp)
+  let recur-some = ParenNode([mk-sym("recur", sp), ParenNode([mk-sym("map-set", sp), acc-name, key-name, val-name], sp), rest-name], sp)
+  let recur-none = ParenNode([mk-sym("recur", sp), acc-name, rest-name], sp)
+  let inner = ParenNode([mk-sym("match", sp), ParenNode([mk-sym("map-get", sp), src-name, key-name], sp), ParenNode([mk-sym("Some", sp), val-name], sp), recur-some, ParenNode([mk-sym("None", sp)], sp), recur-none], sp)
+  let outer = ParenNode([mk-sym("match", sp), ks-name, ParenNode([mk-sym("Nil", sp)], sp), acc-name, ParenNode([mk-sym("Cons", sp), key-name, rest-name], sp), inner], sp)
+  let loop-form = ParenNode([mk-sym("loop", sp), ParenNode([ParenNode([acc-name, base-name], sp), ParenNode([ks-name, ParenNode([mk-sym("map-keys", sp), src-name], sp)], sp)], sp), outer], sp)
+  let inner-let = ParenNode([mk-sym("let", sp), src-name, src, loop-form], sp)
+  ParenNode([mk-sym("let", sp), base-name, base, inner-let], sp)
+}
 
 ; ---------------------------------------------------------------------------
 ; (and) → true; (and x) → x; (and x y …) → (if x (and y …) false)

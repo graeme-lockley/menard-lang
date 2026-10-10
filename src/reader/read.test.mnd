@@ -117,3 +117,65 @@ test \"block value\" = {
     | Err(_) -> false
     | Ok(forms) -> print-form-all(forms) == src
 }
+
+test "an empty map round-trips" = {
+  match (read("{}"))
+    | Err(_) -> false
+    | Ok(a) ->
+      match (read(print-form(a)))
+        | Err(_) -> false
+        | Ok(b) -> print-form(a) == "{}" && ast-equal(a, b)
+}
+
+test "a map literal and a question chain round-trip" = {
+  match (read("{\"a\" => 1, \"b\" => 2}"))
+    | Err(_) -> false
+    | Ok(a) ->
+      match (read(print-form(a)))
+        | Err(_) -> false
+        | Ok(b) -> ast-equal(a, b)
+} && {
+  match (read("{...x, \"a\" => 1, ...y}"))
+    | Err(_) -> false
+    | Ok(a) ->
+      match (read(print-form(a)))
+        | Err(_) -> false
+        | Ok(b) -> ast-equal(a, b)
+} && {
+  match (read("a ? b ? c"))
+    | Err(_) -> false
+    | Ok(a) ->
+      match (read(print-form(a)))
+        | Err(_) -> false
+        | Ok(b) -> print-form(a) == "a ? b ? c" && ast-equal(a, b)
+}
+
+test "one expression in braces stays a block" = {
+  match (read("{ 1 }"))
+    | Err(_) -> false
+    | Ok(a) ->
+      match (a)
+        | ParenNode(h :: _, _) ->
+          match (h)
+            | SymNode(n, _) -> n == "do"
+            | _ -> false
+        | _ -> false
+}
+
+test "question needs whitespace on both sides" = {
+  match (read("a?b"))
+    | Err(_) -> true
+    | Ok(_) -> false
+}
+
+test "a fat arrow needs whitespace on both sides" = {
+  match (read("{\"a\"=>1}"))
+    | Err(_) -> true
+    | Ok(_) -> false
+}
+
+test "a map entry needs a value" = {
+  match (read("{\"a\" => }"))
+    | Err(_) -> true
+    | Ok(_) -> false
+}

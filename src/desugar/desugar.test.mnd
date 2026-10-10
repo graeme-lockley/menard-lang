@@ -85,6 +85,44 @@ let pipe-rejected(src: Str) -> Bool =
 test "pipe appends the left value as the last argument" =
   desugars-to("tokens |> List.map(I.parse) |> List.filter(fn (n) = n <= 1000)", "(List.filter)(fn (n) = n <= 1000, (List.map)(I.parse, tokens))") && desugars-to("input |> String.drop(idx + 1) |> String.split-using(separators)", "(String.split-using)(separators, (String.drop)(idx + 1, input))") && desugars-to("numbers |> List.filter(is-negative) |> Err()", "Err((List.filter)(is-negative, numbers))") && desugars-to("numbers |> List.fold(fn (a, n) = a + n, 0)", "(List.fold)(fn (a, n) = a + n, 0, numbers)") && desugars-to("s |> String.drop(n)", "(String.drop)(n, s)") && desugars-to("s |> String.index-of-from(sep, i)", "(String.index-of-from)(sep, i, s)")
 
+test "a map literal becomes nested map-set" = desugars-to("{\"a\" => 1, \"b\" => 2}", "map-set(map-set(map-new(), \"a\", 1), \"b\", 2)")
+
+let occurs-once(needle: Str, s: Str) -> Bool =
+  match (index-of(needle, s))
+    | None -> false
+    | Some(i) ->
+      match (index-of-from(needle, i + 1, s))
+        | None -> true
+        | Some(_) -> false
+
+test "a spread mentions map-keys once" = {
+  match (read("{...x}"))
+    | Err(_) -> false
+    | Ok(a) ->
+      match (desugar-all([a]))
+        | Err(_) -> false
+        | Ok(forms) ->
+          match (forms)
+            | h :: [] -> occurs-once("map-keys", print-form(h))
+            | _ -> false
+}
+
+test "question lowers to a match and keeps the default in the None arm" = {
+  match (read("Some(1) ? panic(\"no\")"))
+    | Err(_) -> false
+    | Ok(a) ->
+      match (desugar-all([a]))
+        | Err(_) -> false
+        | Ok(forms) ->
+          match (forms)
+            | h :: [] ->
+              {
+                let text = print-form(h)
+                has("match (Some(1))", text) && has("None -> panic(\"no\")", text) && has("Some(mn-ques) -> mn-ques", text)
+              }
+            | _ -> false
+}
+
 test "a bare name is not a pipe target" = pipe-rejected("xs |> List.map")
 
 test "an unclosed declaration does not parse" = is-none-forms("tests/negative/bad-parse.mnd")

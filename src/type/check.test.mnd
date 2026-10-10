@@ -64,6 +64,8 @@ test "an unbound variable is E_TYPE_UNBOUND" = type-has-code("tests/negative/bad
 
 test "a non-Bool if test is E_TYPE_MISMATCH" = type-has-code("tests/negative/bad-type-if-nonbool.mnd", "E_TYPE_MISMATCH")
 
+test "question on an Int is a type error" = type-has-code("tests/negative/bad-ques-type.mnd", "E_TYPE_MISMATCH") || type-has-code("tests/negative/bad-ques-type.mnd", "E_TYPE_EXHAUSTIVE")
+
 test "a rest parameter is packed to a list before typing" =
   match (desugared("tests/phase2/fixtures/rest-ok.mnd"))
     | None -> false

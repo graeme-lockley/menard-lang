@@ -278,6 +278,12 @@ const fixtures: Array<{
     expectDis: /\bcall i64 @mn_map_(new|set|get|size)\b/,
   },
   {
+    name: "map literal, spread, and short-circuit ? (exit 11)",
+    entry: "tests/phase2/oracle/ret-map-lit.mnd",
+    expectExit: 11,
+    expectDis: /\bcall i64 @mn_map_(new|set|get|keys)\b/,
+  },
+  {
     name: "derived show of a private record and variant prints the source name",
     entry: "examples/derive-show.mnd",
     expectExit: 0,

@@ -22,21 +22,22 @@ function join(a: Span, b: Span): Span {
 }
 
 const PREC: Record<string, number> = {
-  "|>": 0,
-  "||": 1,
-  "&&": 2,
-  "==": 3,
-  "!=": 3,
-  "<": 3,
-  ">": 3,
-  "<=": 3,
-  ">=": 3,
-  "+": 4,
-  "-": 4,
-  "::": 4,
-  "*": 5,
-  "/": 5,
-  "%": 5,
+  "?": 0,
+  "|>": 1,
+  "||": 2,
+  "&&": 3,
+  "==": 4,
+  "!=": 4,
+  "<": 4,
+  ">": 4,
+  "<=": 4,
+  ">=": 4,
+  "+": 5,
+  "-": 5,
+  "::": 5,
+  "*": 6,
+  "/": 6,
+  "%": 6,
 };
 const CMP = new Set(["==", "!=", "<", ">", "<=", ">="]);
 
@@ -392,7 +393,15 @@ class P {
   parseBlock(): R {
     const open = this.eat("{");
     if (!open) return this.err(this.cur(), "expected {");
-    const elems: Ast[] = [sym("do", open.span)];
+    if (this.delim("}")) return this.finishMap(open, []);
+    if (this.cur().kind === "eof") return this.errEnd("unclosed {");
+    if (this.cur().kind === "ident" && this.cur().text === "...") return this.parseMapEntry(open, []);
+    const first = this.parseStmt();
+    if (!first.ok) return first;
+    if (this.cur().kind === "op" && this.cur().text === "=>" && !this.isBlockStmt(first.ast)) {
+      return this.parseMapPair(open, first.ast, []);
+    }
+    const elems: Ast[] = [sym("do", open.span), first.ast];
     while (!this.delim("}") && this.cur().kind !== "eof") {
       const e = this.parseStmt();
       if (!e.ok) return e;
@@ -400,8 +409,53 @@ class P {
     }
     const close = this.eat("}");
     if (!close) return this.errEnd("unclosed {");
-    if (elems.length === 1) return this.err(open, "block requires an expression");
     return { ok: true, ast: paren(elems, join(open.span, close.span)) };
+  }
+
+  isBlockStmt(ast: Ast): boolean {
+    if (ast.tag !== "list" || ast.elems[0]?.tag !== "sym") return false;
+    const n = new TextDecoder().decode(ast.elems[0].name);
+    return n === "let" || n === "return";
+  }
+
+  parseMapPair(open: Tok, key: Ast, acc: Ast[]): R {
+    const arrow = this.eat("=>");
+    if (!arrow) return this.err(this.cur(), "expected =>");
+    const val = this.parseExpr();
+    if (!val.ok) return val;
+    const entry = paren([sym("=>", arrow.span), key, val.ast], join(key.span, val.ast.span));
+    return this.parseMapAfter(open, acc.concat([entry]));
+  }
+
+  parseMapEntry(open: Tok, acc: Ast[]): R {
+    if (this.cur().kind === "ident" && this.cur().text === "...") {
+      const dots = this.toks[this.i++]!;
+      const expr = this.parseExpr();
+      if (!expr.ok) return expr;
+      const entry = paren([sym("...", dots.span), expr.ast], join(dots.span, expr.ast.span));
+      return this.parseMapAfter(open, acc.concat([entry]));
+    }
+    const key = this.parseExpr();
+    if (!key.ok) return key;
+    return this.parseMapPair(open, key.ast, acc);
+  }
+
+  parseMapAfter(open: Tok, acc: Ast[]): R {
+    if (this.delim("}")) return this.finishMap(open, acc);
+    if (this.eat(",")) {
+      if (this.delim("}")) return this.finishMap(open, acc);
+      return this.parseMapEntry(open, acc);
+    }
+    return this.err(this.cur(), "expected , or }");
+  }
+
+  finishMap(open: Tok, entries: Ast[]): R {
+    const close = this.eat("}");
+    if (!close) return this.errEnd("unclosed {");
+    return {
+      ok: true,
+      ast: paren([sym("map-lit", open.span), ...entries], join(open.span, close.span)),
+    };
   }
 
   parseStmt(): R {
@@ -440,7 +494,7 @@ class P {
         continue;
       }
       this.i++;
-      const rightPrec = op.text === "::" ? p : p + 1;
+      const rightPrec = op.text === "::" || op.text === "?" ? p : p + 1;
       const right = this.parsePrec(rightPrec);
       if (!right.ok) return right;
       const core = op.text === "::" ? "Cons" : op.text;
@@ -609,6 +663,7 @@ class P {
       }
       return { ok: true, ast: sym(t.text, t.span) };
     }
+    if (t.kind === "op" && t.text === "=>") return this.err(t, "=> is only valid in a map");
     if (t.text === "panic" || t.text === "ref" || t.text === "deref" || t.text === "set!" || t.text === "recur") {
       this.i++;
       return this.parseCallArgs(sym(t.text, t.span));
@@ -991,7 +1046,7 @@ class P {
         continue;
       }
       this.i++;
-      const rightPrec = op.text === "::" ? p : p + 1;
+      const rightPrec = op.text === "::" || op.text === "?" ? p : p + 1;
       const right = this.parsePrecStop(rightPrec, stops);
       if (!right.ok) return right;
       const core = op.text === "::" ? "Cons" : op.text;

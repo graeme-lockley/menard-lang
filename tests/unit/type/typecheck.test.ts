@@ -15,6 +15,12 @@ describe("typer", () => {
     expect(formatted).toContain("t.mnd:");
   });
 
+  test("question on an Int is a type error", () => {
+    const diags = diagnose("1 ? 0");
+    expect(diags.length).toBeGreaterThan(0);
+    expect(diags.some((d) => d.code === "E_TYPE_MISMATCH" || d.code === "E_TYPE_EXHAUSTIVE")).toBe(true);
+  });
+
   test("unbound variable", () => {
     const diags = diagnose("x + 1");
     expect(diags.some((d) => d.code === "E_TYPE_UNBOUND")).toBe(true);

@@ -18,28 +18,29 @@ function head(a: Ast): string | null {
 const OPS = new Set(["+", "-", "*", "/", "%", "<", ">", "<=", ">=", "="]);
 
 const OP_PREC: Record<string, number> = {
-  "=": 3,
-  "<": 3,
-  ">": 3,
-  "<=": 3,
-  ">=": 3,
-  "+": 4,
-  "-": 4,
-  "*": 5,
-  "/": 5,
-  "%": 5,
+  "=": 4,
+  "<": 4,
+  ">": 4,
+  "<=": 4,
+  ">=": 4,
+  "+": 5,
+  "-": 5,
+  "*": 6,
+  "/": 6,
+  "%": 6,
 };
 
 /** Precedence of a printed operator, so a looser child keeps its parentheses. */
 function rootPrec(a: Ast): number | null {
   const h = head(a);
   if (!h || !isList(a)) return null;
-  if (h === "Cons" && a.elems.length === 3) return 4;
-  if (h === "|>") return 0;
-  if (h === "or") return 1;
-  if (h === "and") return 2;
-  if (h === "not" && a.elems.length === 2 && head(a.elems[1]!) === "=") return 3;
-  if (h === "-" && a.elems.length === 2) return 6;
+  if (h === "Cons" && a.elems.length === 3) return 5;
+  if (h === "?") return 0;
+  if (h === "|>") return 1;
+  if (h === "or") return 2;
+  if (h === "and") return 3;
+  if (h === "not" && a.elems.length === 2 && head(a.elems[1]!) === "=") return 4;
+  if (h === "-" && a.elems.length === 2) return 7;
   if (a.elems.length >= 3 && OP_PREC[h] !== undefined) return OP_PREC[h];
   return null;
 }
@@ -234,18 +235,20 @@ function printExpr(a: Ast, ind: number): string {
   if (h === "while") return printWhile(a, ind);
   if (h === "quote" && a.elems[1]) return `'${printAtom(a.elems[1])}`;
   if (h === "|>") return printOp(a, "|>", ind);
+  if (h === "?") return printQues(a, ind);
+  if (h === "map-lit") return printMap(a, ind);
   if (h === "and" || h === "or") return printLogic(a, h === "and" ? "&&" : "||", ind);
   if (h === "not" && a.elems.length === 2 && head(a.elems[1]!) === "=") {
     const eq = a.elems[1] as Ast & { tag: "list" };
-    return `${wrapOperand(3, eq.elems[1]!, false, ind)} != ${wrapOperand(3, eq.elems[2]!, true, ind)}`;
+    return `${wrapOperand(4, eq.elems[1]!, false, ind)} != ${wrapOperand(4, eq.elems[2]!, true, ind)}`;
   }
   if (h === "project" && a.elems.length === 3) return printProject(a, ind);
   if (h === "Cons" && a.elems.length === 3) return printCons(a, ind);
   if (h && OPS.has(h) && a.elems.length >= 3) return printOp(a, h, ind);
   if (h === "-") {
-    if (a.elems.length === 2) return `-${wrapOperand(6, a.elems[1]!, true, ind)}`;
+    if (a.elems.length === 2) return `-${wrapOperand(7, a.elems[1]!, true, ind)}`;
     if (a.elems.length === 3) {
-      return `${wrapOperand(4, a.elems[1]!, false, ind)} - ${wrapOperand(4, a.elems[2]!, true, ind)}`;
+      return `${wrapOperand(5, a.elems[1]!, false, ind)} - ${wrapOperand(5, a.elems[2]!, true, ind)}`;
     }
   }
   if (h || (a.elems[0] && a.elems[0].tag === "list")) return printCall(a, ind);
@@ -287,6 +290,7 @@ function projectLeft(obj: Ast, ind: number): string {
     h === "and" ||
     h === "or" ||
     h === "|>" ||
+    h === "?" ||
     h === "Cons" ||
     h === "-" ||
     (h !== null && OPS.has(h))
@@ -297,7 +301,27 @@ function projectLeft(obj: Ast, ind: number): string {
 }
 
 function printCons(a: Ast & { tag: "list" }, ind: number): string {
-  return `${wrapOperand(4, a.elems[1]!, true, ind)} :: ${wrapOperand(4, a.elems[2]!, false, ind)}`;
+  return `${wrapOperand(5, a.elems[1]!, true, ind)} :: ${wrapOperand(5, a.elems[2]!, false, ind)}`;
+}
+
+function printQues(a: Ast & { tag: "list" }, ind: number): string {
+  return `${wrapOperand(0, a.elems[1]!, true, ind)} ? ${wrapOperand(0, a.elems[2]!, false, ind)}`;
+}
+
+function printMap(a: Ast & { tag: "list" }, ind: number): string {
+  const entries = a.elems.slice(1);
+  if (entries.length === 0) return "{}";
+  return `{${entries.map((e) => printMapEntry(e, ind)).join(", ")}}`;
+}
+
+function printMapEntry(e: Ast, ind: number): string {
+  if (e.tag !== "list") return printExpr(e, ind);
+  const h = txt(e.elems[0]!);
+  if (h === "..." && e.elems[1]) return `...${printExpr(e.elems[1], ind)}`;
+  if (h === "=>" && e.elems[1] && e.elems[2]) {
+    return `${printExpr(e.elems[1], ind)} => ${printExpr(e.elems[2], ind)}`;
+  }
+  return printExpr(e, ind);
 }
 
 function printOp(a: Ast & { tag: "list" }, op: string, ind: number): string {
@@ -314,7 +338,7 @@ function printOp(a: Ast & { tag: "list" }, op: string, ind: number): string {
 }
 
 function printLogic(a: Ast & { tag: "list" }, op: string, ind: number): string {
-  const prec = op === "&&" ? 2 : 1;
+  const prec = op === "&&" ? 3 : 2;
   return a.elems
     .slice(1)
     .map((e, i) => wrapOperand(prec, e, i > 0, ind))

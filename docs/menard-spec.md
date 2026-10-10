@@ -724,7 +724,12 @@ ref   deref   set!     quote   fn
 sugar: the right-hand side is a call, and the left-hand value is appended as
 its last argument. `[e1, e2, …]` and `[]`
 are sugar for a `Cons` / `Nil` chain, in expression position and in `match`
-patterns. `h :: t` is the same chain, associating to the right, in
+patterns. `{k => v, …}`, `{...m, …}`, and `{}` are sugar for `map-new`,
+`map-set`, and, for a spread, one `let`/`loop` over `map-keys` and
+`map-get`. Entries apply left to right and a later entry replaces the same
+key. `m ? d` is sugar for one `match`: `d` is the `None` arm, so it runs
+only when `m` is `None`, and `m` is evaluated once. `?` associates to the
+right and binds looser than `|>`. `h :: t` is the same chain, associating to the right, in
 expressions and in patterns. A bracket list on a `let`, `record`, or `type`
 name is a type-parameter list and is not expanded. `h :: t` is the open list
 pattern. `expr.field` lowers to a field slot. `import path as Name` binds
@@ -999,7 +1004,10 @@ nothing.
 These need either in-place mutation or an opaque representation, so they cannot
 be written in Menard at acceptable cost. `std/string`, `std/map`, and
 `std/string-buffer` publish them. Each call is one direct runtime call. The
-nominal types are built in; the operations are not ambient names.
+nominal types are built in; the operations are not ambient names, except
+the four intrinsics a map literal lowers to (`map-new`, `map-set`,
+`map-get`, `map-keys`). Those schemes exist so a literal needs no import.
+`std/map` still publishes `empty`, `set`, `lookup`, and `keys`.
 
 ```
 ; std/string — byte-level and scalar-level access (§2.3)
@@ -1583,7 +1591,7 @@ same spelling, because the spelling is defined on bytes alone.
 | record | `(Name f1 f2 …)` in declaration order |
 | variant | `(Con payload…)` |
 | `(List T)` / `(Arr T n)` | `[e1 e2 …]` |
-| `(Map K V)` | `{k1 -> v1, k2 -> v2, …}` in sorted key order |
+| `(Map K V)` | `{k1 => v1, k2 => v2, …}` in sorted key order, the same spelling as a map literal |
 | `(Maybe T)` / `(Result T E)` | `(Some v)` / `(None)` / `(Ok v)` / `(Err e)` |
 | `Ref`, `StringBuffer`, `Fn` | **no spelling — a compile error to show** (§2.12). Debug output is a separate contract: §2.16 |
 

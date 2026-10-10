@@ -3,8 +3,9 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { mapNew, mapSet } from "../../host/src/builtins/collections.ts";
 import { showValue } from "../../host/src/interp/derive.ts";
-import { vBool, vInt, vVariant } from "../../host/src/interp/value.ts";
+import { vBool, vInt, vStr, vVariant } from "../../host/src/interp/value.ts";
 
 const ROOT = join(import.meta.dir, "../..");
 const fixture = "tests/phase2/fixtures/print-values.mnd";
@@ -17,8 +18,8 @@ const expected = [
   "computed",
   "(Box false) (Node true (Node false (Empty)))",
   '["a\\"b", "c\\\\d"]',
-  "{1 -> 10, 2 -> 20}",
-  '{"a" -> true, "b" -> false}',
+  "{1 => 10, 2 => 20}",
+  '{"a" => true, "b" => false}',
   '"quoted"',
   "value0 value1 2",
   "[] [7] [[], [1]] (Box [true, false])",
@@ -31,6 +32,11 @@ test("interpreter list representations share literal formatting", () => {
   expect(showValue(vVariant("Cons", [
     vBool(true), { tag: "list", elems: [vBool(false)] },
   ]))).toBe("[true, false]");
+  const m = mapSet(mapSet(mapNew(), vInt(2n), vInt(20n)), vInt(1n), vInt(10n));
+  expect(showValue({ tag: "map", map: m })).toBe("{1 => 10, 2 => 20}");
+  const keys = mapSet(mapNew(), vStr(new TextEncoder().encode("a")), vBool(true));
+  expect(showValue({ tag: "map", map: keys })).toBe('{"a" => true}');
+  expect(showValue({ tag: "map", map: mapNew() })).toBe("{}");
 });
 
 describe.skipIf(!Bun.which("clang"))("print and println value formatting", () => {

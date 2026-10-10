@@ -175,6 +175,28 @@ describe("intrinsics via run", () => {
     }
   });
 
+  test("map literal, spread, and short-circuit question", () => {
+    const src = `import std/map as Map
+{
+  let m = {"a" => 10, "b" => 20, "a" => 3}
+  let n = {...m, "b" => 4, "c" => 1}
+  let from-none = None() ? 2
+  let from-some = Some(1) ? panic("no")
+  match (Map.lookup(n, "a"))
+    | Some(a) ->
+      match (Map.lookup(n, "b"))
+        | Some(b) ->
+          match (Map.lookup(n, "c"))
+            | Some(c) -> a + b + c + from-none + from-some
+            | None -> 0
+        | None -> 0
+    | None -> 0
+}`;
+    const r = run(src, { path: "map-lit.mnd", host: createHost() });
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(11n);
+  });
+
   test("map round trip", () => {
     const src = `import std/map as Map
 {

@@ -107,6 +107,41 @@ string functions change argument order. A non-call on the right is
 
 ---
 
+## 2026-10-10 — Map literals and `?`
+
+### The decision
+
+`{}`, `{k => v, …}`, and `{...m, …}` are map literals. `=>` is the entry
+separator. A spread may sit in any position. Entries apply left to right
+and a later entry keeps the key. Each spread expression is evaluated once
+and merged by walking `map-keys`. The literal lowers to `map-new`,
+`map-set`, `map-get`, and `map-keys` before typechecking. There is no map
+pattern. `{}` is the empty map; a block still needs an expression.
+
+`m ? d` unwraps a `Maybe`. It associates to the right and binds looser than
+`|>`, so `xs |> List.head() ? 0` unwraps the piped value. It lowers to one
+`match`. `d` is the `None` arm. `with-default` stays the eager function.
+
+### Why this shape
+
+A map is built far more often than it is matched, and `map-set(map-set(map-new(), …), …)`
+is the same noise list brackets removed. `=>` is free in expressions.
+`->` stays the arrow. `{` can still open a block, because a block never
+starts with `...` or an expression followed by `=>`.
+
+`?` exists because `with-default` evaluates both arguments. The short
+circuit is the whole operator. A `match` evaluates the scrutinee once and
+leaves the default in the `None` arm. Putting `?` below `|>` makes the
+pipe's result the `Maybe`.
+
+### Cost
+
+Both readers lex, parse, print, and desugar the two forms. Precedence
+numbers move up one to make room for `?` under `|>`. The four map
+intrinsics are builtin schemes. A program can name `map-new` directly.
+
+---
+
 ## 2026-10-09 — String-literal escapes (Kestrel's set, adapted)
 
 ### The decision

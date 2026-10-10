@@ -76,6 +76,7 @@ inside an identifier.
 | `->` | return type, arm body, function type |
 | `\|` | alternative, at the start of an arm or between or-patterns |
 | `\|>` | pipe: append the left-hand value as the last argument of the call on the right |
+| `?` | short-circuit unwrap of a `Maybe`; the right-hand expression runs only on `None` |
 | `.` | field or export projection, glued to both names |
 
 Unary minus and a negative numeric literal are the exception: `-` immediately
@@ -112,8 +113,14 @@ There is no overloading.
 | `Sym` | `'` glued to an identifier (`'red`) |
 | `Unit` | `()` |
 | list | `[e, …]`, or `[]` |
+| map | `{k => v, …}`, `{...m, …}`, or `{}` |
 
-`Char` has no literal syntax. There is no map literal.
+`Char` has no literal syntax. `=>` separates a map key from its value. A
+spread `...` splices a map. Entries run left to right and a later entry
+replaces an earlier one with the same key. `{}` is the empty map. A `{`
+that is not empty, not a leading spread, and not an expression followed by
+`=>` is a block. `print` and `println` spell a map the same way, in sorted
+key order: `{1 => 10, 2 => 20}`.
 
 A string literal is the bytes between `"` quotes. These backslash sequences
 are decoded; every other byte is copied unchanged, including newline, NUL,
@@ -378,14 +385,20 @@ lambda      = "fn" "(" param,* ")" ["->" type] body
 return      = "return" expr
 panic       = "panic" "(" expr ")"
 block       = "{" expr+ "}"
+map         = "{" [map-entry ("," map-entry)* [","]] "}"
+map-entry   = "..." expr / expr "=>" expr
 bin         = unary (operator unary)*
 unary       = ["-"] app
 app         = postfix "(" expr,* ["..."] ")"
             / postfix
 postfix     = atom ("." identifier)*
-atom        = literal / identifier / "(" expr ")" / list
+atom        = literal / identifier / "(" expr ")" / list / map
 list        = "[" expr,* "]"
 ```
+
+`{}` is a map. A brace form whose first entry is a spread, or whose first
+expression is followed by `=>`, is a map. Any other `{` is a block, and a
+block still needs an expression. Map entries are separated by commas.
 
 `ref`, `deref`, and `set!` are written as calls: `ref(n)`, `deref(i)`,
 `set!(i, deref(i) - 1)`. `set!` 's first argument is a name.
@@ -466,23 +479,25 @@ Precedence, tightest first. Associativity is left.
 
 | Precedence | Operators | Notes |
 |---|---|---|
-| 6 | prefix `-` | glued to its operand |
-| 5 | `*` `/` `%` | `Int` |
-| 4 | `+` `-` `::` | `Int` arithmetic; `::` associates to the right |
-| 3 | `<` `>` `<=` `>=` | chaining, see below |
-| 3 | `==` `!=` | chaining, see below |
-| 2 | `&&` | short-circuit |
-| 1 | `\|\|` | short-circuit |
-| 0 | `\|>` | last-argument insertion; the right-hand side is a call |
+| 7 | prefix `-` | glued to its operand |
+| 6 | `*` `/` `%` | `Int` |
+| 5 | `+` `-` `::` | `Int` arithmetic; `::` associates to the right |
+| 4 | `<` `>` `<=` `>=` | chaining, see below |
+| 4 | `==` `!=` | chaining, see below |
+| 3 | `&&` | short-circuit |
+| 2 | `\|\|` | short-circuit |
+| 1 | `\|>` | last-argument insertion; the right-hand side is a call |
+| 0 | `?` | right-associative; unwraps a `Maybe`, and the right-hand side runs only on `None` |
 
-`a + b + c` is `(a + b) + c`. `a :: b :: c` is `a :: (b :: c)`. `a < b < c` is `a < b && b < c`, and `b` is
+`a + b + c` is `(a + b) + c`. `a :: b :: c` is `a :: (b :: c)`. `a ? b ? c` is `a ? (b ? c)`. `a < b < c` is `a < b && b < c`, and `b` is
 evaluated twice. The same chaining rule applies to `==` and `!=` and to the
 relational operators, including mixtures that the existing desugarer already
 chains. `!=` is `not` of `==`.
 
 `&&` and `||` are binary and short-circuit. They are today's `and` and `or`.
 
-`|>` associates to the left and binds looser than `||`. The right-hand side
+`|>` associates to the left and binds looser than `||` and tighter than `?`.
+`xs |> List.head() ? 0` unwraps the piped `Maybe`. The right-hand side
 is a call. Desugaring, which runs before typechecking, appends the left-hand
 value as that call's last argument:
 
@@ -577,6 +592,8 @@ word has changed.
 | `a != b` | `(not (= a b))` |
 | `a && b`, `a \|\| b` | `(and a b)`, `(or a b)` |
 | `x \|> f(a)` | `(f a x)` |
+| `{k => v, ...m}` | `(map-set …)` on `(map-new)`; a spread is one `let`/`loop` merge |
+| `m ? d` | `(match m (Some mn-ques) mn-ques (None) d)` |
 | `f(a, b)` | `(f a b)` |
 | `Name(a, b)` in expression or pattern position | `(Name a b)` |
 | `[a, b]` | `(Cons a (Cons b (Nil)))` |

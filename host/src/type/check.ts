@@ -116,6 +116,23 @@ function installBuiltins(env: TypeEnv): void {
     type: tFn([tRef({ tag: "param", name: "a" })], { tag: "param", name: "a" }),
   });
 
+  const mapKey: Type = { tag: "param", name: "k" };
+  const mapVal: Type = { tag: "param", name: "v" };
+  const mapType = tMap(mapKey, mapVal);
+  env.values.set("map-new", { params: ["k", "v"], type: tFn([], mapType) });
+  env.values.set("map-set", {
+    params: ["k", "v"],
+    type: tFn([mapType, mapKey, mapVal], mapType),
+  });
+  env.values.set("map-get", {
+    params: ["k", "v"],
+    type: tFn([mapType, mapKey], tMaybe(mapVal)),
+  });
+  env.values.set("map-keys", {
+    params: ["k", "v"],
+    type: tFn([mapType], tList(mapKey)),
+  });
+
   // Maybe / Result / List — same registration as user variants: ctors + values
   const a: Type = { tag: "param", name: "a" };
   const tParam: Type = { tag: "param", name: "t" };
