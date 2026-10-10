@@ -23,11 +23,11 @@ import "../reader/ast.mnd"
 import "../reader/read.mnd"
 import "../reader/casing.mnd"
 import "../desugar/desugar.mnd"
-import "../util/result.mnd"
 import std/fs
 import std/io
 import std/list
 import std/proc
+import std/result as Result
 import std/string as String
 import std/sys
 import std/map as Map
@@ -420,7 +420,7 @@ let note-version(versions: Ref (Map Str Str), spec: Str) -> Result Unit Str =
 pub let note-versions(versions: Ref (Map Str Str), specs: List Str) -> Result Unit Str =
   match (specs)
     | [] -> Ok(())
-    | spec :: rest -> result-bind(note-version(versions, spec), fn (_) = note-versions(versions, rest))
+    | spec :: rest -> Result.and-then(fn (_) = note-versions(versions, rest), note-version(versions, spec))
 
 let is-basics-path(path: Str) -> Bool =
   path == "stdlib/basics.mnd" || String.ends-with("/stdlib/basics.mnd", path)
@@ -691,7 +691,7 @@ let register-export-names!(exports: Ref (Map Str Str), path: Str, names: List St
   match (names)
     | [] -> Ok(())
     | n :: rest ->
-      if (n == "main") -> register-export-names!(exports, path, rest, kind) | result-bind(register-one-export!(exports, path, n, kind), fn (_) = register-export-names!(exports, path, rest, kind))
+      if (n == "main") -> register-export-names!(exports, path, rest, kind) | Result.and-then(fn (_) = register-export-names!(exports, path, rest, kind), register-one-export!(exports, path, n, kind))
 
 let register-form-exports!(exports: Ref (Map Str Str), path: Str, form: Ast) -> Result Unit Str =
   match (form)
@@ -710,7 +710,7 @@ let register-form-exports!(exports: Ref (Map Str Str), path: Str, form: Ast) -> 
 let register-forms-exports!(exports: Ref (Map Str Str), path: Str, forms: List Ast) -> Result Unit Str =
   match (forms)
     | [] -> Ok(())
-    | f :: rest -> result-bind(register-form-exports!(exports, path, f), fn (_) = register-forms-exports!(exports, path, rest))
+    | f :: rest -> Result.and-then(fn (_) = register-forms-exports!(exports, path, rest), register-form-exports!(exports, path, f))
 
 ; ---------------------------------------------------------------------------
 ; Per-module init and the program bootstrap
@@ -859,8 +859,7 @@ let uniquify-module-body(path: Str, entry-path: Str, mid: Int, forms: List Ast, 
   match (runtime-misplaced(path, forms))
     | Some(msg) -> Err(msg)
     | None ->
-      result-bind(
-        if (Map.has(deref(qualified-imports), path)) -> Ok(()) | register-forms-exports!(exports, path, forms),
+      Result.and-then(
         fn (_) {
           let renames = build-renames(forms, mid, main-symbol(path), Map.has(deref(qualified-imports), path), path)
           note-renamed-runtime!(path, forms, renames)
@@ -869,7 +868,8 @@ let uniquify-module-body(path: Str, entry-path: Str, mid: Int, forms: List Ast, 
           let body = fold-runtime-forms(with-module-init(path, renamed, inits))
           note-entry!(path, entry-path, body, entry)
           Ok(body)
-        }
+        },
+        if (Map.has(deref(qualified-imports), path)) -> Ok(()) | register-forms-exports!(exports, path, forms)
       )
 
 ; ---------------------------------------------------------------------------
@@ -881,12 +881,12 @@ let load-module-into(path: Str, entry-path: Str, visited: Ref (Map Str Bool), ac
     | None ->
       {
         set!(visited, Map.set(deref(visited), path, true))
-        result-bind(
-          ensure-module-file(path),
+        Result.and-then(
           fn (_) =
             match (read-file(path))
               | Err(_) -> Err(String.concat("module not found: ", path))
-              | Ok(src) -> load-module-source(path, entry-path, src, visited, acc, mid, exports, paths, sources, inits, entry, versions)
+              | Ok(src) -> load-module-source(path, entry-path, src, visited, acc, mid, exports, paths, sources, inits, entry, versions),
+          ensure-module-file(path)
         )
       }
 
@@ -1012,11 +1012,9 @@ let rewrite-flat-import-aliases(from: Str, forms: List Ast) -> List Ast =
 let load-module-deps(path: Str, entry-path: Str, forms: List Ast, visited: Ref (Map Str Bool), acc: Ref (List Ast), mid: Ref Int, exports: Ref (Map Str Str), paths: Ref (List Str), sources: Ref (Map Str Str), inits: Ref (List Str), entry: Ref EntryMain, versions: Ref (Map Str Str)) -> Result Unit Str {
   mark-qualified-imports!(path, forms)
   let specs = specs-with-basics(path, collect-import-specs(forms, []))
-  result-bind(
-    note-versions(versions, specs),
+  Result.and-then(
     fn (_) =
-      result-bind(
-        load-deps-list(path, entry-path, specs, visited, acc, mid, exports, paths, sources, inits, entry, versions),
+      Result.and-then(
         fn (_) {
           let id = deref(mid)
           set!(mid, id + 1)
@@ -1027,22 +1025,24 @@ let load-module-deps(path: Str, entry-path: Str, forms: List Ast, visited: Ref (
               | None -> ""
           let stamped = stamp-forms(forms, src, id)
           let qualified = rewrite-flat-import-aliases(path, stamped)
-          result-bind(
-            uniquify-module-body(path, entry-path, id, qualified, exports, inits, entry),
+          Result.and-then(
             fn (body) {
               set!(acc, append-asts(deref(acc), body))
               Ok(())
-            }
+            },
+            uniquify-module-body(path, entry-path, id, qualified, exports, inits, entry)
           )
-        }
-      )
+        },
+        load-deps-list(path, entry-path, specs, visited, acc, mid, exports, paths, sources, inits, entry, versions)
+      ),
+    note-versions(versions, specs)
   )
 }
 
 let load-deps-list(from: Str, entry-path: Str, specs: List Str, visited: Ref (Map Str Bool), acc: Ref (List Ast), mid: Ref Int, exports: Ref (Map Str Str), paths: Ref (List Str), sources: Ref (Map Str Str), inits: Ref (List Str), entry: Ref EntryMain, versions: Ref (Map Str Str)) -> Result Unit Str =
   match (specs)
     | [] -> Ok(())
-    | spec :: rest -> result-bind(load-module-into(resolve-import-path(from, spec), entry-path, visited, acc, mid, exports, paths, sources, inits, entry, versions), fn (_) = load-deps-list(from, entry-path, rest, visited, acc, mid, exports, paths, sources, inits, entry, versions))
+    | spec :: rest -> Result.and-then(fn (_) = load-deps-list(from, entry-path, rest, visited, acc, mid, exports, paths, sources, inits, entry, versions), load-module-into(resolve-import-path(from, spec), entry-path, visited, acc, mid, exports, paths, sources, inits, entry, versions))
 
 ; Public entry: flatten `entry-path` (already read as `src`) into forms plus
 ; the path of each module id, dependency-first. When the entry defines
@@ -1063,7 +1063,7 @@ pub let flatten-module-graph(entry-path: Str, src: Str) -> Result Flat Str {
   let entry = ref(EntryMain("", false, false))
   let versions = ref(Map.empty())
   set!(visited, Map.set(deref(visited), entry-path, true))
-  result-bind(load-module-source(entry-path, entry-path, src, visited, acc, mid, exports, paths, sources, inits, entry, versions), fn (_) = Ok(Flat(forms-with-bootstrap(deref(acc), deref(inits), deref(entry)), deref(paths))))
+  Result.and-then(fn (_) = Ok(Flat(forms-with-bootstrap(deref(acc), deref(inits), deref(entry)), deref(paths))), load-module-source(entry-path, entry-path, src, visited, acc, mid, exports, paths, sources, inits, entry, versions))
 }
 
 ; Separate compilation uses the same path hash and rename walk. The

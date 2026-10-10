@@ -50,7 +50,6 @@ result with `clang`, and runs it — the current end-to-end smoke test (root
 | `emit/bitcode.mnd` | `emit-program-bc`: the `emit` CLI's entry into code generation | Wired — runs pool collection, then delegates to `lower.mnd`, returning `Result Str Str` so a lowering failure becomes a clean CLI error rather than a crash |
 | `tools/read-roundtrip.mnd` | Test harness (not part of the compiler): read → print → read → structural-equality | Wired |
 | `tools/pool-dump.mnd` | Test harness (not part of the compiler): renders `pool/pool.mnd`'s collected entries as goldenable text | Wired |
-| `util/result.mnd` | `result-bind`/`result-then` — `Result` plumbing shared by the reader, casing checker and emitter (ADR 6: no exceptions) | Wired |
 
 "Wired" modules are exercised by `src/mn.mnd`'s pipeline today. "Stub" and
 "Skeleton"/"Placeholder" modules exist so the pipeline's *shape* — reader →

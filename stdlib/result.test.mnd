@@ -8,4 +8,8 @@ test "map leaves an err" = map(fn (n) = n + 1, Err("x")) == Err("x")
 
 test "and-then chains ok" = and-then(fn (n) = Ok(n + 1), Ok(1)) == Ok(2)
 
+test "and-then leaves an err" = and-then(fn (n) = Ok(n + 1), Err("x")) == Err("x")
+
+test "and-then discards a unit ok" = and-then(fn (_) = Ok(1), Ok(())) == Ok(1)
+
 test "unwrap-or returns the default" = unwrap-or(Err("x"), 0) == 0

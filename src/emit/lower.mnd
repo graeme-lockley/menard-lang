@@ -182,10 +182,10 @@
 
 import "../reader/ast.mnd"
 import "../pool/pool.mnd"
-import "../util/result.mnd"
 import "./llvm-ir.mnd"
 import "./bc-writer.mnd"
 import std/list
+import std/result as Result
 import std/string as String
 import std/map as Map
 import std/string-buffer as Buf
@@ -1315,7 +1315,7 @@ let is-unsupported-form(s: Str) -> Bool =
   str-in-list(s, unsupported-form-names())
 
 let lower-expr(ast: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  result-bind(lower-expr-raw(ast, env, b, funcs, noop, pool), fn (v) = Ok(keep!(b, v)))
+  Result.and-then(fn (v) = Ok(keep!(b, v)), lower-expr-raw(ast, env, b, funcs, noop, pool))
 
 let lower-expr-raw(ast: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (ast)
@@ -1443,13 +1443,13 @@ let lower-paren-head(head: Ast, rest: List Ast, sp: Span, env: Map Str Int, b: B
     | Some(hn) -> lower-named(hn, rest, sp, env, b, funcs, noop, pool)
 
 let lower-apply-value(head: Ast, args: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  result-bind(lower-expr(head, env, b, funcs, noop, pool), fn (clo) = lower-apply-clo(clo, args, sp, env, b, funcs, noop, pool))
+  Result.and-then(fn (clo) = lower-apply-clo(clo, args, sp, env, b, funcs, noop, pool), lower-expr(head, env, b, funcs, noop, pool))
 
 let lower-apply-clo(clo: Int, args: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (args)
     | [] -> Ok(emit-traced-call!(b, pool, sp, extern-apply-0-abs(str-pool-count(pool)), get-words!(b, [clo])))
-    | [a0] -> result-bind(lower-expr(a0, env, b, funcs, noop, pool), fn (arg) = Ok(emit-traced-call!(b, pool, sp, extern-apply-1-abs(str-pool-count(pool)), get-words!(b, [clo, arg]))))
-    | [a0, a1] -> result-bind(lower-expr(a0, env, b, funcs, noop, pool), fn (x) = result-bind(lower-expr(a1, env, b, funcs, noop, pool), fn (y) = Ok(emit-traced-call!(b, pool, sp, extern-apply-2-abs(str-pool-count(pool)), get-words!(b, [clo, x, y])))))
+    | [a0] -> Result.and-then(fn (arg) = Ok(emit-traced-call!(b, pool, sp, extern-apply-1-abs(str-pool-count(pool)), get-words!(b, [clo, arg]))), lower-expr(a0, env, b, funcs, noop, pool))
+    | [a0, a1] -> Result.and-then(fn (x) = Result.and-then(fn (y) = Ok(emit-traced-call!(b, pool, sp, extern-apply-2-abs(str-pool-count(pool)), get-words!(b, [clo, x, y]))), lower-expr(a1, env, b, funcs, noop, pool)), lower-expr(a0, env, b, funcs, noop, pool))
     | _ -> Err("closure application supports at most 2 arguments currently")
 
 let lower-named(hn: Str, rest: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
@@ -1470,7 +1470,7 @@ let lower-named(hn: Str, rest: List Ast, sp: Span, env: Map Str Int, b: Builder,
         | None ->
           cond
             | is-runtime-op(hn) -> lower-runtime-op(hn, rest, env, b, funcs, noop, pool)
-            | is-effect-head(hn) -> result-then(lower-effect-op(hn, rest, env, b, funcs, noop, pool), fn () = Ok(const-unit!(b)))
+            | is-effect-head(hn) -> Result.and-then(fn (_) = Ok(const-unit!(b)), lower-effect-op(hn, rest, env, b, funcs, noop, pool))
             | is-unsupported-form(hn) -> Err(String.concat("cannot lower `", hn, "` with the real instruction lowerer yet"))
             | else -> lower-call(hn, rest, sp, env, b, funcs, noop, pool)
 
@@ -1486,15 +1486,15 @@ let lower-slot(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str Func
 let lower-slot-index(obj: Ast, idx: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (idx)
     | IntNode(n, _) ->
-      result-bind(
-        lower-expr(obj, env, b, funcs, noop, pool),
-        fn (val) = Ok(emit-call!(b, extern-slot-abs(str-pool-count(pool)), [val, const-i64!(b, n)]))
+      Result.and-then(
+        fn (val) = Ok(emit-call!(b, extern-slot-abs(str-pool-count(pool)), [val, const-i64!(b, n)])),
+        lower-expr(obj, env, b, funcs, noop, pool)
       )
     | _ -> Err("slot index must be an integer")
 
 let lower-if(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (rest)
-    | [test, then, els] -> result-bind(lower-cond(test, env, b, funcs, noop, pool), fn (cond-abs) = lower-if-branches(cond-abs, then, els, env, b, funcs, noop, pool))
+    | [test, then, els] -> Result.and-then(fn (cond-abs) = lower-if-branches(cond-abs, then, els, env, b, funcs, noop, pool), lower-cond(test, env, b, funcs, noop, pool))
     | _ -> Err("if requires a test, a then-branch and an else-branch")
 
     ; `result-slot` is allocated into the block still open when the
@@ -1509,7 +1509,7 @@ let lower-if-branches(cond-abs: Int, then: Ast, els: Ast, env: Map Str Int, b: B
   let join-bb = fresh-bb!(b)
   emit-condbr!(b, then-bb, else-bb, cond-abs)
   switch-to!(b, then-bb)
-  result-bind(lower-expr(then, env, b, funcs, noop, pool), fn (then-val) = lower-if-then-done(then-val, els, result-slot, else-bb, join-bb, env, b, funcs, noop, pool))
+  Result.and-then(fn (then-val) = lower-if-then-done(then-val, els, result-slot, else-bb, join-bb, env, b, funcs, noop, pool), lower-expr(then, env, b, funcs, noop, pool))
 }
 
     ; `maybe-store-and-br!`: if `then` ended in `recur` (block already
@@ -1518,7 +1518,7 @@ let lower-if-branches(cond-abs: Int, then: Ast, els: Ast, env: Map Str Int, b: B
 let lower-if-then-done(then-val: Int, els: Ast, result-slot: Int, else-bb: BB, join-bb: BB, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str {
   maybe-store-and-br!(b, result-slot, then-val, join-bb)
   switch-to!(b, else-bb)
-  result-bind(lower-expr(els, env, b, funcs, noop, pool), fn (else-val) = lower-if-else-done(else-val, result-slot, join-bb, b))
+  Result.and-then(fn (else-val) = lower-if-else-done(else-val, result-slot, join-bb, b), lower-expr(els, env, b, funcs, noop, pool))
 }
 
 let lower-if-else-done(else-val: Int, result-slot: Int, join-bb: BB, b: Builder) -> Result Int Str {
@@ -1586,13 +1586,13 @@ let lower-loop-bind-all(pairs: List Ast, body: Ast, result-slot: Int, env: Map S
           match (sym-str(name-ast))
             | None -> Err("loop binding name must be a symbol")
             | Some(name) ->
-              result-bind(
-                lower-expr(init-ast, env, b, funcs, noop, pool),
+              Result.and-then(
                 fn (v) {
                   let slot = root-alloca!(b)
                   emit-store!(b, slot, get!(b, v))
                   lower-loop-bind-all(rest, body, result-slot, env, b, funcs, noop, pool, name :: names-acc, slot :: slots-acc, Map.set(env-acc, name, slot))
-                }
+                },
+                lower-expr(init-ast, env, b, funcs, noop, pool)
               )
         | _ -> Err("each loop binding must be (name init)")
 
@@ -1606,14 +1606,14 @@ let lower-loop-run(body: Ast, result-slot: Int, names: List Str, slots: List Int
   emit-br!(b, header)
   switch-to!(b, header)
   push-loop-frame!(b, LoopFrame(header, exit-bb, result-slot, slots, names, mark))
-  result-bind(
-    lower-expr(body, env, b, funcs, noop, pool),
+  Result.and-then(
     fn (body-val) {
       maybe-store-and-br!(b, result-slot, body-val, exit-bb)
       pop-loop-frame!(b)
       switch-to!(b, exit-bb)
       Ok(get!(b, emit-load!(b, result-slot)))
-    }
+    },
+    lower-expr(body, env, b, funcs, noop, pool)
   )
 }
 
@@ -1629,7 +1629,7 @@ let lower-recur(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str Fun
 let lower-recur-eval-all(args: List Ast, vals-acc: List Int, slots: List Int, header: BB, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (args)
     | [] -> lower-recur-store-all(list-reverse-int(vals-acc), slots, header, b)
-    | a :: rest -> result-bind(lower-expr(a, env, b, funcs, noop, pool), fn (v) = lower-recur-eval-all(rest, v :: vals-acc, slots, header, env, b, funcs, noop, pool))
+    | a :: rest -> Result.and-then(fn (v) = lower-recur-eval-all(rest, v :: vals-acc, slots, header, env, b, funcs, noop, pool), lower-expr(a, env, b, funcs, noop, pool))
 
 let lower-recur-store-all(vals: List Int, slots: List Int, header: BB, b: Builder) -> Result Int Str =
   match (vals)
@@ -1826,14 +1826,14 @@ let lower-user-ctor(hn: Str, args: List Ast, env: Map Str Int, b: Builder, funcs
     | None -> Err(String.concat("unknown constructor ", hn))
     | Some(spec) ->
       if (length(args) == ctor-spec-arity(spec)) ->
-        result-bind(
-          lower-args(args, env, b, funcs, noop, pool),
+        Result.and-then(
           fn (avs) {
             let tag-c = const-i64!(b, ctor-spec-tag(spec))
             let nslots = const-i64!(b, ctor-spec-arity(spec))
             let obj = emit-call!(b, extern-new-abs(str-pool-count(pool)), [tag-c, nslots])
             Ok(lower-user-ctor-fill(obj, avs, 0, b, pool))
-          }
+          },
+          lower-args(args, env, b, funcs, noop, pool)
         ) | Err(String.concat("arity mismatch constructing ", hn))
 
 let lower-fixed-tag-ctor(hn: Str, args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
@@ -1841,20 +1841,20 @@ let lower-fixed-tag-ctor(hn: Str, args: List Ast, env: Map Str Int, b: Builder, 
     | None -> Err(String.concat("unknown constructor ", hn))
     | Some(tag) ->
       if (length(args) == ctor-arity-of(hn, pool)) ->
-        result-bind(
-          lower-args(args, env, b, funcs, noop, pool),
+        Result.and-then(
           fn (avs) {
             let tag-c = const-i64!(b, tag)
             let nslots = const-i64!(b, ctor-arity-of(hn, pool))
             let obj = emit-call!(b, extern-new-abs(str-pool-count(pool)), [tag-c, nslots])
             Ok(lower-user-ctor-fill(obj, avs, 0, b, pool))
-          }
+          },
+          lower-args(args, env, b, funcs, noop, pool)
         ) | Err(String.concat("arity mismatch constructing ", hn))
 
 let lower-ctor(hn: Str, args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   cond
     | is-builtin-ctor(hn) ->
-      if (length(args) == ctor-arity-of(hn, pool)) -> result-bind(lower-args(args, env, b, funcs, noop, pool), fn (avs) = Ok(emit-call-words!(b, ctor-extern-abs(hn, str-pool-count(pool)), avs))) | Err(String.concat("arity mismatch constructing ", hn))
+      if (length(args) == ctor-arity-of(hn, pool)) -> Result.and-then(fn (avs) = Ok(emit-call-words!(b, ctor-extern-abs(hn, str-pool-count(pool)), avs)), lower-args(args, env, b, funcs, noop, pool)) | Err(String.concat("arity mismatch constructing ", hn))
     | has-builtin-tag(hn) -> lower-fixed-tag-ctor(hn, args, env, b, funcs, noop, pool)
     | else -> lower-user-ctor(hn, args, env, b, funcs, noop, pool)
 
@@ -1979,7 +1979,7 @@ let runtime-op-arity-named(hn: Str) -> Int =
 let lower-runtime-op(hn: Str, args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   cond
     | hn == "mn-closure-new" -> lower-closure-new(args, env, b, funcs, noop, pool)
-    | length(args) == runtime-op-arity(hn) -> result-bind(lower-args(args, env, b, funcs, noop, pool), fn (avs) = Ok(emit-call-words!(b, runtime-op-abs(hn, str-pool-count(pool)), avs)))
+    | length(args) == runtime-op-arity(hn) -> Result.and-then(fn (avs) = Ok(emit-call-words!(b, runtime-op-abs(hn, str-pool-count(pool)), avs)), lower-args(args, env, b, funcs, noop, pool))
     | else -> Err(String.concat("arity mismatch calling ", hn))
 
 ; `(mn-closure-new __lamN env)` — first arg is a FuncRef symbol; emit
@@ -1995,7 +1995,7 @@ let lower-closure-new(args: List Ast, env: Map Str Int, b: Builder, funcs: Map S
             | Some(fr) ->
               {
                 let code-bits = emit-cast!(b, cast-ptrtoint, func-ref-abs(fr), ty-i64)
-                result-bind(lower-expr(env-ast, env, b, funcs, noop, pool), fn (env-val) = Ok(emit-call!(b, extern-closure-new-abs(str-pool-count(pool)), [code-bits, get!(b, env-val)])))
+                Result.and-then(fn (env-val) = Ok(emit-call!(b, extern-closure-new-abs(str-pool-count(pool)), [code-bits, get!(b, env-val)])), lower-expr(env-ast, env, b, funcs, noop, pool))
               }
     | _ -> Err("mn-closure-new requires a function name and an env")
 
@@ -2069,7 +2069,7 @@ let bind-payloads!(payloads: List Ast, val: Int, i: Int, else-bb: BB, env: Map S
       {
         let idx = const-i64!(b, i)
         let slotv = emit-call!(b, extern-slot-abs(str-pool-count(pool)), [val, idx])
-        result-bind(bind-pat!(p, slotv, else-bb, env, b, pool), fn (env2) = bind-payloads!(rest, val, i + 1, else-bb, env2, b, pool))
+        Result.and-then(fn (env2) = bind-payloads!(rest, val, i + 1, else-bb, env2, b, pool), bind-pat!(p, slotv, else-bb, env, b, pool))
       }
 
 let bind-bool-pat!(flag: Bool, val: Int, else-bb: BB, env: Map Str Int, b: Builder) -> Result (Map Str Int) Str =
@@ -2106,7 +2106,7 @@ let bind-str-pat!(s: Str, val: Int, else-bb: BB, env: Map Str Int, b: Builder, p
 
 let lower-match(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (rest)
-    | scrut :: clauses -> result-bind(lower-expr(scrut, env, b, funcs, noop, pool), fn (sv) = lower-match-with-scrut(sv, clauses, env, b, funcs, noop, pool))
+    | scrut :: clauses -> Result.and-then(fn (sv) = lower-match-with-scrut(sv, clauses, env, b, funcs, noop, pool), lower-expr(scrut, env, b, funcs, noop, pool))
     | [] -> Err("match requires a scrutinee")
 
 let lower-match-with-scrut(sv: Int, clauses: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str {
@@ -2129,29 +2129,29 @@ let lower-match-clauses(sv: Int, clauses: List Ast, result-slot: Int, join-bb: B
     | [_] -> Err("match clause missing a body")
 
 let lower-match-wildcard-body(body: Ast, result-slot: Int, join-bb: BB, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  result-bind(
-    lower-expr(body, env, b, funcs, noop, pool),
+  Result.and-then(
     fn (v) {
       maybe-store-and-br!(b, result-slot, v, join-bb)
       switch-to!(b, join-bb)
       Ok(get!(b, emit-load!(b, result-slot)))
-    }
+    },
+    lower-expr(body, env, b, funcs, noop, pool)
   )
 
 let lower-match-pat-clause(sv: Int, pat: Ast, body: Ast, rest-clauses: List Ast, result-slot: Int, join-bb: BB, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str {
   let else-bb = fresh-bb!(b)
   let val = get!(b, sv)
-  result-bind(
-    bind-pat!(pat, val, else-bb, env, b, pool),
+  Result.and-then(
     fn (env2) =
-      result-bind(
-        lower-expr(body, env2, b, funcs, noop, pool),
+      Result.and-then(
         fn (v) {
           maybe-store-and-br!(b, result-slot, v, join-bb)
           switch-to!(b, else-bb)
           lower-match-clauses(sv, rest-clauses, result-slot, join-bb, env, b, funcs, noop, pool)
-        }
-      )
+        },
+        lower-expr(body, env2, b, funcs, noop, pool)
+      ),
+    bind-pat!(pat, val, else-bb, env, b, pool)
   )
 }
 
@@ -2169,7 +2169,7 @@ let lower-cond-maybe-cmp(head: Ast, a-ast: Ast, c-ast: Ast, whole: Ast, env: Map
     | None -> lower-cond-bool-value(whole, env, b, funcs, noop, pool)
 
 let lower-cond-op(hn: Str, a-ast: Ast, c-ast: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  result-bind(lower-expr(a-ast, env, b, funcs, noop, pool), fn (av) = result-bind(lower-expr(c-ast, env, b, funcs, noop, pool), fn (cv) = Ok(lower-cond-cmp!(hn, av, cv, b, pool))))
+  Result.and-then(fn (av) = Result.and-then(fn (cv) = Ok(lower-cond-cmp!(hn, av, cv, b, pool)), lower-expr(c-ast, env, b, funcs, noop, pool)), lower-expr(a-ast, env, b, funcs, noop, pool))
 
 ; `=` is value-directed (`mn_equal`). Ordering ops stay immediate icmp.
 let lower-cond-cmp!(hn: Str, av: Int, cv: Int, b: Builder, pool: StrPool) -> Int =
@@ -2183,18 +2183,18 @@ let lower-cond-cmp!(hn: Str, av: Int, cv: Int, b: Builder, pool: StrPool) -> Int
     | else -> emit-cmp2!(b, cmp-pred-for(hn), get!(b, av), get!(b, cv))
 
 let lower-cond-bool-value(ast: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  result-bind(
-    lower-expr(ast, env, b, funcs, noop, pool),
+  Result.and-then(
     fn (bv) {
       let f = const-false!(b)
       Ok(emit-cmp2!(b, icmp-ne, get!(b, bv), f))
-    }
+    },
+    lower-expr(ast, env, b, funcs, noop, pool)
   )
 
 ; Comparison as a Bool *value* (not only as `if`'s test).
 let lower-cmp-value(args: List Ast, op: Str, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (args)
-    | [a-ast, c-ast] -> result-bind(lower-expr(a-ast, env, b, funcs, noop, pool), fn (av) = result-bind(lower-expr(c-ast, env, b, funcs, noop, pool), fn (cv) = Ok(lower-cmp-word!(op, av, cv, b, pool))))
+    | [a-ast, c-ast] -> Result.and-then(fn (av) = Result.and-then(fn (cv) = Ok(lower-cmp-word!(op, av, cv, b, pool)), lower-expr(c-ast, env, b, funcs, noop, pool)), lower-expr(a-ast, env, b, funcs, noop, pool))
     | _ -> Err(String.concat("comparison `", op, "` expects exactly 2 arguments"))
 
 let lower-cmp-word!(op: Str, av: Int, cv: Int, b: Builder, pool: StrPool) -> Int =
@@ -2212,7 +2212,7 @@ let cmp-pred-for(op: Str) -> Int =
 
 let lower-arith(args: List Ast, op: Str, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (args)
-    | [a-ast, c-ast] -> result-bind(lower-expr(a-ast, env, b, funcs, noop, pool), fn (av) = result-bind(lower-expr(c-ast, env, b, funcs, noop, pool), fn (cv) = Ok(apply-arith!(b, pool, sp, op, av, cv))))
+    | [a-ast, c-ast] -> Result.and-then(fn (av) = Result.and-then(fn (cv) = Ok(apply-arith!(b, pool, sp, op, av, cv)), lower-expr(c-ast, env, b, funcs, noop, pool)), lower-expr(a-ast, env, b, funcs, noop, pool))
     | _ -> Err(String.concat("operator ", op, " expects exactly 2 arguments"))
 
 let apply-arith!(b: Builder, pool: StrPool, sp: Span, op: Str, av: Int, cv: Int) -> Int {
@@ -2242,7 +2242,7 @@ let lower-let-inline(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map St
 let lower-let-inline-named(name-ast: Ast, expr-ast: Ast, body: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (sym-str(name-ast))
     | None -> Err("let name must be a symbol")
-    | Some(name) -> result-bind(lower-expr(expr-ast, env, b, funcs, noop, pool), fn (v) = lower-let-inline-bind(name, v, body, env, b, funcs, noop, pool))
+    | Some(name) -> Result.and-then(fn (v) = lower-let-inline-bind(name, v, body, env, b, funcs, noop, pool), lower-expr(expr-ast, env, b, funcs, noop, pool))
 
 let lower-let-inline-bind(name: Str, v: Int, body: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str {
   let w = get!(b, v)
@@ -2346,7 +2346,7 @@ let lower-effect-known(hn: Str, rest: List Ast, env: Map Str Int, b: Builder, fu
 ; `(exit code)` — noreturn via `mn_exit` (tagged Int in, untagged inside).
 let lower-exit(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
   match (rest)
-    | [code-ast] -> result-bind(lower-expr(code-ast, env, b, funcs, noop, pool), fn (v) = Ok(emit-call-void!(b, extern-kind-print, extern-exit-abs(str-pool-count(pool)), [get!(b, v)])))
+    | [code-ast] -> Result.and-then(fn (v) = Ok(emit-call-void!(b, extern-kind-print, extern-exit-abs(str-pool-count(pool)), [get!(b, v)])), lower-expr(code-ast, env, b, funcs, noop, pool))
     | _ -> Err("exit requires exactly one Int argument")
 
 ; Typechecking expands user print calls into print-text calls, formatting
@@ -2356,12 +2356,12 @@ let lower-print-text(a: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRe
   match (a)
     | StrNode(s, _) -> Ok(emit-write-str-to!(b, pool, s, str-pool-write-stdout-abs(pool)))
     | _ ->
-      result-bind(lower-expr(a, env, b, funcs, noop, pool), fn (v) = Ok(emit-call-void!(b, extern-kind-print, extern-print-str-abs(str-pool-count(pool)), [get!(b, v)])))
+      Result.and-then(fn (v) = Ok(emit-call-void!(b, extern-kind-print, extern-print-str-abs(str-pool-count(pool)), [get!(b, v)])), lower-expr(a, env, b, funcs, noop, pool))
 
 let lower-print-args(args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
   match (args)
     | [] -> Ok(())
-    | a :: rest -> result-then(lower-print-arg(a, env, b, funcs, noop, pool), fn () = lower-print-args(rest, env, b, funcs, noop, pool))
+    | a :: rest -> Result.and-then(fn (_) = lower-print-args(rest, env, b, funcs, noop, pool), lower-print-arg(a, env, b, funcs, noop, pool))
 
 let lower-print-arg(a: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
   match (a)
@@ -2369,13 +2369,13 @@ let lower-print-arg(a: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef
     | _ -> lower-print-int-arg(a, env, b, funcs, noop, pool)
 
 let lower-print-int-arg(a: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
-  result-bind(lower-expr(a, env, b, funcs, noop, pool), fn (v) = Ok(emit-print-i64!(b, pool, v)))
+  Result.and-then(fn (v) = Ok(emit-print-i64!(b, pool, v)), lower-expr(a, env, b, funcs, noop, pool))
 
 let lower-print(args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
   lower-print-args(args, env, b, funcs, noop, pool)
 
 let lower-println(args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
-  result-then(lower-print-args(args, env, b, funcs, noop, pool), fn () = Ok(emit-write-str-to!(b, pool, "\n", str-pool-write-stdout-abs(pool))))
+  Result.and-then(fn (_) = Ok(emit-write-str-to!(b, pool, "\n", str-pool-write-stdout-abs(pool))), lower-print-args(args, env, b, funcs, noop, pool))
 
 let lower-sequence(forms: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (forms)
@@ -2399,7 +2399,7 @@ let lower-sequence-after-skip(rest: List Ast, env: Map Str Int, b: Builder, func
 ; (real `mn_write_stdout`/`mn_print_i64` calls) happens here, then
 ; `rest` continues exactly like a skipped no-op would.
 let lower-sequence-effect(f: Ast, rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  result-then(lower-effect(f, env, b, funcs, noop, pool), fn () = lower-sequence-after-effect(rest, env, b, funcs, noop, pool))
+  Result.and-then(fn (_) = lower-sequence-after-effect(rest, env, b, funcs, noop, pool), lower-effect(f, env, b, funcs, noop, pool))
 
 let lower-sequence-after-effect(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (rest)
@@ -2419,12 +2419,12 @@ let lower-sequence-let(sl: SimpleLet, rest: List Ast, env: Map Str Int, b: Build
       {
         let was = deref(b-slot-arm(b))
         set!(b-slot-arm(b), false)
-        result-bind(
-          lower-expr(expr, env, b, funcs, noop, pool),
+        Result.and-then(
           fn (v) {
             set!(b-slot-arm(b), was)
             lower-sequence-let-bind(name, v, rest, env, b, funcs, noop, pool)
-          }
+          },
+          lower-expr(expr, env, b, funcs, noop, pool)
         )
       }
 
@@ -2453,17 +2453,17 @@ let lower-sequence-rest(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map
     | _ -> lower-sequence(rest, env, b, funcs, noop, pool)
 
 let lower-sequence-plain(f: Ast, rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  result-bind(lower-expr(f, env, b, funcs, noop, pool), fn (v) = lower-sequence-rest(rest, env, b, funcs, noop, pool, get!(b, v)))
+  Result.and-then(fn (v) = lower-sequence-rest(rest, env, b, funcs, noop, pool, get!(b, v)), lower-expr(f, env, b, funcs, noop, pool))
 
 ; -- calls to other top-level `Int`-only `defn`s --
 
 let lower-args(arg-asts: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result (List Int) Str =
   match (arg-asts)
     | [] -> Ok([])
-    | a :: rest -> result-bind(lower-expr(a, env, b, funcs, noop, pool), fn (v) = lower-args-cons(v, rest, env, b, funcs, noop, pool))
+    | a :: rest -> Result.and-then(fn (v) = lower-args-cons(v, rest, env, b, funcs, noop, pool), lower-expr(a, env, b, funcs, noop, pool))
 
 let lower-args-cons(v: Int, rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result (List Int) Str =
-  result-bind(lower-args(rest, env, b, funcs, noop, pool), fn (vs) = Ok(v :: vs))
+  Result.and-then(fn (vs) = Ok(v :: vs), lower-args(rest, env, b, funcs, noop, pool))
 
 let lower-call(name: Str, arg-asts: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (Map.lookup(funcs, name))
@@ -2484,29 +2484,29 @@ let lower-apply-local(slot: Int, name: Str, arg-asts: List Ast, sp: Span, env: M
         Ok(emit-traced-call!(b, pool, sp, extern-apply-0-abs(str-pool-count(pool)), [clo]))
       }
     | [a0] ->
-      result-bind(
-        lower-expr(a0, env, b, funcs, noop, pool),
+      Result.and-then(
         fn (arg) {
           let clo = emit-load!(b, slot)
           Ok(emit-traced-call!(b, pool, sp, extern-apply-1-abs(str-pool-count(pool)), [clo, get!(b, arg)]))
-        }
+        },
+        lower-expr(a0, env, b, funcs, noop, pool)
       )
     | [a0, a1] ->
-      result-bind(
-        lower-expr(a0, env, b, funcs, noop, pool),
+      Result.and-then(
         fn (arg0) =
-          result-bind(
-            lower-expr(a1, env, b, funcs, noop, pool),
+          Result.and-then(
             fn (arg1) {
               let clo = emit-load!(b, slot)
               Ok(emit-traced-call!(b, pool, sp, extern-apply-2-abs(str-pool-count(pool)), [clo, get!(b, arg0), get!(b, arg1)]))
-            }
-          )
+            },
+            lower-expr(a1, env, b, funcs, noop, pool)
+          ),
+        lower-expr(a0, env, b, funcs, noop, pool)
       )
     | _ -> Err(String.concat("closure application supports 0–2 arguments (calling local `", name, "`)"))
 
 let lower-call-with-ref(fr: FuncRef, name: Str, arg-asts: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  if (length(arg-asts) == func-ref-arity(fr)) -> result-bind(lower-args(arg-asts, env, b, funcs, noop, pool), fn (args) = Ok(emit-traced-call!(b, pool, sp, func-ref-abs(fr), get-words!(b, args)))) | Err(String.concat("arity mismatch calling ", name))
+  if (length(arg-asts) == func-ref-arity(fr)) -> Result.and-then(fn (args) = Ok(emit-traced-call!(b, pool, sp, func-ref-abs(fr), get-words!(b, args))), lower-args(arg-asts, env, b, funcs, noop, pool)) | Err(String.concat("arity mismatch calling ", name))
 
 ; ---------------------------------------------------------------------------
 ; One function: bind params (each its own alloca, uniformly with `let`s
@@ -2594,10 +2594,10 @@ let lower-one-func-finish(ld: LDefn, is-main: Bool, result-abs: Int, b: Builder)
 let lower-all-funcs(lds: List LDefn, num-globals: Int, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool, mc: Map Str Bool, slots: List Str) -> Result (List LFunc) Str =
   match (lds)
     | [] -> Ok([])
-    | ld :: rest -> result-bind(lower-one-func(ld, num-globals, funcs, noop, pool, mc, slots), fn (lf) = lower-all-funcs-cons(lf, rest, num-globals, funcs, noop, pool, mc, slots))
+    | ld :: rest -> Result.and-then(fn (lf) = lower-all-funcs-cons(lf, rest, num-globals, funcs, noop, pool, mc, slots), lower-one-func(ld, num-globals, funcs, noop, pool, mc, slots))
 
 let lower-all-funcs-cons(lf: LFunc, rest: List LDefn, num-globals: Int, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool, mc: Map Str Bool, slots: List Str) -> Result (List LFunc) Str =
-  result-bind(lower-all-funcs(rest, num-globals, funcs, noop, pool, mc, slots), fn (lfs) = Ok(lf :: lfs))
+  Result.and-then(fn (lfs) = Ok(lf :: lfs), lower-all-funcs(rest, num-globals, funcs, noop, pool, mc, slots))
 
 ; ---------------------------------------------------------------------------
 ; Top-level, non-`defn` forms — `hello.mnd`'s standalone `(println

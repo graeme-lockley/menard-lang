@@ -2,7 +2,7 @@
 ; Mirrors host/src/reader/casing.ts.
 
 import "./ast.mnd"
-import "../util/result.mnd"
+import std/result as Result
 import std/string as String
 
 ; Re-export shim: the current host typer (host/src/type/check.ts,
@@ -54,7 +54,7 @@ let expect-upper(node: Ast, role: Str) -> Result Unit CasingError =
 let check-all(xs: List Ast, f: (Ast) -> Result Unit CasingError) -> Result Unit CasingError =
   match (xs)
     | [] -> Ok(())
-    | x :: rest -> result-then(f(x), fn () = check-all(rest, f))
+    | x :: rest -> Result.and-then(fn (_) = check-all(rest, f), f(x))
 
 let check-type-params(node: Ast) -> Result Unit CasingError =
   match (node)
@@ -77,7 +77,7 @@ let check-type-expr-app(elems: List Ast, sp: Span) -> Result Unit CasingError =
 
 let check-type-expr-app-head(head: Ast, rest: List Ast, elems: List Ast) -> Result Unit CasingError =
   match (head)
-    | SymNode(_, _) -> result-then(expect-upper(head, "type constructor"), fn () = check-all(rest, check-type-expr))
+    | SymNode(_, _) -> Result.and-then(fn (_) = check-all(rest, check-type-expr), expect-upper(head, "type constructor"))
     | _ -> check-all(elems, check-type-expr)
 
 ; (fst: a) — field name (with optional trailing ':') plus its type expression(s).
@@ -93,7 +93,7 @@ let check-field-elems(elems: List Ast, sp: Span) -> Result Unit CasingError =
 
 let check-field-name-and-types(name: Ast, rest: List Ast) -> Result Unit CasingError =
   match (name)
-    | SymNode(raw, sp) -> result-then(check-field-name(raw, sp), fn () = check-all(rest, check-type-expr))
+    | SymNode(raw, sp) -> Result.and-then(fn (_) = check-all(rest, check-type-expr), check-field-name(raw, sp))
     | _ -> mk-err(ast-span(name), "expected field name")
 
 let strip-trailing-colon(raw: Str) -> Str {
@@ -114,7 +114,7 @@ let check-variant-ctor(node: Ast) -> Result Unit CasingError =
 let check-variant-ctor-elems(elems: List Ast, sp: Span) -> Result Unit CasingError =
   match (elems)
     | [] -> mk-err(sp, "expected variant constructor form")
-    | head :: rest -> result-then(expect-upper(head, "variant constructor"), fn () = check-all(rest, check-type-expr))
+    | head :: rest -> Result.and-then(fn (_) = check-all(rest, check-type-expr), expect-upper(head, "variant constructor"))
 
 ; Shared by defn/defrec/variant: `Name` or `(Name [params…])`.
 let check-decl-name(name-part: Ast, role: Str, whole-message: Str, expect: (Ast, Str) -> Result Unit CasingError) -> Result Unit CasingError =
@@ -126,7 +126,7 @@ let check-decl-name(name-part: Ast, role: Str, whole-message: Str, expect: (Ast,
 let check-decl-name-app(np-elems: List Ast, name-part: Ast, role: Str, whole-message: Str, expect: (Ast, Str) -> Result Unit CasingError) -> Result Unit CasingError =
   match (np-elems)
     | [] -> mk-err(ast-span(name-part), whole-message)
-    | the-name :: more -> result-then(expect(the-name, role), fn () = check-decl-tparams(more))
+    | the-name :: more -> Result.and-then(fn (_) = check-decl-tparams(more), expect(the-name, role))
 
 let check-decl-tparams(more: List Ast) -> Result Unit CasingError =
   match (more)
@@ -142,19 +142,19 @@ let check-defn(elems: List Ast, whole-span: Span) -> Result Unit CasingError =
 ; (defrec Name fields…) or (defrec (Name [params…]) fields…)
 let check-defrec(elems: List Ast, whole-span: Span) -> Result Unit CasingError =
   match (elems)
-    | _ :: name-part :: fields -> result-then(check-decl-name(name-part, "record type name", "malformed defrec name", expect-upper), fn () = check-all(fields, check-field))
+    | _ :: name-part :: fields -> Result.and-then(fn (_) = check-all(fields, check-field), check-decl-name(name-part, "record type name", "malformed defrec name", expect-upper))
     | _ -> mk-err(whole-span, "malformed defrec")
 
 ; (variant Name ctors…) or (variant (Name [params…]) ctors…)
 let check-variant(elems: List Ast, whole-span: Span) -> Result Unit CasingError =
   match (elems)
-    | _ :: name-part :: ctors -> result-then(check-decl-name(name-part, "variant type name", "malformed variant name", expect-upper), fn () = check-all(ctors, check-variant-ctor))
+    | _ :: name-part :: ctors -> Result.and-then(fn (_) = check-all(ctors, check-variant-ctor), check-decl-name(name-part, "variant type name", "malformed variant name", expect-upper))
     | _ -> mk-err(whole-span, "malformed variant")
 
 ; (alias Name Type) — Name is a type spelling, Upper.
 let check-alias(elems: List Ast, whole-span: Span) -> Result Unit CasingError =
   match (elems)
-    | _ :: name-part :: type-part :: _ -> result-then(expect-upper(name-part, "alias name"), fn () = check-type-expr(type-part))
+    | _ :: name-part :: type-part :: _ -> Result.and-then(fn (_) = check-type-expr(type-part), expect-upper(name-part, "alias name"))
     | _ -> mk-err(whole-span, "malformed alias")
 
 let check-form-named(name: Str, elems: List Ast, rest: List Ast, sp: Span) -> Result Unit CasingError =
