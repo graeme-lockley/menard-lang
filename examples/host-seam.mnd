@@ -6,6 +6,7 @@ import std/fs
 import std/io
 import std/proc
 import std/sys
+import std/string as String
 
 let line(s: Str) -> Unit {
   write(stdout, s)
@@ -21,8 +22,8 @@ let main() -> Int {
   match (spawn(["/usr/bin/true"]))
     | Ok(st) ->
       match (st)
-        | Exited(n) -> line(str-concat("true exited ", show(n)))
-        | Signalled(n) -> line(str-concat("true signalled ", show(n)))
+        | Exited(n) -> line(String.concat("true exited ", show(n)))
+        | Signalled(n) -> line(String.concat("true signalled ", show(n)))
     | Err(_) -> println("spawn failed")
   match (write-file("build/rename-src.txt", "hi"))
     | Ok(_) -> ()

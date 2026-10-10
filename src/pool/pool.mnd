@@ -55,6 +55,8 @@
 
 import "../reader/ast.mnd"
 import std/list
+import std/string as String
+import std/map as Map
 
 ; Re-export shim — see `reader/casing.mnd`'s header comment for why this
 ; is needed: a `pub` signature (`pool-summary`, below) may not mention a
@@ -100,27 +102,27 @@ let unwrap-pub-head(head: Ast, rest: List Ast, sp: Span, ast: Ast) -> Ast =
 ; `type/check.mnd`'s `collect-defrec-fields`).
 
 let builtin-ctor-arities() -> Map Str Int {
-  let m0 = map-new()
-  let m1 = map-set(m0, "None", 0)
-  let m2 = map-set(m1, "Some", 1)
-  let m3 = map-set(m2, "Ok", 1)
-  let m4 = map-set(m3, "Err", 1)
-  let m5 = map-set(m4, "Nil", 0)
-  let m6 = map-set(m5, "Cons", 2)
-  let m7 = map-set(m6, "NotFound", 0)
-  let m8 = map-set(m7, "Permission", 0)
-  let m9 = map-set(m8, "Exists", 0)
-  let m10 = map-set(m9, "IsADirectory", 0)
-  let m11 = map-set(m10, "NotADirectory", 0)
-  let m12 = map-set(m11, "InvalidPath", 0)
-  let m13 = map-set(m12, "TooLarge", 0)
-  map-set(m13, "Other", 1)
+  let m0 = Map.empty()
+  let m1 = Map.set(m0, "None", 0)
+  let m2 = Map.set(m1, "Some", 1)
+  let m3 = Map.set(m2, "Ok", 1)
+  let m4 = Map.set(m3, "Err", 1)
+  let m5 = Map.set(m4, "Nil", 0)
+  let m6 = Map.set(m5, "Cons", 2)
+  let m7 = Map.set(m6, "NotFound", 0)
+  let m8 = Map.set(m7, "Permission", 0)
+  let m9 = Map.set(m8, "Exists", 0)
+  let m10 = Map.set(m9, "IsADirectory", 0)
+  let m11 = Map.set(m10, "NotADirectory", 0)
+  let m12 = Map.set(m11, "InvalidPath", 0)
+  let m13 = Map.set(m12, "TooLarge", 0)
+  Map.set(m13, "Other", 1)
 }
 
 let register-ctor-arity(cname-ast: Ast, arity: Int, acc: Map Str Int) -> Map Str Int =
   match (sym-str(cname-ast))
     | None -> acc
-    | Some(cname) -> map-set(acc, cname, arity)
+    | Some(cname) -> Map.set(acc, cname, arity)
 
 let register-one-variant-ctor-arity(c: Ast, acc: Map Str Int) -> Map Str Int =
   match (c)
@@ -145,7 +147,7 @@ let collect-defrec-decl-arities(rest: List Ast, acc: Map Str Int) -> Map Str Int
 let collect-defrec-decl-arities-named(name-part: Ast, fields: List Ast, acc: Map Str Int) -> Map Str Int =
   match (decl-name-of(name-part))
     | None -> acc
-    | Some(type-name) -> map-set(acc, type-name, length(fields))
+    | Some(type-name) -> Map.set(acc, type-name, length(fields))
 
 let collect-arities-named(hn: Str, rest: List Ast, acc: Map Str Int) -> Map Str Int =
   cond
@@ -175,7 +177,7 @@ let all-ctor-arities(forms: List Ast) -> Map Str Int =
   collect-arities(forms, builtin-ctor-arities())
 
 let is-nullary-ctor(name: Str, arities: Map Str Int) -> Bool =
-  match (map-get(arities, name))
+  match (Map.lookup(arities, name))
     | None -> false
     | Some(a) -> a == 0
 
@@ -186,13 +188,13 @@ let is-nullary-ctor(name: Str, arities: Map Str Int) -> Bool =
 ; content, sort by byte content" for this text form.
 
 let quote-str(s: Str) -> Str =
-  str-concat("\"", s, "\"")
+  String.concat("\"", s, "\"")
 
 let record-str!(entries: Ref (List Str), s: Str) -> Unit =
-  set!(entries, str-concat("str ", quote-str(s)) :: deref(entries))
+  set!(entries, String.concat("str ", quote-str(s)) :: deref(entries))
 
 let record-ctor!(entries: Ref (List Str), name: Str) -> Unit =
-  set!(entries, str-concat("ctor ", name) :: deref(entries))
+  set!(entries, String.concat("ctor ", name) :: deref(entries))
 
 ; Only a *zero-argument* application `(Name)` — `rest` empty — can be a
 ; nullary constructor mention (spec §2.4's pattern grammar and ordinary
@@ -297,7 +299,7 @@ let join-lines(xs: List Str) -> Str =
   match (xs)
     | [] -> ""
     | [x] -> x
-    | x :: rest -> str-concat(x, "\n", join-lines(rest))
+    | x :: rest -> String.concat(x, "\n", join-lines(rest))
 
 ; The static pool candidates `forms` mentions — every distinct `Str`
 ; literal and every distinct nullary constructor mention (see this

@@ -90,6 +90,7 @@ class P {
             t.text === "record" ||
             t.text === "type" ||
             t.text === "let")) ||
+        t.text === "runtime" ||
         t.text === "test";
       const f = decl ? this.parseDecl() : this.parseExpr();
       if (!f.ok) return f;
@@ -117,6 +118,7 @@ class P {
     let inner: R;
     if (t.text === "import") inner = this.parseImport();
     else if (t.text === "extern") inner = this.parseExtern();
+    else if (t.text === "runtime") inner = this.parseRuntime();
     else if (t.text === "alias") inner = this.parseAlias();
     else if (t.text === "record") inner = this.parseRecord();
     else if (t.text === "type") inner = this.parseTypeDecl();
@@ -166,6 +168,25 @@ class P {
       ? paren([sym(name.text, name.span), tparams.ast], join(name.span, tparams.ast.span))
       : sym(name.text, name.span);
     const elems: Ast[] = [sym("extern", kw.span), nameAst, ...params.asts, sym("->", ret.ast.span), ret.ast];
+    return { ok: true, ast: paren(elems, join(kw.span, ret.ast.span)) };
+  }
+
+  parseRuntime(): R {
+    const kw = this.toks[this.i++]!;
+    const name = this.cur();
+    if (name.kind !== "ident") return this.err(name, "expected a runtime name");
+    this.i++;
+    const tparams = this.parseTParamsOpt();
+    if (!tparams.ok) return tparams;
+    const params = this.parseParamList();
+    if (!params.ok) return params;
+    if (!this.eat("->")) return this.err(this.cur(), "expected ->");
+    const ret = this.parseType();
+    if (!ret.ok) return ret;
+    const nameAst = tparams.ast
+      ? paren([sym(name.text, name.span), tparams.ast], join(name.span, tparams.ast.span))
+      : sym(name.text, name.span);
+    const elems: Ast[] = [sym("runtime", kw.span), nameAst, ...params.asts, sym("->", ret.ast.span), ret.ast];
     return { ok: true, ast: paren(elems, join(kw.span, ret.ast.span)) };
   }
 

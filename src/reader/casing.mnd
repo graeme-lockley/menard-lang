@@ -3,6 +3,7 @@
 
 import "./ast.mnd"
 import "../util/result.mnd"
+import std/string as String
 
 ; Re-export shim: the current host typer (host/src/type/check.ts,
 ; `checkPubPrivateTypes`) only accepts a `pub` signature mentioning a
@@ -25,7 +26,7 @@ let mk-err(sp: Span, message: Str) -> Result Unit CasingError =
   Err(CasingError(sp, message))
 
 let first-byte(name: Str) -> Int =
-  if (str-byte-length(name) > 0) -> str-byte(name, 0) | -1
+  if (String.length(name) > 0) -> String.byte(0, name) | -1
 
 let is-upper-initial(name: Str) -> Bool {
   let b = first-byte(name)
@@ -40,14 +41,14 @@ let is-lower-initial(name: Str) -> Bool {
 let expect-lower(node: Ast, role: Str) -> Result Unit CasingError =
   match (node)
     | SymNode(name, sp) ->
-      if (is-lower-initial(name)) -> Ok(()) | mk-err(sp, str-concat(role, " must begin with a lowercase letter"))
-    | _ -> mk-err(ast-span(node), str-concat("expected ", role, " to be a symbol"))
+      if (is-lower-initial(name)) -> Ok(()) | mk-err(sp, String.concat(role, " must begin with a lowercase letter"))
+    | _ -> mk-err(ast-span(node), String.concat("expected ", role, " to be a symbol"))
 
 let expect-upper(node: Ast, role: Str) -> Result Unit CasingError =
   match (node)
     | SymNode(name, sp) ->
-      if (is-upper-initial(name)) -> Ok(()) | mk-err(sp, str-concat(role, " must begin with an uppercase letter"))
-    | _ -> mk-err(ast-span(node), str-concat("expected ", role, " to be a symbol"))
+      if (is-upper-initial(name)) -> Ok(()) | mk-err(sp, String.concat(role, " must begin with an uppercase letter"))
+    | _ -> mk-err(ast-span(node), String.concat("expected ", role, " to be a symbol"))
 
 ; Run `f` over every element of `xs`, stopping at the first failure.
 let check-all(xs: List Ast, f: (Ast) -> Result Unit CasingError) -> Result Unit CasingError =
@@ -96,13 +97,13 @@ let check-field-name-and-types(name: Ast, rest: List Ast) -> Result Unit CasingE
     | _ -> mk-err(ast-span(name), "expected field name")
 
 let strip-trailing-colon(raw: Str) -> Str {
-  let n = str-byte-length(raw)
-  if (n > 0 && str-byte(raw, n - 1) == 58) -> str-slice(raw, 0, n - 1) | raw
+  let n = String.length(raw)
+  if (n > 0 && String.byte(n - 1, raw) == 58) -> String.slice(0, n - 1, raw) | raw
 }
 
 let check-field-name(raw: Str, sp: Span) -> Result Unit CasingError {
   let field-name = strip-trailing-colon(raw)
-  if (str-byte-length(field-name) > 0 && is-lower-initial(field-name)) -> Ok(()) | mk-err(sp, "field name must begin with a lowercase letter")
+  if (String.length(field-name) > 0 && is-lower-initial(field-name)) -> Ok(()) | mk-err(sp, "field name must begin with a lowercase letter")
 }
 
 let check-variant-ctor(node: Ast) -> Result Unit CasingError =

@@ -25,7 +25,7 @@ describe("builtins Map", () => {
     });
   });
 
-  test("map-keys is sorted by key order", () => {
+  test("keys are sorted by key order", () => {
     const enc = new TextEncoder();
     let m = mapNew();
     m = mapSet(m, { tag: "str", bytes: enc.encode("c") }, { tag: "int", value: 3n });
@@ -37,7 +37,7 @@ describe("builtins Map", () => {
     expect(keys).toEqual(["a", "b", "c"]);
   });
 
-  test("map-set is O(log n): 100k inserts within budget", () => {
+  test("set is O(log n): 100k inserts within budget", () => {
     const N = 100_000;
     const budgetMs = 3000;
     let m = mapNew();
@@ -176,12 +176,13 @@ describe("intrinsics via run", () => {
   });
 
   test("map round trip", () => {
-    const src = `{
-  let m = map-new()
-  let m2 = map-set(m, "a", 1)
-  map-get(m2, "a")
+    const src = `import std/map as Map
+{
+  let m = Map.empty()
+  let m2 = Map.set(m, "a", 1)
+  Map.lookup(m2, "a")
 }`;
-    const r = run(src);
+    const r = run(src, { path: "map-round.mnd", host: createHost() });
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "variant") {
       expect(r.value.ctor).toBe("Some");

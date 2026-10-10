@@ -11,6 +11,7 @@ import "../reader/read.mnd"
 import "../pool/pool.mnd"
 import std/io
 import std/sys
+import std/string as String
 
 let fail(msg: Str) -> Unit {
   write(stderr, msg)
@@ -20,7 +21,7 @@ let fail(msg: Str) -> Unit {
 
 let fail-parse(path: Str, e: ParseError) -> Unit =
   match (e)
-    | ParseError(_, msg) -> fail(str-concat(path, ": parse error: ", msg))
+    | ParseError(_, msg) -> fail(String.concat(path, ": parse error: ", msg))
 
 let print-summary(forms: List Ast) -> Unit {
   println(pool-summary(forms))
@@ -38,4 +39,4 @@ let main() -> Unit =
     | else ->
       match (read-file(arg(0)))
         | Ok(src) -> check-source(arg(0), src)
-        | Err(_) -> fail(str-concat("cannot read ", arg(0)))
+        | Err(_) -> fail(String.concat("cannot read ", arg(0)))

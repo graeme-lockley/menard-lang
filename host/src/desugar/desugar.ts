@@ -51,11 +51,11 @@ function consChain(elems: Ast[], span: Ast["span"]): Ast {
 }
 
 function isDeclKeyword(ast: Ast): boolean {
-  return isSym(ast, "defn") || isSym(ast, "defrec") || isSym(ast, "variant");
+  return isSym(ast, "defn") || isSym(ast, "defrec") || isSym(ast, "variant") || isSym(ast, "runtime");
 }
 
 /**
- * `(name [params…])` in a defn/defrec/variant head. The bracket list is
+ * `(name [params…])` in a defn/defrec/variant/runtime head. The bracket list is
  * type parameters, not a value list.
  */
 function desugarNameForm(ast: Ast & { tag: "list" }, diags: Diagnostic[]): Ast {
@@ -152,8 +152,9 @@ function headText(head: Ast): string | null {
 }
 
 // Left fold into the binary intrinsic. One argument is the identity.
-// `+`, `*`, `f+`, `f*`, `str-concat`.
-const FOLD_OPS = new Set(["+", "*", "f+", "f*", "str-concat"]);
+// `+`, `*`, `f+`, `f*`. String concat folds later, once the callee is
+// known to be std/string's concat.
+const FOLD_OPS = new Set(["+", "*", "f+", "f*"]);
 // Left fold; one argument is negation (`(- x)` → `(- 0 x)`, `(f- x)` → `(f- 0.0 x)`).
 const SUB_OPS = new Set(["-", "f-"]);
 // Left fold; at least two arguments.

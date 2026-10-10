@@ -6,6 +6,7 @@
 import "../reader/read.mnd"
 import "./pool.mnd"
 import std/io
+import std/string as String
 
 let read-forms(path: Str) -> Maybe (List Ast) =
   match (read-file(path))
@@ -21,7 +22,7 @@ let summary-is(fixture: Str, golden: Str) -> Bool =
     | Some(forms) ->
       match (read-file(golden))
         | Err(_) -> false
-        | Ok(text) -> str-concat(pool-summary(forms), "\n") == text
+        | Ok(text) -> String.concat(pool-summary(forms), "\n") == text
 
 test "dedups identical Str literals, reports a nullary ctor, and sorts by bytes" = summary-is("tests/phase2/fixtures/pool-basic.mnd", "tests/phase2/goldens/pool-basic.txt")
 

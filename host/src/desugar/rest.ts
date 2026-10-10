@@ -106,7 +106,7 @@ function keywordOf(form: Ast): string | null {
 
 function definedName(form: Ast): string | null {
   const kw = keywordOf(form);
-  if (kw !== "defn" && kw !== "extern") return null;
+  if (kw !== "defn" && kw !== "extern" && kw !== "runtime") return null;
   const inner = unwrapPub(form).inner;
   if (inner.tag !== "list" || !inner.elems[1]) return null;
   return nameText(inner.elems[1]);
@@ -114,7 +114,7 @@ function definedName(form: Ast): string | null {
 
 function paramAsts(form: Ast): Ast[] | null {
   const kw = keywordOf(form);
-  if (kw !== "defn" && kw !== "extern") return null;
+  if (kw !== "defn" && kw !== "extern" && kw !== "runtime") return null;
   const inner = unwrapPub(form).inner;
   if (inner.tag !== "list") return null;
   const out: Ast[] = [];
@@ -184,7 +184,7 @@ function declNames(form: Ast): string[] {
   const inner = unwrapPub(form).inner;
   if (inner.tag !== "list" || inner.elems.length < 2) return [];
   const kw = symText(inner.elems[0]!);
-  if (kw === "defn" || kw === "extern" || kw === "defrec" || kw === "alias") {
+  if (kw === "defn" || kw === "extern" || kw === "runtime" || kw === "defrec" || kw === "alias") {
     const n = nameText(inner.elems[1]!);
     return n ? [n] : [];
   }
@@ -269,7 +269,7 @@ function rewriteForm(form: Ast, ctx: Ctx): Ast {
 function rewriteDecl(form: Ast, ctx: Ctx): Ast {
   if (form.tag !== "list" || form.elems.length === 0) return rewriteValue(form, ctx);
   const kw = symText(form.elems[0]!);
-  if (kw !== "defn" && kw !== "extern") return rewriteValue(form, ctx);
+  if (kw !== "defn" && kw !== "extern" && kw !== "runtime") return rewriteValue(form, ctx);
   const arrow = form.elems.findIndex((e, i) => i >= 2 && isSym(e, "->"));
   if (arrow < 0 || arrow + 1 >= form.elems.length) return form;
   const prefix = stripPrefix(form.elems.slice(0, arrow + 2));

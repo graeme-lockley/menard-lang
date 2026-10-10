@@ -203,7 +203,7 @@ pub let llvm-module-imports(m: LlvmModule) -> List Imp =
 ; Order: mn_write_stdout, mn_print_i64, mn_write_stderr, mn_alloc,
 ; heap helpers (3C), mn_print_str, Str/Ref/SB (3D), Map (3F), closures (3E),
 ; tier-0 I/O (3G: mn_init … mn_exit).
-pub let extern-count = 87
+pub let extern-count = 89
 
 pub let extern-write-stdout-abs(num-strings: Int) -> Int =
   num-strings
@@ -466,6 +466,12 @@ pub let extern-slot-set-abs(num-strings: Int) -> Int =
 ; Keys of a map, as a list in key order.
 pub let extern-map-keys-abs(num-strings: Int) -> Int =
   num-strings + 86
+
+pub let extern-char-to-str-abs(num-strings: Int) -> Int =
+  num-strings + 87
+
+pub let extern-sb-clear-abs(num-strings: Int) -> Int =
+  num-strings + 88
 
 ; Builtin constructor tags — must match runtime/src/variants.c.
 pub let tag-nil = 0

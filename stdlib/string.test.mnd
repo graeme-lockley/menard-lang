@@ -1,6 +1,7 @@
 ; String helpers.
 
 import std/string
+import std/string-buffer as Buf
 
 test "starts-with matches the prefix" = starts-with("he", "hello") == true
 
@@ -19,12 +20,12 @@ test "drop returns empty past the byte length" = drop(10, "hello") == ""
 test "drop handles an empty string" = drop(1, "") == ""
 
 test "drop counts UTF-8 bytes rather than characters" = {
-  let sb = sb-new()
-  sb-append-byte!(sb, 195)
-  sb-append-byte!(sb, 169)
-  sb-append-byte!(sb, 120)
-  let remaining = drop(1, sb-to-str(sb))
-  str-byte-length(remaining) == 2 && str-byte(remaining, 0) == 169 && str-byte(remaining, 1) == 120
+  let sb = Buf.new()
+  Buf.append-byte!(sb, 195)
+  Buf.append-byte!(sb, 169)
+  Buf.append-byte!(sb, 120)
+  let remaining = drop(1, Buf.to-str(sb))
+  length(remaining) == 2 && byte(0, remaining) == 169 && byte(1, remaining) == 120
 }
 
 test "has finds a substring" = has("ell", "hello") == true
@@ -107,3 +108,15 @@ test "split-using returns one empty piece for an empty string" =
   split-using([",", ";"], "") == [""]
 
 test "lines break on newline" = lines("a\nb") == ["a", "b"]
+
+test "length counts bytes" = length("hi") == 2
+
+test "byte reads an index" = byte(1, "hi") == 105
+
+test "slice takes a span of bytes" = slice(1, 3, "hello") == "ell"
+
+test "concat joins two strings" = concat("hel", "lo") == "hello"
+
+test "concat joins more than two strings" = concat("a", "b", "c") == "abc"
+
+test "concat of one string is that string" = concat("a") == "a"

@@ -14,6 +14,8 @@
 ; itself (function parameter lists, List/Map/Maybe/Result/Ref element
 ; types) — see reader/ast.mnd's header comment for why a self-referential
 ; variant must be declared once, empty, before its real definition.
+import std/string as String
+
 type Type =
 
 pub type Type =
@@ -219,26 +221,26 @@ pub let type-show(t: Type) -> Str =
     | TUnit -> "Unit"
     | TStringBuffer -> "StringBuffer"
     | TVar(id, name) ->
-      if (name == "") -> str-concat("a", show(id)) | name
+      if (name == "") -> String.concat("a", show(id)) | name
     | TParam(name) -> name
-    | TList(elem) -> str-concat("(List ", type-show(elem), ")")
-    | TMap(k, v) -> str-concat("(Map ", type-show(k), " ", type-show(v), ")")
-    | TMaybe(elem) -> str-concat("(Maybe ", type-show(elem), ")")
-    | TResult(ok, err) -> str-concat("(Result ", type-show(ok), " ", type-show(err), ")")
-    | TRef(elem) -> str-concat("(Ref ", type-show(elem), ")")
-    | TFn(params, ret) -> str-concat("(Fn ", type-show-list(params), " -> ", type-show(ret), ")")
+    | TList(elem) -> String.concat("(List ", type-show(elem), ")")
+    | TMap(k, v) -> String.concat("(Map ", type-show(k), " ", type-show(v), ")")
+    | TMaybe(elem) -> String.concat("(Maybe ", type-show(elem), ")")
+    | TResult(ok, err) -> String.concat("(Result ", type-show(ok), " ", type-show(err), ")")
+    | TRef(elem) -> String.concat("(Ref ", type-show(elem), ")")
+    | TFn(params, ret) -> String.concat("(Fn ", type-show-list(params), " -> ", type-show(ret), ")")
     | TNominal(name, args, _) -> type-show-nominal(name, args)
 
 let type-show-nominal(name: Str, args: List Type) -> Str =
   match (args)
     | [] -> name
-    | _ -> str-concat("(", name, " ", type-show-list(args), ")")
+    | _ -> String.concat("(", name, " ", type-show-list(args), ")")
 
 let type-show-list(xs: List Type) -> Str =
   match (xs)
     | [] -> ""
     | [x] -> type-show(x)
-    | x :: rest -> str-concat(type-show(x), " ", type-show-list(rest))
+    | x :: rest -> String.concat(type-show(x), " ", type-show-list(rest))
 
 ; ---------------------------------------------------------------------------
 ; Showable / orderable (§2.12), evaluated on expanded types. `Ref`,

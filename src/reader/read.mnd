@@ -5,6 +5,8 @@
 ; ("unclosed", "'!'", "unterminated") so both front ends report the same code.
 
 import "./ast.mnd"
+import std/string as String
+import std/string-buffer as Buf
 
 pub alias Ast = Ast
 
@@ -161,12 +163,12 @@ let kind-of(text: Str) -> Str =
 
 let lex-peek(lx: Lex, k: Int) -> Int {
   let i = deref(lx-pos(lx)) + k
-  if (i < lx-n(lx)) -> str-byte(lx-src(lx), i) | -1
+  if (i < lx-n(lx)) -> String.byte(i, lx-src(lx)) | -1
 }
 
 let lex-bump(lx: Lex) -> Int {
   let p = deref(lx-pos(lx))
-  let b = str-byte(lx-src(lx), p)
+  let b = String.byte(p, lx-src(lx))
   set!(lx-pos(lx), p + 1)
   cond
     | b == 10 ->
@@ -185,7 +187,7 @@ let skip-comment(lx: Lex) -> Unit =
 
 let prev-byte(lx: Lex) -> Int {
   let s = deref(lx-pos(lx))
-  if (s == 0) -> -1 | str-byte(lx-src(lx), s - 1)
+  if (s == 0) -> -1 | String.byte(s - 1, lx-src(lx))
 }
 
 let prev-ws(b: Int) -> Bool =
@@ -254,24 +256,24 @@ let hex-val(b: Int) -> Int =
 ; UTF-8 of one Unicode scalar. The caller has rejected surrogates and values above U+10FFFF.
 let append-utf8!(sb: StringBuffer, cp: Int) -> Unit =
   cond
-    | cp <= 127 -> sb-append-byte!(sb, cp)
+    | cp <= 127 -> Buf.append-byte!(sb, cp)
     | cp <= 2047 ->
       {
-        sb-append-byte!(sb, 192 + cp / 64)
-        sb-append-byte!(sb, 128 + cp % 64)
+        Buf.append-byte!(sb, 192 + cp / 64)
+        Buf.append-byte!(sb, 128 + cp % 64)
       }
     | cp <= 65535 ->
       {
-        sb-append-byte!(sb, 224 + cp / 4096)
-        sb-append-byte!(sb, 128 + (cp / 64) % 64)
-        sb-append-byte!(sb, 128 + cp % 64)
+        Buf.append-byte!(sb, 224 + cp / 4096)
+        Buf.append-byte!(sb, 128 + (cp / 64) % 64)
+        Buf.append-byte!(sb, 128 + cp % 64)
       }
     | else ->
       {
-        sb-append-byte!(sb, 240 + cp / 262144)
-        sb-append-byte!(sb, 128 + (cp / 4096) % 64)
-        sb-append-byte!(sb, 128 + (cp / 64) % 64)
-        sb-append-byte!(sb, 128 + cp % 64)
+        Buf.append-byte!(sb, 240 + cp / 262144)
+        Buf.append-byte!(sb, 128 + (cp / 4096) % 64)
+        Buf.append-byte!(sb, 128 + (cp / 64) % 64)
+        Buf.append-byte!(sb, 128 + cp % 64)
       }
 
 let escape-invalid!(lx: Lex, failed: Ref (Maybe ParseError), esc: Int, line: Int) -> Unit =
@@ -321,11 +323,11 @@ let append-string-escape!(lx: Lex, sb: StringBuffer, failed: Ref (Maybe ParseErr
       {
         let e = lex-bump(lx)
         cond
-          | e == 92 -> sb-append-byte!(sb, 92)
-          | e == 34 -> sb-append-byte!(sb, 34)
-          | e == 110 -> sb-append-byte!(sb, 10)
-          | e == 114 -> sb-append-byte!(sb, 13)
-          | e == 116 -> sb-append-byte!(sb, 9)
+          | e == 92 -> Buf.append-byte!(sb, 92)
+          | e == 34 -> Buf.append-byte!(sb, 34)
+          | e == 110 -> Buf.append-byte!(sb, 10)
+          | e == 114 -> Buf.append-byte!(sb, 13)
+          | e == 116 -> Buf.append-byte!(sb, 9)
           | e == 117 -> append-unicode-escape!(lx, sb, failed, esc, start, line)
           | else -> escape-invalid!(lx, failed, esc, line)
       }
@@ -333,18 +335,18 @@ let append-string-escape!(lx: Lex, sb: StringBuffer, failed: Ref (Maybe ParseErr
 
 let scan-string(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), start: Int, col: Int, ind: Int, bol: Bool, line: Int) -> Unit {
   lex-bump(lx)
-  let sb = sb-new()
+  let sb = Buf.new()
   let closed = ref(false)
   while (deref(lx-pos(lx)) < lx-n(lx) && not(deref(closed)) && is-none(deref(failed))) {
     let c = lex-bump(lx)
     cond
       | c == 34 -> set!(closed, true)
       | c == 92 -> append-string-escape!(lx, sb, failed, start, line)
-      | else -> sb-append-byte!(sb, c)
+      | else -> Buf.append-byte!(sb, c)
   }
   cond
     | is-none(deref(failed)) && not(deref(closed)) -> set!(failed, Some(perr-at(start, deref(lx-pos(lx)), line, "unterminated string")))
-    | deref(closed) -> push-tok(toks, Tok("str", sb-take-str!(sb), start, deref(lx-pos(lx)), col, ind, bol, line))
+    | deref(closed) -> push-tok(toks, Tok("str", Buf.take-str!(sb), start, deref(lx-pos(lx)), col, ind, bol, line))
 }
 
 let scan-symbol(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), start: Int, col: Int, ind: Int, bol: Bool, line: Int) -> Unit {
@@ -358,18 +360,18 @@ let scan-symbol(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), s
         while (is-ident-cont(lex-peek(lx, 0)) || lex-peek(lx, 0) == 33) {
           lex-bump(lx)
         }
-        let name = str-slice(lx-src(lx), ns, deref(lx-pos(lx)) - ns)
-        if (str-byte(name, str-byte-length(name) - 1) != 33 && has-bang(name)) -> set!(failed, Some(perr-at(ns, deref(lx-pos(lx)), line, "'!' may appear only as the final character of an identifier"))) | push-tok(toks, Tok("sym", name, start, deref(lx-pos(lx)), col, ind, bol, line))
+        let name = String.slice(ns, deref(lx-pos(lx)) - ns, lx-src(lx))
+        if (String.byte(String.length(name) - 1, name) != 33 && has-bang(name)) -> set!(failed, Some(perr-at(ns, deref(lx-pos(lx)), line, "'!' may appear only as the final character of an identifier"))) | push-tok(toks, Tok("sym", name, start, deref(lx-pos(lx)), col, ind, bol, line))
       }
 }
 
 let has-bang(s: Str) -> Bool =
-  has-bang-from(s, 0, str-byte-length(s))
+  has-bang-from(s, 0, String.length(s))
 
 let has-bang-from(s: Str, i: Int, n: Int) -> Bool =
   cond
     | i >= n -> false
-    | str-byte(s, i) == 33 -> true
+    | String.byte(i, s) == 33 -> true
     | else -> has-bang-from(s, i + 1, n)
 
 let scan-number(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), start: Int, col: Int, ind: Int, bol: Bool, line: Int) -> Unit {
@@ -416,7 +418,7 @@ let scan-number(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), s
   cond
     | is-none(deref(failed)) ->
       {
-        let text = str-slice(lx-src(lx), start, deref(lx-pos(lx)) - start)
+        let text = String.slice(start, deref(lx-pos(lx)) - start, lx-src(lx))
         let kind =
           if (deref(saw-dot) || deref(saw-exp)) -> "float" | "int"
         push-tok(toks, Tok(kind, text, start, deref(lx-pos(lx)), col, ind, bol, line))
@@ -452,7 +454,7 @@ let match-op(lx: Lex) -> Str {
 }
 
 let byte-or-end(s: Str, i: Int, n: Int) -> Int =
-  if (i < n) -> str-byte(s, i) | -1
+  if (i < n) -> String.byte(i, s) | -1
 
 let op-len(op: Str) -> Int =
   if (op == "==" || op == "!=" || op == "<=" || op == ">=" || op == "&&" || op == "||" || op == "->" || op == "::" || op == "|>") -> 2 | 1
@@ -481,7 +483,7 @@ let scan-ident(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), st
   cond
     | is-none(deref(failed)) ->
       {
-        let text = str-slice(lx-src(lx), start, deref(lx-pos(lx)) - start)
+        let text = String.slice(start, deref(lx-pos(lx)) - start, lx-src(lx))
         push-tok(toks, Tok(kind-of(text), text, start, deref(lx-pos(lx)), col, ind, bol, line))
       }
 }
@@ -539,9 +541,9 @@ let is-punct(b: Int) -> Bool =
   b == 40 || b == 41 || b == 123 || b == 125 || b == 91 || b == 93 || b == 44
 
 let chr(b: Int) -> Str {
-  let sb = sb-new()
-  sb-append-byte!(sb, b)
-  sb-take-str!(sb)
+  let sb = Buf.new()
+  Buf.append-byte!(sb, b)
+  Buf.take-str!(sb)
 }
 
 let scan-one(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError)) -> Unit {
@@ -562,7 +564,7 @@ let scan-one(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError)) -> U
 }
 
 let lex-all(src: Str) -> Result (List Tok) ParseError {
-  let lx = Lex(src, str-byte-length(src), ref(0), ref(1), ref(0), ref(0), ref(true), ref(true))
+  let lx = Lex(src, String.length(src), ref(0), ref(1), ref(0), ref(0), ref(true), ref(true))
   let toks = ref(empty-toks())
   let failed = ref(no-parse-error())
   while (deref(lx-pos(lx)) < lx-n(lx) && is-none(deref(failed))) {
@@ -668,15 +670,15 @@ let finish-cmp(op: Str, args: List Ast, sp: Span) -> Ast =
     | [] -> paren-at([], sp)
 
 let int-value(text: Str) -> Int =
-  int-value-from(text, 0, str-byte-length(text), false, 0)
+  int-value-from(text, 0, String.length(text), false, 0)
 
 let int-value-from(text: Str, i: Int, n: Int, neg: Bool, acc: Int) -> Int =
   cond
-    | i == 0 && n > 0 && str-byte(text, 0) == 43 -> int-value-from(text, 1, n, false, 0)
-    | i == 0 && n > 0 && str-byte(text, 0) == 45 -> int-value-from(text, 1, n, true, 0)
+    | i == 0 && n > 0 && String.byte(0, text) == 43 -> int-value-from(text, 1, n, false, 0)
+    | i == 0 && n > 0 && String.byte(0, text) == 45 -> int-value-from(text, 1, n, true, 0)
     | i >= n ->
       if (neg) -> -acc | acc
-    | else -> int-value-from(text, i + 1, n, neg, acc * 10 + (str-byte(text, i) - 48))
+    | else -> int-value-from(text, i + 1, n, neg, acc * 10 + (String.byte(i, text) - 48))
 
 let str-node(t: Tok) -> Ast =
   StrNode(tok-text(t), tok-span(t))
@@ -1190,7 +1192,7 @@ let parse-pattern-atom(ps: Ps) -> Result Ast ParseError {
 }
 
 let is-upper(text: Str) -> Bool {
-  let b = str-byte(text, 0)
+  let b = String.byte(0, text)
   b >= 65 && b <= 90
 }
 
@@ -1320,13 +1322,13 @@ let parse-fn-param(ps: Ps) -> Result Ast ParseError {
 }
 
 let bare-name(text: Str) -> Str {
-  let n = str-byte-length(text)
-  if (n > 0 && str-byte(text, n - 1) == 58) -> str-slice(text, 0, n - 1) | text
+  let n = String.length(text)
+  if (n > 0 && String.byte(n - 1, text) == 58) -> String.slice(0, n - 1, text) | text
 }
 
 let ends-colon(text: Str) -> Bool {
-  let n = str-byte-length(text)
-  n > 0 && str-byte(text, n - 1) == 58
+  let n = String.length(text)
+  n > 0 && String.byte(n - 1, text) == 58
 }
 
 let parse-body(ps: Ps) -> Result Ast ParseError =
@@ -1521,7 +1523,7 @@ let parse-param(ps: Ps) -> Result Ast ParseError {
         match (parse-type(ps))
           | Err(e) -> Err(e)
           | Ok(ty) ->
-            if (rest) -> Ok(paren-at([sym-at(str-concat(bare, ":"), tok-span(name)), ty, sym-at("...", tok-span(name))], span-join(tok-span(name), ast-span(ty)))) | Ok(paren-at([sym-at(str-concat(bare, ":"), tok-span(name)), ty], span-join(tok-span(name), ast-span(ty))))
+            if (rest) -> Ok(paren-at([sym-at(String.concat(bare, ":"), tok-span(name)), ty, sym-at("...", tok-span(name))], span-join(tok-span(name), ast-span(ty)))) | Ok(paren-at([sym-at(String.concat(bare, ":"), tok-span(name)), ty], span-join(tok-span(name), ast-span(ty))))
       }
 }
 
@@ -1547,7 +1549,7 @@ let parse-field(ps: Ps) -> Result Ast ParseError {
 let parse-field-type(ps: Ps, name: Tok, bare: Str) -> Result Ast ParseError =
   match (parse-type(ps))
     | Err(e) -> Err(e)
-    | Ok(ty) -> Ok(paren-at([sym-at(str-concat(bare, ":"), tok-span(name)), ty], span-join(tok-span(name), ast-span(ty))))
+    | Ok(ty) -> Ok(paren-at([sym-at(String.concat(bare, ":"), tok-span(name)), ty], span-join(tok-span(name), ast-span(ty))))
 
 let parse-let(ps: Ps, indent: Int) -> Result Ast ParseError {
   let kw = peek(ps)
@@ -1685,6 +1687,30 @@ let parse-extern(ps: Ps) -> Result Ast ParseError {
       }
 }
 
+let parse-runtime(ps: Ps) -> Result Ast ParseError {
+  let kw = peek(ps)
+  advance(ps)
+  let name = peek(ps)
+  cond
+    | tok-kind(name) != "ident" -> perr(name, "expected a runtime name")
+    | else ->
+      {
+        advance(ps)
+        match (parse-tparams-opt(ps))
+          | Err(e) -> Err(e)
+          | Ok(tp) ->
+            match (parse-param-list(ps))
+              | Err(e) -> Err(e)
+              | Ok(params) ->
+                match (eat(ps, "->"))
+                  | None -> perr(peek(ps), "expected ->")
+                  | Some(_) ->
+                    match (parse-type(ps))
+                      | Err(e) -> Err(e)
+                      | Ok(ret) -> Ok(paren-at(defn-like("runtime", kw, name-ast(name, tp), params, ret), span-join(tok-span(kw), ast-span(ret))))
+      }
+}
+
 let defn-like(head: Str, kw: Tok, name: Ast, params: List Ast, ret: Ast) -> List Ast =
   sym-at(head, tok-span(kw)) :: name :: cat(params, [sym-at("->", ast-span(ret)), ret])
 
@@ -1775,6 +1801,7 @@ let parse-decl-inner(ps: Ps) -> Result Ast ParseError {
   cond
     | tok-text(t) == "import" -> parse-import(ps)
     | tok-text(t) == "extern" -> parse-extern(ps)
+    | tok-text(t) == "runtime" -> parse-runtime(ps)
     | tok-text(t) == "alias" -> parse-alias(ps)
     | tok-text(t) == "record" -> parse-record(ps)
     | tok-text(t) == "type" -> parse-type-decl(ps)
@@ -1805,6 +1832,7 @@ let wrap-pub(pub-tok: Tok, inner: Ast) -> Ast =
 
 let is-decl(t: Tok) -> Bool =
   cond
+    | tok-text(t) == "runtime" -> true
     | tok-kind(t) == "kw" && (tok-text(t) == "pub" || tok-text(t) == "import" || tok-text(t) == "extern" || tok-text(t) == "alias" || tok-text(t) == "record" || tok-text(t) == "type" || tok-text(t) == "let") -> true
     | tok-text(t) == "test" -> true
     | else -> false

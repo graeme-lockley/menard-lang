@@ -127,6 +127,39 @@ MnWord mn_str_slice(MnWord s, MnWord start_t, MnWord len_t) {
   return (MnWord)obj;
 }
 
+/* One scalar as UTF-8. Surrogates encode as three bytes. Out of range is U+FFFD. */
+MnWord mn_char_to_str(MnWord c) {
+  int64_t cp = mn_word_to_int(c);
+  uint8_t tmp[4];
+  int n;
+  if (cp < 0 || cp > 0x10FFFF) {
+    cp = 0xFFFD;
+  }
+  if (cp < 0x80) {
+    tmp[0] = (uint8_t)cp;
+    n = 1;
+  } else if (cp < 0x800) {
+    tmp[0] = (uint8_t)(0xC0 | (cp >> 6));
+    tmp[1] = (uint8_t)(0x80 | (cp & 0x3F));
+    n = 2;
+  } else if (cp < 0x10000) {
+    tmp[0] = (uint8_t)(0xE0 | (cp >> 12));
+    tmp[1] = (uint8_t)(0x80 | ((cp >> 6) & 0x3F));
+    tmp[2] = (uint8_t)(0x80 | (cp & 0x3F));
+    n = 3;
+  } else {
+    tmp[0] = (uint8_t)(0xF0 | (cp >> 18));
+    tmp[1] = (uint8_t)(0x80 | ((cp >> 12) & 0x3F));
+    tmp[2] = (uint8_t)(0x80 | ((cp >> 6) & 0x3F));
+    tmp[3] = (uint8_t)(0x80 | (cp & 0x3F));
+    n = 4;
+  }
+  MnWord *obj = (MnWord *)mn_alloc(HDR + 8 + n, &shape_str);
+  obj[1] = (MnWord)n;
+  memcpy((uint8_t *)(obj + 2), tmp, (size_t)n);
+  return (MnWord)obj;
+}
+
 void mn_print_str(MnWord s) {
   int64_t n = str_len(s);
   if (n > 0) {
@@ -244,6 +277,14 @@ MnWord mn_sb_take_str(MnWord sb) {
   obj[2] = 0;
   mn_root_pop();
   return (MnWord)str;
+}
+
+MnWord mn_sb_clear(MnWord sb) {
+  if (mn_is_immediate(sb)) {
+    mn_panic("mn_sb_clear: expected StringBuffer");
+  }
+  ((MnWord *)(uintptr_t)sb)[2] = 0;
+  return MN_UNIT;
 }
 
 MnWord mn_sb_to_str(MnWord sb) {

@@ -42,6 +42,8 @@
 
 import "../reader/ast.mnd"
 import std/list
+import std/string as String
+import std/map as Map
 
 pub alias Ast = Ast
 
@@ -59,8 +61,8 @@ let is-sym(ast: Ast, name: Str) -> Bool =
     | None -> false
 
 let strip-trailing-colon(raw: Str) -> Str {
-  let n = str-byte-length(raw)
-  if (n > 0 && str-byte(raw, n - 1) == 58) -> str-slice(raw, 0, n - 1) | raw
+  let n = String.length(raw)
+  if (n > 0 && String.byte(n - 1, raw) == 58) -> String.slice(0, n - 1, raw) | raw
 }
 
 let dummy-span() -> Span =
@@ -130,7 +132,7 @@ let fn-param-elems(params-ast: Ast) -> List Ast =
     | _ -> []
 
 let int-param-for(name: Str) -> Ast =
-  ParenNode([SymNode(str-concat(name, ":"), dummy-span()), SymNode("Int", dummy-span())], dummy-span())
+  ParenNode([SymNode(String.concat(name, ":"), dummy-span()), SymNode("Int", dummy-span())], dummy-span())
 
 let int-params-for(names: List Str) -> List Ast =
   match (names)
@@ -216,14 +218,14 @@ let apply-subst-paren-head(head: Ast, args: List Ast, sp: Span, subst: Map Str L
     | Some(name) -> apply-subst-paren-named(name, head, args, sp, subst)
 
 let apply-subst-paren-named(name: Str, head: Ast, args: List Ast, sp: Span, subst: Map Str LiftedInfo) -> Ast =
-  match (map-get(subst, name))
+  match (Map.lookup(subst, name))
     | None -> ParenNode(head :: apply-subst-list(args, subst), sp)
     | Some(_) -> rewrite-call(name, args, sp, subst)
 
 ; `(name arg…)` for a known let-bound function. An empty capture is a
 ; direct call of the lifted `defn`. A capture stays `mn-apply-0/1/2`.
 let rewrite-call(name: Str, args: List Ast, sp: Span, subst: Map Str LiftedInfo) -> Ast =
-  match (map-get(subst, name))
+  match (Map.lookup(subst, name))
     | None -> ParenNode(SymNode(name, sp) :: apply-subst-list(args, subst), sp)
     | Some(info) -> rewrite-call-info(name, info, args, sp, subst)
 
@@ -358,7 +360,7 @@ let free-vars-in-scope-order-cons(s: Str, rest: List Str, used: List Str, exclud
 let fresh-lam-name(counter: Ref Int) -> Str {
   let n = deref(counter)
   set!(counter, n + 1)
-  str-concat("__lam", show(n))
+  String.concat("__lam", show(n))
 }
 
 record LiftOut {
@@ -412,7 +414,7 @@ let is-direct-lift(bind-name: Maybe Str, free-vars: List Str) -> Bool =
 let direct-body-subst(subst: Map Str LiftedInfo, bind-name: Maybe Str, lam-name: Str, direct: Bool) -> Map Str LiftedInfo =
   match (bind-name)
     | Some(name) ->
-      if (direct) -> map-set(subst, name, LiftedInfo(lam-name, [])) | subst
+      if (direct) -> Map.set(subst, name, LiftedInfo(lam-name, [])) | subst
     | None -> subst
 
 let lifted-params(direct: Bool, param-names: List Str) -> List Ast =
@@ -425,7 +427,7 @@ let lifted-body(direct: Bool, free-vars: List Str, body: Ast) -> Ast =
 let lift-bind-subst(subst: Map Str LiftedInfo, bind-name: Maybe Str, lam-name: Str, free-vars: List Str) -> Map Str LiftedInfo =
   match (bind-name)
     | None -> subst
-    | Some(name) -> map-set(subst, name, LiftedInfo(lam-name, free-vars))
+    | Some(name) -> Map.set(subst, name, LiftedInfo(lam-name, free-vars))
 
 ; ---------------------------------------------------------------------------
 ; close-expr / close-body
@@ -488,7 +490,7 @@ let expr-list-extra(r: ExprListResult) -> List Ast =
 ; `_` and uppercase constructors bind nothing; a lowercase symbol binds;
 ; `(Ctor p …)` recurses into payloads. Patterns are not closed as expressions.
 let is-upper-name(s: Str) -> Bool {
-  let b = str-byte(s, 0)
+  let b = String.byte(0, s)
   b >= 65 && b <= 90
 }
 
@@ -749,7 +751,7 @@ let close-defn-form(elems: List Ast, sp: Span, counter: Ref Int) -> CloseResult 
 let close-defn-split(split: ArrowSplit, sp: Span, counter: Ref Int) -> CloseResult {
   let header = arrow-split-header(split)
   let scope = defn-scope-of(header)
-  let result = close-body(arrow-split-body(split), scope, map-new(), counter)
+  let result = close-body(arrow-split-body(split), scope, Map.empty(), counter)
   CloseResult(ParenNode(append-list(header, arrow-split-arrow(split) :: arrow-split-ret(split) :: body-result-forms(result)), sp), body-result-extra(result))
 }
 

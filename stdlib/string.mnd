@@ -1,45 +1,65 @@
 ; Helpers over Str bytes.
 ; @module std/string
 
+; Byte length of s.
+; @test length("hi") => 2
+pub runtime length(s: Str) -> Int
+
+; The byte at index i. An index outside s reads as 0.
+; @test byte(1, "hi") => 105
+pub runtime byte(i: Int, s: Str) -> Int
+
+; len bytes of s starting at start. Bounds outside s are clamped.
+; @test slice(1, 3, "hello") => "ell"
+pub runtime slice(start: Int, len: Int, s: Str) -> Str
+
+; a and b joined. Further arguments nest to the left.
+; @test concat("a", "b") => "ab"
+pub runtime concat(a: Str, b: Str) -> Str
+
+; c encoded as UTF-8. A scalar outside 0..U+10FFFF encodes as U+FFFD.
+; @test from-char(c) => "A"
+pub runtime from-char(c: Char) -> Str
+
 ; Whether s begins with prefix.
 ; @test starts-with("he", "hello") => true
 pub let starts-with(prefix: Str, s: Str) -> Bool {
-  let n = str-byte-length(prefix)
-  str-byte-length(s) >= n && str-slice(s, 0, n) == prefix
+  let n = length(prefix)
+  length(s) >= n && slice(0, n, s) == prefix
 }
 
 ; Whether s ends with suffix.
 ; @test ends-with("lo", "hello") => true
 pub let ends-with(suffix: Str, s: Str) -> Bool {
-  let sn = str-byte-length(s)
-  let un = str-byte-length(suffix)
-  sn >= un && str-slice(s, sn - un, un) == suffix
+  let sn = length(s)
+  let un = length(suffix)
+  sn >= un && slice(sn - un, un, s) == suffix
 }
 
 ; Drop the first n bytes. Non-positive counts keep s; counts past the end return "".
 ; @test drop(2, "hello") => "llo"
 pub let drop(n: Int, s: Str) -> Str {
-  let l = str-byte-length(s)
+  let l = length(s)
 
   cond
     | n <= 0 -> s
     | n >= l -> ""
-    | else -> str-slice(s, n, l - n)
+    | else -> slice(n, l - n, s)
 }
 
 ; Whether needle matches s at byte i. The needle is short, so the walk stays shallow.
 let bytes-eq(s: Str, i: Int, pat: Str, j: Int, n: Int) -> Bool =
   cond
     | j >= n -> true
-    | str-byte(s, i + j) == str-byte(pat, j) -> bytes-eq(s, i, pat, j + 1, n)
+    | byte(i + j, s) == byte(j, pat) -> bytes-eq(s, i, pat, j + 1, n)
     | else -> false
 
 ; Whether s contains needle as a byte substring.
 ; Named `has` so a program can import std/list, which also publishes `contains`.
 ; @test has("ell", "hello") => true
 pub let has(needle: Str, s: Str) -> Bool {
-  let n = str-byte-length(needle)
-  let sn = str-byte-length(s)
+  let n = length(needle)
+  let sn = length(s)
   loop (i = 0)
     cond
       | i + n > sn -> false
@@ -51,7 +71,7 @@ pub let has(needle: Str, s: Str) -> Bool {
 let join-rest(sep: Str, acc: Str, rest: List Str) -> Str =
   match (rest)
     | [] -> acc
-    | h :: t -> join-rest(sep, str-concat(acc, sep, h), t)
+    | h :: t -> join-rest(sep, concat(acc, sep, h), t)
 
 ; parts joined by sep.
 ; @test join(",", ["a", "b"]) => "a,b"
@@ -70,8 +90,8 @@ pub let index-of(sep: Str, s: Str) -> Maybe Int =
 ; The string is last so a pipe can fill it: `s |> index-of-from(sep, i)`.
 ; @test index-of-from(",", 2, "a,b,c") => Some(3)
 pub let index-of-from(sep: Str, i: Int, s: Str) -> Maybe Int {
-  let n = str-byte-length(sep)
-  let sn = str-byte-length(s)
+  let n = length(sep)
+  let sn = length(s)
   loop (j = if (i < 0) -> 0 | i)
     cond
       | j > sn || n > sn - j -> None()
@@ -81,17 +101,17 @@ pub let index-of-from(sep: Str, i: Int, s: Str) -> Maybe Int {
 
 ; The pieces of s from byte i to the end, split on sep.
 let split-from(s: Str, sep: Str, i: Int) -> List Str {
-  let n = str-byte-length(sep)
-  let sn = str-byte-length(s)
+  let n = length(sep)
+  let sn = length(s)
   match (index-of-from(sep, i, s))
-    | None -> [str-slice(s, i, sn - i)]
-    | Some(at) -> str-slice(s, i, at - i) :: split-from(s, sep, at + n)
+    | None -> [slice(i, sn - i, s)]
+    | Some(at) -> slice(i, at - i, s) :: split-from(s, sep, at + n)
 }
 
 ; s split on sep. An empty separator is not a split: the whole string is the one piece.
 ; @test split(",", "a,b,c") => ["a", "b", "c"]
 pub let split(sep: Str, s: Str) -> List Str =
-  if (str-byte-length(sep) == 0) -> [s] | split-from(s, sep, 0)
+  if (length(sep) == 0) -> [s] | split-from(s, sep, 0)
 
 ; s split on any separator. List order breaks ties; empty separators are ignored.
 ; @test split-using([",", ";"], "a,b;c") => ["a", "b", "c"]
@@ -104,22 +124,22 @@ let matching-sep-length(s: Str, seps: List Str, i: Int) -> Int =
     | [] -> 0
     | sep :: rest ->
       {
-        let n = str-byte-length(sep)
-        if (n > 0 && i + n <= str-byte-length(s) && bytes-eq(s, i, sep, 0, n)) ->
+        let n = length(sep)
+        if (n > 0 && i + n <= length(s) && bytes-eq(s, i, sep, 0, n)) ->
           n | matching-sep-length(s, rest, i)
       }
 
 ; The pieces of s from byte start to the end, split on any separator in seps.
 let split-using-from(s: Str, seps: List Str, start: Int) -> List Str {
-  let sn = str-byte-length(s)
+  let sn = length(s)
   loop (i = start)
     cond
-      | i >= sn -> [str-slice(s, start, sn - start)]
+      | i >= sn -> [slice(start, sn - start, s)]
       | else ->
         {
           let n = matching-sep-length(s, seps, i)
           if (n > 0) ->
-            str-slice(s, start, i - start) :: split-using-from(s, seps, i + n) |
+            slice(start, i - start, s) :: split-using-from(s, seps, i + n) |
             recur(i + 1)
         }
 }

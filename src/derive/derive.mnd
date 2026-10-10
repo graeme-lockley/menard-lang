@@ -26,6 +26,8 @@
 
 import "../reader/ast.mnd"
 import std/list
+import std/string as String
+import std/map as Map
 
 ; Re-export shim: a `pub` signature may not mention a private nominal
 ; type (ADR 27), even one imported `pub` from elsewhere — see
@@ -66,8 +68,8 @@ let append-ast(xs: List Ast, ys: List Ast) -> List Ast =
     | x :: rest -> x :: append-ast(rest, ys)
 
 let strip-colon(s: Str) -> Str {
-  let n = str-byte-length(s)
-  if (n > 0 && str-byte(s, n - 1) == 58) -> str-slice(s, 0, n - 1) | s
+  let n = String.length(s)
+  if (n > 0 && String.byte(n - 1, s) == 58) -> String.slice(0, n - 1, s) | s
 }
 
 let unwrap-pub(ast: Ast) -> Ast =
@@ -90,7 +92,7 @@ let dc-arity(c: DeriveCtor) -> Int =
     | DeriveCtor(_, a) -> a
 
 let binders(prefix: Str, n: Int, i: Int) -> List Str =
-  if (i >= n) -> [] | str-concat(prefix, show(i)) :: binders(prefix, n, i + 1)
+  if (i >= n) -> [] | String.concat(prefix, show(i)) :: binders(prefix, n, i + 1)
 
 let syms-of(xs: List Str) -> List Ast =
   match (xs)
@@ -108,16 +110,16 @@ let source-ctor-name-digits(n: Str, i: Int, len: Int) -> Str =
     | i >= len -> n
     | else ->
       {
-        let b = str-byte(n, i)
+        let b = String.byte(i, n)
         cond
           | b >= 48 && b <= 57 -> source-ctor-name-digits(n, i + 1, len)
-          | b == 95 -> str-slice(n, i + 1, len - (i + 1))
+          | b == 95 -> String.slice(i + 1, len - (i + 1), n)
           | else -> n
       }
 
 let source-ctor-name(n: Str) -> Str {
-  let len = str-byte-length(n)
-  if (len >= 4 && str-byte(n, 0) == 95 && str-byte(n, 1) == 95 && str-byte(n, 2) == 109) -> source-ctor-name-digits(n, 3, len) | n
+  let len = String.length(n)
+  if (len >= 4 && String.byte(0, n) == 95 && String.byte(1, n) == 95 && String.byte(2, n) == 109) -> source-ctor-name-digits(n, 3, len) | n
 }
 
 let concat2(a: Ast, b: Ast) -> Ast =
@@ -134,7 +136,7 @@ let join-shown(fields: List Str) -> Ast =
 
 let show-of-ctor(c: DeriveCtor, prefix: Str) -> Ast {
   let spelled = source-ctor-name(dc-name(c))
-  if (dc-arity(c) == 0) -> st(str-concat("(", spelled, ")")) | concat2(st(str-concat("(", spelled, " ")), concat2(join-shown(binders(prefix, dc-arity(c), 0)), st(")")))
+  if (dc-arity(c) == 0) -> st(String.concat("(", spelled, ")")) | concat2(st(String.concat("(", spelled, " ")), concat2(join-shown(binders(prefix, dc-arity(c), 0)), st(")")))
 }
 
 let show-clauses(ctors: List DeriveCtor) -> List Ast =
@@ -187,13 +189,13 @@ let match-a(clauses: List Ast) -> Ast =
   paren(sy("match") :: sy("a") :: clauses)
 
 let gen-type(ty: Str, ctors: List DeriveCtor) -> List Ast =
-  [defn-1(str-concat("show_", ty), ty, "Str", match-v(show-clauses(ctors))), defn-2(str-concat("eq_", ty), ty, "Bool", match-a(eq-clauses(ctors))), defn-2(str-concat("compare_", ty), ty, "Int", match-a(cmp-clauses(ctors))), defn-1(str-concat("dump_", ty), ty, "Str", match-v(show-clauses(ctors)))]
+  [defn-1(String.concat("show_", ty), ty, "Str", match-v(show-clauses(ctors))), defn-2(String.concat("eq_", ty), ty, "Bool", match-a(eq-clauses(ctors))), defn-2(String.concat("compare_", ty), ty, "Int", match-a(cmp-clauses(ctors))), defn-1(String.concat("dump_", ty), ty, "Str", match-v(show-clauses(ctors)))]
 
 let gen-used(names: List Str, types: Map Str (List DeriveCtor)) -> List Ast =
   match (names)
     | [] -> []
     | n :: rest ->
-      match (map-get(types, n))
+      match (Map.lookup(types, n))
         | None -> gen-used(rest, types)
         | Some(ctors) -> append-ast(gen-type(n, ctors), gen-used(rest, types))
 
@@ -207,7 +209,7 @@ let insert-name(x: Str, xs: List Str) -> List Str =
         | else -> h :: insert-name(x, rest)
 
 let ctor-type-of(name: Str, ctors: Map Str Str) -> Maybe Str =
-  map-get(ctors, name)
+  Map.lookup(ctors, name)
 
 let classify-user(ast: Ast, ctors: Map Str Str) -> Maybe Str =
   match (ast)
@@ -267,7 +269,7 @@ let used-in-list(forms: List Ast, ctors: Map Str Str, acc: List Str) -> List Str
     | f :: rest -> used-in-list(rest, ctors, note-used(f, ctors, acc))
 
 let rewrite-name(op: Str, ty: Str) -> Str =
-  str-concat(op-prefix(op), ty)
+  String.concat(op-prefix(op), ty)
 
 let rewrite(ast: Ast, ctors: Map Str Str) -> Ast =
   match (ast)
@@ -305,7 +307,7 @@ let rewrite-forms(forms: List Ast, ctors: Map Str Str) -> List Ast =
     | f :: rest -> rewrite(f, ctors) :: rewrite-forms(rest, ctors)
 
 let add-ctor(ctors: Map Str Str, cname: Str, ty: Str) -> Map Str Str =
-  map-set(ctors, cname, ty)
+  Map.set(ctors, cname, ty)
 
 let variant-ctors(cs: List Ast, ty: Str, ctors: Map Str Str, acc: List DeriveCtor) -> List DeriveCtor =
   match (cs)
@@ -336,11 +338,11 @@ record TypeAcc {
 
 let acc-add-defrec(acc: TypeAcc, name: Str, arity: Int) -> TypeAcc =
   match (acc)
-    | TypeAcc(types, ctors) -> TypeAcc(map-set(types, name, [DeriveCtor(name, arity)]), add-ctor(ctors, name, name))
+    | TypeAcc(types, ctors) -> TypeAcc(Map.set(types, name, [DeriveCtor(name, arity)]), add-ctor(ctors, name, name))
 
 let acc-add-variant(acc: TypeAcc, name: Str, cs: List Ast) -> TypeAcc =
   match (acc)
-    | TypeAcc(types, ctors) -> TypeAcc(map-set(types, name, variant-ctors(cs, name, ctors, [])), remember-variant(cs, name, ctors))
+    | TypeAcc(types, ctors) -> TypeAcc(Map.set(types, name, variant-ctors(cs, name, ctors, [])), remember-variant(cs, name, ctors))
 
 let take-name(ast: Ast) -> Maybe Str =
   match (ast)
@@ -383,5 +385,5 @@ let consider-all(forms: List Ast, acc: TypeAcc) -> TypeAcc =
     | f :: rest -> consider-all(rest, consider(f, acc))
 
 pub let plan-derives(forms: List Ast) -> List Ast =
-  match (consider-all(forms, TypeAcc(map-new(), map-new())))
+  match (consider-all(forms, TypeAcc(Map.empty(), Map.empty())))
     | TypeAcc(types, ctors) -> append-ast(gen-used(used-in(forms, ctors), types), rewrite-forms(forms, ctors))

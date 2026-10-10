@@ -56,6 +56,8 @@
 ; does no value-numbering of its own.
 
 import "./llvm-ir.mnd"
+import std/string as String
+import std/string-buffer as Buf
 
 pub alias LlvmModule = LlvmModule
 
@@ -119,12 +121,12 @@ let max-int(a: Int, b: Int) -> Int =
   if (a > b) -> a | b
 
 let str-byte-ops-from(s: Str, i: Int, n: Int) -> List Int =
-  if (i >= n) -> [] | str-byte(s, i) :: str-byte-ops-from(s, i + 1, n)
+  if (i >= n) -> [] | String.byte(i, s) :: str-byte-ops-from(s, i + 1, n)
 
 ; A Str's bytes as a `(List Int)` — how a record's inline name operands
 ; (`vst-code-entry`, below) are built from a function's literal name.
 let str-byte-ops(s: Str) -> List Int =
-  str-byte-ops-from(s, 0, str-byte-length(s))
+  str-byte-ops-from(s, 0, String.length(s))
 
 ; ---------------------------------------------------------------------------
 ; BitSink: pending bits (`pending`, `pending-bits`) plus the accumulated
@@ -149,7 +151,7 @@ let sink-pending-bits(s: BitSink) -> Ref Int =
     | BitSink(_, _, b) -> b
 
 let bitsink-new() -> BitSink =
-  BitSink(sb-new(), ref(0), ref(0))
+  BitSink(Buf.new(), ref(0), ref(0))
 
 ; Flush every whole byte currently pending (`pending-bits >= 8`) into
 ; `buf`. Bits above the flushed byte survive in `pending`, shifted down.
@@ -160,7 +162,7 @@ let bitsink-flush-fields!(buf: StringBuffer, pending: Ref Int, pending-bits: Ref
     | deref(pending-bits) >= 8 ->
       {
         let p = deref(pending)
-        sb-append-byte!(buf, p % 256)
+        Buf.append-byte!(buf, p % 256)
         set!(pending, p / 256)
         set!(pending-bits, deref(pending-bits) - 8)
         bitsink-flush-fields!(buf, pending, pending-bits)
@@ -207,7 +209,7 @@ let bitsink-write-vbr!(s: BitSink, value: Int, width: Int) -> Unit =
   bitsink-write-vbr-chunks!(s, value, pow2(width - 1), width)
 
 let bitsink-total-bits(s: BitSink) -> Int =
-  sb-length(sink-buf(s)) * 8 + deref(sink-pending-bits(s))
+  Buf.length(sink-buf(s)) * 8 + deref(sink-pending-bits(s))
 
 ; Pad with zero bits to the next 32-bit boundary. Every rendered block
 ; body ends with one of these right after its `END_BLOCK` — see the
@@ -222,10 +224,10 @@ let bitsink-align32!(s: BitSink) -> Unit {
 ; block body — the fact that `render-block-body!` always returns a whole
 ; number of bytes), so `pending-bits` is always 0 here.
 let bitsink-append-raw!(s: BitSink, raw: Str) -> Unit =
-  sb-append!(sink-buf(s), raw)
+  Buf.append!(sink-buf(s), raw)
 
 let bitsink-finish!(s: BitSink) -> Str =
-  sb-take-str!(sink-buf(s))
+  Buf.take-str!(sink-buf(s))
 
 ; ---------------------------------------------------------------------------
 ; Bitstream structure: blocks and unabbreviated records, built on BitSink.
@@ -259,10 +261,10 @@ let render-block-body!(write-body: (BitSink) -> Unit) -> Str {
 }
 
 let append-word32-le!(s: BitSink, n: Int) -> Unit {
-  sb-append-byte!(sink-buf(s), n % 256)
-  sb-append-byte!(sink-buf(s), n / 256 % 256)
-  sb-append-byte!(sink-buf(s), n / 65536 % 256)
-  sb-append-byte!(sink-buf(s), n / 16777216 % 256)
+  Buf.append-byte!(sink-buf(s), n % 256)
+  Buf.append-byte!(sink-buf(s), n / 256 % 256)
+  Buf.append-byte!(sink-buf(s), n / 65536 % 256)
+  Buf.append-byte!(sink-buf(s), n / 16777216 % 256)
 }
 
 ; Enter a subblock of `parent`: render its body in isolation (so its
@@ -274,7 +276,7 @@ let enter-subblock!(parent: BitSink, block-id: Int, write-body: (BitSink) -> Uni
   bitsink-write-vbr!(parent, block-id, 8)
   bitsink-write-vbr!(parent, abbrev-width, 4)
   bitsink-align32!(parent)
-  append-word32-le!(parent, str-byte-length(body) / 4)
+  append-word32-le!(parent, String.length(body) / 4)
   bitsink-append-raw!(parent, body)
 }
 
@@ -420,7 +422,7 @@ let write-func-types!(t: BitSink, arity: Int, ma: Int) -> Unit =
 let str-lengths(globals: List Str) -> List Int =
   match (globals)
     | [] -> []
-    | g :: rest -> str-byte-length(g) :: str-lengths(rest)
+    | g :: rest -> String.length(g) :: str-lengths(rest)
 
 let write-array-types!(t: BitSink, ma: Int, lens: List Int) -> Unit =
   match (lens)
@@ -575,7 +577,11 @@ let write-extern-decls!(m: BitSink, ma: Int) -> Unit {
   write-extern-decl!(m, func-type-idx-for-arity(2))
   write-extern-decl!(m, func-type-idx-for-arity(3))
   write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
 }
+
+ ; mn_char_to_str, mn_sb_clear
 
  ; mn_slot_set
 
@@ -666,7 +672,7 @@ let write-globalvars!(m: BitSink, ma: Int, lens: List Int, i: Int, init-base: In
     ; `CST_CODE_STRING` record is rejected as "Invalid string record".
 let write-global-const!(c: BitSink, ma: Int, i: Int, s: Str) -> Unit {
   write-record!(c, cst-code-settype, [ty-str-array-idx(ma, i)])
-  if (str-byte-length(s) == 0) -> write-record!(c, cst-code-null, []) | write-record!(c, cst-code-string, str-byte-ops(s))
+  if (String.length(s) == 0) -> write-record!(c, cst-code-null, []) | write-record!(c, cst-code-string, str-byte-ops(s))
 }
 
 let write-global-consts!(c: BitSink, ma: Int, globals: List Str, i: Int) -> Unit =
@@ -894,6 +900,8 @@ let write-extern-vst-entries!(v: BitSink, num-strings: Int) -> Unit {
   write-record!(v, vst-code-entry, extern-slot-get-abs(num-strings) :: str-byte-ops("mn_slot_get"))
   write-record!(v, vst-code-entry, extern-slot-set-abs(num-strings) :: str-byte-ops("mn_slot_set"))
   write-record!(v, vst-code-entry, extern-map-keys-abs(num-strings) :: str-byte-ops("mn_map_keys"))
+  write-record!(v, vst-code-entry, extern-char-to-str-abs(num-strings) :: str-byte-ops("mn_char_to_str"))
+  write-record!(v, vst-code-entry, extern-sb-clear-abs(num-strings) :: str-byte-ops("mn_sb_clear"))
 }
 
 let lfunc-list-length(fs: List LFunc) -> Int =
@@ -920,7 +928,7 @@ let max-arity-of(fs: List LFunc) -> Int =
 ; missing or differs from the compiler it is linking with. An empty
 ; string leaves the record out (callers that cannot ask clang).
 let write-target-triple!(m: BitSink, triple: Str) -> Unit =
-  if (str-byte-length(triple) == 0) -> () | write-record!(m, module-code-triple, str-byte-ops(triple))
+  if (String.length(triple) == 0) -> () | write-record!(m, module-code-triple, str-byte-ops(triple))
 
     ; Heap helpers need arities up to 3 (str-slice) even when user code is narrower.
 let write-module-body!(m: BitSink, mod: LlvmModule, triple: Str) -> Unit {
@@ -960,10 +968,10 @@ let write-module-body!(m: BitSink, mod: LlvmModule, triple: Str) -> Unit {
 ; function itself knows nothing about `Ast` or lowering.
 pub let write-module-bc(mod: LlvmModule, triple: Str) -> Str {
   let top = bitsink-new()
-  sb-append-byte!(sink-buf(top), bitstream-magic-byte-0)
-  sb-append-byte!(sink-buf(top), bitstream-magic-byte-1)
-  sb-append-byte!(sink-buf(top), bitstream-magic-byte-2)
-  sb-append-byte!(sink-buf(top), bitstream-magic-byte-3)
+  Buf.append-byte!(sink-buf(top), bitstream-magic-byte-0)
+  Buf.append-byte!(sink-buf(top), bitstream-magic-byte-1)
+  Buf.append-byte!(sink-buf(top), bitstream-magic-byte-2)
+  Buf.append-byte!(sink-buf(top), bitstream-magic-byte-3)
   enter-subblock!(top, module-block-id, fn (m) = write-module-body!(m, mod, triple))
   bitsink-finish!(top)
 }

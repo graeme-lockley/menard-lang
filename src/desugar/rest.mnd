@@ -7,6 +7,7 @@
 ; Mirrors host/src/desugar/rest.ts.
 
 import "../reader/ast.mnd"
+import std/string as String
 
 pub alias Ast = Ast
 
@@ -151,7 +152,7 @@ let name-text(ast: Ast) -> Maybe Str =
 let defined-name(form: Ast) -> Maybe Str =
   match (unwrap(form))
     | ParenNode(h :: name :: _, _) ->
-      if (is-sym(h, "defn") || is-sym(h, "extern")) -> name-text(name) | None()
+      if (is-sym(h, "defn") || is-sym(h, "extern") || is-sym(h, "runtime")) -> name-text(name) | None()
     | _ -> None()
 
 let let-name(form: Ast) -> Maybe Str =
@@ -169,7 +170,7 @@ let take-params(xs: List Ast) -> List Ast =
 let param-asts(form: Ast) -> Maybe (List Ast) =
   match (unwrap(form))
     | ParenNode(h :: _ :: rest, _) ->
-      if (is-sym(h, "defn") || is-sym(h, "extern")) -> Some(take-params(rest)) | None()
+      if (is-sym(h, "defn") || is-sym(h, "extern") || is-sym(h, "runtime")) -> Some(take-params(rest)) | None()
     | _ -> None()
 
 let is-list-type(ast: Ast) -> Bool =
@@ -324,7 +325,7 @@ let decl-names(form: Ast) -> List Str =
 
 let decl-names-kw(h: Ast, name: Ast, more: List Ast) -> List Str =
   cond
-    | is-sym(h, "defn") || is-sym(h, "extern") || is-sym(h, "defrec") || is-sym(h, "alias") ->
+    | is-sym(h, "defn") || is-sym(h, "extern") || is-sym(h, "runtime") || is-sym(h, "defrec") || is-sym(h, "alias") ->
       match (name-text(name))
         | Some(n) -> [n]
         | None -> []
@@ -351,7 +352,7 @@ let name-taken(xs: List Str, name: Str) -> Bool =
 
 let fresh-append(names: List Str, n: Int) -> Str {
   let candidate =
-    if (n == 0) -> "mn-rest-append" | str-concat("mn-rest-append-", show(n))
+    if (n == 0) -> "mn-rest-append" | String.concat("mn-rest-append-", show(n))
   if (name-taken(names, candidate)) -> fresh-append(names, n + 1) | candidate
 }
 
@@ -622,7 +623,7 @@ let rewrite-header(form: Ast, ctx: PackCtx) -> Ast =
 let rewrite-inner(form: Ast, ctx: PackCtx) -> Ast =
   match (form)
     | ParenNode(h :: _, _) ->
-      if (is-sym(h, "defn") || is-sym(h, "extern")) -> rewrite-header(form, ctx) | rewrite-value(form, ctx)
+      if (is-sym(h, "defn") || is-sym(h, "extern") || is-sym(h, "runtime")) -> rewrite-header(form, ctx) | rewrite-value(form, ctx)
     | _ -> rewrite-value(form, ctx)
 
 let rewrap(original: Ast, inner: Ast) -> Ast =

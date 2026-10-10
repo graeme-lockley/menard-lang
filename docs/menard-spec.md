@@ -128,8 +128,8 @@ projects like this.
 
 - `Arr`, and `arr-new` / `arr-length` / `arr-nth` (§2.8.2)
 - `str-chars` (§2.8.2)
-- character literals — `Char` has no reader syntax; `char->str` is the conversion that exists
-- `map-entries` (§2.8.2). `map-keys` is accepted by both typers and runs in the interpreter; the native runtime does not provide it
+- character literals — `Char` has no reader syntax; `String.from-char` is the conversion that exists
+- `map-entries` (§2.8.2). `Map.keys` returns that same order and is implemented by the runtime
 - the library function `find-on-path` (§2.8.3)
 
 ---
@@ -167,7 +167,7 @@ expression are type variables.
 
 **Identifier characters, and the `!` hygiene rule.** `!` is a legal identifier
 character — `set!` requires it — but it may appear **only as the final
-character**. `sb-append!` is fine; `a!b` is a lexical error. This is hygiene, not
+character**. `Buf.append!` is fine; `a!b` is a lexical error. This is hygiene, not
 semantics: see §2.15 for the one thing a trailing `!` means.
 
 ### 2.2 Values, representation and arithmetic
@@ -308,9 +308,9 @@ instantiation**. No specialisation, no per-instantiation singletons.
 
 **What the static pool buys is allocation deletion, not GC throughput.** `Str` is
 not interned, so without this every *evaluation* of a literal allocates:
-`str-concat("foo", x)` in a loop allocates `"foo"` on every iteration, and a
+`String.concat("foo", x)` in a loop allocates `"foo"` on every iteration, and a
 constructor constant is reallocated every time it is returned — which for `None`
-is every failed lookup in `map-get` and `arr-nth`. A compiler's most frequent
+is every failed lookup in `Map.lookup` and `arr-nth`. A compiler's most frequent
 allocations are its constants, and static objects remove them entirely.
 
 **Static-ness is invisible to the language.** No operation may distinguish a
@@ -504,7 +504,7 @@ Rules:
   and are documented as such.
 - **Duplicate keys overwrite; last write wins.** Iteration order at the language
   level is defined **only through the derived canonical order** (§2.11.O), and
-  `map-keys` / `map-entries` return that order — so no Menard program can ever
+  `Map.keys` / `map-entries` return that order — so no Menard program can ever
   observe hash order. See the persistence rule below.
 - **`(Map K V)` requires `K` orderable** (§2.12). This is stronger than "keys
   must be orderable to *show* the map", and deliberately so: it means a
@@ -557,12 +557,12 @@ These rules make byte-level I/O well defined:
   newline, a NUL, or invalid UTF-8. `$` is a byte. There is no interpolation.
   `show` (§2.13) still escapes only `\` and `"`.
 - **`Char` is a Unicode *scalar value*** — a code point excluding the surrogate
-  range `U+D800–U+DFFF`. This makes `char->str` **total** and never failing,
+  range `U+D800–U+DFFF`. This makes `String.from-char` **total** and never failing,
   while `str-chars` (decode) is the **fallible** direction. **Not in this
   version (§1.4):** there is no character-literal syntax, and `str-chars` is
-  not implemented. `char->str` is.
+  not implemented. `String.from-char` is.
 - **There is no `Byte` type.** Bytes are `Int`s in a documented `0..255` range,
-  reached through `str-byte`. The compiler's byte-critical paths — reader,
+  reached through `String.byte`. The compiler's byte-critical paths — reader,
   hashing, I/O — are exactly the paths where a range assertion is a test. If
   readability is wanted, `alias Byte = Int` is free: nullary and transparent, so
   it guarantees nothing, but the display view (§2.3) will show `Byte` in
@@ -581,12 +581,12 @@ where the bytes live.
 `Map` is a **value**, in the same sense as `List`. That is not free, and it is
 the one place where the runtime must do real data-structure work.
 
-`map-set` cannot mutate in place. If it did, then
+`Map.set` cannot mutate in place. If it did, then
 
 ```
-let a = map-new()
+let a = Map.empty()
 let b = a
-map-set(a, "k", 1)     ; b would also change
+Map.set(a, "k", 1)     ; b would also change
 ```
 
 would silently alias, and the language's central promise would be false for
@@ -731,7 +731,7 @@ pattern. `expr.field` lowers to a field slot. `import path as Name` binds
 `Name` to that module's exports, and `Name.f` is a call of the export.
 
 Infix `+`, `*`, `-`, `/`, and the calls `f+`, `f*`, `f-`, `f/`, and
-`str-concat` lower to binary intrinsics, left-associative, so `a + b + c`
+`String.concat` lower to binary intrinsics, left-associative, so `a + b + c`
 is the same as `(a + b) + c`. A one-argument call `f-(x)` is negation
 (`f-(0.0, x)`); prefix `-` on a non-literal is the same negation for `Int`.
 `/` and `f/` require at least two arguments. Comparisons of the same
@@ -994,19 +994,20 @@ stream, but a stream is not a value you hold, so their effect is not *mutation* 
 which is the only thing `!` marks. `show`, `=` and `compare` are pure and touch
 nothing.
 
-#### 2.8.2 Runtime-backed built-ins
+#### 2.8.2 Runtime-backed operations
 
 These need either in-place mutation or an opaque representation, so they cannot
-be written in Menard at acceptable cost. They are **declared** to the typer as
-built-in nominal types with fixed operations, and implemented in the runtime:
+be written in Menard at acceptable cost. `std/string`, `std/map`, and
+`std/string-buffer` publish them. Each call is one direct runtime call. The
+nominal types are built in; the operations are not ambient names.
 
 ```
-; Str and Char — byte-level and scalar-level access (§2.3)
-str-byte-length(s: Str) -> Int
-str-byte(s: Str, i: Int) -> Int                 ; 0..255
-str-slice(s: Str, start: Int, len: Int) -> Str
-str-concat(a: Str, b: Str) -> Str
-char->str(c: Char) -> Str                       ; total; implemented
+; std/string — byte-level and scalar-level access (§2.3)
+length(s: Str) -> Int
+byte(i: Int, s: Str) -> Int                     ; 0..255
+slice(start: Int, len: Int, s: Str) -> Str      ; bounds outside s are clamped
+concat(a: Str, b: Str) -> Str                   ; further arguments nest to the left
+from-char(c: Char) -> Str                       ; total
 str-chars(s: Str) -> Result (List Char) Int     ; not in this version (§1.4)
 
 ; Arr — specified, not in this version (§1.4)
@@ -1014,34 +1015,34 @@ arr-new[a](n: Int, v: a) -> Arr a n
 arr-length[a, n](xs: Arr a n) -> Int
 arr-nth[a, n](xs: Arr a n, i: Int) -> Maybe a
 
-; Map — persistent, value semantics, keys orderable (§2.3)
-map-new[k, v]() -> Map k v
-map-get[k, v](m: Map k v, k2: k) -> Maybe v
-map-set[k, v](m: Map k v, k2: k, v2: v) -> Map k v
-map-has[k, v](m: Map k v, k2: k) -> Bool
-map-size[k, v](m: Map k v) -> Int
-map-keys[k, v](m: Map k v) -> List k            ; interpreter and typers only; no native runtime (§1.4)
+; std/map — persistent, value semantics, keys orderable (§2.3)
+empty[k, v]() -> Map k v
+lookup[k, v](m: Map k v, k2: k) -> Maybe v
+set[k, v](m: Map k v, k2: k, v2: v) -> Map k v
+has[k, v](m: Map k v, k2: k) -> Bool
+size[k, v](m: Map k v) -> Int
+keys[k, v](m: Map k v) -> List k
 map-entries[k, v](m: Map k v) -> List k, List v ; not in this version (§1.4)
 
-; StringBuffer — a reference type with in-place append (§2.3)
-sb-new() -> StringBuffer
-sb-append!(sb: StringBuffer, s: Str) -> Unit       ; ! — visible mutation
-sb-append-byte!(sb: StringBuffer, b: Int) -> Unit  ; ! — 0..255
-sb-length(sb: StringBuffer) -> Int                 ; bytes
-sb-clear!(sb: StringBuffer) -> Unit                ; ! — visible mutation
-sb-to-str(sb: StringBuffer) -> Str                 ; non-destructive, cached
-sb-take-str!(sb: StringBuffer) -> Str             ; ! — transfers storage; buffer becomes empty
+; std/string-buffer — a reference type with in-place append (§2.3)
+new() -> StringBuffer
+append!(sb: StringBuffer, s: Str) -> Unit          ; ! — visible mutation
+append-byte!(sb: StringBuffer, b: Int) -> Unit     ; ! — 0..255
+length(sb: StringBuffer) -> Int                    ; bytes
+clear!(sb: StringBuffer) -> Unit                   ; ! — visible mutation
+to-str(sb: StringBuffer) -> Str                    ; non-destructive, cached
+take-str!(sb: StringBuffer) -> Str                 ; ! — transfers storage; buffer becomes empty
 ```
 
 **Note which of these carry `!`,** because it is the cleanest illustration of the
-rule in §2.15: the four that change state a caller can still observe do, and
-`sb-to-str` does not, because it is non-destructive. That distinction is the one
+rule in §2.15: the mutators that change state a caller can still observe do, and
+`to-str` does not, because it is non-destructive. That distinction is the one
 a reader most needs — *who owns the backing store?* — and it is exactly the
 distinction a single blanket marker would destroy.
 
 Three deliberate choices among the maps:
 
-- **`map-keys` and `map-entries` return the derived canonical order**, not hash
+- **`keys` and `map-entries` return the derived canonical order**, not hash
   order. That makes map iteration deterministic *by construction*, which is
   worth an `O(k log k)` sort on every call. It also means **the hash function
   needs no agreement between the interpreter and the runtime**: the hash order
@@ -1060,11 +1061,11 @@ A mutable string buffer could be written in the prelude — a `Ref` to a chunk
 list, joined once at the end. That is linear time, it passes the gate, and it is
 correct. It is a built-in anyway, for three reasons in order of importance:
 
-1. **`sb-take-str!` is `O(1)`, always.** `Str` and the buffer's backing store
+1. **`take-str!` is `O(1)`, always.** `Str` and the buffer's backing store
    share one representation (layout kind `bytes`, §2.2.1), so transferring
    ownership is a pointer move, not a copy. This saves the largest single
    allocation the compiler makes.
-2. **`sb-to-str` is `O(1)` on repeat.** It caches, so converting the same buffer
+2. **`to-str` is `O(1)` on repeat.** It caches, so converting the same buffer
    twice does not re-join.
 3. **Append allocates no cons cell.** A prelude buffer over a chunk list
    allocates one cons per append, which is the dominant cost under a
@@ -1091,23 +1092,23 @@ the same verdict here.
   adopts the payload of a static object (§2.2.1); `.rodata` is never written.
   Every `Str` a buffer hands out either shares heap storage — which forces a copy
   before the next in-place write — or is itself freshly allocated.
-- **`sb-take-str!` transfers** the backing store and leaves the buffer
+- **`take-str!` transfers** the backing store and leaves the buffer
   **empty and valid**. It is *not* an affine/consume operation, and there is no
   use-after-finish hazard: the buffer remains a working, empty buffer. Aliases
-  observe it empty, which is the same observation `sb-clear!` produces.
-- **Copy-on-write after a non-destructive `sb-to-str`.** Because a `Str` handed
-  out by `sb-to-str` *shares* the backing store, the buffer's **next append must
+  observe it empty, which is the same observation `clear!` produces.
+- **Copy-on-write after a non-destructive `to-str`.** Because a `Str` handed
+  out by `to-str` *shares* the backing store, the buffer's **next append must
   copy before writing in place**. Without this rule an append would mutate an
   immutable `Str` that a caller already holds — a silent corruption, invisible to
-  the gate. `sb-take-str!` has no such constraint, because it hands over
-  ownership. Note that the cache `sb-to-str` maintains is **invisible** to the
+  the gate. `take-str!` has no such constraint, because it hands over
+  ownership. Note that the cache `to-str` maintains is **invisible** to the
   caller, which is why it is not mutation in the §2.15 sense and why it carries
   no `!`.
 - **Not showable, not orderable, equatable by identity** (§2.12). A mutable
   value has no stable spelling, so showing one is banned; and that ban is a
   compile error, which is what keeps a buffer out of emitted bytes (§2.11.I).
   Its contents remain inspectable while debugging: `dump(sb)` and
-  `sb-to-str(sb)`, §2.16.
+  `to-str(sb)`, §2.16.
 
 **Why not a general `MutBytes` instead** — a mutable byte array as the built-in,
 with `StringBuffer`, growth and `to-str` all in the prelude on top? It is a
@@ -1136,9 +1137,9 @@ import (§2.7).
 | `std/basics` | `id`, `not`, `min`, `max`, `abs`, `clamp` (implicit) |
 | `std/pair` | `Pair` |
 | `std/list` | `length`, `nth`, `append`, `reverse`, `map`, `filter`, `fold`, `zip`, `contains`, `sort`, `find`, `any`, `all`, `concat`, `flat-map`, `take`, `drop`, `sort-by` |
-| `std/map` | `from-list`, `lookup`, `to-list`, `remove`, `merge` |
-| `std/string` | `starts-with`, `ends-with`, `has`, `join`, `split`, `lines` |
-| `std/string-buffer` | `sb-append-show!` |
+| `std/map` | `empty`, `lookup`, `set`, `has`, `size`, `keys`, `from-list`, `to-list`, `remove`, `merge` |
+| `std/string` | `length`, `byte`, `slice`, `concat`, `from-char`, `starts-with`, `ends-with`, `has`, `join`, `split`, `lines` |
+| `std/string-buffer` | `new`, `append!`, `append-byte!`, `length`, `clear!`, `to-str`, `take-str!`, `append-show!` |
 | `std/result`, `std/maybe` | `map`, `and-then`, `unwrap-or` |
 | `std/io`, `std/fs`, `std/proc`, `std/sys` | the host-seam wrappers (§2.15) |
 | `std/console` | `tty-color`, `paint` |
@@ -1154,9 +1155,9 @@ the same name in three modules; a program imports one of them.
 caller-supplied predicate anywhere in an output path (§2.11.O).
 
 ```
-; expressible, so a library function rather than a built-in. Carries ! because it mutates its argument.
-let sb-append-show![a](sb: StringBuffer, v: a) -> Unit =
-  sb-append!(sb, show(v))                ; requires showable a
+; expressible, so an ordinary library function. Carries ! because it mutates its argument.
+let append-show![a](sb: StringBuffer, v: a) -> Unit =
+  append!(sb, show(v))                   ; requires showable a
 ```
 
 Two more library functions earn a mention because §2.15 depends on them:
@@ -1333,7 +1334,7 @@ predicate**. Instead:
   *content-derived*, never iteration-derived. This is consistent with maps having
   no language-level iteration order: the order belongs to the value's structure,
   not to how it was built.
-- **`map-keys` and `map-entries` hand out that same order** (§2.8.2), which is
+- **`Map.keys` and `map-entries` hand out that same order** (§2.8.2), which is
   what makes map iteration deterministic for *user* code as well as for the
   compiler. This is the rule that removes the hash function from the agreement
   surface: hash order is unobservable, so the interpreter and the runtime need
@@ -1496,8 +1497,8 @@ function of the value:
   for them (identity), so they cannot be orderable either.
 - And showability **composes**: a showable buffer makes every record, list and
   map containing one showable, so a buffer's *current contents* could reach an
-  emitted byte several files away from the mistake. `sb-take-str!` and
-  `sb-to-str` cross that boundary explicitly and are greppable; `show` would be
+  emitted byte several files away from the mistake. `Buf.take-str!` and
+  `Buf.to-str` cross that boundary explicitly and are greppable; `show` would be
   silent.
 
 The need that motivates the question — *I want to see the buffer while
@@ -1559,7 +1560,7 @@ order.
 **Errors are at the point of use.** A non-orderable key in a map, and a
 non-showable value passed to an emission path, are **compile errors**, not
 runtime traps. Because `(Map K V)` requires `K` orderable (§2.3), the first of
-those is really a rule about `map-new` and `map-set`.
+those is really a rule about `Map.empty` and `Map.set`.
 
 ### 2.13 Canonical text forms (normative)
 
@@ -1685,7 +1686,7 @@ markers rather than one shared one.
 
 > `!` marks a call that changes state the caller can still observe afterwards:
 > mutation of a value reachable from an argument. *Observable* is the operative
-> word — memoisation the caller cannot see does not qualify (`sb-to-str`), and
+> word — memoisation the caller cannot see does not qualify (`Buf.to-str`), and
 > neither does talking to the operating system, because a stream is not a value
 > you hold.
 
@@ -1702,13 +1703,13 @@ thing.**
 | Operation | `!`? | Why |
 |---|---|---|
 | `set!` | **yes** | The anchor case |
-| `sb-append!`, `sb-append-byte!`, `sb-clear!`, `sb-take-str!`, `sb-append-show!` | **yes** | The buffer is visible through the argument |
-| `sb-to-str` | **no** | Non-destructive — the sharp distinction from `sb-take-str!` |
+| `Buf.append!`, `Buf.append-byte!`, `Buf.clear!`, `Buf.take-str!`, `Buf.append-show!` | **yes** | The buffer is visible through the argument |
+| `Buf.to-str` | **no** | Non-destructive — the sharp distinction from `Buf.take-str!` |
 | `print`, `println`, `write`, `dump`, `read-file`, `write-file`, `exit`, `spawn`, … | **no** | They touch the OS, not an argument |
 
 The published surface — `stdlib/` — therefore uses `!` on **one special form and
 five functions**. Applying the rule there is a decision about six names, not a
-judgement call on every I/O call. A lint checks that surface. `sb-append-show!`
+judgement call on every I/O call. A lint checks that surface. `Buf.append-show!`
 is the fifth function: it lives in `std/string-buffer` and mutates the buffer it
 is given (§2.8.3). The compiler's own helpers (`emit!`, `bitsink-flush!`, and the rest)
 are local imperative names, and this convention does not propagate into them.
@@ -2387,8 +2388,8 @@ the compiler cannot be developed on an interpreter that fails them:
   must not map Menard calls onto JavaScript calls one-for-one, or a deep enough
   input overflows the JavaScript stack; it keeps an explicit continuation stack
   instead. `loop`/`recur` runs in constant space.
-- **Asymptotically honest built-ins.** `map-set` is `O(log n)` with structural
-  sharing (§2.3), `sb-append!` is amortised `O(1)` (§2.8.2). A built-in that is
+- **Asymptotically honest built-ins.** `Map.set` is `O(log n)` with structural
+  sharing (§2.3), `Buf.append!` is amortised `O(1)` (§2.8.2). A built-in that is
   correct but quadratic makes stage0 unusable long before it makes a test fail.
 - **Throughput sufficient for stage0 to compile the compiler in minutes.**
   Until stage1 exists, stage0 is how the compiler is developed and tested (§5,
@@ -2429,7 +2430,7 @@ These are mandatory from day one, and each maps to an obligation in §2.11:
 | `IoError` and `SpawnError` cases are identical in the interpreter and the runtime; no `strerror`, no errno text, no locale. | **B** |
 | No environment value, cwd, timestamp, hostname or absolute path reaches emitted bytes. | **B**, **I** |
 | The audit for the two rows above is over **`extern` and module imports**, not over a name (§2.15). | **B** |
-| `list-dir` and `map-keys` hand out the canonical order, never the OS's or the hash's. | **O** |
+| `list-dir` and `Map.keys` hand out the canonical order, never the OS's or the hash's. | **O** |
 | Hash seeds are fixed constants; no RNG, clock, pid, environment, or locale in output. | O, I |
 | Symbol and definition emission order is **stable and explicit**. | **O** |
 | Instantiation order and derived-function naming are deterministic, and depend on nothing that differs between the interpreter and the runtime. | O, I |
@@ -2457,7 +2458,7 @@ These are mandatory from day one, and each maps to an obligation in §2.11:
 | **Representation invariants** | heap-verify asserts odd immediates, 8-byte alignment for heap **and** static objects, empty-word handling, and **that every scanned slot word is an immediate, the empty word, or an aligned object of the declared layout kind** (§2.2) |
 | **`dump`** | output captured on **fd 2** and asserted on **structurally**, never byte-compared; a cyclic `Ref` graph must terminate via the depth cap; a closure's dumped environment shows captured values (§2.16) |
 | **Canonical text** | one fixture per entry of the §2.13 table, byte-compared |
-| **Buffers** | append after `sb-to-str` leaves the earlier `Str` **unchanged** (copy-on-write); `sb-take-str!` then reuse; growth across many appends; `sb-clear!` then reuse |
+| **Buffers** | append after `Buf.to-str` leaves the earlier `Str` **unchanged** (copy-on-write); `Buf.take-str!` then reuse; growth across many appends; `Buf.clear!` then reuse |
 | **Process spawning** | a **stub child** (§3.10) that echoes its `argv` and exits with a scripted status: the driver's `argv` construction is asserted **exactly**, the `SpawnStatus` decode is asserted, and every `SpawnError` case has a fixture (missing file, non-executable, a NUL in an argument, empty `argv`). The stub is the *only* child the suite spawns. |
 | **Driver** | end-to-end: the artifact `mn build` produces is **byte-identical** to the harness's (§1.2 criterion 3), and `rename` atomicity is tested by killing a build mid-flight and checking no artifact appeared |
 | Collector | stress mode: collect on *every* allocation; heap-verify mode |
@@ -2571,7 +2572,7 @@ Seven host-language hazards, each with a rule:
 6. **Object-literal key order is a trap.** Integer-like keys sort ascending
    regardless of insertion. Use `Map` for anything whose iteration can reach
    emitted output, or order it explicitly per §2.11.O. The interpreter's
-   `map-keys` and `map-entries` must sort explicitly, in canonical order, never
+   `Map.keys` and `map-entries` must sort explicitly, in canonical order, never
    hand out a host container's iteration order — otherwise stage0 sees one
    order and stage1 another, and the compiler's output differs with no compiler
    bug behind it.
@@ -2989,7 +2990,7 @@ The failure modes this design is most exposed to, and what holds each one off.
 | **A static object with word slots appears**, without the statics-hold-only-immediates invariant | Low | Collector traces a constant's contents as pointers | §2.2.1's fence: the static pool is `bytes`-kind or header-only; adding anything else requires the invariant and its heap-verify assertion |
 | Emitting output from a traversal with no derived order | Medium | Fixed-point failure that looks like a miscompile | Derived order (§2.11.O); IR differ in CI |
 | **Type parameters invite scope creep** (inference, type classes, higher-kinded params) | High | The type system becomes the project | §2.3 fences and §1.3 non-goals; declared-only rule; nullary aliases |
-| **The `!` marker creeps back** to cover I/O "for consistency" | Medium | One glyph for two ideas again, and the marker stops discriminating — which is what makes `sb-to-str`/`sb-take-str!` indistinguishable | §2.15 defines it as observable mutation only; the ambient audit does not need it, so there is nothing to gain by widening it |
+| **The `!` marker creeps back** to cover I/O "for consistency" | Medium | One glyph for two ideas again, and the marker stops discriminating — which is what makes `Buf.to-str`/`Buf.take-str!` indistinguishable | §2.15 defines it as observable mutation only; the ambient audit does not need it, so there is nothing to gain by widening it |
 | **Debug facilities invite an effect system** (eliding `dump`, marking it in types) | Medium | Reopens the feature §1.3 excludes, to save a write to fd 2 | §2.16 refuses elision and the `Debug` value form, with reasons |
 | **Spawn invites a process-control library** (signals, timeouts, `kill`, `chdir!`) | Medium | The seam, not the language, becomes the project; each addition is plausible on its own | §2.15 rule 8 refuses them as a group; §1.3 lists them as non-goals; the v2 line is drawn at "streaming child I/O" |
 | **Comfortable built-ins invite `MutBytes` and general mutation** | Medium | Every array operation becomes an output-path hazard | §2.8.2 records the rejection and the reason; §1.3 lists mutable arrays as a non-goal |
@@ -3130,7 +3131,7 @@ in two well-understood places.
       (§2.13), and no `dump` output (§2.16).
 - [x] **On the published surface (`stdlib/`), `!` appears on exactly one
       special form and five functions** — `set!`, the four `StringBuffer`
-      operations that mutate, and `sb-append-show!` — and on nothing that merely
+      operations that mutate, and `Buf.append-show!` — and on nothing that merely
       touches the OS or the filesystem. The compiler's local helpers are outside
       that surface.
 - [x] **Every ambient operation is `extern`-backed and lives in one of four

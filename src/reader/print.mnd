@@ -2,6 +2,8 @@
 ; Mirrors host/src/reader/print.ts.
 
 import "./ast.mnd"
+import std/string as String
+import std/string-buffer as Buf
 
 pub alias Ast = Ast
 
@@ -9,13 +11,13 @@ let pad(n: Int) -> Str =
   pad-from(n, "")
 
 let pad-from(n: Int, acc: Str) -> Str =
-  if (n <= 0) -> acc | pad-from(n - 1, str-concat(acc, " "))
+  if (n <= 0) -> acc | pad-from(n - 1, String.concat(acc, " "))
 
 let join(xs: List Str, sep: Str) -> Str =
   match (xs)
     | [] -> ""
     | h :: [] -> h
-    | h :: t -> str-concat(h, str-concat(sep, join(t, sep)))
+    | h :: t -> String.concat(h, String.concat(sep, join(t, sep)))
 
 let sym-str(a: Ast) -> Maybe Str =
   match (a)
@@ -47,20 +49,20 @@ let name-text(s: Str) -> Str =
     | else -> s
 
 let has-nl(s: Str) -> Bool =
-  has-nl-from(s, 0, str-byte-length(s))
+  has-nl-from(s, 0, String.length(s))
 
 let has-nl-from(s: Str, i: Int, n: Int) -> Bool =
   cond
     | i >= n -> false
-    | str-byte(s, i) == 10 -> true
+    | String.byte(i, s) == 10 -> true
     | else -> has-nl-from(s, i + 1, n)
 
 let quote-str(s: Str) -> Str {
-  let sb = sb-new()
-  sb-append-byte!(sb, 34)
-  quote-bytes(sb, s, 0, str-byte-length(s))
-  sb-append-byte!(sb, 34)
-  sb-take-str!(sb)
+  let sb = Buf.new()
+  Buf.append-byte!(sb, 34)
+  quote-bytes(sb, s, 0, String.length(s))
+  Buf.append-byte!(sb, 34)
+  Buf.take-str!(sb)
 }
 
 let quote-bytes(sb: StringBuffer, s: Str, i: Int, n: Int) -> Unit =
@@ -68,14 +70,14 @@ let quote-bytes(sb: StringBuffer, s: Str, i: Int, n: Int) -> Unit =
     | i >= n -> ()
     | else ->
       {
-        let b = str-byte(s, i)
-        if (b == 92 || b == 34) -> sb-append-byte!(sb, 92)
-        sb-append-byte!(sb, b)
+        let b = String.byte(i, s)
+        if (b == 92 || b == 34) -> Buf.append-byte!(sb, 92)
+        Buf.append-byte!(sb, b)
         quote-bytes(sb, s, i + 1, n)
       }
 
 let is-upper-name(s: Str) -> Bool {
-  let b = str-byte(s, 0)
+  let b = String.byte(0, s)
   b >= 65 && b <= 90
 }
 
@@ -84,7 +86,7 @@ pub let print-form(a: Ast) -> Str =
 
 pub let print-form-all(xs: List Ast) -> Str {
   let body = join-forms(xs)
-  if (body == "") -> "" | str-concat(body, "\n")
+  if (body == "") -> "" | String.concat(body, "\n")
 }
 
 ; Consecutive imports have no blank line between them. Every other pair of forms keeps one.
@@ -95,17 +97,18 @@ let join-forms(xs: List Ast) -> Str =
   match (xs)
     | [] -> ""
     | h :: [] -> print-form(h)
-    | h :: next :: rest -> str-concat(print-form(h), str-concat(form-sep(h, next), join-forms(next :: rest)))
+    | h :: next :: rest -> String.concat(print-form(h), String.concat(form-sep(h, next), join-forms(next :: rest)))
 
 let print-form-at(a: Ast, ind: Int) -> Str =
   cond
-    | is-head(a, "pub") -> str-concat("pub ", print-pub-rest(a, ind))
+    | is-head(a, "pub") -> String.concat("pub ", print-pub-rest(a, ind))
     | is-head(a, "defn") -> print-defn(a, ind)
     | is-head(a, "defrec") -> print-record(a, ind)
     | is-head(a, "variant") -> print-variant(a, ind)
     | is-head(a, "alias") -> print-alias(a)
     | is-head(a, "import") -> print-import(a)
     | is-head(a, "extern") -> print-extern(a)
+    | is-head(a, "runtime") -> print-runtime(a)
     | is-head(a, "test") -> print-test(a, ind)
     | else -> print-expr(a, ind)
 
@@ -116,19 +119,19 @@ let print-pub-rest(a: Ast, ind: Int) -> Str =
 
 let print-alias(a: Ast) -> Str =
   match (a)
-    | ParenNode(_ :: name :: ty :: _, _) -> str-concat("alias ", str-concat(print-expr(name, 0), str-concat(" = ", print-type(ty))))
+    | ParenNode(_ :: name :: ty :: _, _) -> String.concat("alias ", String.concat(print-expr(name, 0), String.concat(" = ", print-type(ty))))
     | _ -> "alias"
 
 let print-import(a: Ast) -> Str =
   match (a)
     | ParenNode(_ :: path :: mod :: _, _) ->
-      str-concat("import ", str-concat(print-atom(path), str-concat(" as ", print-atom(mod))))
-    | ParenNode(_ :: path :: _, _) -> str-concat("import ", print-atom(path))
+      String.concat("import ", String.concat(print-atom(path), String.concat(" as ", print-atom(mod))))
+    | ParenNode(_ :: path :: _, _) -> String.concat("import ", print-atom(path))
     | _ -> "import"
 
 let print-test(a: Ast, ind: Int) -> Str =
   match (a)
-    | ParenNode(_ :: desc :: body :: _, _) -> str-concat("test ", str-concat(print-atom(desc), str-concat(" =", placed(body, ind + 2))))
+    | ParenNode(_ :: desc :: body :: _, _) -> String.concat("test ", String.concat(print-atom(desc), String.concat(" =", placed(body, ind + 2))))
     | _ -> "test"
 
 let print-defn(a: Ast, ind: Int) -> Str =
@@ -142,10 +145,10 @@ let print-defn-rest(name: Ast, rest: List Ast, ind: Int) -> Str {
   match (after)
     | ret :: bodies ->
       {
-        let sig = str-concat("let ", str-concat(print-defn-name(name), str-concat("(", str-concat(join(params, ", "), str-concat(") -> ", print-type(ret))))))
+        let sig = String.concat("let ", String.concat(print-defn-name(name), String.concat("(", String.concat(join(params, ", "), String.concat(") -> ", print-type(ret))))))
         print-defn-body(sig, bodies, ind)
       }
-    | [] -> str-concat("let ", print-defn-name(name))
+    | [] -> String.concat("let ", print-defn-name(name))
 }
 
 let params-before(xs: List Ast, acc: List Str) -> List Str =
@@ -175,8 +178,8 @@ let print-defn-body(sig: Str, bodies: List Ast, ind: Int) -> Str =
   match (bodies)
     | [] -> sig
     | only :: [] ->
-      if (is-head(only, "do") || is-head(only, "let")) -> str-concat(sig, str-concat(" ", print-as-block(bodies, ind))) | str-concat(sig, " =\n", pad(ind + 2), print-expr(only, ind + 2))
-    | _ -> str-concat(sig, str-concat(" ", print-as-block(bodies, ind)))
+      if (is-head(only, "do") || is-head(only, "let")) -> String.concat(sig, String.concat(" ", print-as-block(bodies, ind))) | String.concat(sig, " =\n", pad(ind + 2), print-expr(only, ind + 2))
+    | _ -> String.concat(sig, String.concat(" ", print-as-block(bodies, ind)))
 
 let print-as-block(bodies: List Ast, ind: Int) -> Str =
   match (bodies)
@@ -193,7 +196,7 @@ let print-defn-name(a: Ast) -> Str =
     | ParenNode(SymNode(n, _) :: rest, _) ->
       match (rest)
         | [] -> name-text(n)
-        | BracketNode(ps, _) :: _ -> str-concat(name-text(n), str-concat("[", str-concat(join(map-atom(ps), ", "), "]")))
+        | BracketNode(ps, _) :: _ -> String.concat(name-text(n), String.concat("[", String.concat(join(map-atom(ps), ", "), "]")))
         | _ -> print-atom(a)
     | _ -> print-atom(a)
 
@@ -215,7 +218,7 @@ let print-param-elems(elems: List Ast) -> Str =
         let bare = name-text(strip-colon(raw))
         let prefix =
           if (has-sym(rest, "...") || has-sym(elems, "...")) -> "..." | ""
-        str-concat(prefix, str-concat(bare, str-concat(": ", print-type(ty))))
+        String.concat(prefix, String.concat(bare, String.concat(": ", print-type(ty))))
       }
     | _ -> ""
 
@@ -225,8 +228,8 @@ let sym-or(a: Ast, d: Str) -> Str =
     | None -> d
 
 let strip-colon(s: Str) -> Str {
-  let n = str-byte-length(s)
-  if (n > 0 && str-byte(s, n - 1) == 58) -> str-slice(s, 0, n - 1) | s
+  let n = String.length(s)
+  if (n > 0 && String.byte(n - 1, s) == 58) -> String.slice(0, n - 1, s) | s
 }
 
 let has-sym(xs: List Ast, name: Str) -> Bool =
@@ -241,35 +244,35 @@ let has-sym(xs: List Ast, name: Str) -> Bool =
 let print-record(a: Ast, ind: Int) -> Str =
   match (a)
     | ParenNode(_ :: name :: fields, _) ->
-      str-concat("record ", print-defn-name(name), " {\n", join(map-field(fields, ind), "\n"), "\n", pad(ind), "}")
+      String.concat("record ", print-defn-name(name), " {\n", join(map-field(fields, ind), "\n"), "\n", pad(ind), "}")
     | _ -> "record"
 
 let map-field(xs: List Ast, ind: Int) -> List Str =
   match (xs)
     | [] -> []
-    | h :: t -> str-concat(pad(ind + 2), print-field(h)) :: map-field(t, ind)
+    | h :: t -> String.concat(pad(ind + 2), print-field(h)) :: map-field(t, ind)
 
 let print-field(a: Ast) -> Str =
   match (a)
-    | ParenNode(name :: ty :: _, _) -> str-concat(strip-colon(sym-or(name, "")), str-concat(": ", print-type(ty)))
+    | ParenNode(name :: ty :: _, _) -> String.concat(strip-colon(sym-or(name, "")), String.concat(": ", print-type(ty)))
     | _ -> print-atom(a)
 
 let print-variant(a: Ast, ind: Int) -> Str =
   match (a)
     | ParenNode(_ :: name :: ctors, _) ->
-      if (ctors == []) -> str-concat("type ", print-defn-name(name), " =\n") | str-concat("type ", print-defn-name(name), " =\n", join(map-ctor(ctors, ind), "\n"))
+      if (ctors == []) -> String.concat("type ", print-defn-name(name), " =\n") | String.concat("type ", print-defn-name(name), " =\n", join(map-ctor(ctors, ind), "\n"))
     | _ -> "type"
 
 let map-ctor(xs: List Ast, ind: Int) -> List Str =
   match (xs)
     | [] -> []
-    | h :: t -> str-concat(pad(ind + 2), str-concat("| ", print-ctor(h))) :: map-ctor(t, ind)
+    | h :: t -> String.concat(pad(ind + 2), String.concat("| ", print-ctor(h))) :: map-ctor(t, ind)
 
 let print-ctor(a: Ast) -> Str =
   match (a)
     | SymNode(n, _) -> n
     | ParenNode(name :: [], _) -> print-atom(name)
-    | ParenNode(name :: args, _) -> str-concat(print-atom(name), str-concat("(", str-concat(join(map-type(args), ", "), ")")))
+    | ParenNode(name :: args, _) -> String.concat(print-atom(name), String.concat("(", String.concat(join(map-type(args), ", "), ")")))
     | _ -> print-atom(a)
 
 let map-type(xs: List Ast) -> List Str =
@@ -283,21 +286,32 @@ let print-extern(a: Ast) -> Str =
       {
         let params = params-before(rest, [])
         match (after-arrow(rest))
-          | ret :: _ -> str-concat("extern ", str-concat(print-defn-name(name), str-concat("(", str-concat(join(params, ", "), str-concat(") -> ", print-type(ret))))))
-          | [] -> str-concat("extern ", print-defn-name(name))
+          | ret :: _ -> String.concat("extern ", String.concat(print-defn-name(name), String.concat("(", String.concat(join(params, ", "), String.concat(") -> ", print-type(ret))))))
+          | [] -> String.concat("extern ", print-defn-name(name))
       }
     | _ -> "extern"
+
+let print-runtime(a: Ast) -> Str =
+  match (a)
+    | ParenNode(_ :: name :: rest, _) ->
+      {
+        let params = params-before(rest, [])
+        match (after-arrow(rest))
+          | ret :: _ -> String.concat("runtime ", String.concat(print-defn-name(name), String.concat("(", String.concat(join(params, ", "), String.concat(") -> ", print-type(ret))))))
+          | [] -> String.concat("runtime ", print-defn-name(name))
+      }
+    | _ -> "runtime"
 
 let print-block(a: Ast, ind: Int) -> Str =
   match (a)
     | ParenNode(_ :: body, _) ->
-      str-concat("{\n", join(map-stmt(body, ind), "\n"), "\n", pad(ind), "}")
+      String.concat("{\n", join(map-stmt(body, ind), "\n"), "\n", pad(ind), "}")
     | _ -> "{}"
 
 let map-stmt(xs: List Ast, ind: Int) -> List Str =
   match (xs)
     | [] -> []
-    | h :: t -> str-concat(pad(ind + 2), print-stmt(h, ind + 2)) :: map-stmt(t, ind)
+    | h :: t -> String.concat(pad(ind + 2), print-stmt(h, ind + 2)) :: map-stmt(t, ind)
 
 let print-stmt(a: Ast, ind: Int) -> Str =
   if (is-head(a, "let")) -> print-form-at(a, ind) | print-expr(a, ind)
@@ -310,7 +324,7 @@ let print-expr(a: Ast, ind: Int) -> Str =
       if (n) -> "true" | "false"
     | StrNode(n, _) -> quote-str(n)
     | SymNode(n, _) -> name-text(n)
-    | BracketNode(xs, _) -> str-concat("[", str-concat(join(map-expr(xs, ind), ", "), "]"))
+    | BracketNode(xs, _) -> String.concat("[", String.concat(join(map-expr(xs, ind), ", "), "]"))
     | ParenNode([], _) -> "()"
     | ParenNode(elems, _) -> print-paren(elems, a, ind)
 
@@ -335,13 +349,13 @@ let print-headed(n: Str, rest: List Ast, whole: Ast, ind: Int) -> Str =
     | n == "when" -> print-when(rest, ind)
     | n == "match" -> print-match(rest, ind)
     | n == "fn" -> print-fn(rest, ind)
-    | n == "pub" -> str-concat("pub ", print-form-at(ParenNode(rest, Span(0, 0, 0, 0)), ind))
+    | n == "pub" -> String.concat("pub ", print-form-at(ParenNode(rest, Span(0, 0, 0, 0)), ind))
     | n == "let" -> print-let(rest, ind)
     | n == "loop" -> print-loop(rest, ind)
     | n == "while" -> print-while(rest, ind)
     | n == "quote" ->
       match (rest)
-        | s :: _ -> str-concat("'", print-atom(s))
+        | s :: _ -> String.concat("'", print-atom(s))
         | [] -> "'"
     | n == "and" -> print-logic(rest, "&&", 2, ind)
     | n == "or" -> print-logic(rest, "||", 1, ind)
@@ -355,14 +369,14 @@ let print-headed(n: Str, rest: List Ast, whole: Ast, ind: Int) -> Str =
 ; `pair.fst` and `Lexer.read`, including a chain.
 let print-project(rest: List Ast, ind: Int) -> Str =
   match (rest)
-    | obj :: field :: _ -> str-concat(project-left(obj, ind), str-concat(".", print-atom(field)))
+    | obj :: field :: _ -> String.concat(project-left(obj, ind), String.concat(".", print-atom(field)))
     | _ -> ""
 
 ; Parenthesize a receiver that would otherwise swallow the dot.
 let project-left(obj: Ast, ind: Int) -> Str =
   cond
     | is-head(obj, "project") -> print-expr(obj, ind)
-    | needs-project-paren(obj) -> str-concat("(", str-concat(print-expr(obj, ind), ")"))
+    | needs-project-paren(obj) -> String.concat("(", String.concat(print-expr(obj, ind), ")"))
     | else -> print-expr(obj, ind)
 
 ; Operators and layout forms need parentheses before a dot.
@@ -373,7 +387,7 @@ let needs-project-paren(obj: Ast) -> Bool =
 
 let print-cons(rest: List Ast, ind: Int) -> Str =
   match (rest)
-    | a :: b :: _ -> str-concat(wrap-operand(4, a, true, ind), str-concat(" :: ", wrap-operand(4, b, false, ind)))
+    | a :: b :: _ -> String.concat(wrap-operand(4, a, true, ind), String.concat(" :: ", wrap-operand(4, b, false, ind)))
     | _ -> "Cons()"
 
 let is-op(n: Str) -> Bool =
@@ -387,7 +401,7 @@ let print-not(rest: List Ast, ind: Int) -> Str =
 
 let print-neq(inner: Ast, ind: Int) -> Str =
   match (inner)
-    | ParenNode(_ :: a :: b :: _, _) -> str-concat(wrap-operand(3, a, false, ind), str-concat(" != ", wrap-operand(3, b, true, ind)))
+    | ParenNode(_ :: a :: b :: _, _) -> String.concat(wrap-operand(3, a, false, ind), String.concat(" != ", wrap-operand(3, b, true, ind)))
     | _ -> "!= "
 
 let op-prec(op: Str) -> Int =
@@ -432,8 +446,8 @@ let wrap-operand(parent: Int, child: Ast, right: Bool, ind: Int) -> Str {
   let cp = expr-prec(child)
   cond
     | cp < 0 -> text
-    | right && cp <= parent -> str-concat("(", str-concat(text, ")"))
-    | not(right) && cp < parent -> str-concat("(", str-concat(text, ")"))
+    | right && cp <= parent -> String.concat("(", String.concat(text, ")"))
+    | not(right) && cp < parent -> String.concat("(", String.concat(text, ")"))
     | else -> text
 }
 
@@ -442,8 +456,8 @@ let print-logic(rest: List Ast, surface: Str, prec: Int, ind: Int) -> Str =
 
 let print-minus(rest: List Ast, ind: Int) -> Str =
   match (rest)
-    | a :: [] -> str-concat("-", wrap-operand(6, a, true, ind))
-    | a :: b :: _ -> str-concat(wrap-operand(4, a, false, ind), str-concat(" - ", wrap-operand(4, b, true, ind)))
+    | a :: [] -> String.concat("-", wrap-operand(6, a, true, ind))
+    | a :: b :: _ -> String.concat(wrap-operand(4, a, false, ind), String.concat(" - ", wrap-operand(4, b, true, ind)))
     | _ -> "-"
 
 let print-op(op: Str, rest: List Ast, ind: Int) -> Str {
@@ -456,22 +470,22 @@ let print-op-from(rest: List Ast, surface: Str, prec: Int, first: Bool, ind: Int
   match (rest)
     | [] -> ""
     | a :: [] -> wrap-operand(prec, a, not(first), ind)
-    | a :: more -> str-concat(wrap-operand(prec, a, not(first), ind), str-concat(str-concat(str-concat(" ", surface), " "), print-op-from(more, surface, prec, false, ind)))
+    | a :: more -> String.concat(wrap-operand(prec, a, not(first), ind), String.concat(String.concat(String.concat(" ", surface), " "), print-op-from(more, surface, prec, false, ind)))
 
 let print-let(rest: List Ast, ind: Int) -> Str =
   match (rest)
-    | name :: expr :: [] -> str-concat("let ", str-concat(print-atom(name), str-concat(" =", placed(expr, ind + 2))))
+    | name :: expr :: [] -> String.concat("let ", String.concat(print-atom(name), String.concat(" =", placed(expr, ind + 2))))
     | name :: expr :: body -> print-block(wrap-do(ParenNode([SymNode("let", Span(0, 0, 0, 0)), name, expr], Span(0, 0, 0, 0)) :: body), ind)
     | _ -> "let"
 
 let placed(a: Ast, ind: Int) -> Str =
   cond
-    | is-head(a, "do") -> str-concat(" ", print-expr(a, ind - 2))
-    | laid-out(a) -> str-concat("\n", pad(ind), print-expr(a, ind))
+    | is-head(a, "do") -> String.concat(" ", print-expr(a, ind - 2))
+    | laid-out(a) -> String.concat("\n", pad(ind), print-expr(a, ind))
     | else ->
       {
         let text = print-expr(a, ind)
-        if (has-nl(text)) -> str-concat("\n", pad(ind), text) | str-concat(" ", text)
+        if (has-nl(text)) -> String.concat("\n", pad(ind), text) | String.concat(" ", text)
       }
 
 let laid-out(a: Ast) -> Bool =
@@ -479,7 +493,7 @@ let laid-out(a: Ast) -> Bool =
 
 let arrow-body(body: Ast, ind: Int) -> Str {
   let text = print-expr(body, ind)
-  if (has-nl(text) || is-head(body, "if") || is-head(body, "match") || is-head(body, "loop") || is-head(body, "while") || is-head(body, "do")) -> str-concat("\n", pad(ind), text) | str-concat(" ", text)
+  if (has-nl(text) || is-head(body, "if") || is-head(body, "match") || is-head(body, "loop") || is-head(body, "while") || is-head(body, "do")) -> String.concat("\n", pad(ind), text) | String.concat(" ", text)
 }
 
 let print-if(a: Ast, ind: Int) -> Str = {
@@ -531,21 +545,21 @@ let use-cond(arms: List IfArm) -> Bool =
 
 let print-inline-if(arms: List IfArm, ind: Int) -> Str =
   match (arms)
-    | IfThen(test, body) :: [] -> str-concat("if (", str-concat(print-expr(test, ind), str-concat(") ->", arrow-body(body, ind + 2))))
-    | IfThen(test, body) :: IfElse(els) :: _ -> str-concat("if (", str-concat(print-expr(test, ind), str-concat(") ->", str-concat(arrow-body(body, ind + 2), str-concat(" | ", print-expr(els, ind))))))
+    | IfThen(test, body) :: [] -> String.concat("if (", String.concat(print-expr(test, ind), String.concat(") ->", arrow-body(body, ind + 2))))
+    | IfThen(test, body) :: IfElse(els) :: _ -> String.concat("if (", String.concat(print-expr(test, ind), String.concat(") ->", String.concat(arrow-body(body, ind + 2), String.concat(" | ", print-expr(els, ind))))))
     | _ -> print-cond-arms(arms, ind)
 
 let print-cond-arms(arms: List IfArm, ind: Int) -> Str =
-  str-concat("cond\n", join(cond-arm-lines(arms, ind), "\n"))
+  String.concat("cond\n", join(cond-arm-lines(arms, ind), "\n"))
 
 let cond-arm-lines(arms: List IfArm, ind: Int) -> List Str =
   match (arms)
     | [] -> []
-    | IfThen(test, body) :: rest -> str-concat(pad(ind + 2), str-concat("| ", str-concat(print-expr(test, ind + 2), str-concat(" ->", arrow-body(body, ind + 4))))) :: cond-arm-lines(rest, ind)
-    | IfElse(body) :: rest -> str-concat(pad(ind + 2), str-concat("| else ->", arrow-body(body, ind + 4))) :: cond-arm-lines(rest, ind)
+    | IfThen(test, body) :: rest -> String.concat(pad(ind + 2), String.concat("| ", String.concat(print-expr(test, ind + 2), String.concat(" ->", arrow-body(body, ind + 4))))) :: cond-arm-lines(rest, ind)
+    | IfElse(body) :: rest -> String.concat(pad(ind + 2), String.concat("| else ->", arrow-body(body, ind + 4))) :: cond-arm-lines(rest, ind)
 
 let print-cond(rest: List Ast, ind: Int) -> Str =
-  str-concat("cond\n", join(cond-lines(rest, ind), "\n"))
+  String.concat("cond\n", join(cond-lines(rest, ind), "\n"))
 
 let cond-lines(xs: List Ast, ind: Int) -> List Str =
   match (xs)
@@ -559,8 +573,8 @@ let cond-line(clause: Ast, ind: Int) -> Str =
         let rendered = cond-body(body, ind)
         match (sym-str(test))
           | Some(n) ->
-            if (n == "else") -> str-concat(pad(ind + 2), str-concat("| else ->", rendered)) | str-concat(pad(ind + 2), str-concat("| ", str-concat(print-expr(test, ind + 2), str-concat(" ->", rendered))))
-          | None -> str-concat(pad(ind + 2), str-concat("| ", str-concat(print-expr(test, ind + 2), str-concat(" ->", rendered))))
+            if (n == "else") -> String.concat(pad(ind + 2), String.concat("| else ->", rendered)) | String.concat(pad(ind + 2), String.concat("| ", String.concat(print-expr(test, ind + 2), String.concat(" ->", rendered))))
+          | None -> String.concat(pad(ind + 2), String.concat("| ", String.concat(print-expr(test, ind + 2), String.concat(" ->", rendered))))
       }
     | _ -> ""
 
@@ -574,36 +588,36 @@ let print-when(rest: List Ast, ind: Int) -> Str =
     | [] -> "when()"
     | test :: body ->
       match (body)
-        | only :: [] -> str-concat("if (", str-concat(print-expr(test, ind), str-concat(") ->", arrow-body(only, ind + 2))))
-        | _ -> str-concat("if (", str-concat(print-expr(test, ind), str-concat(") ->", arrow-body(wrap-do(body), ind + 2))))
+        | only :: [] -> String.concat("if (", String.concat(print-expr(test, ind), String.concat(") ->", arrow-body(only, ind + 2))))
+        | _ -> String.concat("if (", String.concat(print-expr(test, ind), String.concat(") ->", arrow-body(wrap-do(body), ind + 2))))
 
 let print-match(rest: List Ast, ind: Int) -> Str =
   match (rest)
-    | scrut :: arms -> str-concat("match (", print-expr(scrut, ind), ")\n", join(match-lines(arms, ind), "\n"))
+    | scrut :: arms -> String.concat("match (", print-expr(scrut, ind), ")\n", join(match-lines(arms, ind), "\n"))
     | [] -> "match (())"
 
 let match-lines(xs: List Ast, ind: Int) -> List Str =
   match (xs)
     | [] -> []
-    | pat :: body :: rest -> str-concat(pad(ind + 2), str-concat("| ", str-concat(print-pat(pat), str-concat(" ->", arrow-body(body, ind + 4))))) :: match-lines(rest, ind)
+    | pat :: body :: rest -> String.concat(pad(ind + 2), String.concat("| ", String.concat(print-pat(pat), String.concat(" ->", arrow-body(body, ind + 4))))) :: match-lines(rest, ind)
     | _ :: _ -> []
 
 let print-pat(a: Ast) -> Str =
   match (a)
-    | BracketNode(xs, _) -> str-concat("[", str-concat(join(map-pat(xs), ", "), "]"))
+    | BracketNode(xs, _) -> String.concat("[", String.concat(join(map-pat(xs), ", "), "]"))
     | ParenNode([], _) -> "()"
     | ParenNode(SymNode(n, _) :: [], _) ->
-      if (is-upper-name(n)) -> n | str-concat(n, "()")
+      if (is-upper-name(n)) -> n | String.concat(n, "()")
     | ParenNode(SymNode("Cons", _) :: a :: b :: _, _) ->
       {
         let left = print-pat(a)
         let right = print-pat(b)
-        let wrapped = if (is-head(a, "Cons")) -> str-concat("(", str-concat(left, ")")) | left
-        str-concat(wrapped, str-concat(" :: ", right))
+        let wrapped = if (is-head(a, "Cons")) -> String.concat("(", String.concat(left, ")")) | left
+        String.concat(wrapped, String.concat(" :: ", right))
       }
     | ParenNode(h :: args, _) ->
       match (sym-str(h))
-        | Some(n) -> str-concat(n, str-concat("(", str-concat(join(map-pat(args), ", "), ")")))
+        | Some(n) -> String.concat(n, String.concat("(", String.concat(join(map-pat(args), ", "), ")")))
         | None -> print-expr(a, 0)
     | _ -> print-atom(a)
 
@@ -618,11 +632,11 @@ let print-fn(rest: List Ast, ind: Int) -> Str =
       {
         let ps = fn-params(params)
         cond
-          | is-head(body, "do") -> str-concat("fn (", str-concat(ps, str-concat(") ", print-block(body, ind))))
+          | is-head(body, "do") -> String.concat("fn (", String.concat(ps, String.concat(") ", print-block(body, ind))))
           | else ->
             {
               let b = print-expr(body, ind + 2)
-              if (not(has-nl(b)) && not(laid-out(body))) -> str-concat("fn (", str-concat(ps, str-concat(") = ", b))) | str-concat("fn (", ps, ") =\n", pad(ind + 2), b)
+              if (not(has-nl(b)) && not(laid-out(body))) -> String.concat("fn (", String.concat(ps, String.concat(") = ", b))) | String.concat("fn (", ps, ") =\n", pad(ind + 2), b)
             }
       }
     | _ -> "fn ()"
@@ -634,7 +648,7 @@ let fn-params(a: Ast) -> Str =
 
 let print-loop(rest: List Ast, ind: Int) -> Str =
   match (rest)
-    | binds :: body :: _ -> str-concat("loop (", loop-binds(binds), ")\n", pad(ind + 2), print-expr(body, ind + 2))
+    | binds :: body :: _ -> String.concat("loop (", loop-binds(binds), ")\n", pad(ind + 2), print-expr(body, ind + 2))
     | _ -> "loop ()"
 
 let loop-binds(a: Ast) -> Str =
@@ -649,20 +663,20 @@ let map-bind(xs: List Ast) -> List Str =
 
 let one-bind(a: Ast) -> Str =
   match (a)
-    | ParenNode(name :: expr :: _, _) -> str-concat(print-atom(name), str-concat(" = ", print-expr(expr, 0)))
+    | ParenNode(name :: expr :: _, _) -> String.concat(print-atom(name), String.concat(" = ", print-expr(expr, 0)))
     | _ -> print-atom(a)
 
 let print-while(rest: List Ast, ind: Int) -> Str =
   match (rest)
     | [] -> "while (()) {}"
-    | test :: body -> str-concat("while (", str-concat(print-expr(test, ind), str-concat(") ", print-block(wrap-do(body), ind))))
+    | test :: body -> String.concat("while (", String.concat(print-expr(test, ind), String.concat(") ", print-block(wrap-do(body), ind))))
 
 let print-call(callee: Ast, args: List Ast, ind: Int) -> Str {
   let f =
     match (callee)
       | SymNode(_, _) -> print-atom(callee)
-      | _ -> str-concat("(", str-concat(print-expr(callee, ind), ")"))
-  if (call-hangs(args)) -> str-concat(f, "(\n", format-args(args, ind + 2, true), "\n", pad(ind), ")") | str-concat(f, str-concat("(", str-concat(format-args(args, ind, false), ")")))
+      | _ -> String.concat("(", String.concat(print-expr(callee, ind), ")"))
+  if (call-hangs(args)) -> String.concat(f, "(\n", format-args(args, ind + 2, true), "\n", pad(ind), ")") | String.concat(f, String.concat("(", String.concat(format-args(args, ind, false), ")")))
 }
 
 let call-hangs(xs: List Ast) -> Bool =
@@ -694,13 +708,13 @@ let arg-parts(xs: List Ast, ind: Int, hang: Bool) -> List Str =
           cond
             | n == "..." ->
               match (t)
-                | next :: rest -> arg-piece(str-concat("...", print-expr(next, ind)), ind, hang) :: arg-parts(rest, ind, hang)
+                | next :: rest -> arg-piece(String.concat("...", print-expr(next, ind)), ind, hang) :: arg-parts(rest, ind, hang)
                 | [] -> [arg-piece("...", ind, hang)]
             | else -> arg-piece(print-expr(h, ind), ind, hang) :: arg-parts(t, ind, hang)
         | None -> arg-piece(print-expr(h, ind), ind, hang) :: arg-parts(t, ind, hang)
 
 let arg-piece(text: Str, ind: Int, hang: Bool) -> Str =
-  if (hang) -> str-concat(pad(ind), text) | text
+  if (hang) -> String.concat(pad(ind), text) | text
 
 let print-type(a: Ast) -> Str =
   match (a)
@@ -717,9 +731,9 @@ let print-fn-type(rest: List Ast) -> Str {
   let ps = types-before-arrow(rest, [])
   let ret = type-after-arrow(rest)
   match (ps)
-    | [] -> str-concat("() -> ", ret)
-    | only :: [] -> str-concat("(", str-concat(only, str-concat(") -> ", ret)))
-    | _ -> str-concat("(", str-concat(join(ps, ", "), str-concat(") -> ", ret)))
+    | [] -> String.concat("() -> ", ret)
+    | only :: [] -> String.concat("(", String.concat(only, String.concat(") -> ", ret)))
+    | _ -> String.concat("(", String.concat(join(ps, ", "), String.concat(") -> ", ret)))
 }
 
 let types-before-arrow(xs: List Ast, acc: List Str) -> List Str =
@@ -751,14 +765,14 @@ let type-after-arrow(xs: List Ast) -> Str =
         | None -> type-after-arrow(t)
 
 let print-type-app(head: Str, args: List Ast) -> Str =
-  if (args == []) -> head | str-concat(head, str-concat(" ", join(map-type-arg(args), " ")))
+  if (args == []) -> head | String.concat(head, String.concat(" ", join(map-type-arg(args), " ")))
 
 let map-type-arg(xs: List Ast) -> List Str =
   match (xs)
     | [] -> []
     | h :: t ->
       match (h)
-        | ParenNode(_, _) -> str-concat("(", str-concat(print-type(h), ")")) :: map-type-arg(t)
+        | ParenNode(_, _) -> String.concat("(", String.concat(print-type(h), ")")) :: map-type-arg(t)
         | _ -> print-type(h) :: map-type-arg(t)
 
 let print-atom(a: Ast) -> Str =

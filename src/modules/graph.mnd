@@ -30,6 +30,7 @@ import std/list
 import std/proc
 import std/string as String
 import std/sys
+import std/map as Map
 
 ; Re-export shim — see `emit/bitcode.mnd` / `reader/casing.mnd`.
 pub alias Ast = Ast
@@ -45,7 +46,7 @@ pub record Flat {
 }
 
 ; Paths imported through `as` in the graph currently being flattened.
-let qualified-imports = ref(map-new())
+let qualified-imports = ref(Map.empty())
 
 ; `present` is false when the entry module has no `main`. `unit-ret` means
 ; that `main` is declared `-> Unit`, so the bootstrap returns 0 after calling it.
@@ -72,11 +73,11 @@ let collect-line-starts(src: Str, i: Int, n: Int, acc: List Int) -> List Int =
   loop (j = i, out = acc)
     cond
       | j >= n -> out
-      | str-byte(src, j) == 10 -> recur(j + 1, (j + 1) :: out)
+      | String.byte(j, src) == 10 -> recur(j + 1, (j + 1) :: out)
       | else -> recur(j + 1, out)
 
 let line-starts(src: Str) -> List Int =
-  reverse-ints(collect-line-starts(src, 0, str-byte-length(src), [0]), [])
+  reverse-ints(collect-line-starts(src, 0, String.length(src), [0]), [])
 
 ; Index → offset, so a span's line is a binary search instead of a scan
 ; from the first line. One scan per AST node was quadratic in a file
@@ -84,7 +85,7 @@ let line-starts(src: Str) -> List Int =
 let index-line-starts(starts: List Int, i: Int, m: Map Int Int) -> Map Int Int =
   match (starts)
     | [] -> m
-    | s :: rest -> index-line-starts(rest, i + 1, map-set(m, i, s))
+    | s :: rest -> index-line-starts(rest, i + 1, Map.set(m, i, s))
 
 let line-start-count(starts: List Int) -> Int =
   match (starts)
@@ -97,7 +98,7 @@ let line-search(m: Map Int Int, lo: Int, hi: Int, offset: Int) -> Int =
   if (lo >= hi) -> lo | line-search-mid(m, lo, hi, offset, (lo + hi) / 2)
 
 let line-search-mid(m: Map Int Int, lo: Int, hi: Int, offset: Int, mid: Int) -> Int =
-  match (map-get(m, mid))
+  match (Map.lookup(m, mid))
     | None -> lo
     | Some(s) ->
       if (s > offset) -> line-search(m, lo, mid, offset) | line-search(m, mid + 1, hi, offset)
@@ -114,7 +115,7 @@ let span-at(sp: Span, origin: Int, m: Map Int Int, n: Int) -> Span {
 
 let stamp-forms(forms: List Ast, src: Str, origin: Int) -> List Ast {
   let starts = line-starts(src)
-  stamp-form-list(forms, origin, index-line-starts(starts, 0, map-new()), line-start-count(starts))
+  stamp-form-list(forms, origin, index-line-starts(starts, 0, Map.empty()), line-start-count(starts))
 }
 
 let stamp-form-list(forms: List Ast, origin: Int, m: Map Int Int, n: Int) -> List Ast =
@@ -151,7 +152,7 @@ let append-asts(xs: List Ast, ys: List Ast) -> List Ast =
     | x :: rest -> x :: append-asts(rest, ys)
 
 let str-byte-at(s: Str, i: Int) -> Int =
-  str-byte(s, i)
+  String.byte(i, s)
 
 ; Last `/` index, or -1 if none.
 let last-slash-from(s: Str, i: Int, acc: Int) -> Int =
@@ -161,22 +162,22 @@ let last-slash-from(s: Str, i: Int, acc: Int) -> Int =
     | else -> last-slash-from(s, i - 1, acc)
 
 let path-dirname(path: Str) -> Str {
-  let n = str-byte-length(path)
+  let n = String.length(path)
   let slash = last-slash-from(path, n - 1, -1)
   cond
     | slash < 0 -> "."
     | slash == 0 -> "/"
-    | else -> str-slice(path, 0, slash)
+    | else -> String.slice(0, slash, path)
 }
 
 let path-is-abs(spec: Str) -> Bool =
-  str-byte-length(spec) > 0 && str-byte-at(spec, 0) == 47
+  String.length(spec) > 0 && str-byte-at(spec, 0) == 47
 
 let path-join(dir: Str, spec: Str) -> Str =
   cond
     | path-is-abs(spec) -> spec
     | dir == "." || dir == "" -> spec
-    | else -> str-concat(dir, "/", spec)
+    | else -> String.concat(dir, "/", spec)
 
 ; Normalize `.` / `..` segments (no symlink resolution).
 let normalize-push(acc: List Str, seg: Str) -> List Str =
@@ -191,14 +192,14 @@ let normalize-push(acc: List Str, seg: Str) -> List Str =
 let split-segments-from(s: Str, i: Int, n: Int, start: Int, acc: List Str) -> List Str =
   cond
     | i >= n ->
-      if (start == n) -> acc | str-slice(s, start, n - start) :: acc
+      if (start == n) -> acc | String.slice(start, n - start, s) :: acc
     | str-byte-at(s, i) == 47 ->
       split-segments-from(
         s,
         i + 1,
         n,
         i + 1,
-        if (start == i) -> acc | normalize-push(acc, str-slice(s, start, i - start))
+        if (start == i) -> acc | normalize-push(acc, String.slice(start, i - start, s))
       )
     | else -> split-segments-from(s, i + 1, n, start, acc)
 
@@ -211,17 +212,13 @@ let join-segments(xs: List Str, abs: Bool) -> Str =
 let join-segments-cons(h: Str, rest: List Str, abs: Bool) -> Str =
   match (rest)
     | [] ->
-      if (abs) -> str-concat("/", h) | h
+      if (abs) -> String.concat("/", h) | h
     | n :: more ->
-      str-concat(
-        if (abs) -> str-concat("/", h) | h,
-        "/",
-        join-segments-cons(n, more, false)
-      )
+      String.concat(if (abs) -> String.concat("/", h) | h, "/", join-segments-cons(n, more, false))
 
 let path-normalize(path: Str) -> Str {
   let abs = path-is-abs(path)
-  let n = str-byte-length(path)
+  let n = String.length(path)
   let segs-rev = split-segments-from(path, 0, n, 0, [])
   let segs = reverse(segs-rev)
   join-segments(segs, abs)
@@ -229,28 +226,28 @@ let path-normalize(path: Str) -> Str {
 
 ; s without a leading prefix. The caller has already checked the prefix.
 let drop-prefix(s: Str, n: Int) -> Str =
-  str-slice(s, n, str-byte-length(s) - n)
+  String.slice(n, String.length(s) - n, s)
 
 ; Index of byte b at or after i, or -1.
 let index-of-byte(s: Str, b: Int, i: Int) -> Int =
   cond
-    | i >= str-byte-length(s) -> -1
-    | str-byte(s, i) == b -> i
+    | i >= String.length(s) -> -1
+    | String.byte(i, s) == b -> i
     | else -> index-of-byte(s, b, i + 1)
 
 ; name.mnd when name does not already end in .mnd.
 let ensure-mnd(name: Str) -> Str =
-  if (String.ends-with(".mnd", name)) -> name | str-concat(name, ".mnd")
+  if (String.ends-with(".mnd", name)) -> name | String.concat(name, ".mnd")
 
 ; `std/list` → `stdlib/list.mnd`, independent of the importing file.
 let std-path(spec: Str) -> Str =
-  str-concat("stdlib/", ensure-mnd(drop-prefix(spec, 4)))
+  String.concat("stdlib/", ensure-mnd(drop-prefix(spec, 4)))
 
 ; Cache root for github: imports. HOME/.menard/deps, or .menard/deps.
 let deps-root() -> Str =
   match (getenv("HOME"))
     | Some(h) ->
-      if (str-byte-length(h) > 0) -> str-concat(h, "/.menard/deps") | ".menard/deps"
+      if (String.length(h) > 0) -> String.concat(h, "/.menard/deps") | ".menard/deps"
     | None -> ".menard/deps"
 
 ; `github:owner/repo@version/module` → the cached file, or spec when it
@@ -262,7 +259,7 @@ let github-cache-path(spec: Str) -> Str {
     | at < 1 -> spec
     | else ->
       {
-        let owner-repo = str-slice(rest, 0, at)
+        let owner-repo = String.slice(0, at, rest)
         let slash = index-of-byte(owner-repo, 47, 0)
         let after = drop-prefix(rest, at + 1)
         let vslash = index-of-byte(after, 47, 0)
@@ -270,11 +267,11 @@ let github-cache-path(spec: Str) -> Str {
           | slash < 1 || vslash < 1 -> spec
           | else ->
             {
-              let owner = str-slice(owner-repo, 0, slash)
+              let owner = String.slice(0, slash, owner-repo)
               let repo = drop-prefix(owner-repo, slash + 1)
-              let version = str-slice(after, 0, vslash)
+              let version = String.slice(0, vslash, after)
               let module = drop-prefix(after, vslash + 1)
-              str-concat(deps-root(), "/", owner, "/", repo, "/", version, "/", ensure-mnd(module))
+              String.concat(deps-root(), "/", owner, "/", repo, "/", version, "/", ensure-mnd(module))
             }
       }
 }
@@ -293,11 +290,11 @@ let index-of-from(s: Str, needle: Str) -> Int =
   index-of-from-at(s, needle, 0)
 
 let index-of-from-at(s: Str, needle: Str, i: Int) -> Int {
-  let n = str-byte-length(needle)
-  let sn = str-byte-length(s)
+  let n = String.length(needle)
+  let sn = String.length(s)
   cond
     | i + n > sn -> -1
-    | str-slice(s, i, n) == needle -> i
+    | String.slice(i, n, s) == needle -> i
     | else -> index-of-from-at(s, needle, i + 1)
 }
 
@@ -322,7 +319,7 @@ let dep-spec-of(path: Str) -> Maybe DepSpec {
       | else ->
         {
           let i = index-of-from(path, mark)
-          if (i < 0) -> "" | drop-prefix(path, i + str-byte-length(mark))
+          if (i < 0) -> "" | drop-prefix(path, i + String.length(mark))
         }
   let s1 = index-of-byte(rel, 47, 0)
   cond
@@ -335,7 +332,7 @@ let dep-spec-of(path: Str) -> Maybe DepSpec {
           | else ->
             {
               let s3 = index-of-byte(rel, 47, s2 + 1)
-              if (s3 < 0) -> None() | Some(DepSpec(str-slice(rel, 0, s1), str-slice(rel, s1 + 1, s2 - s1 - 1), str-slice(rel, s2 + 1, s3 - s2 - 1)))
+              if (s3 < 0) -> None() | Some(DepSpec(String.slice(0, s1, rel), String.slice(s1 + 1, s2 - s1 - 1, rel), String.slice(s2 + 1, s3 - s2 - 1, rel)))
             }
       }
 }
@@ -346,19 +343,19 @@ let fetch-dep(spec: DepSpec) -> Result Unit Str =
   match (spec)
     | DepSpec(owner, repo, version) ->
       {
-        let dir = str-concat(deps-root(), "/", owner, "/", repo, "/", version)
+        let dir = String.concat(deps-root(), "/", owner, "/", repo, "/", version)
         cond
           | ensure-dir(dir) ->
             {
-              let tgz = str-concat(dir, "/.src.tgz")
-              let url = str-concat("https://codeload.github.com/", owner, "/", repo, "/tar.gz/refs/tags/", version)
+              let tgz = String.concat(dir, "/.src.tgz")
+              let url = String.concat("https://codeload.github.com/", owner, "/", repo, "/tar.gz/refs/tags/", version)
               match (spawn(["/usr/bin/curl", "-fsSL", "-o", tgz, url]))
-                | Err(_) -> Err(str-concat("cannot fetch ", url))
+                | Err(_) -> Err(String.concat("cannot fetch ", url))
                 | Ok(st) ->
                   cond
                     | spawn-ok(st) ->
                       match (spawn(["/usr/bin/tar", "-xzf", tgz, "-C", dir, "--strip-components=1"]))
-                        | Err(_) -> Err(str-concat("cannot extract ", url))
+                        | Err(_) -> Err(String.concat("cannot extract ", url))
                         | Ok(st2) ->
                           cond
                             | spawn-ok(st2) ->
@@ -366,10 +363,10 @@ let fetch-dep(spec: DepSpec) -> Result Unit Str =
                                 remove(tgz)
                                 Ok(())
                               }
-                            | else -> Err(str-concat("cannot extract ", url))
-                    | else -> Err(str-concat("cannot fetch ", url))
+                            | else -> Err(String.concat("cannot extract ", url))
+                    | else -> Err(String.concat("cannot fetch ", url))
             }
-          | else -> Err(str-concat("cannot create ", dir))
+          | else -> Err(String.concat("cannot create ", dir))
       }
 
 ; Make a github cache path exist. Other paths are left for read-file.
@@ -378,7 +375,7 @@ pub let ensure-module-file(path: Str) -> Result Unit Str =
     | exists(path) -> Ok(())
     | in-deps(path) ->
       match (dep-spec-of(path))
-        | None -> Err(str-concat("bad dependency path: ", path))
+        | None -> Err(String.concat("bad dependency path: ", path))
         | Some(spec) -> fetch-dep(spec)
     | else -> Ok(())
 
@@ -398,10 +395,10 @@ let github-ver(spec: Str) -> Maybe GithubVer =
           | at < 1 -> None()
           | else ->
             {
-              let owner-repo = str-slice(rest, 0, at)
+              let owner-repo = String.slice(0, at, rest)
               let after = drop-prefix(rest, at + 1)
               let vslash = index-of-byte(after, 47, 0)
-              if (vslash < 1) -> None() | Some(GithubVer(owner-repo, str-slice(after, 0, vslash)))
+              if (vslash < 1) -> None() | Some(GithubVer(owner-repo, String.slice(0, vslash, after)))
             }
       }
     | else -> None()
@@ -411,14 +408,14 @@ let note-version(versions: Ref (Map Str Str), spec: Str) -> Result Unit Str =
   match (github-ver(spec))
     | None -> Ok(())
     | Some(GithubVer(key, version)) ->
-      match (map-get(deref(versions), key))
+      match (Map.lookup(deref(versions), key))
         | None ->
           {
-            set!(versions, map-set(deref(versions), key, version))
+            set!(versions, Map.set(deref(versions), key, version))
             Ok(())
           }
         | Some(prev) ->
-          if (prev == version) -> Ok(()) | Err(str-concat("two versions of ", key, ": ", prev, " and ", version))
+          if (prev == version) -> Ok(()) | Err(String.concat("two versions of ", key, ": ", prev, " and ", version))
 
 pub let note-versions(versions: Ref (Map Str Str), specs: List Str) -> Result Unit Str =
   match (specs)
@@ -524,7 +521,7 @@ let gather-decl-name-list(head: Str, rest: List Ast, acc: List Str) -> List Str 
             | Some(n) -> push-unique(acc, n)
             | None -> acc
         | [] -> acc
-    | head == "defn" ->
+    | head == "defn" || head == "runtime" ->
       match (rest)
         | name-part :: _ ->
           match (decl-name-of(name-part))
@@ -583,18 +580,18 @@ let gather-pub-forms-names(forms: List Ast, acc: List Str) -> List Str =
 let list-to-bool-map(xs: List Str, acc: Map Str Bool) -> Map Str Bool =
   match (xs)
     | [] -> acc
-    | n :: rest -> list-to-bool-map(rest, map-set(acc, n, true))
+    | n :: rest -> list-to-bool-map(rest, Map.set(acc, n, true))
 
 let name-is-pub(pub-names: Map Str Bool, name: Str) -> Bool =
-  match (map-get(pub-names, name))
+  match (Map.lookup(pub-names, name))
     | Some(_) -> true
     | None -> false
 
 let module-prefix(mid: Int) -> Str =
-  str-concat("__m", show(mid), "_")
+  String.concat("__m", show(mid), "_")
 
 let add-rename(renames: Map Str Str, prefix: Str, name: Str) -> Map Str Str =
-  map-set(renames, name, str-concat(prefix, name))
+  Map.set(renames, name, String.concat(prefix, name))
 
 ; Polynomial hash of the path bytes. The modulus keeps every step inside a
 ; 63-bit Int. The same path always yields the same symbol.
@@ -603,41 +600,41 @@ let hash-mix(h: Int, b: Int) -> Int =
 
 let hash-bytes(s: Str, i: Int, n: Int, h: Int) -> Int =
   loop (j = i, acc = h)
-    if (j >= n) -> acc | recur(j + 1, hash-mix(acc, str-byte(s, j)))
+    if (j >= n) -> acc | recur(j + 1, hash-mix(acc, String.byte(j, s)))
 
 let path-hash(path: Str) -> Int =
-  hash-bytes(path, 0, str-byte-length(path), 0)
+  hash-bytes(path, 0, String.length(path), 0)
 
 let main-symbol(path: Str) -> Str =
-  str-concat("mn_", show(path-hash(path)), "_main")
+  String.concat("mn_", show(path-hash(path)), "_main")
 
 let init-symbol(path: Str) -> Str =
-  str-concat("mn_", show(path-hash(path)), "_init")
+  String.concat("mn_", show(path-hash(path)), "_init")
 
 let build-renames-from-list(names: List Str, pub-names: Map Str Bool, prefix: Str, main-sym: Str, acc: Map Str Str) -> Map Str Str =
   match (names)
     | [] -> acc
     | n :: rest ->
       cond
-        | n == "main" -> build-renames-from-list(rest, pub-names, prefix, main-sym, map-set(acc, n, main-sym))
+        | n == "main" -> build-renames-from-list(rest, pub-names, prefix, main-sym, Map.set(acc, n, main-sym))
         | name-is-pub(pub-names, n) -> build-renames-from-list(rest, pub-names, prefix, main-sym, acc)
         | else -> build-renames-from-list(rest, pub-names, prefix, main-sym, add-rename(acc, prefix, n))
 
 let qualified-prefix(path: Str) -> Str =
-  str-concat("__q", show(path-hash(path)), "_")
+  String.concat("__q", show(path-hash(path)), "_")
 
 let build-renames(forms: List Ast, mid: Int, main-sym: Str, qualify: Bool, path: Str) -> Map Str Str {
   let pub-list =
     if (qualify) -> [] | gather-pub-forms-names(forms, [])
   let all-list = gather-forms-names(forms, [])
-  let pub-names = list-to-bool-map(pub-list, map-new())
+  let pub-names = list-to-bool-map(pub-list, Map.empty())
   let prefix =
     if (qualify) -> qualified-prefix(path) | module-prefix(mid)
-  build-renames-from-list(all-list, pub-names, prefix, main-sym, map-new())
+  build-renames-from-list(all-list, pub-names, prefix, main-sym, Map.empty())
 }
 
 let rename-lookup(renames: Map Str Str, name: Str) -> Str =
-  match (map-get(renames, name))
+  match (Map.lookup(renames, name))
     | Some(n) -> n
     | None -> name
 
@@ -678,17 +675,17 @@ let shared-io-ctor(name: Str) -> Bool =
   name == "NotFound" || name == "Permission"
 
 let register-one-export!(exports: Ref (Map Str Str), path: Str, name: Str, kind: Str) -> Result Unit Str =
-  match (map-get(deref(exports), name))
+  match (Map.lookup(deref(exports), name))
     | None ->
       {
-        set!(exports, map-set(deref(exports), name, path))
+        set!(exports, Map.set(deref(exports), name, path))
         Ok(())
       }
     | Some(prev) ->
       cond
         | kind == "alias" || shared-io-ctor(name) -> Ok(())
         | prev == path -> Ok(())
-        | else -> Err(str-concat("duplicate pub export `", name, "` from ", path, " (already exported by ", prev, ")"))
+        | else -> Err(String.concat("duplicate pub export `", name, "` from ", path, " (already exported by ", prev, ")"))
 
 let register-export-names!(exports: Ref (Map Str Str), path: Str, names: List Str, kind: Str) -> Result Unit Str =
   match (names)
@@ -735,7 +732,7 @@ let defn-form(name: Str, ret: Str, body: List Ast) -> Ast =
 
 let is-kept-decl(form: Ast) -> Bool {
   let k = form-decl-kind(form)
-  k == "defn" || k == "defrec" || k == "variant" || k == "alias" || k == "extern"
+  k == "defn" || k == "defrec" || k == "variant" || k == "alias" || k == "extern" || k == "runtime"
 }
 
 ; Integer `(let name N)` stays at module scope so constant substitution
@@ -859,51 +856,55 @@ let forms-with-bootstrap(forms: List Ast, inits: List Str, entry: EntryMain) -> 
 ; Strip imports/pub, uniquify privates, rename `main`, lift top-level
 ; expressions into this module's init.
 let uniquify-module-body(path: Str, entry-path: Str, mid: Int, forms: List Ast, exports: Ref (Map Str Str), inits: Ref (List Str), entry: Ref EntryMain) -> Result (List Ast) Str =
-  result-bind(
-    if (map-has(deref(qualified-imports), path)) -> Ok(()) | register-forms-exports!(exports, path, forms),
-    fn (_) {
-      let renames = build-renames(forms, mid, main-symbol(path), map-has(deref(qualified-imports), path), path)
-      let stripped = strip-imports-and-pub(forms, [])
-      let renamed = rename-forms(stripped, renames)
-      let body = with-module-init(path, renamed, inits)
-      note-entry!(path, entry-path, body, entry)
-      Ok(body)
-    }
-  )
+  match (runtime-misplaced(path, forms))
+    | Some(msg) -> Err(msg)
+    | None ->
+      result-bind(
+        if (Map.has(deref(qualified-imports), path)) -> Ok(()) | register-forms-exports!(exports, path, forms),
+        fn (_) {
+          let renames = build-renames(forms, mid, main-symbol(path), Map.has(deref(qualified-imports), path), path)
+          note-renamed-runtime!(path, forms, renames)
+          let stripped = strip-imports-and-pub(forms, [])
+          let renamed = rename-forms(stripped, renames)
+          let body = fold-runtime-forms(with-module-init(path, renamed, inits))
+          note-entry!(path, entry-path, body, entry)
+          Ok(body)
+        }
+      )
 
 ; ---------------------------------------------------------------------------
 ; Module graph load
 
 let load-module-into(path: Str, entry-path: Str, visited: Ref (Map Str Bool), acc: Ref (List Ast), mid: Ref Int, exports: Ref (Map Str Str), paths: Ref (List Str), sources: Ref (Map Str Str), inits: Ref (List Str), entry: Ref EntryMain, versions: Ref (Map Str Str)) -> Result Unit Str =
-  match (map-get(deref(visited), path))
+  match (Map.lookup(deref(visited), path))
     | Some(_) -> Ok(())
     | None ->
       {
-        set!(visited, map-set(deref(visited), path, true))
+        set!(visited, Map.set(deref(visited), path, true))
         result-bind(
           ensure-module-file(path),
           fn (_) =
             match (read-file(path))
-              | Err(_) -> Err(str-concat("module not found: ", path))
+              | Err(_) -> Err(String.concat("module not found: ", path))
               | Ok(src) -> load-module-source(path, entry-path, src, visited, acc, mid, exports, paths, sources, inits, entry, versions)
         )
       }
 
 let load-module-source(path: Str, entry-path: Str, src: Str, visited: Ref (Map Str Bool), acc: Ref (List Ast), mid: Ref Int, exports: Ref (Map Str Str), paths: Ref (List Str), sources: Ref (Map Str Str), inits: Ref (List Str), entry: Ref EntryMain, versions: Ref (Map Str Str)) -> Result Unit Str {
-  set!(sources, map-set(deref(sources), path, src))
+  set!(sources, Map.set(deref(sources), path, src))
   match (read-all(src))
-    | Err(e) -> Err(str-concat("parse error in ", path))
+    | Err(e) -> Err(String.concat("parse error in ", path))
     | Ok(forms) -> load-module-casing(path, entry-path, forms, visited, acc, mid, exports, paths, sources, inits, entry, versions)
 }
 
 let load-module-casing(path: Str, entry-path: Str, forms: List Ast, visited: Ref (Map Str Bool), acc: Ref (List Ast), mid: Ref Int, exports: Ref (Map Str Str), paths: Ref (List Str), sources: Ref (Map Str Str), inits: Ref (List Str), entry: Ref EntryMain, versions: Ref (Map Str Str)) -> Result Unit Str =
   match (check-casing-all(forms))
-    | Err(_) -> Err(str-concat("casing error in ", path))
+    | Err(_) -> Err(String.concat("casing error in ", path))
     | Ok(_) -> load-module-desugar(path, entry-path, forms, visited, acc, mid, exports, paths, sources, inits, entry, versions)
 
 let load-module-desugar(path: Str, entry-path: Str, forms: List Ast, visited: Ref (Map Str Bool), acc: Ref (List Ast), mid: Ref Int, exports: Ref (Map Str Str), paths: Ref (List Str), sources: Ref (Map Str Str), inits: Ref (List Str), entry: Ref EntryMain, versions: Ref (Map Str Str)) -> Result Unit Str =
   match (desugar-all(forms))
-    | Err(_) -> Err(str-concat("desugar error in ", path))
+    | Err(_) -> Err(String.concat("desugar error in ", path))
     | Ok(desugared) -> load-module-deps(path, entry-path, desugared, visited, acc, mid, exports, paths, sources, inits, entry, versions)
 
 ; The name after `import path as`, if this form has one.
@@ -931,13 +932,13 @@ let qualified-import-paths(from: Str, forms: List Ast, acc: Map Str Str) -> Map 
       match (import-alias-of(f))
         | Some(name) ->
           match (parse-import-spec(f))
-            | Some(spec) -> qualified-import-paths(from, rest, map-set(acc, name, resolve-import-path(from, spec)))
+            | Some(spec) -> qualified-import-paths(from, rest, Map.set(acc, name, resolve-import-path(from, spec)))
             | None -> qualified-import-paths(from, rest, acc)
         | None -> qualified-import-paths(from, rest, acc)
 
 let mark-qualified-imports!(from: Str, forms: List Ast) -> Unit {
-  let paths = qualified-import-paths(from, forms, map-new())
-  let names = map-keys(paths)
+  let paths = qualified-import-paths(from, forms, Map.empty())
+  let names = Map.keys(paths)
   mark-qualified-names!(names, paths)
 }
 
@@ -946,8 +947,8 @@ let mark-qualified-names!(names: List Str, paths: Map Str Str) -> Unit =
     | [] -> ()
     | name :: rest ->
       {
-        match (map-get(paths, name))
-          | Some(path) -> set!(qualified-imports, map-set(deref(qualified-imports), path, true))
+        match (Map.lookup(paths, name))
+          | Some(path) -> set!(qualified-imports, Map.set(deref(qualified-imports), path, true))
           | None -> ()
         mark-qualified-names!(rest, paths)
       }
@@ -964,11 +965,11 @@ let rewrite-qual-project(obj: Ast, field: Ast, sp: Span, aliases: Map Str Str, q
   let field2 = rewrite-qual-ast(field, aliases, qualify)
   match (sym-str(obj2))
     | Some(name) ->
-      match (map-get(aliases, name))
+      match (Map.lookup(aliases, name))
         | Some(path) ->
           match (sym-str(field2))
             | Some(field-name) ->
-              if (qualify) -> SymNode(str-concat(qualified-prefix(path), field-name), sp) | SymNode(str-concat(import-alias-prefix(name), field-name), sp)
+              if (qualify) -> SymNode(String.concat(qualified-prefix(path), field-name), sp) | SymNode(String.concat(import-alias-prefix(name), field-name), sp)
             | None -> field2
         | None -> ParenNode([SymNode("project", sp), obj2, field2], sp)
     | None -> ParenNode([SymNode("project", sp), obj2, field2], sp)
@@ -996,17 +997,17 @@ let rewrite-qual-forms(forms: List Ast, aliases: Map Str Str, qualify: Bool) -> 
 
 ; Replace qualified import projections with module-local import names.
 pub let rewrite-import-aliases(from: Str, forms: List Ast) -> List Ast =
-  rewrite-qual-forms(forms, qualified-import-paths(from, forms, map-new()), false)
+  rewrite-qual-forms(forms, qualified-import-paths(from, forms, Map.empty()), false)
 
 ; Separate compilation binds qualified exports under module-local names.
 pub let import-alias-prefix(name: Str) -> Str =
-  str-concat("__import_", name, "_")
+  String.concat("__import_", name, "_")
 
 pub let module-import-alias(form: Ast) -> Maybe Str =
   import-alias-of(form)
 
 let rewrite-flat-import-aliases(from: Str, forms: List Ast) -> List Ast =
-  rewrite-qual-forms(forms, qualified-import-paths(from, forms, map-new()), true)
+  rewrite-qual-forms(forms, qualified-import-paths(from, forms, Map.empty()), true)
 
 let load-module-deps(path: Str, entry-path: Str, forms: List Ast, visited: Ref (Map Str Bool), acc: Ref (List Ast), mid: Ref Int, exports: Ref (Map Str Str), paths: Ref (List Str), sources: Ref (Map Str Str), inits: Ref (List Str), entry: Ref EntryMain, versions: Ref (Map Str Str)) -> Result Unit Str {
   mark-qualified-imports!(path, forms)
@@ -1021,7 +1022,7 @@ let load-module-deps(path: Str, entry-path: Str, forms: List Ast, visited: Ref (
           set!(mid, id + 1)
           set!(paths, snoc-str(deref(paths), path))
           let src =
-            match (map-get(deref(sources), path))
+            match (Map.lookup(deref(sources), path))
               | Some(s) -> s
               | None -> ""
           let stamped = stamp-forms(forms, src, id)
@@ -1046,18 +1047,22 @@ let load-deps-list(from: Str, entry-path: Str, specs: List Str, visited: Ref (Ma
 ; Public entry: flatten `entry-path` (already read as `src`) into forms plus
 ; the path of each module id, dependency-first. When the entry defines
 ; `main`, the flat list ends with the bootstrap that calls it.
+; Declared here, before the flatten that clears it. Later passes read it.
+let runtime-ops = ref(Map.empty())
+
 pub let flatten-module-graph(entry-path: Str, src: Str) -> Result Flat Str {
-  set!(qualified-imports, map-new())
-  let visited = ref(map-new())
+  set!(qualified-imports, Map.empty())
+  set!(runtime-ops, Map.empty())
+  let visited = ref(Map.empty())
   let acc = ref([])
   let mid = ref(0)
-  let exports = ref(map-new())
+  let exports = ref(Map.empty())
   let paths = ref([])
-  let sources = ref(map-new())
+  let sources = ref(Map.empty())
   let inits = ref([])
   let entry = ref(EntryMain("", false, false))
-  let versions = ref(map-new())
-  set!(visited, map-set(deref(visited), entry-path, true))
+  let versions = ref(Map.empty())
+  set!(visited, Map.set(deref(visited), entry-path, true))
   result-bind(load-module-source(entry-path, entry-path, src, visited, acc, mid, exports, paths, sources, inits, entry, versions), fn (_) = Ok(Flat(forms-with-bootstrap(deref(acc), deref(inits), deref(entry)), deref(paths))))
 }
 
@@ -1068,7 +1073,7 @@ pub let bytes-hash(s: Str) -> Int =
   path-hash(s)
 
 pub let link-of(path: Str, name: Str) -> Str =
-  str-concat("mn_", show(path-hash(path)), "_", name)
+  String.concat("mn_", show(path-hash(path)), "_", name)
 
 pub let rename-module-forms(forms: List Ast, renames: Map Str Str) -> List Ast =
   rename-forms(forms, renames)
@@ -1090,3 +1095,258 @@ pub let module-init-forms(path: Str, forms: List Ast, inits: Ref (List Str)) -> 
 
 pub let defn-return-type(forms: List Ast, name: Str) -> Maybe Str =
   find-main-return(forms, name)
+
+; Runtime bindings. A published name in std/string, std/map, or
+; std/string-buffer lowers to one direct runtime call. The map is filled
+; while a module graph is flattened or while one separate-compilation
+; unit is prepared, then read by the fold (before typecheck) and the
+; rewrite (after typecheck). `runtime-ops` itself is declared above
+; `flatten-module-graph`, which clears it.
+
+let path-ends(path: Str, suffix: Str) -> Bool {
+  let p = if (String.length(path) > 0 && String.byte(0, path) == 47) -> path | String.concat("/", path)
+  let n = String.length(p)
+  let m = String.length(suffix)
+  n >= m && String.slice(n - m, m, p) == suffix
+}
+
+let string-op(name: Str) -> Maybe Str =
+  cond
+    | name == "length" -> Some("str-byte-length")
+    | name == "byte" -> Some("str-byte")
+    | name == "slice" -> Some("str-slice")
+    | name == "concat" -> Some("str-concat")
+    | name == "from-char" -> Some("char->str")
+    | else -> None()
+
+let map-op(name: Str) -> Maybe Str =
+  cond
+    | name == "empty" -> Some("map-new")
+    | name == "lookup" -> Some("map-get")
+    | name == "set" -> Some("map-set")
+    | name == "has" -> Some("map-has")
+    | name == "size" -> Some("map-size")
+    | name == "keys" -> Some("map-keys")
+    | else -> None()
+
+let buffer-op(name: Str) -> Maybe Str =
+  cond
+    | name == "new" -> Some("sb-new")
+    | name == "append!" -> Some("sb-append!")
+    | name == "append-byte!" -> Some("sb-append-byte!")
+    | name == "length" -> Some("sb-length")
+    | name == "clear!" -> Some("sb-clear!")
+    | name == "to-str" -> Some("sb-to-str")
+    | name == "take-str!" -> Some("sb-take-str!")
+    | else -> None()
+
+let runtime-module(path: Str) -> Bool =
+  path-ends(path, "/stdlib/string.mnd") || path-ends(path, "/stdlib/map.mnd") || path-ends(path, "/stdlib/string-buffer.mnd")
+
+let runtime-misplaced-list(forms: List Ast) -> Maybe Str =
+  match (forms)
+    | [] -> None()
+    | f :: rest ->
+      if (is-runtime-form(f)) -> Some("runtime is confined to stdlib string, map, and string-buffer") | runtime-misplaced-list(rest)
+
+pub let runtime-misplaced(path: Str, forms: List Ast) -> Maybe Str =
+  if (runtime-module(path)) -> None() | runtime-misplaced-list(forms)
+
+let runtime-binding(path: Str, name: Str) -> Maybe Str =
+  cond
+    | path-ends(path, "/stdlib/string.mnd") -> string-op(name)
+    | path-ends(path, "/stdlib/map.mnd") -> map-op(name)
+    | path-ends(path, "/stdlib/string-buffer.mnd") -> buffer-op(name)
+    | else -> None()
+
+let note-runtime!(symbol: Str, op: Str) -> Unit =
+  set!(runtime-ops, Map.set(deref(runtime-ops), symbol, op))
+
+let runtime-decl-name(form: Ast) -> Maybe Str =
+  match (unwrap-pub-form(form))
+    | ParenNode(head :: name :: _, _) ->
+      if (is-sym(head, "runtime")) -> decl-name-of(name) | None()
+    | _ -> None()
+
+let note-renamed-runtime-list!(path: Str, forms: List Ast, renames: Map Str Str) -> Unit =
+  match (forms)
+    | [] -> ()
+    | f :: rest ->
+      {
+        match (runtime-decl-name(f))
+          | Some(name) ->
+            match (runtime-binding(path, name))
+              | Some(op) -> note-runtime!(rename-lookup(renames, name), op)
+              | None -> ()
+          | None -> ()
+        note-renamed-runtime-list!(path, rest, renames)
+      }
+
+let note-renamed-runtime!(path: Str, forms: List Ast, renames: Map Str Str) -> Unit =
+  note-renamed-runtime-list!(path, forms, renames)
+
+let note-local-runtime-list!(path: Str, forms: List Ast) -> Unit =
+  match (forms)
+    | [] -> ()
+    | f :: rest ->
+      {
+        match (runtime-decl-name(f))
+          | Some(name) ->
+            match (runtime-binding(path, name))
+              | Some(op) -> note-runtime!(name, op)
+              | None -> ()
+          | None -> ()
+        note-local-runtime-list!(path, rest)
+      }
+
+let runtime-names(path: Str) -> List Str =
+  cond
+    | path-ends(path, "/stdlib/string.mnd") -> ["length", "byte", "slice", "concat", "from-char"]
+    | path-ends(path, "/stdlib/map.mnd") -> ["empty", "lookup", "set", "has", "size", "keys"]
+    | path-ends(path, "/stdlib/string-buffer.mnd") -> ["new", "append!", "append-byte!", "length", "clear!", "to-str", "take-str!"]
+    | else -> []
+
+let note-names!(path: Str, prefix: Str, names: List Str) -> Unit =
+  match (names)
+    | [] -> ()
+    | n :: rest ->
+      {
+        match (runtime-binding(path, n))
+          | Some(op) -> note-runtime!(String.concat(prefix, n), op)
+          | None -> ()
+        note-names!(path, prefix, rest)
+      }
+
+let note-import-list!(from: Str, forms: List Ast) -> Unit =
+  match (forms)
+    | [] -> ()
+    | f :: rest ->
+      {
+        match (parse-import-spec(f))
+          | Some(spec) ->
+            {
+              let path = resolve-import-path(from, spec)
+              match (import-alias-of(f))
+                | Some(alias-name) -> note-names!(path, import-alias-prefix(alias-name), runtime-names(path))
+                | None -> note-names!(path, "", runtime-names(path))
+            }
+          | None -> ()
+        note-import-list!(from, rest)
+      }
+
+; Clear, then record this module's runtime calls. Used by separate compilation
+; after dependencies have finished with the same ref.
+pub let prepare-runtime-forms(from: Str, forms: List Ast) -> List Ast {
+  set!(runtime-ops, Map.empty())
+  note-local-runtime-list!(from, forms)
+  note-import-list!(from, forms)
+  fold-runtime-forms(forms)
+}
+
+let fold-left(name: Str, acc: Ast, rest: List Ast, sp: Span) -> Ast =
+  match (rest)
+    | [] -> acc
+    | b :: more -> fold-left(name, ParenNode([sym-node-span(name, sp), acc, b], sp), more, sp)
+
+let sym-node-span(name: Str, sp: Span) -> Ast =
+  SymNode(name, sp)
+
+let fold-concat-args(name: Str, args: List Ast, sp: Span) -> Ast =
+  match (args)
+    | [] -> ParenNode([sym-node-span(name, sp)], sp)
+    | [a] -> a
+    | a :: rest -> fold-left(name, a, rest, sp)
+
+let fold-runtime-list(xs: List Ast) -> List Ast =
+  match (xs)
+    | [] -> []
+    | x :: rest -> fold-runtime-ast(x) :: fold-runtime-list(rest)
+
+let fold-runtime-call(name: Str, args: List Ast, sp: Span, whole: List Ast) -> Ast =
+  match (Map.lookup(deref(runtime-ops), name))
+    | Some(op) ->
+      if (op == "str-concat") -> fold-concat-args(name, fold-runtime-list(args), sp) | ParenNode(sym-node-span(name, sp) :: fold-runtime-list(args), sp)
+    | None -> ParenNode(fold-runtime-list(whole), sp)
+
+let fold-runtime-paren(elems: List Ast, sp: Span) -> Ast =
+  match (elems)
+    | head :: args ->
+      if (is-sym(head, "quote")) -> ParenNode(elems, sp) | fold-runtime-paren-call(head, args, elems, sp)
+    | [] -> ParenNode(elems, sp)
+
+let fold-runtime-paren-call(head: Ast, args: List Ast, elems: List Ast, sp: Span) -> Ast =
+  match (sym-str(head))
+    | Some(name) -> fold-runtime-call(name, args, sp, elems)
+    | None -> ParenNode(fold-runtime-list(elems), sp)
+
+let fold-runtime-ast(a: Ast) -> Ast =
+  match (a)
+    | ParenNode(elems, sp) -> fold-runtime-paren(elems, sp)
+    | BracketNode(xs, sp) -> BracketNode(fold-runtime-list(xs), sp)
+    | _ -> a
+
+let fold-runtime-form-list(forms: List Ast) -> List Ast =
+  match (forms)
+    | [] -> []
+    | f :: rest -> fold-runtime-ast(f) :: fold-runtime-form-list(rest)
+
+let fold-runtime-forms(forms: List Ast) -> List Ast =
+  fold-runtime-form-list(forms)
+
+let swap-two(args: List Ast) -> List Ast =
+  match (args)
+    | a :: b :: rest -> b :: a :: rest
+    | _ -> args
+
+let rot-three(args: List Ast) -> List Ast =
+  match (args)
+    | a :: b :: c :: rest -> c :: a :: b :: rest
+    | _ -> args
+
+let permute-args(op: Str, args: List Ast) -> List Ast =
+  cond
+    | op == "str-byte" -> swap-two(args)
+    | op == "str-slice" -> rot-three(args)
+    | else -> args
+
+let rewrite-runtime-list(xs: List Ast) -> List Ast =
+  match (xs)
+    | [] -> []
+    | x :: rest -> rewrite-runtime-ast(x) :: rewrite-runtime-list(rest)
+
+let rewrite-runtime-call(name: Str, args: List Ast, sp: Span, whole: List Ast) -> Ast =
+  match (Map.lookup(deref(runtime-ops), name))
+    | Some(op) -> ParenNode(sym-node-span(op, sp) :: permute-args(op, rewrite-runtime-list(args)), sp)
+    | None -> ParenNode(rewrite-runtime-list(whole), sp)
+
+let rewrite-runtime-paren(elems: List Ast, sp: Span) -> Ast =
+  match (elems)
+    | head :: args ->
+      if (is-sym(head, "quote")) -> ParenNode(elems, sp) | rewrite-runtime-paren-call(head, args, elems, sp)
+    | [] -> ParenNode(elems, sp)
+
+let rewrite-runtime-paren-call(head: Ast, args: List Ast, elems: List Ast, sp: Span) -> Ast =
+  match (sym-str(head))
+    | Some(name) -> rewrite-runtime-call(name, args, sp, elems)
+    | None -> ParenNode(rewrite-runtime-list(elems), sp)
+
+let rewrite-runtime-ast(a: Ast) -> Ast =
+  match (a)
+    | ParenNode(elems, sp) -> rewrite-runtime-paren(elems, sp)
+    | BracketNode(xs, sp) -> BracketNode(rewrite-runtime-list(xs), sp)
+    | _ -> a
+
+let is-runtime-form(form: Ast) -> Bool =
+  match (unwrap-pub-form(form))
+    | ParenNode(head :: _, _) -> is-sym(head, "runtime")
+    | _ -> false
+
+let drop-runtime-forms(forms: List Ast, acc: List Ast) -> List Ast =
+  match (forms)
+    | [] -> reverse(acc)
+    | f :: rest ->
+      if (is-runtime-form(f)) -> drop-runtime-forms(rest, acc) | drop-runtime-forms(rest, rewrite-runtime-ast(f) :: acc)
+
+; Replace runtime calls with the direct operation and drop the declarations.
+pub let lower-runtime-forms(forms: List Ast) -> List Ast =
+  drop-runtime-forms(forms, [])

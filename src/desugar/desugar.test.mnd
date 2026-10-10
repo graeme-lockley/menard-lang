@@ -8,7 +8,7 @@ import std/io
 import std/string
 
 let has-head(text: Str, name: Str) -> Bool =
-  has(str-concat("(", name, " "), text) || has(str-concat("(", name, ")"), text)
+  has(concat("(", name, " "), text) || has(concat("(", name, ")"), text)
 
 let read-forms(path: Str) -> Maybe (List Ast) =
   match (read-file(path))

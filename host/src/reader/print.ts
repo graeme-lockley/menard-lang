@@ -84,6 +84,7 @@ function printForm(ast: Ast, ind: number): string {
   if (h === "alias" && isList(ast)) return `alias ${printExpr(ast.elems[1]!, ind)} = ${printType(ast.elems[2]!)}`;
   if (h === "import" && isList(ast)) return printImport(ast);
   if (h === "extern" && isList(ast)) return printExtern(ast);
+  if (h === "runtime" && isList(ast)) return printRuntime(ast);
   if (h === "test" && isList(ast)) return `test ${printAtom(ast.elems[1]!)} =${placed(ast.elems[2]!, ind + 2)}`;
   return printExpr(ast, ind);
 }
@@ -188,6 +189,10 @@ function printExtern(ast: Ast & { tag: "list" }): string {
   }
   const ret = printType(ast.elems[i + 1]!);
   return `extern ${name}(${params.join(", ")}) -> ${ret}`;
+}
+
+function printRuntime(ast: Ast & { tag: "list" }): string {
+  return printExtern(ast).replace(/^extern /, "runtime ");
 }
 
 function printBlock(ast: Ast & { tag: "list" }, ind: number): string {

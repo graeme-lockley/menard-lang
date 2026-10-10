@@ -21,6 +21,7 @@ import std/fs
 import std/io
 import std/string as String
 import std/sys
+import std/string-buffer as Buf
 
 ; Version 5 invalidates objects whose print formatters use Cons/Nil list syntax.
 let iface-version = 5
@@ -65,36 +66,36 @@ let quote-str(s: Str) -> Str =
   print-form(StrNode(s, blank()))
 
 let dirname-of(path: Str) -> Str {
-  let n = str-byte-length(path)
+  let n = String.length(path)
   let slash = last-slash(path, n - 1)
   cond
     | slash < 0 -> "."
     | slash == 0 -> "/"
-    | else -> str-slice(path, 0, slash)
+    | else -> String.slice(0, slash, path)
 }
 
 let last-slash(s: Str, i: Int) -> Int =
   cond
     | i < 0 -> -1
-    | str-byte(s, i) == 47 -> i
+    | String.byte(i, s) == 47 -> i
     | else -> last-slash(s, i - 1)
 
 pub let cache-root() -> Str =
   match (getenv("MENARD_CACHE"))
     | Some(s) ->
-      if (str-byte-length(s) > 0) -> s | default-cache()
+      if (String.length(s) > 0) -> s | default-cache()
     | None -> default-cache()
 
 let default-cache() -> Str =
   match (getenv("HOME"))
     | Some(h) ->
-      if (str-byte-length(h) > 0) -> str-concat(h, "/.menard") | "/tmp/menard"
+      if (String.length(h) > 0) -> String.concat(h, "/.menard") | "/tmp/menard"
     | None -> "/tmp/menard"
 
 pub let canonical-path(path: Str) -> Str {
   let direct = realpath(path)
-  if (str-byte-length(direct) > 0) -> direct | normalize-path(
-    if (String.starts-with("/", path)) -> path | str-concat(cwd(), "/", path)
+  if (String.length(direct) > 0) -> direct | normalize-path(
+    if (String.starts-with("/", path)) -> path | String.concat(cwd(), "/", path)
   )
 }
 
@@ -102,21 +103,21 @@ pub let canonical-path(path: Str) -> Str {
 ; working directory when the file lives under it, so the object bytes
 ; do not contain an absolute path.
 pub let display-path(abs: Str) -> Str {
-  let prefix = str-concat(cwd(), "/")
-  if (String.starts-with(prefix, abs)) -> str-slice(abs, str-byte-length(prefix), str-byte-length(abs) - str-byte-length(prefix)) | abs
+  let prefix = String.concat(cwd(), "/")
+  if (String.starts-with(prefix, abs)) -> String.slice(String.length(prefix), String.length(abs) - String.length(prefix), abs) | abs
 }
 
 let cache-base(abs: Str) -> Str =
-  str-concat(cache-root(), abs)
+  String.concat(cache-root(), abs)
 
 pub let iface-path(abs: Str) -> Str =
-  str-concat(cache-base(abs), ".mni")
+  String.concat(cache-base(abs), ".mni")
 
 pub let object-path(abs: Str) -> Str =
-  str-concat(cache-base(abs), ".bc")
+  String.concat(cache-base(abs), ".bc")
 
 pub let cache-bin(abs: Str) -> Str =
-  str-concat(cache-root(), "/out/", show(bytes-hash(abs)))
+  String.concat(cache-root(), "/out/", show(bytes-hash(abs)))
 
 pub let ensure-parent(path: Str) -> Bool =
   ensure-dir(dirname-of(path))
@@ -127,19 +128,19 @@ pub let hash-file(path: Str) -> Int =
     | Err(_) -> 0
 
 let add-line(sb: StringBuffer, s: Str) -> Unit {
-  sb-append!(sb, s)
-  sb-append!(sb, "\n")
+  Buf.append!(sb, s)
+  Buf.append!(sb, "\n")
   ()
 }
 
 let call1(name: Str, arg: Str) -> Str =
-  str-concat(name, str-concat("(", str-concat(arg, ")")))
+  String.concat(name, String.concat("(", String.concat(arg, ")")))
 
 let call2(name: Str, a: Str, b: Str) -> Str =
-  str-concat(name, str-concat("(", str-concat(a, str-concat(", ", str-concat(b, ")")))))
+  String.concat(name, String.concat("(", String.concat(a, String.concat(", ", String.concat(b, ")")))))
 
 let call3(name: Str, a: Str, b: Str, c: Str) -> Str =
-  str-concat(name, str-concat("(", str-concat(a, str-concat(", ", str-concat(b, str-concat(", ", str-concat(c, ")")))))))
+  String.concat(name, String.concat("(", String.concat(a, String.concat(", ", String.concat(b, String.concat(", ", String.concat(c, ")")))))))
 
 let write-deps(sb: StringBuffer, deps: List DepRec) -> Unit =
   match (deps)
@@ -181,14 +182,14 @@ let write-stubs(sb: StringBuffer, stubs: List Ast) -> Unit =
       }
 
 let dash(s: Str) -> Str =
-  if (str-byte-length(s) == 0) -> "-" | s
+  if (String.length(s) == 0) -> "-" | s
 
 let iface-text(iface: Iface) -> Str =
   match (iface)
     | Iface(src, deps, init, main-sym, main-ret, fns, ctors, stubs) ->
       {
-        let sb = sb-new()
-        add-line(sb, str-concat("mni(", show(iface-version), ")"))
+        let sb = Buf.new()
+        add-line(sb, String.concat("mni(", show(iface-version), ")"))
         add-line(sb, call1("src", show(src)))
         write-deps(sb, deps)
         add-line(sb, call1("init", quote-str(dash(init))))
@@ -196,7 +197,7 @@ let iface-text(iface: Iface) -> Str =
         write-fns(sb, fns)
         write-ctors(sb, ctors)
         write-stubs(sb, stubs)
-        sb-take-str!(sb)
+        Buf.take-str!(sb)
       }
 
 pub let write-iface(abs: Str, iface: Iface) -> Bool {
@@ -352,8 +353,8 @@ pub let remove-cache(abs: Str) -> Unit {
 let split-acc(s: Str, i: Int, start: Int, n: Int, acc: List Str) -> List Str =
   cond
     | i > n -> acc
-    | i == n || str-byte(s, i) == 10 ->
-      if (i == start) -> split-acc(s, i + 1, i + 1, n, acc) | split-acc(s, i + 1, i + 1, n, str-slice(s, start, i - start) :: acc)
+    | i == n || String.byte(i, s) == 10 ->
+      if (i == start) -> split-acc(s, i + 1, i + 1, n, acc) | split-acc(s, i + 1, i + 1, n, String.slice(start, i - start, s) :: acc)
     | else -> split-acc(s, i + 1, start, n, acc)
 
 let reverse-strs(xs: List Str, acc: List Str) -> List Str =
@@ -362,4 +363,4 @@ let reverse-strs(xs: List Str, acc: List Str) -> List Str =
     | x :: rest -> reverse-strs(rest, x :: acc)
 
 pub let split-lines(s: Str) -> List Str =
-  reverse-strs(split-acc(s, 0, 0, str-byte-length(s), []), [])
+  reverse-strs(split-acc(s, 0, 0, String.length(s), []), [])

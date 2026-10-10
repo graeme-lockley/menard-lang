@@ -6,6 +6,7 @@ import "./ast.mnd"
 import "./read.mnd"
 import "./print.mnd"
 import std/io
+import std/string as String
 
 let roundtrip(path: Str) -> Bool =
   match (read-file(path))
@@ -31,7 +32,7 @@ test "named string escapes decode to bytes" = {
     | Err(_) -> false
     | Ok(a) ->
       match (a)
-        | StrNode(s, _) -> str-byte-length(s) == 3 && str-byte(s, 0) == 10 && str-byte(s, 1) == 13 && str-byte(s, 2) == 9
+        | StrNode(s, _) -> String.length(s) == 3 && String.byte(0, s) == 10 && String.byte(1, s) == 13 && String.byte(2, s) == 9
         | _ -> false
 }
 
@@ -40,7 +41,7 @@ test "unicode escapes encode UTF-8" = {
     | Err(_) -> false
     | Ok(a) ->
       match (a)
-        | StrNode(s, _) -> str-byte-length(s) == 6 && str-byte(s, 0) == 195 && str-byte(s, 1) == 169 && str-byte(s, 2) == 240 && str-byte(s, 3) == 159 && str-byte(s, 4) == 152 && str-byte(s, 5) == 128
+        | StrNode(s, _) -> String.length(s) == 6 && String.byte(0, s) == 195 && String.byte(1, s) == 169 && String.byte(2, s) == 240 && String.byte(3, s) == 159 && String.byte(4, s) == 152 && String.byte(5, s) == 128
         | _ -> false
 }
 
@@ -55,7 +56,7 @@ test "dollar is not interpolation" = {
     | Err(_) -> false
     | Ok(a) ->
       match (a)
-        | StrNode(s, _) -> str-byte-length(s) == 2 && str-byte(s, 0) == 36 && str-byte(s, 1) == 120
+        | StrNode(s, _) -> String.length(s) == 2 && String.byte(0, s) == 36 && String.byte(1, s) == 120
         | _ -> false
 }
 

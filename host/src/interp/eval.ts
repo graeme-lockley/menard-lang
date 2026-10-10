@@ -181,8 +181,44 @@ function isTopDef(ast: Ast): boolean {
     nameEquals(h.name, "defrec") ||
     nameEquals(h.name, "variant") ||
     nameEquals(h.name, "alias") ||
-    nameEquals(h.name, "extern")
+    nameEquals(h.name, "extern") ||
+    nameEquals(h.name, "runtime")
   );
+}
+
+const STRING_RUNTIME: Record<string, string> = {
+  length: "str-byte-length",
+  byte: "string-byte",
+  slice: "string-slice",
+  concat: "str-concat",
+  "from-char": "char->str",
+};
+
+const MAP_RUNTIME: Record<string, string> = {
+  empty: "map-new",
+  lookup: "map-get",
+  set: "map-set",
+  has: "map-has",
+  size: "map-size",
+  keys: "map-keys",
+};
+
+const BUFFER_RUNTIME: Record<string, string> = {
+  new: "sb-new",
+  "append!": "sb-append!",
+  "append-byte!": "sb-append-byte!",
+  length: "sb-length",
+  "clear!": "sb-clear!",
+  "to-str": "sb-to-str",
+  "take-str!": "sb-take-str!",
+};
+
+function runtimeBuiltin(path: string, name: string): string | null {
+  const p = path.startsWith("/") ? path : `/${path}`;
+  if (p.endsWith("/stdlib/string.mnd")) return STRING_RUNTIME[name] ?? null;
+  if (p.endsWith("/stdlib/map.mnd")) return MAP_RUNTIME[name] ?? null;
+  if (p.endsWith("/stdlib/string-buffer.mnd")) return BUFFER_RUNTIME[name] ?? null;
+  return null;
 }
 
 /** C symbol on an `extern` line → the host builtin it wraps. */
@@ -218,6 +254,21 @@ function defineTop(ast: Ast, env: Env): void {
       { tag: "list", kind: ast.kind, elems: ast.elems.slice(1), span: ast.span },
       env,
     );
+    return;
+  }
+  if (nameEquals(hn.name, "runtime")) {
+    const namePart = ast.elems[1]!;
+    const name =
+      namePart.tag === "sym"
+        ? symName(namePart)
+        : namePart.tag === "list" && namePart.elems[0]?.tag === "sym"
+          ? symName(namePart.elems[0])
+          : "";
+    const builtin = runtimeBuiltin(definePath, name);
+    if (!builtin) {
+      throw new PanicError(`runtime unbound in interpreter: ${name}`, ast.span);
+    }
+    envSet(env, name, { tag: "builtin", name: builtin });
     return;
   }
   if (nameEquals(hn.name, "extern")) {
@@ -511,7 +562,7 @@ const FAST_BUILTIN = new Set([
   "+", "-", "*", "/", "%",
   "<", ">", "<=", ">=", "=",
   "deref",
-  "str-byte", "str-byte-length", "str-slice",
+  "str-byte", "string-byte", "str-byte-length", "str-slice", "string-slice",
 ]);
 
 function pow2Host(n: bigint): bigint {
@@ -1077,9 +1128,6 @@ function installBuiltins(env: Env): void {
     "f+", "f-", "f*", "f/",
     "show", "print", "println", "=", "compare", "dump",
     "ref", "deref",
-    "str-byte-length", "str-byte", "str-slice", "str-concat", "char->str",
-    "map-new", "map-get", "map-set", "map-has", "map-size", "map-keys",
-    "sb-new", "sb-append!", "sb-append-byte!", "sb-length", "sb-clear!", "sb-to-str", "sb-take-str!",
     "None", "Some", "Ok", "Err", "Nil", "Cons",
     "exit", "arg-count", "arg", "write", "read-file", "write-file",
     "getenv", "exists", "rename",
@@ -1141,6 +1189,23 @@ function listStrToArgv(v: Value): Uint8Array[] | null {
     out.push(head.bytes);
     cur = cur.payloads[1]!;
   }
+}
+
+function utf8OfScalar(cp: number): Uint8Array {
+  if (!Number.isInteger(cp) || cp < 0 || cp > 0x10ffff) {
+    return new Uint8Array([0xef, 0xbf, 0xbd]);
+  }
+  if (cp < 0x80) return new Uint8Array([cp]);
+  if (cp < 0x800) return new Uint8Array([0xc0 | (cp >> 6), 0x80 | (cp & 0x3f)]);
+  if (cp < 0x10000) {
+    return new Uint8Array([0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f)]);
+  }
+  return new Uint8Array([
+    0xf0 | (cp >> 18),
+    0x80 | ((cp >> 12) & 0x3f),
+    0x80 | ((cp >> 6) & 0x3f),
+    0x80 | (cp & 0x3f),
+  ]);
 }
 
 function applyBuiltin(
@@ -1211,28 +1276,36 @@ function applyBuiltin(
     }
     case "str-byte-length":
       return vInt(BigInt((args[0] as { bytes: Uint8Array }).bytes.length));
-    case "str-byte": {
-      const s = args[0] as { bytes: Uint8Array };
-      const i = Number((args[1] as { value: bigint }).value);
+    case "str-byte":
+    case "string-byte": {
+      const swapped = name === "string-byte";
+      const s = args[swapped ? 1 : 0] as { bytes: Uint8Array };
+      const i = Number((args[swapped ? 0 : 1] as { value: bigint }).value);
       return vInt(BigInt(s.bytes[i] ?? 0));
     }
-    case "str-slice": {
-      const s = args[0] as { bytes: Uint8Array };
-      const start = Number((args[1] as { value: bigint }).value);
-      const len = Number((args[2] as { value: bigint }).value);
+    case "str-slice":
+    case "string-slice": {
+      const swapped = name === "string-slice";
+      const s = args[swapped ? 2 : 0] as { bytes: Uint8Array };
+      const start = Number((args[swapped ? 0 : 1] as { value: bigint }).value);
+      const len = Number((args[swapped ? 1 : 2] as { value: bigint }).value);
       return vStr(s.bytes.slice(start, start + len));
     }
     case "str-concat": {
-      const a = (args[0] as { bytes: Uint8Array }).bytes;
-      const b = (args[1] as { bytes: Uint8Array }).bytes;
-      const out = new Uint8Array(a.length + b.length);
-      out.set(a);
-      out.set(b, a.length);
-      return vStr(out);
+      if (args.length < 1) throw new PanicError("str-concat expects at least 1 argument", span);
+      let acc = (args[0] as { bytes: Uint8Array }).bytes;
+      for (let i = 1; i < args.length; i++) {
+        const b = (args[i] as { bytes: Uint8Array }).bytes;
+        const out = new Uint8Array(acc.length + b.length);
+        out.set(acc);
+        out.set(b, acc.length);
+        acc = out;
+      }
+      return vStr(acc);
     }
     case "char->str": {
-      const cp = (args[0] as { value: number }).value;
-      return vStr(new TextEncoder().encode(String.fromCodePoint(cp)));
+      const raw = args[0] as { value: number | bigint };
+      return vStr(utf8OfScalar(Number(raw.value)));
     }
     case "map-new":
       return { tag: "map", map: mapNew() };

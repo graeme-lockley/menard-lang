@@ -1,8 +1,8 @@
 ; Desugar — expands `and`/`or`/`cond`/`when`/`while` into `if`/`do`/`loop`/
 ; `recur`, `[e1 e2 …]` / `[]` into a `Cons`/`Nil` chain, and open-arity
-; calls of `+` `*` `f+` `f*` `str-concat` `-` `f-` `/` `f/` `<` `>` `<=`
+; calls of `+` `*` `f+` `f*` `-` `f-` `/` `f/` `<` `>` `<=`
 ; `>=` `=` into the binary intrinsics (see the sections below). A bracket
-; list in a `defn`/`defrec`/`variant` name form is a type-parameter list
+; list in a `defn`/`defrec`/`variant`/`runtime` name form is a type-parameter list
 ; and is left alone. Mirrors host/src/desugar/desugar.ts.
 ;
 ; The host threads a single mutable `Diagnostic[]` accumulator through every
@@ -19,6 +19,7 @@
 ; host's chronological (first-error-first) order.
 
 import "../reader/ast.mnd"
+import std/string as String
 
 ; Re-export shim: see reader/casing.mnd for why this is needed — a `pub`
 ; signature here (desugar-form/desugar-all, DesugarError's own fields) may
@@ -92,7 +93,7 @@ let cons-chain(elems: List Ast, sp: Span) -> Ast =
 
 let is-decl-keyword(ast: Ast) -> Bool =
   match (ast)
-    | SymNode(n, _) -> n == "defn" || n == "defrec" || n == "variant"
+    | SymNode(n, _) -> n == "defn" || n == "defrec" || n == "variant" || n == "runtime"
     | _ -> false
 
 ; `(name [params…])` — the bracket list is type parameters.
@@ -135,7 +136,7 @@ let desugar-paren-head(head: Ast, elems: List Ast, sp: Span, diags: Ref (List De
 
 let desugar-paren-named(name: Str, elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
   cond
-    | name == "defn" || name == "defrec" || name == "variant" -> desugar-decl(elems, sp, diags)
+    | name == "defn" || name == "defrec" || name == "variant" || name == "runtime" -> desugar-decl(elems, sp, diags)
     | name == "pub" -> desugar-pub(elems, sp, diags)
     | name == "and" -> desugar-and(elems, sp, diags)
     | name == "or" -> desugar-or(elems, sp, diags)
@@ -227,12 +228,12 @@ let desugar-or-rest(x: Ast, rest: List Ast, sp: Span, diags: Ref (List DesugarEr
 ; ---------------------------------------------------------------------------
 ; Open-arity calls. Two arguments stay the binary intrinsic. More than two
 ; left-fold into that intrinsic (`/` and the comparisons require two).
-; One argument of `+`/`*`/`f+`/`f*`/`str-concat` is the argument itself.
+; One argument of `+`/`*`/`f+`/`f*` is the argument itself.
 ; One argument of `-`/`f-` is negation. A chain `(< a b c)` is
 ; `(and (< a b) (< b c))`, so each middle operand is evaluated twice.
 
 let is-fold-op(name: Str) -> Bool =
-  name == "+" || name == "*" || name == "f+" || name == "f*" || name == "str-concat"
+  name == "+" || name == "*" || name == "f+" || name == "f*"
 
 let is-sub-op(name: Str) -> Bool =
   name == "-" || name == "f-"
@@ -252,7 +253,7 @@ let desugar-operator(name: Str, elems: List Ast, sp: Span, diags: Ref (List Desu
     | else -> ParenNode(map-desugar(elems, diags), sp)
 
 let desugar-arity-fail(name: Str, how: Str, fallback: Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast {
-  push-diag!(diags, sp, "E_DESUGAR_ARITY", str-concat(name, " expects ", how))
+  push-diag!(diags, sp, "E_DESUGAR_ARITY", String.concat(name, " expects ", how))
   fallback
 }
 

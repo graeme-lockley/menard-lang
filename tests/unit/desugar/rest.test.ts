@@ -13,7 +13,7 @@ let sum(...xs: List Int) -> Int =
 let join-more(sep: Str, head: Str, tail: List Str) -> Str =
   match (tail)
     | [] -> head
-    | Cons(h, t) -> join-more(sep, str-concat(head, sep, h), t)
+    | Cons(h, t) -> join-more(sep, String.concat(head, sep, h), t)
 
 let join(sep: Str, ...parts: List Str) -> Str =
   match (parts)
@@ -22,7 +22,7 @@ let join(sep: Str, ...parts: List Str) -> Str =
 `;
 
 function truth(expr: string): void {
-  const r = run(`${lib}\n${expr}`);
+  const r = run(`import std/string as String\n${lib}\n${expr}`, { path: "rest.mnd", host: createHost() });
   expect(r.ok).toBe(true);
   if (r.ok) expect(r.value).toEqual({ tag: "bool", value: true });
 }

@@ -208,6 +208,7 @@ MnWord mn_str_concat(MnWord a, MnWord b);
 MnWord mn_str_byte_length(MnWord s);
 MnWord mn_str_byte(MnWord s, MnWord i_tagged);
 MnWord mn_str_slice(MnWord s, MnWord start_t, MnWord end_t);
+MnWord mn_char_to_str(MnWord c);
 void mn_print_str(MnWord s);
 /* Write all bytes to a tagged Int descriptor; returns Result Unit IoError. */
 MnWord mn_write(MnWord fd_tagged, MnWord s);
@@ -219,6 +220,7 @@ MnWord mn_sb_length(MnWord sb);
 MnWord mn_sb_append(MnWord sb, MnWord s);
 MnWord mn_sb_append_byte(MnWord sb, MnWord b_tagged);
 MnWord mn_sb_take_str(MnWord sb);
+MnWord mn_sb_clear(MnWord sb);
 MnWord mn_sb_to_str(MnWord sb);
 /*
  * Module slots. A non-integer top-level `let` is evaluated once from the

@@ -48,15 +48,15 @@ describe("extern seam", () => {
 
 const publishedBang = new Set([
   "set!",
-  "sb-append!",
-  "sb-append-byte!",
-  "sb-append-show!",
-  "sb-clear!",
-  "sb-take-str!",
+  "append!",
+  "append-byte!",
+  "append-show!",
+  "clear!",
+  "take-str!",
 ]);
 
 describe("published mutation names", () => {
-  test("stdlib uses only the five ! names", () => {
+  test("stdlib uses only the published ! names", () => {
     const files: string[] = [];
     mndFiles(join(ROOT, "stdlib"), files);
     const offenders: string[] = [];

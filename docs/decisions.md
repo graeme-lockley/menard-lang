@@ -64,8 +64,8 @@ bearing choices; everything in the specification follows from them.
 | 30 | **`!` marks observable mutation only; the OS boundary is marked by `extern`, not by a name** | One glyph for two ideas meant neither was reliable, and `!`-for-purity was a gesture at effects the language refuses (no propagation, no effect system) | The convention covers one special form and four functions and is still unchecked; the ambient audit moves from a naming habit to a lintable module boundary |
 | 31 | **`Map` requires orderable keys and is persistent** | Deterministic iteration by construction; value semantics preserved; deletes hash from the agreement surface | HAMT in the runtime (~300 lines ×2); no `Ref`/`Fn` keys |
 | 32 | **No `Byte` type; `Char` is a scalar value; `Str` is arbitrary bytes** | A `Byte` is a second integer type with the same agreement cost as `Int32`; bytes are small `Int`s with a documented range | Byte/character confusion is a documented-range question, not a type error |
-| 33 | **`StringBuffer` is a built-in reference type** (§2.8.2) | It needs in-place mutation, and the compiler is its hot-path client; `sb-take-str!` is free because `Str` and the buffer share one payload shape | ~200 lines of C and ~200 of TS, implemented twice; a second mutation path to keep out of output |
-| 34 | **Copy-on-write after a non-destructive `sb-to-str`** | A shared backing store means an append could otherwise mutate an immutable `Str` already held by a caller | One extra copy on the first append after a conversion; a rule the interpreter and the runtime must both implement |
+| 33 | **`StringBuffer` is a built-in reference type** (§2.8.2) | It needs in-place mutation, and the compiler is its hot-path client; `Buf.take-str!` is free because `Str` and the buffer share one payload shape | ~200 lines of C and ~200 of TS, implemented twice; a second mutation path to keep out of output |
+| 34 | **Copy-on-write after a non-destructive `Buf.to-str`** | A shared backing store means an append could otherwise mutate an immutable `Str` already held by a caller | One extra copy on the first append after a conversion; a rule the interpreter and the runtime must both implement |
 | 35 | **Debug output is a separate printer — `dump` — writing only to fd 2, with no way to become a value** | Debugging needs to see `Ref`, `Fn` and `StringBuffer` contents, which `show` must refuse; isolation by *type*, not by convention, means a forgotten `dump` cannot break the fixed point | A sixth compiler-known intrinsic once `println` is counted; the loose policy in the derive engine; two kinds of text on stderr with opposite determinism rules |
 | 36 | **Menard has no `null`; the empty word is an allocator sentinel, not a value — kept, and paired with an *asserted* no-partial-publication discipline** | Filling an object's fields may allocate, so the collector can run mid-construction; without a distinguished word an unwritten slot holds a stale pointer or an even non-pointer, traced silently in every native build. The word converts that into a wasted read; the discipline — and its heap-verify assertion — is what stops the collector *depending* on it | One extra test in the marking loop; one `memset` per recycled object; one non-value word in the representation that must be kept out of the language, out of output, and out of the debug printer |
 | 37 | **Process spawning is admitted, in argv-vector form only; shell strings and `fork` are refused permanently** | The build driver must be Menard, or the language's own integration test lives in a shell script; argv is data the compiler can see and check, whereas a shell string is unbounded ambient state in one string; and `fork` copies a GC's heap and collector state | ~310 lines implemented twice; a `SpawnError` taxonomy to keep aligned; a non-hermetic test tier; one more way for a path to reach the artifact |
@@ -132,7 +132,7 @@ non-printable bytes. The rest of that encoding does not fit a Menard `Str`:
 - **Surrogates are rejected.** Kestrel's JavaScript lexer can keep a lone
   surrogate in a UTF-16 string. Menard has no encoding for one: `Char` is a
   scalar, and `\u{…}` writes UTF-8. `U+D800`–`U+DFFF` is a lexical error,
-  the same exclusion that makes `char->str` total.
+  the same exclusion that makes `String.from-char` total.
 - **`show` stays raw.** The canonical spelling has to be total on invalid
   UTF-8. Emitting `\n` / `\u{…}` from `show` would drop that. Source escapes
   and the `show` spelling are different jobs; several source spellings may
@@ -266,12 +266,12 @@ He is correct that this is good for the collector. But the gain is not collector
 throughput — it is **allocation deletion**, and the two are not the same shape:
 
 > `Str` is not interned, so without this **every evaluation** of a literal
-> allocates. `str-concat("foo", x)` in a loop allocates `"foo"` on every
+> allocates. `String.concat("foo", x)` in a loop allocates `"foo"` on every
 > iteration.
 
 A literal is a constant, and a constant that is rebuilt on every evaluation is
 the purest form of waste. The same holds for a nullary constructor: `(None)` is
-returned by every failed lookup in `map-get` and `arr-nth`, which in a compiler
+returned by every failed lookup in `Map.lookup` and `arr-nth`, which in a compiler
 is a hot path.
 
 So the reason to record is: **a compiler's most frequent allocations are its
@@ -593,14 +593,14 @@ v0.5.5 gave one suffix to two different ideas:
 
 | Was marked `!` | The idea |
 |---|---|
-| `set!`, `sb-append!`, `sb-clear!`, `sb-take-str!` | **Mutation of a value reachable from an argument** |
+| `set!`, `Buf.append!`, `Buf.clear!`, `Buf.take-str!` | **Mutation of a value reachable from an argument** |
 | `print!`, `write!`, `dump!`, `read-file!`, `exit!`, `spawn!`, … | **Any contact with the outside world** |
 
 `!` now marks the first and only the first. Precisely:
 
 > `!` marks a call that changes state the caller can still observe afterwards:
 > mutation of a value reachable from an argument. *Observable* is the operative
-> word — memoisation the caller cannot see does not qualify (`sb-to-str`), and
+> word — memoisation the caller cannot see does not qualify (`Buf.to-str`), and
 > neither does talking to the operating system, because a stream is not a value
 > you hold.
 
@@ -621,13 +621,13 @@ Withdrawing the half is the fix, not a compromise.
 
 ### The payoff is a pair the spec already cared about
 
-`sb-to-str` **loses** its `!`; `sb-take-str!` **keeps** it.
+`Buf.to-str` **loses** its `!`; `Buf.take-str!` **keeps** it.
 
 That is exactly the distinction a reader needs — *who owns the backing store?* —
 and it is precisely the distinction a blanket marker destroyed by marking both.
 This is ADR 34's copy-on-write rule and the v0.5.2 exchange about consuming
 versus non-destructive conversion, now visible in the names rather than only in
-the prose. Three revisions of argument about `sb-to-str!` versus `sb-take-str!`
+the prose. Three revisions of argument about `Buf.to-str!` versus `Buf.take-str!`
 were, in retrospect, an argument about the `!` rule.
 
 The full population of `!` in the language is therefore **one special form and
@@ -688,9 +688,9 @@ Renames: `print!`→`print`, `write!`→`write`, `dump!`→`dump`,
 `append-file`, `read-stdin!`→`read-stdin`, `list-dir!`→`list-dir`,
 `getenv!`→`getenv`, `exists!`→`exists`, `remove!`→`remove`, `rename!`→`rename`,
 `exit!`→`exit`, `spawn!`→`spawn`, `spawn-capture!`→`spawn-capture`,
-`sb-to-str!`→`sb-to-str`, `find-on-path!`→`find-on-path`. Unchanged: `set!`,
-`sb-append!`, `sb-append-byte!`, `sb-clear!`, `sb-take-str!`,
-`sb-append-show!`.
+`Buf.to-str!`→`Buf.to-str`, `find-on-path!`→`find-on-path`. Unchanged: `set!`,
+`Buf.append!`, `Buf.append-byte!`, `Buf.clear!`, `Buf.take-str!`,
+`Buf.append-show!`.
 
 **Sizing unchanged** — the change removes a suffix and moves a boundary marker
 onto a mechanism that already existed.
@@ -1019,9 +1019,9 @@ checking.
 
 Three routes existed even then, none needing a language change:
 
-- `write!(1, sb-to-str!(sb))` — contents, byte-exact, stdout;
-- `show(sb-to-str!(sb))` — quoted form, for a message;
-- `sb-length` / `str-byte` — raw inspection.
+- `write!(1, Buf.to-str!(sb))` — contents, byte-exact, stdout;
+- `show(Buf.to-str!(sb))` — quoted form, for a message;
+- `Buf.length` / `String.byte` — raw inspection.
 
 So the *need* was already met. What was missing was a printer for the cases where
 the type system deliberately refuses.
@@ -1044,8 +1044,8 @@ Therefore:
 - And the practical one: **showability composes.** A showable buffer makes every
   record, list and map containing one showable, so a buffer's *current contents*
   could reach an emitted byte several files from the mistake. Crossing that
-  boundary explicitly is a deliberate, greppable act (`sb-take-str!`, and since
-  v0.5.6 `sb-to-str` unmarked); `show` would be silent.
+  boundary explicitly is a deliberate, greppable act (`Buf.take-str!`, and since
+  v0.5.6 `Buf.to-str` unmarked); `show` would be silent.
 
 Note what this does *not* claim: it is not that a showable buffer would
 necessarily break determinism — a deterministic program has deterministic buffer
@@ -1185,9 +1185,9 @@ explicitly: an operation belongs in §2.8.2 when it needs in-place mutation **an
 the compiler itself is a client that needs it on a hot path**. A criterion with a
 named client, not an open door.
 
-**What the built-in actually buys:** `sb-take-str!` is `O(1)` (shared payload
+**What the built-in actually buys:** `Buf.take-str!` is `O(1)` (shared payload
 shape → pointer move, saving the largest allocation the compiler makes);
-`sb-to-str!` is `O(1)` on repeat (cached); and append allocates no cons cell (the
+`Buf.to-str!` is `O(1)` on repeat (cached); and append allocates no cons cell (the
 dominant cost under a bump-allocating nursery).
 
 **And the honest floor**, recorded so the built-in is not mistaken for necessity:
@@ -1202,15 +1202,15 @@ prompt produced a better shape. Consuming means **use-after-finish**, an affine
 discipline the language has no machinery for. Instead:
 
 ```
-sb-to-str!(...)   ; non-destructive, cached      → sb-to-str   since v0.5.6
-sb-take-str!()    ; transfers storage; buffer becomes empty
+Buf.to-str!(...)   ; non-destructive, cached      → Buf.to-str   since v0.5.6
+Buf.take-str!()    ; transfers storage; buffer becomes empty
 ```
 
-`sb-take-str!` transfers and leaves the buffer **empty and valid** — no hazard,
+`Buf.take-str!` transfers and leaves the buffer **empty and valid** — no hazard,
 total function, and the `!` is honest because it does mutate.
 
 **And this pair is what eventually broke the `!` rule.** Three revisions argued
-about `sb-to-str!` versus `sb-take-str!` while both carried a `!` that
+about `Buf.to-str!` versus `Buf.take-str!` while both carried a `!` that
 distinguished nothing. v0.5.6's rule is the resolution: the non-destructive one
 loses the marker, and the pair now reads the way it always should have.
 
@@ -1218,9 +1218,9 @@ The static-objects entry adds one clause to this pair: **the backing store is
 always heap-owned**. Sharing with a `Str` is what copy-on-write is for; adopting a
 *static* payload would mean writing to `.rodata`.
 
-### ADR 34: copy-on-write after a non-destructive `sb-to-str!`
+### ADR 34: copy-on-write after a non-destructive `Buf.to-str!`
 
-Because a `Str` handed out by `sb-to-str!` **shares** the backing store, the
+Because a `Str` handed out by `Buf.to-str!` **shares** the backing store, the
 buffer's next append must **copy before writing in place**; otherwise an append
 mutates an immutable `Str` a caller already holds. A **semantic** rule, not an
 implementation detail, because it is implemented twice.

@@ -3,13 +3,15 @@
 
 import std/fs
 import std/sys
+import std/string as String
+import std/string-buffer as Buf
 
 ; The escape sequence for codes, which already includes the leading bracket.
 let esc(codes: Str) -> Str {
-  let sb = sb-new()
-  sb-append-byte!(sb, 27)
-  sb-append!(sb, codes)
-  sb-take-str!(sb)
+  let sb = Buf.new()
+  Buf.append-byte!(sb, 27)
+  Buf.append!(sb, codes)
+  Buf.take-str!(sb)
 }
 
 ; True when fd is a terminal and NO_COLOR is unset.
@@ -22,4 +24,4 @@ pub let tty-color(fd: Int) -> Bool =
 ; s wrapped in an ANSI sequence when on is true, otherwise s unchanged.
 ; @test paint(false, "[31m", "hi") => "hi"
 pub let paint(on: Bool, code: Str, s: Str) -> Str =
-  if (on) -> str-concat(esc(code), s, esc("[0m")) | s
+  if (on) -> String.concat(esc(code), s, esc("[0m")) | s

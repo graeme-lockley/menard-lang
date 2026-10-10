@@ -40,11 +40,12 @@ describe("spawn (real child)", () => {
   test("NUL in an argument is InvalidArgument", () => {
     const real = createRealHost({ spawnEnabled: true });
     const r = runProc(
-      `{
-  let sb = sb-new()
-  sb-append!(sb, "a")
-  sb-append-byte!(sb, 0)
-  spawn(Cons(sb-to-str(sb), Nil()))
+      `import std/string-buffer as Buf
+{
+  let sb = Buf.new()
+  Buf.append!(sb, "a")
+  Buf.append-byte!(sb, 0)
+  spawn(Cons(Buf.to-str(sb), Nil()))
 }`,
       real,
     );

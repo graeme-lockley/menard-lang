@@ -1,8 +1,9 @@
 import std/console
+import std/string as String
 
 test "paint is a no-op when color is off" = paint(false, "[31m", "hi") == "hi"
 
 test "paint wraps the text when color is on" = has-color(paint(true, "[31m", "hi")) && true
 
 let has-color(s: Str) -> Bool =
-  str-byte-length(s) > 2 && str-byte(s, 0) == 27
+  String.length(s) > 2 && String.byte(0, s) == 27

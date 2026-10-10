@@ -63,8 +63,6 @@ function installBuiltins(env: TypeEnv): void {
   const B = prim("Bool");
   const S = prim("Str");
   const U = prim("Unit");
-  const C = prim("Char");
-  const SB = prim("StringBuffer");
 
   const binInt = tFn([I, I], I);
   const binIntB = tFn([I, I], B);
@@ -117,47 +115,6 @@ function installBuiltins(env: TypeEnv): void {
     params: ["a"],
     type: tFn([tRef({ tag: "param", name: "a" })], { tag: "param", name: "a" }),
   });
-
-  // Str / Char
-  env.values.set("str-byte-length", { params: [], type: tFn([S], I) });
-  env.values.set("str-byte", { params: [], type: tFn([S, I], I) });
-  env.values.set("str-slice", { params: [], type: tFn([S, I, I], S) });
-  env.values.set("str-concat", { params: [], type: tFn([S, S], S) });
-  env.values.set("char->str", { params: [], type: tFn([C], S) });
-
-  // Map
-  const K = { tag: "param" as const, name: "k" };
-  const V = { tag: "param" as const, name: "v" };
-  env.values.set("map-new", { params: ["k", "v"], type: tFn([], tMap(K, V)) });
-  env.values.set("map-get", {
-    params: ["k", "v"],
-    type: tFn([tMap(K, V), K], tMaybe(V)),
-  });
-  env.values.set("map-set", {
-    params: ["k", "v"],
-    type: tFn([tMap(K, V), K, V], tMap(K, V)),
-  });
-  env.values.set("map-has", {
-    params: ["k", "v"],
-    type: tFn([tMap(K, V), K], B),
-  });
-  env.values.set("map-size", {
-    params: ["k", "v"],
-    type: tFn([tMap(K, V)], I),
-  });
-  env.values.set("map-keys", {
-    params: ["k", "v"],
-    type: tFn([tMap(K, V)], tList(K)),
-  });
-
-  // StringBuffer
-  env.values.set("sb-new", { params: [], type: tFn([], SB) });
-  env.values.set("sb-append!", { params: [], type: tFn([SB, S], U) });
-  env.values.set("sb-append-byte!", { params: [], type: tFn([SB, I], U) });
-  env.values.set("sb-length", { params: [], type: tFn([SB], I) });
-  env.values.set("sb-clear!", { params: [], type: tFn([SB], U) });
-  env.values.set("sb-to-str", { params: [], type: tFn([SB], S) });
-  env.values.set("sb-take-str!", { params: [], type: tFn([SB], S) });
 
   // Maybe / Result / List — same registration as user variants: ctors + values
   const a: Type = { tag: "param", name: "a" };
@@ -580,6 +537,7 @@ export function typecheckForms(
     collectDef(env, f);
     collectDefnScheme(env, f);
     collectExternScheme(env, f);
+    collectRuntimeScheme(env, f);
   }
   const topLocal = new Map<string, Type>();
   const topSubst: Subst = new Map();
@@ -658,7 +616,7 @@ function checkPubPrivateTypes(env: TypeEnv, forms: Ast[], exports: Set<string>):
   for (const f of forms) {
     if (f.tag !== "list" || f.elems.length === 0) continue;
     const hn = symStr(f.elems[0]!);
-    if (hn !== "defn" && hn !== "extern") continue;
+    if (hn !== "defn" && hn !== "extern" && hn !== "runtime") continue;
     const names = hn === "defn"
       ? (() => {
           const p = parseDefn(env, f, false);
@@ -708,6 +666,26 @@ function nominalNamesInType(t: Type): string[] {
     default:
       return [];
   }
+}
+
+function collectRuntimeScheme(env: TypeEnv, ast: Ast): void {
+  if (ast.tag !== "list" || ast.elems.length === 0) return;
+  if (symStr(ast.elems[0]!) === "pub" && ast.elems.length >= 2) {
+    collectRuntimeScheme(env, {
+      tag: "list",
+      kind: ast.kind,
+      elems: ast.elems.slice(1),
+      span: ast.span,
+    });
+    return;
+  }
+  if (symStr(ast.elems[0]!) !== "runtime") return;
+  collectExternScheme(env, {
+    tag: "list",
+    kind: ast.kind,
+    elems: [{ tag: "sym", name: new TextEncoder().encode("extern"), span: ast.span }, ...ast.elems.slice(1)],
+    span: ast.span,
+  });
 }
 
 function collectExternScheme(env: TypeEnv, ast: Ast): void {
@@ -853,7 +831,7 @@ function typecheckTop(
     );
     return;
   }
-  if (hn === "alias" || hn === "defrec" || hn === "variant" || hn === "extern") return;
+  if (hn === "alias" || hn === "defrec" || hn === "variant" || hn === "extern" || hn === "runtime") return;
   if (hn === "defn") {
     typecheckDefn(env, ast);
     return;
@@ -1497,7 +1475,7 @@ function inferApp(
   const ret = freshVar(env);
   // unify callee with fn of arg types
   if (!unify(env, callee, tFn(args, ret), subst, ast.span)) {
-    // try arity message already emitted
+    // arity or argument mismatch already reported
   }
   if (hn === "show") {
     const a0 = applySubst(args[0] ?? freshVar(env), subst);
@@ -1521,7 +1499,7 @@ function inferApp(
       );
     }
   }
-  if (hn === "map-new" || hn === "map-set" || hn === "map-get") {
+  if (hn === "empty" || hn === "set" || hn === "lookup") {
     // Map keys must be orderable — checked when key type known
   }
   return applySubst(ret, subst);

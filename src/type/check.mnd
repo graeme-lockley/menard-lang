@@ -28,6 +28,8 @@ import "../reader/ast.mnd"
 import "../desugar/rest.mnd"
 import "./types.mnd"
 import std/list
+import std/string as String
+import std/map as Map
 
 ; Re-export shim — see reader/casing.mnd for why this is needed: a `pub`
 ; signature (typecheck-forms, below) may not mention a private nominal
@@ -119,7 +121,7 @@ record PrintNote {
 
 let print-notes = ref([])
 let print-functions = ref([])
-let print-names = ref(map-new())
+let print-names = ref(Map.empty())
 
 ; Remember which slot a project form selected.
 let note-project!(sp: Span, index: Int) -> Unit =
@@ -139,28 +141,28 @@ let find-proj-note(sp: Span, notes: List ProjNote) -> Maybe ProjNote =
       if (proj-note-matches(sp, note)) -> Some(note) | find-proj-note(sp, rest)
 
 let value-get(env: TypeEnv, name: Str) -> Maybe Scheme =
-  map-get(deref(env-values(env)), name)
+  Map.lookup(deref(env-values(env)), name)
 
 let value-set(env: TypeEnv, name: Str, s: Scheme) -> Unit =
-  set!(env-values(env), map-set(deref(env-values(env)), name, s))
+  set!(env-values(env), Map.set(deref(env-values(env)), name, s))
 
 let type-get(env: TypeEnv, name: Str) -> Maybe TypeDef =
-  map-get(deref(env-types(env)), name)
+  Map.lookup(deref(env-types(env)), name)
 
 let type-set(env: TypeEnv, name: Str, td: TypeDef) -> Unit =
-  set!(env-types(env), map-set(deref(env-types(env)), name, td))
+  set!(env-types(env), Map.set(deref(env-types(env)), name, td))
 
 let ctor-get(env: TypeEnv, name: Str) -> Maybe CtorInfo =
-  map-get(deref(env-ctors(env)), name)
+  Map.lookup(deref(env-ctors(env)), name)
 
 let ctor-set(env: TypeEnv, name: Str, c: CtorInfo) -> Unit =
-  set!(env-ctors(env), map-set(deref(env-ctors(env)), name, c))
+  set!(env-ctors(env), Map.set(deref(env-ctors(env)), name, c))
 
 let alias-get(env: TypeEnv, name: Str) -> Maybe Type =
-  map-get(deref(env-aliases(env)), name)
+  Map.lookup(deref(env-aliases(env)), name)
 
 let alias-set(env: TypeEnv, name: Str, t: Type) -> Unit =
-  set!(env-aliases(env), map-set(deref(env-aliases(env)), name, t))
+  set!(env-aliases(env), Map.set(deref(env-aliases(env)), name, t))
 
 ; The one true mutating primitive in this file, named the way
 ; desugar.mnd's `push-diag!` is: it is the diagnostic accumulator.
@@ -190,8 +192,8 @@ let is-sym(ast: Ast, name: Str) -> Bool =
     | None -> false
 
 let strip-trailing-colon(raw: Str) -> Str {
-  let n = str-byte-length(raw)
-  if (n > 0 && str-byte(raw, n - 1) == 58) -> str-slice(raw, 0, n - 1) | raw
+  let n = String.length(raw)
+  if (n > 0 && String.byte(n - 1, raw) == 58) -> String.slice(0, n - 1, raw) | raw
 }
 
 let field-name(ast: Ast) -> Maybe Str =
@@ -234,33 +236,6 @@ let install-ref-ops(env: TypeEnv) -> Unit {
   value-set(env, "deref", Scheme(["a"], t-fn([t-ref(TParam("a"))], TParam("a"))))
 }
 
-let install-str-ops(env: TypeEnv) -> Unit {
-  value-set(env, "str-byte-length", Scheme([], t-fn([t-str()], t-int())))
-  value-set(env, "str-byte", Scheme([], t-fn([t-str(), t-int()], t-int())))
-  value-set(env, "str-slice", Scheme([], t-fn([t-str(), t-int(), t-int()], t-str())))
-  value-set(env, "str-concat", Scheme([], t-fn([t-str(), t-str()], t-str())))
-  value-set(env, "char->str", Scheme([], t-fn([t-char()], t-str())))
-}
-
-let install-map-ops(env: TypeEnv) -> Unit {
-  value-set(env, "map-new", Scheme(["k", "v"], t-fn([], t-map(TParam("k"), TParam("v")))))
-  value-set(env, "map-get", Scheme(["k", "v"], t-fn([t-map(TParam("k"), TParam("v")), TParam("k")], t-maybe(TParam("v")))))
-  value-set(env, "map-set", Scheme(["k", "v"], t-fn([t-map(TParam("k"), TParam("v")), TParam("k"), TParam("v")], t-map(TParam("k"), TParam("v")))))
-  value-set(env, "map-has", Scheme(["k", "v"], t-fn([t-map(TParam("k"), TParam("v")), TParam("k")], t-bool())))
-  value-set(env, "map-size", Scheme(["k", "v"], t-fn([t-map(TParam("k"), TParam("v"))], t-int())))
-  value-set(env, "map-keys", Scheme(["k", "v"], t-fn([t-map(TParam("k"), TParam("v"))], t-list(TParam("k")))))
-}
-
-let install-sb-ops(env: TypeEnv) -> Unit {
-  value-set(env, "sb-new", Scheme([], t-fn([], t-string-buffer())))
-  value-set(env, "sb-append!", Scheme([], t-fn([t-string-buffer(), t-str()], t-unit())))
-  value-set(env, "sb-append-byte!", Scheme([], t-fn([t-string-buffer(), t-int()], t-unit())))
-  value-set(env, "sb-length", Scheme([], t-fn([t-string-buffer()], t-int())))
-  value-set(env, "sb-clear!", Scheme([], t-fn([t-string-buffer()], t-unit())))
-  value-set(env, "sb-to-str", Scheme([], t-fn([t-string-buffer()], t-str())))
-  value-set(env, "sb-take-str!", Scheme([], t-fn([t-string-buffer()], t-str())))
-}
-
 let install-maybe(env: TypeEnv) -> Unit {
   type-set(env, "Maybe", VariantDef("Maybe", ["a"], [VariantCtor("None", Nil()), VariantCtor("Some", TParam("a") :: Nil())]))
   ctor-set(env, "None", CtorInfo("Maybe", [], ["a"]))
@@ -289,16 +264,13 @@ let install-builtins(env: TypeEnv) -> Unit {
   install-arith(env)
   install-intrinsics(env)
   install-ref-ops(env)
-  install-str-ops(env)
-  install-map-ops(env)
-  install-sb-ops(env)
   install-maybe(env)
   install-result(env)
   install-list-type(env)
 }
 
 let empty-env() -> TypeEnv {
-  let env = TypeEnv(ref(map-new()), ref(map-new()), ref(map-new()), ref(map-new()), ref(0), ref([]), ref(map-new()), ref(None()))
+  let env = TypeEnv(ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(0), ref([]), ref(Map.empty()), ref(None()))
   install-builtins(env)
   env
 }
@@ -320,7 +292,7 @@ let apply-subst(env: TypeEnv, t: Type) -> Type =
     | _ -> t
 
 let apply-subst-var(env: TypeEnv, t: Type, id: Int) -> Type =
-  match (map-get(deref(env-subst(env)), id))
+  match (Map.lookup(deref(env-subst(env)), id))
     | Some(bound) -> apply-subst(env, bound)
     | None -> t
 
@@ -369,7 +341,7 @@ let unify-var(env: TypeEnv, id: Int, tb: Type, span: Span) -> Bool =
       }
     | else ->
       {
-        set!(env-subst(env), map-set(deref(env-subst(env)), id, tb))
+        set!(env-subst(env), Map.set(deref(env-subst(env)), id, tb))
         true
       }
 
@@ -434,7 +406,7 @@ let unify-fn-params(env: TypeEnv, pa: List Type, pb: List Type, ra: Type, rb: Ty
       if (unify-list-pairwise(env, pa, pb, span)) -> unify(env, ra, rb, span) | false
     | else ->
       {
-        err!(env, "E_TYPE_ARITY", str-concat("function arity mismatch: expected ", show(length(pa)), ", found ", show(length(pb))), span)
+        err!(env, "E_TYPE_ARITY", String.concat("function arity mismatch: expected ", show(length(pa)), ", found ", show(length(pb))), span)
         false
       }
 
@@ -459,13 +431,13 @@ let unify-nominal-same(env: TypeEnv, na: Str, aa: List Type, ka: Str, nb: Str, a
         | length(aa) == length(ab) -> unify-list-pairwise(env, aa, ab, span)
         | else ->
           {
-            err!(env, "E_TYPE_MISMATCH", str-concat("type argument count mismatch for ", na), span)
+            err!(env, "E_TYPE_MISMATCH", String.concat("type argument count mismatch for ", na), span)
             false
           }
     | else -> unify-mismatch(env, TNominal(na, aa, ka), TNominal(nb, ab, kb), span)
 
 let unify-mismatch(env: TypeEnv, ta: Type, tb: Type, span: Span) -> Bool {
-  err!(env, "E_TYPE_MISMATCH", str-concat("expected ", type-show(ta), ", found ", type-show(tb)), span)
+  err!(env, "E_TYPE_MISMATCH", String.concat("expected ", type-show(ta), ", found ", type-show(tb)), span)
   false
 }
 
@@ -479,8 +451,8 @@ let expect-type(env: TypeEnv, got: Type, expected: Type, span: Span) -> Type {
 
 let fresh-param-map(env: TypeEnv, params: List Str) -> Map Str Type =
   match (params)
-    | [] -> map-new()
-    | p :: rest -> map-set(fresh-param-map(env, rest), p, fresh-var(env, p))
+    | [] -> Map.empty()
+    | p :: rest -> Map.set(fresh-param-map(env, rest), p, fresh-var(env, p))
 
 let replace-params(t: Type, m: Map Str Type) -> Type =
   match (t)
@@ -495,7 +467,7 @@ let replace-params(t: Type, m: Map Str Type) -> Type =
     | _ -> t
 
 let replace-param-lookup(t: Type, name: Str, m: Map Str Type) -> Type =
-  match (map-get(m, name))
+  match (Map.lookup(m, name))
     | Some(t2) -> t2
     | None -> t
 
@@ -589,7 +561,7 @@ let parse-type-expr-sym-nominal(env: TypeEnv, name: Str, sp: Span) -> Type =
     | Some(td) -> t-nominal(name, [], type-def-kind(td))
     | None ->
       {
-        err!(env, "E_TYPE_UNKNOWN", str-concat("unknown type ", name), sp)
+        err!(env, "E_TYPE_UNKNOWN", String.concat("unknown type ", name), sp)
         fresh-var-anon(env)
       }
 
@@ -631,7 +603,7 @@ let parse-type-expr-one(env: TypeEnv, name: Str, args: List Ast, sp: Span, param
     | [a] -> mk(parse-type-expr(env, a, params))
     | _ ->
       {
-        err!(env, "E_TYPE_EXPR", str-concat(name, " requires exactly one type argument"), sp)
+        err!(env, "E_TYPE_EXPR", String.concat(name, " requires exactly one type argument"), sp)
         fresh-var-anon(env)
       }
 
@@ -640,7 +612,7 @@ let parse-type-expr-two(env: TypeEnv, name: Str, args: List Ast, sp: Span, param
     | [a, b] -> mk(parse-type-expr(env, a, params), parse-type-expr(env, b, params))
     | _ ->
       {
-        err!(env, "E_TYPE_EXPR", str-concat(name, " requires exactly two type arguments"), sp)
+        err!(env, "E_TYPE_EXPR", String.concat(name, " requires exactly two type arguments"), sp)
         fresh-var-anon(env)
       }
 
@@ -996,6 +968,7 @@ let collect-defn-scheme-named(env: TypeEnv, hn: Str, rest: List Ast, elems: List
     | "pub" -> collect-defn-scheme-elems(env, rest, sp)
     | "defn" -> register-defn-scheme(env, elems, sp)
     | "extern" -> register-defn-scheme(env, elems, sp)
+    | "runtime" -> register-defn-scheme(env, elems, sp)
     | _ -> ()
 
 let collect-defn-scheme-head(env: TypeEnv, head: Ast, rest: List Ast, elems: List Ast, sp: Span) -> Unit =
@@ -1018,11 +991,11 @@ let collect-defn-scheme(env: TypeEnv, ast: Ast) -> Unit =
 
 let build-param-local(names: List Str, types: List Type) -> Map Str Type =
   match (names)
-    | [] -> map-new()
+    | [] -> Map.empty()
     | n :: nrest ->
       match (types)
-        | [] -> map-new()
-        | t :: trest -> map-set(build-param-local(nrest, trest), n, t)
+        | [] -> Map.empty()
+        | t :: trest -> Map.set(build-param-local(nrest, trest), n, t)
 
 let last-of(xs: List Ast) -> Maybe Ast =
   match (xs)
@@ -1072,7 +1045,7 @@ let infer-sym-global(env: TypeEnv, name: Str, sp: Span) -> Type =
     | Some(s) -> instantiate(env, s)
     | None ->
       {
-        err!(env, "E_TYPE_UNBOUND", str-concat("unbound variable ", name), sp)
+        err!(env, "E_TYPE_UNBOUND", String.concat("unbound variable ", name), sp)
         fresh-var-anon(env)
       }
 
@@ -1080,7 +1053,7 @@ let infer-sym(env: TypeEnv, name: Str, sp: Span, local: Map Str Type) -> Type =
   if (name == "_") -> fresh-var-anon(env) | infer-sym-lookup(env, name, sp, local)
 
 let infer-sym-lookup(env: TypeEnv, name: Str, sp: Span, local: Map Str Type) -> Type =
-  match (map-get(local, name))
+  match (Map.lookup(local, name))
     | Some(t) -> apply-subst(env, t)
     | None -> infer-sym-global(env, name, sp)
 
@@ -1142,7 +1115,7 @@ let infer-let-named(env: TypeEnv, name-ast: Ast, expr-ast: Ast, body: List Ast, 
     | Some(name) ->
       {
         let t = infer-named-expr(env, name, expr-ast, local)
-        infer-let-body(env, body, t, map-set(local, name, t))
+        infer-let-body(env, body, t, Map.set(local, name, t))
       }
 
 let infer-let(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) -> Type =
@@ -1182,7 +1155,7 @@ let is-fn-expr(ast: Ast) -> Bool =
 
 let infer-recursive-fn(env: TypeEnv, name: Str, expr: Ast, local: Map Str Type) -> Type {
   let tv = fresh-var(env, name)
-  let t = infer(env, expr, map-set(local, name, tv))
+  let t = infer(env, expr, Map.set(local, name, tv))
   unify(env, tv, t, ast-span(expr))
   apply-subst(env, t)
 }
@@ -1197,7 +1170,7 @@ let infer-sequence-let(env: TypeEnv, sl: SimpleLet, rest: List Ast, local: Map S
     | SimpleLet(name, expr-ast) ->
       {
         let t = infer-named-expr(env, name, expr-ast, local)
-        infer-sequence-rest(env, rest, map-set(local, name, t), t)
+        infer-sequence-rest(env, rest, Map.set(local, name, t), t)
       }
 
 let infer-sequence-plain(env: TypeEnv, f: Ast, rest: List Ast, local: Map Str Type) -> Type {
@@ -1227,7 +1200,7 @@ record LoopAcc {
 
 let loop-acc-extend(m: Map Str Type, name-ast: Ast, t: Type) -> Map Str Type =
   match (sym-str(name-ast))
-    | Some(n) -> map-set(m, n, t)
+    | Some(n) -> Map.set(m, n, t)
     | None -> m
 
 let loop-binding-pairs(env: TypeEnv, belems: List Ast, outer: Map Str Type) -> LoopAcc =
@@ -1288,7 +1261,7 @@ let check-recur-args(env: TypeEnv, args: List Ast, expected: List Type, local: M
           }
 
 let check-recur-arity(env: TypeEnv, args: List Ast, expected: List Type, sp: Span) -> Unit =
-  if (length(args) == length(expected)) -> () | err!(env, "E_TYPE_ARITY", str-concat("recur expects ", show(length(expected)), " argument(s), got ", show(length(args))), sp)
+  if (length(args) == length(expected)) -> () | err!(env, "E_TYPE_ARITY", String.concat("recur expects ", show(length(expected)), " argument(s), got ", show(length(args))), sp)
 
 let infer-recur-with(env: TypeEnv, args: List Ast, expected: List Type, sp: Span, local: Map Str Type) -> Type {
   check-recur-arity(env, args, expected, sp)
@@ -1381,7 +1354,7 @@ record LambdaAcc {
 
 let lambda-acc-extend(local: Map Str Type, p: Ast, v: Type) -> Map Str Type =
   match (sym-str(p))
-    | Some(n) -> map-set(local, n, v)
+    | Some(n) -> Map.set(local, n, v)
     | None -> local
 
 let lambda-param-list-cons(env: TypeEnv, p: Ast, rest: List Ast, local: Map Str Type) -> LambdaAcc {
@@ -1467,11 +1440,11 @@ let bind-ctor-scrut-specific(env: TypeEnv, type-name: Str, arg-vars: List Type, 
 
 let zip-param-map(params: List Str, vars: List Type) -> Map Str Type =
   match (params)
-    | [] -> map-new()
+    | [] -> Map.empty()
     | p :: prest ->
       match (vars)
-        | [] -> map-new()
-        | v :: vrest -> map-set(zip-param-map(prest, vrest), p, v)
+        | [] -> Map.empty()
+        | v :: vrest -> Map.set(zip-param-map(prest, vrest), p, v)
 
 let fresh-vars-for(params: List Str, env: TypeEnv) -> List Type =
   match (params)
@@ -1516,7 +1489,7 @@ let bind-pattern-sym(env: TypeEnv, name: Str, sp: Span, scrut: Type, loc: Ref (M
 let bind-pattern-sym-lookup(env: TypeEnv, name: Str, sp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
   match (ctor-get(env, name))
     | Some(ctor) -> bind-nullary-ctor(env, name, ctor, scrut, covered, sp)
-    | None -> set!(loc, map-set(deref(loc), name, apply-subst(env, scrut)))
+    | None -> set!(loc, Map.set(deref(loc), name, apply-subst(env, scrut)))
 
 let bind-pattern-args(env: TypeEnv, arg-pats: List Ast, payloads: List Type, loc: Ref (Map Str Type)) -> Unit =
   match (payloads)
@@ -1565,7 +1538,7 @@ let nominal-type-name-of(t: Type) -> Maybe Str =
 let check-ctor-covered(env: TypeEnv, c: VariantCtor, covered: List Str, sp: Span) -> Unit =
   match (c)
     | VariantCtor(name, _) ->
-      if (contains(covered, name)) -> () | err!(env, "E_TYPE_EXHAUSTIVE", str-concat("non-exhaustive match: missing ", name), sp)
+      if (contains(covered, name)) -> () | err!(env, "E_TYPE_EXHAUSTIVE", String.concat("non-exhaustive match: missing ", name), sp)
 
 let check-ctors-covered(env: TypeEnv, ctors: List VariantCtor, covered: List Str, sp: Span) -> Unit =
   match (ctors)
@@ -1650,7 +1623,7 @@ let type-is-str(t: Type) -> Bool =
 
 let check-print-arg(env: TypeEnv, a: Ast, local: Map Str Type) -> Type {
   let t = apply-subst(env, infer(env, a, local))
-  if (type-is-str(t) || is-showable(t)) -> () | err!(env, "E_TYPE_SHOWABLE", str-concat("type ", type-show(t), " is not showable"), ast-span(a))
+  if (type-is-str(t) || is-showable(t)) -> () | err!(env, "E_TYPE_SHOWABLE", String.concat("type ", type-show(t), " is not showable"), ast-span(a))
   t
 }
 
@@ -1682,7 +1655,7 @@ let first-span-or(args: List Ast, fallback: Span) -> Span =
 
 let check-predicate-arg(env: TypeEnv, arg-types: List Type, args: List Ast, sp: Span, pred: (Type) -> Bool, code: Str, label: Str) -> Unit {
   let t = apply-subst(env, first-type-or-fresh(arg-types, env))
-  if (pred(t)) -> () | err!(env, code, str-concat("type ", type-show(t), " is ", label), first-span-or(args, sp))
+  if (pred(t)) -> () | err!(env, code, String.concat("type ", type-show(t), " is ", label), first-span-or(args, sp))
 }
 
 let check-show-compare(env: TypeEnv, head: Ast, arg-types: List Type, args: List Ast, sp: Span) -> Unit =
@@ -1729,8 +1702,8 @@ let bind-type-params(params: List Str, args: List Type, m: Map Str Type) -> Map 
     | [] -> m
     | p :: rest ->
       match (args)
-        | [] -> bind-type-params(rest, [], map-set(m, p, TParam(p)))
-        | a :: more -> bind-type-params(rest, more, map-set(m, p, a))
+        | [] -> bind-type-params(rest, [], Map.set(m, p, TParam(p)))
+        | a :: more -> bind-type-params(rest, more, Map.set(m, p, a))
 
 ; Type of one field, and the slot index to lower later.
 let infer-record-field(env: TypeEnv, def: TypeDef, args: List Type, field: Str, field-ast: Ast, sp: Span) -> Type =
@@ -1739,7 +1712,7 @@ let infer-record-field(env: TypeEnv, def: TypeDef, args: List Type, field: Str, 
       match (record-field-at(fields, field, 0))
         | None ->
           {
-            err!(env, "E_TYPE_UNBOUND", str-concat("unknown field ", field), ast-span(field-ast))
+            err!(env, "E_TYPE_UNBOUND", String.concat("unknown field ", field), ast-span(field-ast))
             fresh-var-anon(env)
           }
         | Some(index) ->
@@ -1748,7 +1721,7 @@ let infer-record-field(env: TypeEnv, def: TypeDef, args: List Type, field: Str, 
             | Some(ft) ->
               {
                 note-project!(sp, index)
-                replace-params(ft, bind-type-params(params, args, map-new()))
+                replace-params(ft, bind-type-params(params, args, Map.empty()))
               }
     | _ ->
       {
@@ -1767,7 +1740,7 @@ let infer-project-record(env: TypeEnv, name: Str, args: List Type, field: Str, f
   match (type-get(env, name))
     | None ->
       {
-        err!(env, "E_TYPE_UNBOUND", str-concat("unknown record ", name), ast-span(field-ast))
+        err!(env, "E_TYPE_UNBOUND", String.concat("unknown record ", name), ast-span(field-ast))
         fresh-var-anon(env)
       }
     | Some(def) -> infer-record-field(env, def, args, field, field-ast, sp)
@@ -1782,7 +1755,7 @@ let infer-project-typed(env: TypeEnv, obj-ty: Type, field: Str, field-ast: Ast, 
     | TNominal(name, args, kind) -> infer-project-nominal(env, name, args, kind, field, field-ast, sp)
     | _ ->
       {
-        err!(env, "E_TYPE_MISMATCH", str-concat("expected a record, found ", type-show(obj-ty)), ast-span(field-ast))
+        err!(env, "E_TYPE_MISMATCH", String.concat("expected a record, found ", type-show(obj-ty)), ast-span(field-ast))
         fresh-var-anon(env)
       }
 
@@ -1843,7 +1816,7 @@ let infer-paren(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) ->
 ; top level exactly as within a `defn` body).
 
 let bind-top-let(env: TypeEnv, n: Str, t: Type, top-local: Ref (Map Str Type)) -> Unit {
-  set!(top-local, map-set(deref(top-local), n, t))
+  set!(top-local, Map.set(deref(top-local), n, t))
   value-set(env, n, Scheme([], t))
 }
 
@@ -1870,6 +1843,7 @@ let typecheck-top-named(env: TypeEnv, hn: Str, rest: List Ast, elems: List Ast, 
     | "defrec" -> ()
     | "variant" -> ()
     | "extern" -> ()
+    | "runtime" -> ()
     | "import" -> ()
     | "defn" -> typecheck-defn(env, elems, sp)
     | "let" -> typecheck-top-let(env, elems, sp, ast, top-local)
@@ -1976,18 +1950,18 @@ let print-concat(a: Ast, b: Ast) -> Ast =
   print-call("str-concat", [a, b])
 
 let print-error(message: Str) -> Ast =
-  print-call("do", [print-call("write", [IntNode(2, Span(0, 0, 0, 1)), print-str(str-concat(message, "\n"))]), print-call("exit", [IntNode(1, Span(0, 0, 0, 1))]), print-str("")])
+  print-call("do", [print-call("write", [IntNode(2, Span(0, 0, 0, 1)), print-str(String.concat(message, "\n"))]), print-call("exit", [IntNode(1, Span(0, 0, 0, 1))]), print-str("")])
 
 let print-format(env: TypeEnv, t: Type, value: Ast) -> Ast {
   let resolved = apply-subst(env, t)
   let key = type-show(resolved)
   let name =
-    match (map-get(deref(print-names), key))
+    match (Map.lookup(deref(print-names), key))
       | Some(n) -> n
       | None ->
         {
-          let n = str-concat("__print-value", show(map-size(deref(print-names))))
-          set!(print-names, map-set(deref(print-names), key, n))
+          let n = String.concat("__print-value", show(Map.size(deref(print-names))))
+          set!(print-names, Map.set(deref(print-names), key, n))
           let body = print-format-body(env, resolved)
           set!(print-functions, print-def(n, resolved, body) :: deref(print-functions))
           n
@@ -1999,15 +1973,15 @@ let print-payloads(env: TypeEnv, ts: List Type, i: Int) -> Ast =
   match (ts)
     | [] -> print-str("")
     | t :: rest ->
-      print-concat(print-str(" "), print-concat(print-format(env, t, print-sym(str-concat("p", show(i)))), print-payloads(env, rest, i + 1)))
+      print-concat(print-str(" "), print-concat(print-format(env, t, print-sym(String.concat("p", show(i)))), print-payloads(env, rest, i + 1)))
 
 let print-pattern(name: Str, ts: List Type, i: Int) -> List Ast =
   match (ts)
     | [] -> []
-    | _ :: rest -> print-sym(str-concat("p", show(i))) :: print-pattern(name, rest, i + 1)
+    | _ :: rest -> print-sym(String.concat("p", show(i))) :: print-pattern(name, rest, i + 1)
 
 let print-ctor-body(env: TypeEnv, name: Str, ts: List Type) -> Ast =
-  print-concat(print-str(str-concat("(", name)), print-concat(print-payloads(env, ts, 0), print-str(")")))
+  print-concat(print-str(String.concat("(", name)), print-concat(print-payloads(env, ts, 0), print-str(")")))
 
 let print-ctor-arms(env: TypeEnv, cs: List VariantCtor, params: Map Str Type) -> List Ast =
   match (cs)
@@ -2026,16 +2000,16 @@ let print-field-types(fs: List RecordField) -> List Type =
 
 let print-nominal-body(env: TypeEnv, name: Str, args: List Type) -> Ast =
   match (type-get(env, name))
-    | None -> print-error(str-concat("print: missing type ", name))
+    | None -> print-error(String.concat("print: missing type ", name))
     | Some(td) ->
       match (td)
         | RecordDef(_, ps, fs) ->
-          print-call("match", print-sym("v") :: print-ctor-arms(env, [VariantCtor(name, print-field-types(fs))], bind-type-params(ps, args, map-new())))
+          print-call("match", print-sym("v") :: print-ctor-arms(env, [VariantCtor(name, print-field-types(fs))], bind-type-params(ps, args, Map.empty())))
         | VariantDef(_, ps, cs) ->
-          print-call("match", print-sym("v") :: print-ctor-arms(env, cs, bind-type-params(ps, args, map-new())))
+          print-call("match", print-sym("v") :: print-ctor-arms(env, cs, bind-type-params(ps, args, Map.empty())))
 
 let print-map-body(env: TypeEnv, t: Type, k: Type, value: Type) -> Ast {
-  let name = str-concat("__print-map", show(map-size(deref(print-names))))
+  let name = String.concat("__print-map", show(Map.size(deref(print-names))))
   let found = print-call("match", [print-call("map-get", [print-sym("v"), print-sym("key")]), print-call("Some", [print-sym("item")]), print-format(env, value, print-sym("item")), print-call("None", []), print-error("print: map key disappeared")])
   let entry = print-concat(print-format(env, k, print-sym("key")), print-concat(print-str(" -> "), found))
   let tail = print-call("if", [print-call("=", [print-sym("rest"), print-call("Nil", [])]), print-str(""), print-concat(print-str(", "), print-call(name, [print-sym("v"), print-sym("rest")]))])
@@ -2046,7 +2020,7 @@ let print-map-body(env: TypeEnv, t: Type, k: Type, value: Type) -> Ast {
 }
 
 let print-list-body(env: TypeEnv, t: Type, elem: Type) -> Ast {
-  let name = str-concat("__print-list", show(map-size(deref(print-names))))
+  let name = String.concat("__print-list", show(Map.size(deref(print-names))))
   let item = print-format(env, elem, print-sym("item"))
   let tail = print-call("if", [print-call("=", [print-sym("rest"), print-call("Nil", [])]), print-str(""), print-concat(print-str(", "), print-call(name, [print-sym("rest")]))])
   let body = print-call("match", [print-sym("v"), print-call("Nil", []), print-str(""), print-call("Cons", [print-sym("item"), print-sym("rest")]), print-concat(item, tail)])
@@ -2060,15 +2034,15 @@ let print-format-body(env: TypeEnv, t: Type) -> Ast =
     | TUnit -> print-str("()")
     | TList(e) -> print-list-body(env, t, e)
     | TMaybe(e) ->
-      print-call("match", print-sym("v") :: print-ctor-arms(env, [VariantCtor("None", []), VariantCtor("Some", [e])], map-new()))
+      print-call("match", print-sym("v") :: print-ctor-arms(env, [VariantCtor("None", []), VariantCtor("Some", [e])], Map.empty()))
     | TResult(a, b) ->
-      print-call("match", print-sym("v") :: print-ctor-arms(env, [VariantCtor("Ok", [a]), VariantCtor("Err", [b])], map-new()))
+      print-call("match", print-sym("v") :: print-ctor-arms(env, [VariantCtor("Ok", [a]), VariantCtor("Err", [b])], Map.empty()))
     | TNominal(n, args, _) -> print-nominal-body(env, n, args)
     | TMap(k, v) -> print-map-body(env, t, k, v)
     | TParam(_) | TVar(_, _) ->
       print-error("print: cannot format an unresolved type parameter")
     | TInt | TFloat | TChar | TStr -> print-call("show", [print-sym("v")])
-    | _ -> print-error(str-concat("print: type ", type-show(t), " is not supported"))
+    | _ -> print-error(String.concat("print: type ", type-show(t), " is not supported"))
 
 let find-print-note(sp: Span, notes: List PrintNote) -> Maybe (List Type) =
   match (notes)
@@ -2167,11 +2141,11 @@ let typecheck-collected(forms: List Ast) -> Result (List Ast) (List TypeError) {
   set!(proj-notes, [])
   set!(print-notes, [])
   set!(print-functions, [])
-  set!(print-names, map-new())
+  set!(print-names, Map.empty())
   let env = empty-env()
   collect-defs(env, forms)
   collect-defn-schemes(env, forms)
-  let top-local = ref(map-new())
+  let top-local = ref(Map.empty())
   run-typecheck-top(env, forms, top-local)
   finish-typecheck(forms, deref(env-diags(env)), env)
 }

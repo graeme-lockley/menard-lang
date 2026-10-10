@@ -4,7 +4,7 @@ import { createHost, createVirtualFs, mapNodeErrno } from "../../../host/src/hos
 import { parseCliArgs } from "../../../host/src/cli/args.ts";
 
 function runSeam(src: string, host = createHost()) {
-  const text = `import std/fs\nimport std/io\nimport std/sys\n${src}`;
+  const text = `import std/fs\nimport std/io\nimport std/sys\nimport std/string as String\n${src}`;
   host.writeFile("/main.mnd", new TextEncoder().encode(text));
   return run(text, { path: "/main.mnd", host });
 }
@@ -17,7 +17,7 @@ describe("tier-0 host seam", () => {
   let n = arg-count()
   let a0 = arg(0)
   let a1 = arg(1)
-  str-concat(show(n), ":", a0, a1)
+  String.concat(show(n), ":", a0, a1)
 }`,
       host,
     );

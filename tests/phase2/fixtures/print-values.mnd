@@ -1,3 +1,6 @@
+import std/string as String
+import std/map as Map
+
 record Point {
   x: Int
   y: Bool
@@ -18,7 +21,7 @@ type Tree =
 let next(counter: Ref Int) -> Str {
   let n = deref(counter)
   set!(counter, n + 1)
-  str-concat("value", show(n))
+  String.concat("value", show(n))
 }
 
 let output(input: Str, tokens: List Str) -> Unit {
@@ -28,11 +31,11 @@ let output(input: Str, tokens: List Str) -> Unit {
   println(Point(7, true), " ", Red(), " ", Rgb(1, 2, 3))
   println([true, false], " ", [[1, 2], [3]])
   println(Some("hello"), " ", Ok(42))
-  println(str-concat("com", "puted"))
+  println(String.concat("com", "puted"))
   println(Box(false), " ", Node(true, Node(false, Empty())))
   println(["a\"b", "c\\d"])
-  println(map-set(map-set(map-new(), 2, 20), 1, 10))
-  let pairs = map-set(map-set(map-new(), "b", false), "a", true)
+  println(Map.set(Map.set(Map.empty(), 2, 20), 1, 10))
+  let pairs = Map.set(Map.set(Map.empty(), "b", false), "a", true)
   println(pairs)
   println(show("quoted"))
   let counter = ref(0)

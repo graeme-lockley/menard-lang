@@ -20,35 +20,42 @@ record Scan {
 
 ; Drop one leading space when the comment has one.
 let comment-body(line: Str) -> Str {
-  let n = str-byte-length(line)
-  let rest = str-slice(line, 1, n - 1)
-  if (str-byte-length(rest) > 0 && str-byte(rest, 0) == 32) -> str-slice(rest, 1, str-byte-length(rest) - 1) | rest
+  let n = String.length(line)
+  let rest = String.slice(1, n - 1, line)
+  if (String.length(rest) > 0 && String.byte(0, rest) == 32) -> String.slice(1, String.length(rest) - 1, rest) | rest
 }
 
 ; The symbol at the start of s, stopping at space, `[`, `(`, or `)`.
 let take-sym(s: Str, i: Int, n: Int) -> Str =
   cond
-    | i >= n -> str-slice(s, 0, n)
+    | i >= n -> String.slice(0, n, s)
     | else ->
       {
-        let b = str-byte(s, i)
-        if (b == 32 || b == 91 || b == 40 || b == 41) -> str-slice(s, 0, i) | take-sym(s, i + 1, n)
+        let b = String.byte(i, s)
+        if (b == 32 || b == 91 || b == 40 || b == 41) -> String.slice(0, i, s) | take-sym(s, i + 1, n)
       }
 
-; The function name from a defn header line.
+; Bytes to skip before the name of a defn or runtime header.
+let header-skip(line: Str) -> Int =
+  cond
+    | String.starts-with("pub runtime ", line) -> 12
+    | String.starts-with("pub let ", line) -> 8
+    | String.starts-with("runtime ", line) -> 8
+    | else -> 4
+
+; The function name from a defn or runtime header line.
 let defn-name(line: Str) -> Str {
-  let raw =
-    if (String.starts-with("pub let ", line)) -> str-slice(line, 8, str-byte-length(line) - 8) | str-slice(line, 4, str-byte-length(line) - 4)
-  take-sym(raw, 0, str-byte-length(raw))
+  let raw = String.slice(header-skip(line), String.length(line) - header-skip(line), line)
+  take-sym(raw, 0, String.length(raw))
 }
 
-; True when line is a top-level defn header.
+; True when line is a top-level defn or runtime header.
 let is-defn(line: Str) -> Bool =
-  String.starts-with("let ", line) || String.starts-with("pub let ", line)
+  String.starts-with("let ", line) || String.starts-with("pub let ", line) || String.starts-with("runtime ", line) || String.starts-with("pub runtime ", line)
 
-; True when the defn is published.
+; True when the defn or runtime binding is published.
 let is-pub(line: Str) -> Bool =
-  String.starts-with("pub let ", line)
+  String.starts-with("pub let ", line) || String.starts-with("pub runtime ", line)
 
 ; The first summary line.
 let summary-of(docs: List Str) -> Str =
@@ -65,7 +72,7 @@ let tests-of(docs: List Str, acc: List Str) -> List Str =
 
 ; `@module name` from a comment body, or the current module.
 let module-of(body: Str, current: Str) -> Str =
-  if (String.starts-with("@module ", body)) -> str-slice(body, 8, str-byte-length(body) - 8) | current
+  if (String.starts-with("@module ", body)) -> String.slice(8, String.length(body) - 8, body) | current
 
 ; One published record, plus a missing-summary or missing-@test note.
 let scan-record(module: Str, name: Str, sig: Str, docs: List Str, exported: Bool) -> Scan {
@@ -75,12 +82,12 @@ let scan-record(module: Str, name: Str, sig: Str, docs: List Str, exported: Bool
   let missing-test = exported && length(tests) == 0
   let note =
     cond
-      | missing-summary -> str-concat("error: ", module, " ", name, " has no summary\n")
-      | missing-test -> str-concat("error: ", module, " ", name, " has no @test\n")
+      | missing-summary -> String.concat("error: ", module, " ", name, " has no summary\n")
+      | missing-test -> String.concat("error: ", module, " ", name, " has no @test\n")
       | else -> ""
   let body =
-    if (exported) -> str-concat("module: ", module, "\nname: ", name, "\nsignature: ", sig, "\nsummary: ", summary, "\n", String.join("\n", tests), "\n\n") | ""
-  Scan(str-concat(note, body), not(missing-summary || missing-test))
+    if (exported) -> String.concat("module: ", module, "\nname: ", name, "\nsignature: ", sig, "\nsummary: ", summary, "\n", String.join("\n", tests), "\n\n") | ""
+  Scan(String.concat(note, body), not(missing-summary || missing-test))
 }
 
 ; Walk the lines of one file.
@@ -92,14 +99,14 @@ let scan-lines(ls: List Str, docs: List Str, module: Str, acc: Scan) -> Scan =
         let line = raw
         cond
           | line == "" -> scan-lines(rest, [], module, acc)
-          | str-byte(line, 0) == 59 -> scan-lines(rest, append(docs, [comment-body(line)]), module-of(comment-body(line), module), acc)
+          | String.byte(0, line) == 59 -> scan-lines(rest, append(docs, [comment-body(line)]), module-of(comment-body(line), module), acc)
           | is-defn(line) ->
             {
               let rec = scan-record(module, defn-name(line), line, docs, is-pub(line))
               match (rec)
                 | Scan(text, ok) ->
                   match (acc)
-                    | Scan(prev, pok) -> scan-lines(rest, [], module, Scan(str-concat(prev, text), pok && ok))
+                    | Scan(prev, pok) -> scan-lines(rest, [], module, Scan(String.concat(prev, text), pok && ok))
             }
           | else -> scan-lines(rest, [], module, acc)
       }
@@ -108,14 +115,14 @@ let scan-lines(ls: List Str, docs: List Str, module: Str, acc: Scan) -> Scan =
 let split-keep(s: Str, i: Int, start: Int, n: Int, acc: List Str) -> List Str =
   cond
     | i > n -> reverse(acc)
-    | i == n || str-byte(s, i) == 10 -> split-keep(s, i + 1, i + 1, n, str-slice(s, start, i - start) :: acc)
+    | i == n || String.byte(i, s) == 10 -> split-keep(s, i + 1, i + 1, n, String.slice(start, i - start, s) :: acc)
     | else -> split-keep(s, i + 1, start, n, acc)
 
 ; Scan one library file. A missing file is a failure.
 let scan-file(path: Str) -> Scan =
   match (read-file(path))
-    | Err(_) -> Scan(str-concat("error: cannot read ", path, "\n"), false)
-    | Ok(src) -> scan-lines(split-keep(src, 0, 0, str-byte-length(src), []), [], "", Scan("", true))
+    | Err(_) -> Scan(String.concat("error: cannot read ", path, "\n"), false)
+    | Ok(src) -> scan-lines(split-keep(src, 0, 0, String.length(src), []), [], "", Scan("", true))
 
 ; Library sources, not the colocated tests.
 let lib-name(name: Str) -> Bool =
@@ -123,7 +130,7 @@ let lib-name(name: Str) -> Bool =
 
 ; Join dir and name.
 let join-path(dir: Str, name: Str) -> Str =
-  if (dir == "" || dir == ".") -> name | str-concat(dir, "/", name)
+  if (dir == "" || dir == ".") -> name | String.concat(dir, "/", name)
 
 ; Scan each library file in dir.
 let scan-names(dir: Str, names: List Str, acc: Scan) -> Scan =
@@ -137,13 +144,13 @@ let scan-names(dir: Str, names: List Str, acc: Scan) -> Scan =
             match (one)
               | Scan(text, ok) ->
                 match (acc)
-                  | Scan(prev, pok) -> scan-names(dir, rest, Scan(str-concat(prev, text), pok && ok))
+                  | Scan(prev, pok) -> scan-names(dir, rest, Scan(String.concat(prev, text), pok && ok))
           }
         | else -> scan-names(dir, rest, acc)
 
 ; The published records for dir, and whether every defn is documented.
 let library-docs(dir: Str) -> Scan =
-  scan-names(dir, sort(split-keep(list-dir(dir), 0, 0, str-byte-length(list-dir(dir)), [])), Scan("", true))
+  scan-names(dir, sort(split-keep(list-dir(dir), 0, 0, String.length(list-dir(dir)), [])), Scan("", true))
 
 ; True when dir's library defns have summaries and every pub defn has @test.
 pub let library-docs-ok(dir: Str) -> Bool =

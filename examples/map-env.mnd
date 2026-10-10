@@ -2,6 +2,8 @@
 ; Prints both entries and the size.
 ; Run with: `./mn run examples/map-env.mnd`
 
+import std/map as Map
+
 let print-got(v: Maybe Int) -> Int =
   match (v)
     | Some(n) ->
@@ -16,14 +18,14 @@ let print-got(v: Maybe Int) -> Int =
       }
 
 let main() -> Int {
-  let m0 = map-new()
-  let m1 = map-set(m0, 1, 10)
-  let m2 = map-set(m1, 2, 20)
+  let m0 = Map.empty()
+  let m1 = Map.set(m0, 1, 10)
+  let m2 = Map.set(m1, 2, 20)
   print("1 -> ")
-  print-got(map-get(m2, 1))
+  print-got(Map.lookup(m2, 1))
   print(", 2 -> ")
-  print-got(map-get(m2, 2))
+  print-got(Map.lookup(m2, 2))
   print(", size ")
-  println(map-size(m2))
+  println(Map.size(m2))
   0
 }

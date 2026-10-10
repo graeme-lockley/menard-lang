@@ -21,14 +21,12 @@ describe("desugar", () => {
     expect(desugared("true || false")).toContain("if");
   });
 
-  test("arithmetic, concat, and comparisons expand to binary calls", () => {
+  test("arithmetic and comparisons expand to binary calls", () => {
     expect(desugared("1 + 2")).toBe("1 + 2");
     expect(desugared("1 + 2 + 3 + 4")).toBe("1 + 2 + 3 + 4");
     expect(desugared("2 * 3 * 4")).toBe("2 * 3 * 4");
-    expect(desugared('str-concat("a", "b", "c")')).toBe(
-      'str-concat(str-concat("a", "b"), "c")',
-    );
-    expect(desugared('str-concat("a")')).toBe('"a"');
+    expect(desugared('concat("a", "b", "c")')).toBe('concat("a", "b", "c")');
+    expect(desugared('concat("a")')).toBe('concat("a")');
     expect(desugared("10 - 3 - 2")).toBe("10 - 3 - 2");
     expect(desugared("-(4)")).toBe("0 - 4");
     expect(desugared("8 / 4 / 2")).toBe("8 / 4 / 2");

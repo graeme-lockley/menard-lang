@@ -48,7 +48,7 @@ following may appear with no surrounding whitespace:
 | `-` `+` `*` `/` `:` `@` | anywhere in the rest |
 | `!` | only as the final character |
 
-So `str-concat`, `sb-append-byte!`, `f+`, `f-`, `f*`, `f/`, `std/list`, and
+So `String.concat`, `Buf.append-byte!`, `f+`, `f-`, `f*`, `f/`, `std/list`, and
 `github:owner/repo@v1.2.0/console` are each one identifier. `a-b` is one
 identifier, not a subtraction. `!` anywhere but the end is a lexical error.
 
@@ -244,8 +244,8 @@ let adder(n: Int) -> (Int) -> Int =
 let join-path = fn (dir: Str, name: Str) -> Str =
   cond
     | dir == "" || dir == "." -> name
-    | dir == "/" -> str-concat("/", name)
-    | else -> str-concat(dir, "/", name)
+    | dir == "/" -> String.concat("/", name)
+    | else -> String.concat(dir, "/", name)
 ```
 
 A parameter-list `let` is the same declaration at any indent. Below column 0
@@ -588,10 +588,11 @@ A known top-level function is never lowered to `fn`. A nested parameter-list
 capture set is empty to a direct call. An anonymous `fn`, and any function
 that captures a name, stays a heap closure and an indirect call.
 
-`str-concat(a, b, c)` keeps the current left fold. One argument is that
-argument. The same fold applies to `+` `*` `f+` `f*` written as calls, and
-to `-` and `f-`, whose one-argument call form is negation. Infix `-` is
-always binary; prefix `-` on a non-literal is the one-argument negation.
+`String.concat(a, b, c)` left-folds once the callee is `std/string`'s `concat`.
+One argument is that argument. A bare `concat` from `std/list` is not folded.
+`+` `*` `f+` `f*` written as calls left-fold during desugaring, and so do `-`
+and `f-`, whose one-argument call form is negation. Infix `-` is always binary;
+prefix `-` on a non-literal is the one-argument negation.
 
 ---
 
@@ -628,18 +629,18 @@ pub record Counts {
 let join-path(dir: Str, name: Str) -> Str =
   cond
     | dir == "" || dir == "." -> name
-    | dir == "/" -> str-concat("/", name)
-    | else -> str-concat(dir, "/", name)
+    | dir == "/" -> String.concat("/", name)
+    | else -> String.concat(dir, "/", name)
 
 pub let summary(c: Counts, ms: Int, on: Bool) -> Unit =
   match (c)
     | Counts(p, f) -> {
         if (f > 0) -> {
-          write(stdout, paint(on, "[31m", str-concat(show(f), " failed")))
+          write(stdout, paint(on, "[31m", String.concat(show(f), " failed")))
           write(stdout, ", ")        
         }
-        write(stdout, paint(on, "[32m", str-concat(show(p), " passed")))
-        write(stdout, str-concat(" (", show(ms), "ms)"))
+        write(stdout, paint(on, "[32m", String.concat(show(p), " passed")))
+        write(stdout, String.concat(" (", show(ms), "ms)"))
         write(stdout, "\n")
       }
 ```

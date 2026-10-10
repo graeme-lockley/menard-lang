@@ -1,7 +1,35 @@
 ; Helpers over StringBuffer.
 ; @module std/string-buffer
 
+; A fresh empty buffer.
+; @test length(new()) => 0
+pub runtime new() -> StringBuffer
+
+; Append the bytes of s.
+; @test append!(new(), "hi") => ()
+pub runtime append!(sb: StringBuffer, s: Str) -> Unit
+
+; Append one byte. b is in 0..255.
+; @test append-byte!(new(), 33) => ()
+pub runtime append-byte!(sb: StringBuffer, b: Int) -> Unit
+
+; How many bytes sb holds.
+; @test length(new()) => 0
+pub runtime length(sb: StringBuffer) -> Int
+
+; Drop every byte. The buffer stays usable.
+; @test clear!(new()) => ()
+pub runtime clear!(sb: StringBuffer) -> Unit
+
+; A copy of the bytes in sb. The buffer is unchanged.
+; @test to-str(new()) => ""
+pub runtime to-str(sb: StringBuffer) -> Str
+
+; The bytes in sb, leaving the buffer empty.
+; @test take-str!(new()) => ""
+pub runtime take-str!(sb: StringBuffer) -> Str
+
 ; Append the show spelling of v.
-; @test sb-append-show!(sb-new(), 41) => ()
-pub let sb-append-show![a](sb: StringBuffer, v: a) -> Unit =
-  sb-append!(sb, show(v))
+; @test append-show!(new(), 41) => ()
+pub let append-show![a](sb: StringBuffer, v: a) -> Unit =
+  append!(sb, show(v))

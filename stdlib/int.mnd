@@ -14,13 +14,13 @@ let is-digit(d: Int) -> Bool =
 
 ; The integer spelled by the digits of n from byte i, stopping at the first non-digit.
 let parse-rest(n: Str, i: Int) -> Int {
-  let len = str-byte-length(n)
+  let len = String.length(n)
 
   loop(iter = i, result = 0) {
       cond
         | iter >= len -> result
         | else -> {
-            let d = str-byte(n, iter)
+            let d = String.byte(iter, n)
             if (is-digit(d)) -> recur(iter + 1, result * 10 + d - 48) | result
           }
   }

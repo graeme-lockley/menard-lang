@@ -2,6 +2,8 @@
 ; fixed parameter in front of the rest. `sum(xs)` is a one-element call
 ; and is covered by tests/negative/bad-rest-wrap.mnd.
 
+import std/string as String
+
 let sum(...xs: List Int) -> Int =
   match (xs)
     | [] -> 0
@@ -10,7 +12,7 @@ let sum(...xs: List Int) -> Int =
 let join-more(sep: Str, head: Str, tail: List Str) -> Str =
   match (tail)
     | [] -> head
-    | h :: t -> join-more(sep, str-concat(head, sep, h), t)
+    | h :: t -> join-more(sep, String.concat(head, sep, h), t)
 
 let join(sep: Str, ...parts: List Str) -> Str =
   match (parts)

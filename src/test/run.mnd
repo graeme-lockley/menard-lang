@@ -48,7 +48,7 @@ let print-verbose(lines: List Str, on: Bool, show-output: Bool) -> Unit =
 ; A passing file stays a single status line. A failure points at the
 ; assertion expression, the same way a compile error points at its span.
 let fail-name(line: Str) -> Maybe Str =
-  if (String.starts-with("fail ", line)) -> Some(str-slice(line, 5, str-byte-length(line) - 5)) | None()
+  if (String.starts-with("fail ", line)) -> Some(String.slice(5, String.length(line) - 5, line)) | None()
 
 let sym-text(a: Ast) -> Maybe Str =
   match (a)
@@ -106,8 +106,8 @@ let find-named(forms: List Ast, name: Str) -> Maybe Ast =
 
 let explain-one(path: Str, src: Str, forms: List Ast, name: Str) -> Unit =
   match (find-named(forms, name))
-    | Some(expr) -> report-span(path, src, ast-span(expr), "error", "E_TEST", str-concat("assertion failed: ", name))
-    | None -> report-plain(str-concat("assertion failed: ", name))
+    | Some(expr) -> report-span(path, src, ast-span(expr), "error", "E_TEST", String.concat("assertion failed: ", name))
+    | None -> report-plain(String.concat("assertion failed: ", name))
 
 let explain-fails(path: Str, src: Str, forms: List Ast, lines: List Str) -> Unit =
   match (lines)
@@ -146,7 +146,7 @@ let rev-strs(xs: List Str, acc: List Str) -> List Str =
 
 ; `file <path>` is printed by the suite bootstrap before that file's tests.
 let file-path(line: Str) -> Maybe Str =
-  if (String.starts-with("file ", line)) -> Some(str-slice(line, 5, str-byte-length(line) - 5)) | None()
+  if (String.starts-with("file ", line)) -> Some(String.slice(5, String.length(line) - 5, line)) | None()
 
 record RunAcc {
   path: Str
@@ -159,7 +159,7 @@ record RunAcc {
 ; running when the process stopped. A panic aborts the rest of the suite.
 let flush-file(path: Str, lines: List Str, verbose: Bool, show-output: Bool, on: Bool, exit-bad: Bool) -> Counts =
   cond
-    | str-byte-length(path) == 0 ->
+    | String.length(path) == 0 ->
       if (exit-bad) -> Counts(0, 1) | Counts(0, 0)
     | else ->
       {
@@ -195,7 +195,7 @@ let finish-acc(acc: RunAcc, verbose: Bool, show-output: Bool, on: Bool, exit-bad
           | Counts(p, f) ->
             {
               cond
-                | exit-bad && str-byte-length(err) > 0 ->
+                | exit-bad && String.length(err) > 0 ->
                   {
                     write(stderr, err)
                     write(stderr, "\n")
@@ -206,7 +206,7 @@ let finish-acc(acc: RunAcc, verbose: Bool, show-output: Bool, on: Bool, exit-bad
       }
 
 let report-suite-error(msg: Str, started: Int, on: Bool) -> Int {
-  if (str-byte-length(msg) > 0) -> report-plain(msg)
+  if (String.length(msg) > 0) -> report-plain(msg)
   summary(Counts(0, 1), now-ms() - started, on)
   1
 }
@@ -216,7 +216,7 @@ pub let run-suite(path: Str, clean: Bool, verbose: Bool, show-output: Bool, quie
   match (files)
     | [] ->
       {
-        report-plain(str-concat("no tests found in ", path))
+        report-plain(String.concat("no tests found in ", path))
         1
       }
     | _ :: _ ->
@@ -227,7 +227,7 @@ pub let run-suite(path: Str, clean: Bool, verbose: Bool, show-output: Bool, quie
           | Err(msg) -> report-suite-error(msg, started, on)
           | Ok(bin) ->
             match (spawn-capture([bin], ""))
-              | Err(_) -> report-suite-error(str-concat("cannot spawn ", bin), started, on)
+              | Err(_) -> report-suite-error(String.concat("cannot spawn ", bin), started, on)
               | Ok(SpawnOutput(st, text, err)) ->
                 {
                   let exit-bad = status-exit-code(st) != 0

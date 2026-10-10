@@ -11,6 +11,7 @@ import "../reader/read.mnd"
 import "../reader/print.mnd"
 import std/io
 import std/sys
+import std/string as String
 
 let fail(msg: Str) -> Unit {
   write(stderr, msg)
@@ -20,7 +21,7 @@ let fail(msg: Str) -> Unit {
 
 let fail-parse(path: Str, e: ParseError) -> Unit =
   match (e)
-    | ParseError(_, msg) -> fail(str-concat(path, ": parse error: ", msg))
+    | ParseError(_, msg) -> fail(String.concat(path, ": parse error: ", msg))
 
 let compare-roundtrip(path: Str, forms: List Ast, forms2: List Ast) -> Unit =
   cond
@@ -29,12 +30,12 @@ let compare-roundtrip(path: Str, forms: List Ast, forms2: List Ast) -> Unit =
         println("ok")
         exit(0)
       }
-    | else -> fail(str-concat("roundtrip mismatch: ", path))
+    | else -> fail(String.concat("roundtrip mismatch: ", path))
 
 let reread(path: Str, forms: List Ast, printed: Str) -> Unit =
   match (read-all(printed))
     | Ok(forms2) -> compare-roundtrip(path, forms, forms2)
-    | Err(e) -> fail-parse(str-concat(path, " (re-read)"), e)
+    | Err(e) -> fail-parse(String.concat(path, " (re-read)"), e)
 
 let check-forms(path: Str, forms: List Ast) -> Unit =
   reread(path, forms, print-form-all(forms))
@@ -50,4 +51,4 @@ let main() -> Unit =
     | else ->
       match (read-file(arg(0)))
         | Ok(src) -> check-source(arg(0), src)
-        | Err(_) -> fail(str-concat("cannot read ", arg(0)))
+        | Err(_) -> fail(String.concat("cannot read ", arg(0)))

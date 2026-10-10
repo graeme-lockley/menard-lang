@@ -40,9 +40,20 @@ const SEAM_SUFFIXES = [
   "/proc.mnd",
 ];
 
+const RUNTIME_SUFFIXES = [
+  "/stdlib/string.mnd",
+  "/stdlib/map.mnd",
+  "/stdlib/string-buffer.mnd",
+];
+
 export function isSeamModule(path: string): boolean {
   const p = path.startsWith("/") ? path : "/" + path;
   return SEAM_SUFFIXES.some((s) => p === s || p.endsWith(s));
+}
+
+export function isRuntimeModule(path: string): boolean {
+  const p = path.startsWith("/") ? path : "/" + path;
+  return RUNTIME_SUFFIXES.some((s) => p.endsWith(s));
 }
 
 export type PreparedModule = {
@@ -98,6 +109,62 @@ function readModuleBytes(
     }
   }
   return { ok: false };
+}
+
+function isSymNamed(ast: Ast, name: string): boolean {
+  return ast.tag === "sym" && nameEquals(ast.name, name);
+}
+
+function isStringConcatHead(head: Ast, bare: boolean, aliases: Set<string>): boolean {
+  if (head.tag === "sym") return bare && nameEquals(head.name, "concat");
+  if (head.tag !== "list" || head.elems.length !== 3) return false;
+  const proj = head.elems[0]!;
+  const target = head.elems[1]!;
+  const field = head.elems[2]!;
+  if (!isSymNamed(proj, "project") || target.tag !== "sym" || !isSymNamed(field, "concat")) return false;
+  for (const alias of aliases) {
+    if (nameEquals(target.name, alias)) return true;
+  }
+  return false;
+}
+
+function foldConcatCall(head: Ast, args: Ast[], span: Ast["span"]): Ast {
+  if (args.length === 1) return args[0]!;
+  if (args.length < 2) return { tag: "list", kind: "paren", elems: [head, ...args], span };
+  let acc = args[0]!;
+  for (let i = 1; i < args.length; i++) {
+    acc = { tag: "list", kind: "paren", elems: [head, acc, args[i]!], span };
+  }
+  return acc;
+}
+
+function foldConcatAst(ast: Ast, bare: boolean, aliases: Set<string>): Ast {
+  if (ast.tag !== "list") return ast;
+  if (ast.elems.length > 0 && isSymNamed(ast.elems[0]!, "quote")) return ast;
+  const elems = ast.elems.map((e) => foldConcatAst(e, bare, aliases));
+  const head = elems[0];
+  if (head && isStringConcatHead(head, bare, aliases) && elems.length !== 3) {
+    return foldConcatCall(head, elems.slice(1), ast.span);
+  }
+  return { ...ast, elems };
+}
+
+/** Left-fold n-ary `concat` once it is known to be `std/string`'s. */
+function foldStringConcat(
+  forms: Ast[],
+  path: string,
+  imports: { path: string; alias?: string }[],
+): Ast[] {
+  const fromString = (p: string) => {
+    const n = p.startsWith("/") ? p : "/" + p;
+    return n.endsWith("/stdlib/string.mnd");
+  };
+  const bare = fromString(path) || imports.some((imp) => !imp.alias && fromString(imp.path));
+  const aliases = new Set(
+    imports.filter((imp) => imp.alias && fromString(imp.path)).map((imp) => imp.alias!),
+  );
+  if (!bare && aliases.size === 0) return forms;
+  return forms.map((f) => foldConcatAst(f, bare, aliases));
 }
 
 export function loadModuleGraph(
@@ -183,6 +250,18 @@ export function loadModuleGraph(
             code: "E_EXTERN_SEAM",
             message:
               "extern is confined to stdlib seam modules (sys, io, fs, proc)",
+            span: pub.form.span,
+          }),
+        );
+      }
+      if (isRuntime(pub.form) && !isRuntimeModule(path)) {
+        diagnostics.push(
+          diagnostic({
+            severity: "error",
+            category: "semantic",
+            code: "E_RUNTIME_MODULE",
+            message:
+              "runtime is confined to stdlib string, map, and string-buffer",
             span: pub.form.span,
           }),
         );
@@ -366,7 +445,7 @@ export function loadModuleGraph(
       }
     }
     const packed = packRest(m.forms, imported, blocked);
-    m.forms = packed.forms;
+    m.forms = foldStringConcat(packed.forms, m.path, m.imports);
     if (!packed.ok) diagnostics.push(...packed.diagnostics);
   }
 
@@ -438,6 +517,12 @@ function isExtern(form: Ast): boolean {
   return h.tag === "sym" && nameEquals(h.name, "extern");
 }
 
+function isRuntime(form: Ast): boolean {
+  if (form.tag !== "list" || form.elems.length === 0) return false;
+  const h = form.elems[0]!;
+  return h.tag === "sym" && nameEquals(h.name, "runtime");
+}
+
 export function declarationNames(form: Ast): string[] {
   if (form.tag !== "list" || form.elems.length < 2) return [];
   const h = form.elems[0]!;
@@ -447,7 +532,7 @@ export function declarationNames(form: Ast): string[] {
   if (hn === "let" && form.elems.length >= 3 && letName?.tag === "sym") {
     return [new TextDecoder().decode(letName.name)];
   }
-  if (hn === "defn" || hn === "defrec" || hn === "alias" || hn === "extern") {
+  if (hn === "defn" || hn === "defrec" || hn === "alias" || hn === "extern" || hn === "runtime") {
     const namePart = form.elems[1]!;
     if (namePart.tag === "sym") return [new TextDecoder().decode(namePart.name)];
     if (namePart.tag === "list" && namePart.elems[0]?.tag === "sym") {

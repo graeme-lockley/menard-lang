@@ -3,6 +3,10 @@
 ; Prints: list 528 map 62 sb 40 clo 16
 ; Run with: `./mn run examples/heap-churn.mnd`
 
+import std/string as String
+import std/map as Map
+import std/string-buffer as Buf
+
 let list-sum(xs: List Int) -> Int =
   match (xs)
     | [] -> 0
@@ -14,21 +18,21 @@ let build-list(n: Int) -> List Int =
 
 let fill-map(n: Int) -> Int {
   let m =
-    loop (i = 0, acc = map-new())
-      if (i == n) -> acc | recur(i + 1, map-set(acc, i, i * 2))
-  match (map-get(m, n - 1))
+    loop (i = 0, acc = Map.empty())
+      if (i == n) -> acc | recur(i + 1, Map.set(acc, i, i * 2))
+  match (Map.lookup(m, n - 1))
     | Some(v) -> v
     | None -> 0
 }
 
 let grow(n: Int) -> Int {
-  let sb = sb-new()
+  let sb = Buf.new()
   loop (i = 0)
     cond
-      | i == n -> str-byte-length(sb-take-str!(sb))
+      | i == n -> String.length(Buf.take-str!(sb))
       | else ->
         {
-          sb-append-byte!(sb, 97)
+          Buf.append-byte!(sb, 97)
           recur(i + 1)
         }
 }

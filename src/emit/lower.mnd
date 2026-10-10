@@ -186,6 +186,9 @@ import "../util/result.mnd"
 import "./llvm-ir.mnd"
 import "./bc-writer.mnd"
 import std/list
+import std/string as String
+import std/map as Map
+import std/string-buffer as Buf
 
 pub alias Ast = Ast
 
@@ -208,8 +211,8 @@ let is-sym(ast: Ast, name: Str) -> Bool =
     | None -> false
 
 let strip-trailing-colon(raw: Str) -> Str {
-  let n = str-byte-length(raw)
-  if (n > 0 && str-byte(raw, n - 1) == 58) -> str-slice(raw, 0, n - 1) | raw
+  let n = String.length(raw)
+  if (n > 0 && String.byte(n - 1, raw) == 58) -> String.slice(0, n - 1, raw) | raw
 }
 
 ; ---------------------------------------------------------------------------
@@ -395,15 +398,15 @@ let is-word-type(ast: Ast) -> Bool =
 ; After private-symbol uniquify, names look like `__m3_Span` — strip the
 ; `__mN_` prefix before the Upper-initial check.
 let is-raw-upper-name(n: Str) -> Bool =
-  str-byte-length(n) > 0 && {
-    let b = str-byte(n, 0)
+  String.length(n) > 0 && {
+    let b = String.byte(0, n)
     b >= 65 && b <= 90
   }
 
 ; `__m12_Foo` → `Foo`; otherwise identity.
 let strip-uniq-prefix(n: Str) -> Str {
-  let len = str-byte-length(n)
-  if (len >= 4 && str-byte(n, 0) == 95 && str-byte(n, 1) == 95 && str-byte(n, 2) == 109) -> strip-uniq-prefix-digits(n, 3, len) | n
+  let len = String.length(n)
+  if (len >= 4 && String.byte(0, n) == 95 && String.byte(1, n) == 95 && String.byte(2, n) == 109) -> strip-uniq-prefix-digits(n, 3, len) | n
 }
 
 let strip-uniq-prefix-digits(n: Str, i: Int, len: Int) -> Str =
@@ -411,10 +414,10 @@ let strip-uniq-prefix-digits(n: Str, i: Int, len: Int) -> Str =
     | i >= len -> n
     | else ->
       {
-        let b = str-byte(n, i)
+        let b = String.byte(i, n)
         cond
           | b >= 48 && b <= 57 -> strip-uniq-prefix-digits(n, i + 1, len)
-          | b == 95 -> str-slice(n, i + 1, len - (i + 1))
+          | b == 95 -> String.slice(i + 1, len - (i + 1), n)
           | else -> n
       }
 
@@ -444,8 +447,8 @@ let is-sb-type(ast: Ast) -> Bool =
 let is-type-var(ast: Ast) -> Bool =
   match (ast)
     | SymNode(n, _) ->
-      str-byte-length(n) > 0 && {
-        let b = str-byte(n, 0)
+      String.length(n) > 0 && {
+        let b = String.byte(0, n)
         b >= 97 && b <= 122 && not(n == "Int" || n == "Bool" || n == "Unit" || n == "Str")
       }
     | _ -> false
@@ -494,11 +497,11 @@ let is-unit-noop-ldefn(ld: LDefn) -> Bool =
 
 let collect-noop-names(lds: List LDefn) -> Map Str Bool =
   match (lds)
-    | [] -> map-new()
+    | [] -> Map.empty()
     | ld :: rest -> collect-noop-names-cons(ld, rest)
 
 let collect-noop-names-cons(ld: LDefn, rest: List LDefn) -> Map Str Bool =
-  if (is-unit-noop-ldefn(ld)) -> map-set(collect-noop-names(rest), ldefn-name(ld), true) | collect-noop-names(rest)
+  if (is-unit-noop-ldefn(ld)) -> Map.set(collect-noop-names(rest), ldefn-name(ld), true) | collect-noop-names(rest)
 
 let find-ldefn-named(lds: List LDefn, name: Str) -> Maybe LDefn =
   match (lds)
@@ -523,8 +526,8 @@ let func-ref-arity(fr: FuncRef) -> Int =
 
 let build-func-refs(lds: List LDefn, idx: Int) -> Map Str FuncRef =
   match (lds)
-    | [] -> map-new()
-    | ld :: rest -> map-set(build-func-refs(rest, idx + 1), ldefn-name(ld), FuncRef(idx, param-arity-of(ldefn-params(ld))))
+    | [] -> Map.empty()
+    | ld :: rest -> Map.set(build-func-refs(rest, idx + 1), ldefn-name(ld), FuncRef(idx, param-arity-of(ldefn-params(ld))))
 
 ; ---------------------------------------------------------------------------
 ; `Builder` — see header comment's "The one piece of mutable state per
@@ -1175,21 +1178,21 @@ let str-pool-file-gids(p: StrPool) -> Ref (Map Str Int) =
 ; (collection alone never reads them) — `0 - 1` (`-1`) as a visibly
 ; invalid placeholder, same convention `new-bb`'s unresolved index uses.
 let str-pool-new(origins: List Str) -> StrPool =
-  StrPool([], map-new(), 0, -1, -1, -1, map-new(), origins, ref(map-new()))
+  StrPool([], Map.empty(), 0, -1, -1, -1, Map.empty(), origins, ref(Map.empty()))
 
 let str-pool-count(p: StrPool) -> Int =
   str-pool-next(p)
 
 let str-pool-add(p: StrPool, s: Str) -> StrPool =
-  match (map-get(str-pool-by-content(p), s))
+  match (Map.lookup(str-pool-by-content(p), s))
     | Some(_) -> p
-    | None -> StrPool(s :: str-pool-order-rev(p), map-set(str-pool-by-content(p), s, str-pool-next(p)), str-pool-next(p) + 1, str-pool-write-stdout-abs(p), str-pool-print-i64-abs(p), str-pool-write-stderr-abs(p), str-pool-ctors(p), str-pool-origins(p), str-pool-file-gids(p))
+    | None -> StrPool(s :: str-pool-order-rev(p), Map.set(str-pool-by-content(p), s, str-pool-next(p)), str-pool-next(p) + 1, str-pool-write-stdout-abs(p), str-pool-print-i64-abs(p), str-pool-write-stderr-abs(p), str-pool-ctors(p), str-pool-origins(p), str-pool-file-gids(p))
 
 ; Always found once `str-pool-add` has run over every occurrence
 ; `collect-str-pool` sees — see that function's header comment for why
 ; this content-keyed lookup never depends on traversal order matching.
 let str-pool-get(p: StrPool, s: Str) -> Int =
-  match (map-get(str-pool-by-content(p), s))
+  match (Map.lookup(str-pool-by-content(p), s))
     | Some(id) -> id
     | None -> -1
 
@@ -1223,10 +1226,10 @@ let origin-path(pool: StrPool, origin: Int) -> Str =
   list-nth-str(str-pool-origins(pool), origin)
 
 let c-str(s: Str) -> Str {
-  let sb = sb-new()
-  sb-append!(sb, s)
-  sb-append-byte!(sb, 0)
-  sb-take-str!(sb)
+  let sb = Buf.new()
+  Buf.append!(sb, s)
+  Buf.append-byte!(sb, 0)
+  Buf.take-str!(sb)
 }
 
 let add-origin-cstrs(ps: List Str, p: StrPool) -> StrPool =
@@ -1242,12 +1245,12 @@ let span-line-clamped(sp: Span) -> Int {
 let file-gid-of(pool: StrPool, origin: Int) -> Int {
   let path = origin-path(pool, origin)
   let gids = str-pool-file-gids(pool)
-  match (map-get(deref(gids), path))
+  match (Map.lookup(deref(gids), path))
     | Some(id) -> id
     | None ->
       {
         let id = str-pool-get(pool, c-str(path))
-        set!(gids, map-set(deref(gids), path, id))
+        set!(gids, Map.set(deref(gids), path, id))
         id
       }
 }
@@ -1274,7 +1277,7 @@ let emit-call-void!(b: Builder, kind: Int, callee-abs: Int, arg-abs: List Int) -
 ; this module, see the header comment's "Constants are never cached").
 let emit-write-str-to!(b: Builder, pool: StrPool, s: Str, callee-abs: Int) -> Unit {
   let gid = str-pool-get(pool, s)
-  let len-abs = const-i64!(b, str-byte-length(s))
+  let len-abs = const-i64!(b, String.length(s))
   emit-call-void!(b, extern-kind-write, callee-abs, [gid, len-abs])
 }
 
@@ -1327,14 +1330,14 @@ let lower-expr-raw(ast: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRe
 let emit-float-lit!(b: Builder, pool: StrPool, s: Str) -> Int {
   let gid = str-pool-get(pool, s)
   let ptr-i64 = emit-cast!(b, cast-ptrtoint, gid, ty-i64)
-  let len = const-i64!(b, str-byte-length(s))
+  let len = const-i64!(b, String.length(s))
   emit-call!(b, extern-float-from-str-abs(str-pool-count(pool)), [ptr-i64, len])
 }
 
 let emit-str-lit!(b: Builder, pool: StrPool, s: Str) -> Int {
   let gid = str-pool-get(pool, s)
   let ptr-i64 = emit-cast!(b, cast-ptrtoint, gid, ty-i64)
-  let len = const-i64!(b, str-byte-length(s))
+  let len = const-i64!(b, String.length(s))
   emit-call!(b, extern-str-new-abs(str-pool-count(pool)), [ptr-i64, len])
 }
 
@@ -1343,23 +1346,23 @@ let emit-str-lit!(b: Builder, pool: StrPool, s: Str) -> Int {
 let emit-slot-get!(b: Builder, pool: StrPool, name: Str) -> Int {
   let gid = str-pool-get(pool, name)
   let ptr-i64 = emit-cast!(b, cast-ptrtoint, gid, ty-i64)
-  let len = const-i64!(b, str-byte-length(name))
+  let len = const-i64!(b, String.length(name))
   emit-call!(b, extern-slot-get-abs(str-pool-count(pool)), [ptr-i64, len])
 }
 
 let emit-slot-set!(b: Builder, pool: StrPool, name: Str, w: Int) -> Unit {
   let gid = str-pool-get(pool, name)
   let ptr-i64 = emit-cast!(b, cast-ptrtoint, gid, ty-i64)
-  let len = const-i64!(b, str-byte-length(name))
+  let len = const-i64!(b, String.length(name))
   emit-call!(b, extern-slot-set-abs(str-pool-count(pool)), [ptr-i64, len, w])
   ()
 }
 
 let lower-sym(name: Str, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, pool: StrPool) -> Result Int Str =
-  match (map-get(env, name))
+  match (Map.lookup(env, name))
     | Some(slot) -> Ok(emit-load!(b, slot))
     | None ->
-      match (map-get(funcs, name))
+      match (Map.lookup(funcs, name))
         | Some(fr) -> lower-func-as-value(fr, b, pool)
         | None ->
           if (str-in-list(name, deref(b-slots(b)))) -> Ok(emit-slot-get!(b, pool, name)) | lower-sym-ctor-or-err(name, b, pool)
@@ -1374,7 +1377,7 @@ let lower-func-as-value(fr: FuncRef, b: Builder, pool: StrPool) -> Result Int St
           ; Nullary ctor as an expression *is* the value (Nil, None, …).
 let lower-sym-ctor-or-err(name: Str, b: Builder, pool: StrPool) -> Result Int Str =
   match (ctor-tag-of(name, pool))
-    | None -> Err(str-concat("cannot lower unbound name ", name))
+    | None -> Err(String.concat("cannot lower unbound name ", name))
     | Some(tag) ->
       {
         let ns = str-pool-count(pool)
@@ -1462,13 +1465,13 @@ let lower-named(hn: Str, rest: List Ast, sp: Span, env: Map Str Int, b: Builder,
     | is-cmp-op(hn) -> lower-cmp-value(rest, hn, env, b, funcs, noop, pool)
     | is-ctor-name(hn, pool) -> lower-ctor(hn, rest, env, b, funcs, noop, pool)
     | else ->
-      match (map-get(funcs, hn))
+      match (Map.lookup(funcs, hn))
         | Some(_) -> lower-call(hn, rest, sp, env, b, funcs, noop, pool)
         | None ->
           cond
             | is-runtime-op(hn) -> lower-runtime-op(hn, rest, env, b, funcs, noop, pool)
             | is-effect-head(hn) -> result-then(lower-effect-op(hn, rest, env, b, funcs, noop, pool), fn () = Ok(const-unit!(b)))
-            | is-unsupported-form(hn) -> Err(str-concat("cannot lower `", hn, "` with the real instruction lowerer yet"))
+            | is-unsupported-form(hn) -> Err(String.concat("cannot lower `", hn, "` with the real instruction lowerer yet"))
             | else -> lower-call(hn, rest, sp, env, b, funcs, noop, pool)
 
 ; -- if --
@@ -1588,7 +1591,7 @@ let lower-loop-bind-all(pairs: List Ast, body: Ast, result-slot: Int, env: Map S
                 fn (v) {
                   let slot = root-alloca!(b)
                   emit-store!(b, slot, get!(b, v))
-                  lower-loop-bind-all(rest, body, result-slot, env, b, funcs, noop, pool, name :: names-acc, slot :: slots-acc, map-set(env-acc, name, slot))
+                  lower-loop-bind-all(rest, body, result-slot, env, b, funcs, noop, pool, name :: names-acc, slot :: slots-acc, Map.set(env-acc, name, slot))
                 }
               )
         | _ -> Err("each loop binding must be (name init)")
@@ -1665,7 +1668,7 @@ let decl-name-of(name-part: Ast) -> Maybe Str =
 let register-ctor-spec(acc: Map Str CtorSpec, name: Str, arity: Int, tag-ref: Ref Int) -> Map Str CtorSpec {
   let tag = deref(tag-ref)
   set!(tag-ref, tag + 1)
-  map-set(acc, name, CtorSpec(tag, arity))
+  Map.set(acc, name, CtorSpec(tag, arity))
 }
 
 let register-one-variant-ctor(c: Ast, acc: Map Str CtorSpec, tag-ref: Ref Int) -> Map Str CtorSpec =
@@ -1726,14 +1729,14 @@ let collect-ctors-forms(forms: List Ast, acc: Map Str CtorSpec, tag-ref: Ref Int
 
 let collect-user-ctors(forms: List Ast) -> Map Str CtorSpec {
   let tag-ref = ref(user-ctor-tag-base)
-  collect-ctors-forms(forms, map-new(), tag-ref)
+  collect-ctors-forms(forms, Map.empty(), tag-ref)
 }
 
 let is-builtin-ctor(hn: Str) -> Bool =
   hn == "Nil" || hn == "Cons" || hn == "None" || hn == "Some" || hn == "Ok" || hn == "Err"
 
 let is-user-ctor(hn: Str, pool: StrPool) -> Bool =
-  match (map-get(str-pool-ctors(pool), hn))
+  match (Map.lookup(str-pool-ctors(pool), hn))
     | Some(_) -> true
     | None -> false
 
@@ -1775,7 +1778,7 @@ let ctor-tag-of(hn: Str, pool: StrPool) -> Maybe Int =
   match (builtin-ctor-tag-of(hn))
     | Some(t) -> Some(t)
     | None ->
-      match (map-get(str-pool-ctors(pool), hn))
+      match (Map.lookup(str-pool-ctors(pool), hn))
         | Some(spec) -> Some(ctor-spec-tag(spec))
         | None -> None()
 
@@ -1795,7 +1798,7 @@ let ctor-arity-of(hn: Str, pool: StrPool) -> Int =
         | hn == "Cons" -> 2
         | hn == "Some" || hn == "Ok" || hn == "Err" -> 1
         | else ->
-          match (map-get(str-pool-ctors(pool), hn))
+          match (Map.lookup(str-pool-ctors(pool), hn))
             | Some(spec) -> ctor-spec-arity(spec)
             | None -> -1
 
@@ -1819,8 +1822,8 @@ let lower-user-ctor-fill(obj: Int, avs: List Int, i: Int, b: Builder, pool: StrP
       }
 
 let lower-user-ctor(hn: Str, args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  match (map-get(str-pool-ctors(pool), hn))
-    | None -> Err(str-concat("unknown constructor ", hn))
+  match (Map.lookup(str-pool-ctors(pool), hn))
+    | None -> Err(String.concat("unknown constructor ", hn))
     | Some(spec) ->
       if (length(args) == ctor-spec-arity(spec)) ->
         result-bind(
@@ -1831,11 +1834,11 @@ let lower-user-ctor(hn: Str, args: List Ast, env: Map Str Int, b: Builder, funcs
             let obj = emit-call!(b, extern-new-abs(str-pool-count(pool)), [tag-c, nslots])
             Ok(lower-user-ctor-fill(obj, avs, 0, b, pool))
           }
-        ) | Err(str-concat("arity mismatch constructing ", hn))
+        ) | Err(String.concat("arity mismatch constructing ", hn))
 
 let lower-fixed-tag-ctor(hn: Str, args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (builtin-ctor-tag-of(hn))
-    | None -> Err(str-concat("unknown constructor ", hn))
+    | None -> Err(String.concat("unknown constructor ", hn))
     | Some(tag) ->
       if (length(args) == ctor-arity-of(hn, pool)) ->
         result-bind(
@@ -1846,12 +1849,12 @@ let lower-fixed-tag-ctor(hn: Str, args: List Ast, env: Map Str Int, b: Builder, 
             let obj = emit-call!(b, extern-new-abs(str-pool-count(pool)), [tag-c, nslots])
             Ok(lower-user-ctor-fill(obj, avs, 0, b, pool))
           }
-        ) | Err(str-concat("arity mismatch constructing ", hn))
+        ) | Err(String.concat("arity mismatch constructing ", hn))
 
 let lower-ctor(hn: Str, args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   cond
     | is-builtin-ctor(hn) ->
-      if (length(args) == ctor-arity-of(hn, pool)) -> result-bind(lower-args(args, env, b, funcs, noop, pool), fn (avs) = Ok(emit-call-words!(b, ctor-extern-abs(hn, str-pool-count(pool)), avs))) | Err(str-concat("arity mismatch constructing ", hn))
+      if (length(args) == ctor-arity-of(hn, pool)) -> result-bind(lower-args(args, env, b, funcs, noop, pool), fn (avs) = Ok(emit-call-words!(b, ctor-extern-abs(hn, str-pool-count(pool)), avs))) | Err(String.concat("arity mismatch constructing ", hn))
     | has-builtin-tag(hn) -> lower-fixed-tag-ctor(hn, args, env, b, funcs, noop, pool)
     | else -> lower-user-ctor(hn, args, env, b, funcs, noop, pool)
 
@@ -1859,7 +1862,7 @@ let is-runtime-op(hn: Str) -> Bool =
   hn == "write" || hn == "mn_write" || str-in-list(hn, runtime-op-names())
 
 let runtime-op-names() -> List Str =
-  ["str-concat", "str-byte-length", "str-byte", "str-slice", "ref", "deref", "set!", "sb-new", "sb-append!", "sb-append-byte!", "sb-take-str!", "map-new", "map-set", "map-get", "map-has", "map-size", "map-keys", "mn-env-0", "mn-env-1", "mn-env-get", "mn-closure-new", "mn-apply-0", "mn-apply-1", "mn-apply-2", "arg-count", "arg", "read-file", "write-file", "show", "mn-env-new", "mn-env-set", "compare", "sb-length", "sb-to-str", "dump", "spawn", "spawn-capture", "getenv", "exists", "rename", "isatty", "mtime", "cwd", "ensure-dir", "list-dir", "realpath", "now-ms", "remove", "is-dir", "mn_isatty", "mn_mtime", "mn_cwd", "mn_ensure_dir", "mn_list_dir", "mn_realpath", "mn_now_ms", "mn_remove", "mn_is_dir", "mn_arg_count", "mn_arg", "mn_read_file", "mn_write_file", "mn_spawn", "mn_spawn_capture", "mn_getenv", "mn_exists", "mn_rename", "f+", "f-", "f*", "f/"]
+  ["str-concat", "str-byte-length", "str-byte", "str-slice", "char->str", "ref", "deref", "set!", "sb-new", "sb-append!", "sb-append-byte!", "sb-take-str!", "sb-clear!", "map-new", "map-set", "map-get", "map-has", "map-size", "map-keys", "mn-env-0", "mn-env-1", "mn-env-get", "mn-closure-new", "mn-apply-0", "mn-apply-1", "mn-apply-2", "arg-count", "arg", "read-file", "write-file", "show", "mn-env-new", "mn-env-set", "compare", "sb-length", "sb-to-str", "dump", "spawn", "spawn-capture", "getenv", "exists", "rename", "isatty", "mtime", "cwd", "ensure-dir", "list-dir", "realpath", "now-ms", "remove", "is-dir", "mn_isatty", "mn_mtime", "mn_cwd", "mn_ensure_dir", "mn_list_dir", "mn_realpath", "mn_now_ms", "mn_remove", "mn_is_dir", "mn_arg_count", "mn_arg", "mn_read_file", "mn_write_file", "mn_spawn", "mn_spawn_capture", "mn_getenv", "mn_exists", "mn_rename", "f+", "f-", "f*", "f/"]
 
 ; `extern` declares the C symbol (`mn_exists`). Ambient compiler calls
 ; still use the Menard name (`exists`). Both lower to the same abs id.
@@ -1922,6 +1925,7 @@ let runtime-op-abs-named(hn: Str, ns: Int) -> Int =
     | hn == "str-byte-length" -> extern-str-byte-length-abs(ns)
     | hn == "str-byte" -> extern-str-byte-abs(ns)
     | hn == "str-slice" -> extern-str-slice-abs(ns)
+    | hn == "char->str" -> extern-char-to-str-abs(ns)
     | hn == "ref" -> extern-ref-new-abs(ns)
     | hn == "deref" -> extern-ref-deref-abs(ns)
     | hn == "set!" -> extern-ref-set-abs(ns)
@@ -1952,6 +1956,7 @@ let runtime-op-abs-named(hn: Str, ns: Int) -> Int =
     | hn == "compare" -> extern-compare-abs(ns)
     | hn == "sb-length" -> extern-sb-length-abs(ns)
     | hn == "sb-to-str" -> extern-sb-to-str-abs(ns)
+    | hn == "sb-clear!" -> extern-sb-clear-abs(ns)
     | hn == "dump" -> extern-dump-abs(ns)
     | hn == "spawn" -> extern-spawn-abs(ns)
     | hn == "spawn-capture" -> extern-spawn-capture-abs(ns)
@@ -1967,7 +1972,7 @@ let runtime-op-arity-named(hn: Str) -> Int =
     | hn == "cwd" || hn == "now-ms" -> 0
     | str-in-list(hn, ["isatty", "mtime", "ensure-dir", "list-dir", "realpath", "remove", "is-dir"]) -> 1
     | hn == "sb-new" || hn == "map-new" || hn == "mn-env-0" || hn == "arg-count" -> 0
-    | str-in-list(hn, ["str-byte-length", "ref", "deref", "sb-take-str!", "map-size", "map-keys", "mn-env-1", "mn-env-new", "arg", "read-file", "mn-apply-0", "show", "sb-length", "sb-to-str", "dump", "spawn", "getenv", "exists"]) -> 1
+    | str-in-list(hn, ["str-byte-length", "char->str", "ref", "deref", "sb-take-str!", "sb-clear!", "map-size", "map-keys", "mn-env-1", "mn-env-new", "arg", "read-file", "mn-apply-0", "show", "sb-length", "sb-to-str", "dump", "spawn", "getenv", "exists"]) -> 1
     | hn == "str-slice" || hn == "map-set" || hn == "mn-apply-2" || hn == "mn-env-set" -> 3
     | else -> 2
 
@@ -1975,7 +1980,7 @@ let lower-runtime-op(hn: Str, args: List Ast, env: Map Str Int, b: Builder, func
   cond
     | hn == "mn-closure-new" -> lower-closure-new(args, env, b, funcs, noop, pool)
     | length(args) == runtime-op-arity(hn) -> result-bind(lower-args(args, env, b, funcs, noop, pool), fn (avs) = Ok(emit-call-words!(b, runtime-op-abs(hn, str-pool-count(pool)), avs)))
-    | else -> Err(str-concat("arity mismatch calling ", hn))
+    | else -> Err(String.concat("arity mismatch calling ", hn))
 
 ; `(mn-closure-new __lamN env)` — first arg is a FuncRef symbol; emit
 ; ptrtoint of that function's module-scope abs id, then call mn_closure_new.
@@ -1985,8 +1990,8 @@ let lower-closure-new(args: List Ast, env: Map Str Int, b: Builder, funcs: Map S
       match (sym-str(code-ast))
         | None -> Err("mn-closure-new requires a function name as its first argument")
         | Some(lam-name) ->
-          match (map-get(funcs, lam-name))
-            | None -> Err(str-concat("mn-closure-new: unknown function ", lam-name))
+          match (Map.lookup(funcs, lam-name))
+            | None -> Err(String.concat("mn-closure-new: unknown function ", lam-name))
             | Some(fr) ->
               {
                 let code-bits = emit-cast!(b, cast-ptrtoint, func-ref-abs(fr), ty-i64)
@@ -2011,14 +2016,14 @@ let pat-payload-asts(pat: Ast) -> List Ast =
     | _ -> []
 
 let is-upper-name(s: Str) -> Bool {
-  let b = str-byte(s, 0)
+  let b = String.byte(0, s)
   b >= 65 && b <= 90
 }
 
 let bind-name!(name: Str, val: Int, env: Map Str Int, b: Builder) -> Map Str Int {
   let slot = root-alloca!(b)
   emit-store!(b, slot, val)
-  map-set(env, name, slot)
+  Map.set(env, name, slot)
 }
 
 ; Bind `pat` against `val`. Constructor and literal mismatches branch to
@@ -2045,7 +2050,7 @@ let bind-nullary-pat!(cname: Str, val: Int, else-bb: BB, env: Map Str Int, b: Bu
 
 let bind-ctor-pat!(cname: Str, payloads: List Ast, val: Int, else-bb: BB, env: Map Str Int, b: Builder, pool: StrPool) -> Result (Map Str Int) Str =
   match (ctor-tag-of(cname, pool))
-    | None -> Err(str-concat("cannot lower match on constructor ", cname))
+    | None -> Err(String.concat("cannot lower match on constructor ", cname))
     | Some(want-tag) ->
       {
         let tag-abs = emit-call!(b, extern-tag-abs(str-pool-count(pool)), [val])
@@ -2190,7 +2195,7 @@ let lower-cond-bool-value(ast: Ast, env: Map Str Int, b: Builder, funcs: Map Str
 let lower-cmp-value(args: List Ast, op: Str, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (args)
     | [a-ast, c-ast] -> result-bind(lower-expr(a-ast, env, b, funcs, noop, pool), fn (av) = result-bind(lower-expr(c-ast, env, b, funcs, noop, pool), fn (cv) = Ok(lower-cmp-word!(op, av, cv, b, pool))))
-    | _ -> Err(str-concat("comparison `", op, "` expects exactly 2 arguments"))
+    | _ -> Err(String.concat("comparison `", op, "` expects exactly 2 arguments"))
 
 let lower-cmp-word!(op: Str, av: Int, cv: Int, b: Builder, pool: StrPool) -> Int =
   if (op == "=") -> emit-call!(b, extern-equal-abs(str-pool-count(pool)), [get!(b, av), get!(b, cv)]) | bool-from-i1!(b, emit-cmp2!(b, cmp-pred-for(op), get!(b, av), get!(b, cv)))
@@ -2208,7 +2213,7 @@ let cmp-pred-for(op: Str) -> Int =
 let lower-arith(args: List Ast, op: Str, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (args)
     | [a-ast, c-ast] -> result-bind(lower-expr(a-ast, env, b, funcs, noop, pool), fn (av) = result-bind(lower-expr(c-ast, env, b, funcs, noop, pool), fn (cv) = Ok(apply-arith!(b, pool, sp, op, av, cv))))
-    | _ -> Err(str-concat("operator ", op, " expects exactly 2 arguments"))
+    | _ -> Err(String.concat("operator ", op, " expects exactly 2 arguments"))
 
 let apply-arith!(b: Builder, pool: StrPool, sp: Span, op: Str, av: Int, cv: Int) -> Int {
   let aw = get!(b, av)
@@ -2243,7 +2248,7 @@ let lower-let-inline-bind(name: Str, v: Int, body: List Ast, env: Map Str Int, b
   let w = get!(b, v)
   let slot = root-alloca!(b)
   emit-store!(b, slot, w)
-  lower-let-inline-continue(body, map-set(env, name, slot), b, funcs, noop, pool, w)
+  lower-let-inline-continue(body, Map.set(env, name, slot), b, funcs, noop, pool, w)
 }
 
 let lower-let-inline-continue(body: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool, v: Int) -> Result Int Str =
@@ -2283,7 +2288,7 @@ let is-unit-noop-call-named(head: Ast, noop: Map Str Bool) -> Bool =
   match (sym-str(head))
     | None -> false
     | Some(name) ->
-      match (map-get(noop, name))
+      match (Map.lookup(noop, name))
         | Some(_) -> true
         | None -> false
 
@@ -2308,10 +2313,10 @@ let is-effect-call-named(head: Ast) -> Bool =
 ; Trailing 0 so `mn_panic`'s `strlen` stops at the end of the message.
 ; The pool stores the bytes as given; a Menard string literal has no NUL.
 let div-zero-msg() -> Str {
-  let sb = sb-new()
-  sb-append!(sb, "division by zero")
-  sb-append-byte!(sb, 0)
-  sb-take-str!(sb)
+  let sb = Buf.new()
+  Buf.append!(sb, "division by zero")
+  Buf.append-byte!(sb, 0)
+  Buf.take-str!(sb)
 }
 
 let lower-effect(f: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
@@ -2336,7 +2341,7 @@ let lower-effect-known(hn: Str, rest: List Ast, env: Map Str Int, b: Builder, fu
         | [value] -> lower-print-text(value, env, b, funcs, noop, pool)
         | _ -> Err("print-text requires exactly one Str argument")
     | hn == "exit" -> lower-exit(rest, env, b, funcs, noop, pool)
-    | else -> Err(str-concat("unknown effect ", hn))
+    | else -> Err(String.concat("unknown effect ", hn))
 
 ; `(exit code)` — noreturn via `mn_exit` (tagged Int in, untagged inside).
 let lower-exit(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
@@ -2428,7 +2433,7 @@ let slot-store(b: Builder, name: Str, env: Map Str Int) -> Bool =
     | deref(b-slot-arm(b)) ->
       cond
         | str-in-list(name, deref(b-slots(b))) ->
-          match (map-get(env, name))
+          match (Map.lookup(env, name))
             | None -> true
             | Some(_) -> false
         | else -> false
@@ -2439,7 +2444,7 @@ let lower-sequence-let-bind(name: Str, v: Int, rest: List Ast, env: Map Str Int,
   if (slot-store(b, name, env)) -> emit-slot-set!(b, pool, name, w)
   let slot = root-alloca!(b)
   emit-store!(b, slot, w)
-  lower-sequence-rest(rest, map-set(env, name, slot), b, funcs, noop, pool, w)
+  lower-sequence-rest(rest, Map.set(env, name, slot), b, funcs, noop, pool, w)
 }
 
 let lower-sequence-rest(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool, fallback: Int) -> Result Int Str =
@@ -2461,14 +2466,14 @@ let lower-args-cons(v: Int, rest: List Ast, env: Map Str Int, b: Builder, funcs:
   result-bind(lower-args(rest, env, b, funcs, noop, pool), fn (vs) = Ok(v :: vs))
 
 let lower-call(name: Str, arg-asts: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  match (map-get(funcs, name))
+  match (Map.lookup(funcs, name))
     | Some(fr) -> lower-call-with-ref(fr, name, arg-asts, sp, env, b, funcs, noop, pool)
     | None -> lower-call-local-or-err(name, arg-asts, sp, env, b, funcs, noop, pool)
 
 ; A local holding a heap closure: `(f arg)` → `mn_apply_1`.
 let lower-call-local-or-err(name: Str, arg-asts: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  match (map-get(env, name))
-    | None -> Err(str-concat("cannot lower a call to ", name))
+  match (Map.lookup(env, name))
+    | None -> Err(String.concat("cannot lower a call to ", name))
     | Some(slot) -> lower-apply-local(slot, name, arg-asts, sp, env, b, funcs, noop, pool)
 
 let lower-apply-local(slot: Int, name: Str, arg-asts: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
@@ -2498,10 +2503,10 @@ let lower-apply-local(slot: Int, name: Str, arg-asts: List Ast, sp: Span, env: M
             }
           )
       )
-    | _ -> Err(str-concat("closure application supports 0–2 arguments (calling local `", name, "`)"))
+    | _ -> Err(String.concat("closure application supports 0–2 arguments (calling local `", name, "`)"))
 
 let lower-call-with-ref(fr: FuncRef, name: Str, arg-asts: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  if (length(arg-asts) == func-ref-arity(fr)) -> result-bind(lower-args(arg-asts, env, b, funcs, noop, pool), fn (args) = Ok(emit-traced-call!(b, pool, sp, func-ref-abs(fr), get-words!(b, args)))) | Err(str-concat("arity mismatch calling ", name))
+  if (length(arg-asts) == func-ref-arity(fr)) -> result-bind(lower-args(arg-asts, env, b, funcs, noop, pool), fn (args) = Ok(emit-traced-call!(b, pool, sp, func-ref-abs(fr), get-words!(b, args)))) | Err(String.concat("arity mismatch calling ", name))
 
 ; ---------------------------------------------------------------------------
 ; One function: bind params (each its own alloca, uniformly with `let`s
@@ -2510,14 +2515,14 @@ let lower-call-with-ref(fr: FuncRef, name: Str, arg-asts: List Ast, sp: Span, en
 
 let bind-params!(b: Builder, names: List Str, start: Int, i: Int) -> Map Str Int =
   match (names)
-    | [] -> map-new()
+    | [] -> Map.empty()
     | n :: rest -> bind-params-cons!(b, n, rest, start, i)
 
 let bind-params-cons!(b: Builder, n: Str, rest: List Str, start: Int, i: Int) -> Map Str Int {
   let param-abs = start + i
   let slot = root-alloca!(b)
   emit-store!(b, slot, param-abs)
-  map-set(bind-params!(b, rest, start, i + 1), n, slot)
+  Map.set(bind-params!(b, rest, start, i + 1), n, slot)
 }
 
 let finish-return!(b: Builder, is-main: Bool, result-abs: Int) -> Unit {
@@ -2542,7 +2547,7 @@ let lower-one-func(ld: LDefn, num-globals: Int, funcs: Map Str FuncRef, noop: Ma
     if (is-main) -> 2 | param-arity-of(ldefn-params(ld))
   let b = builder-new(num-globals + llvm-nparams)
   let flag =
-    match (map-get(mc, ldefn-name(ld)))
+    match (Map.lookup(mc, ldefn-name(ld)))
       | Some(f) -> f
       | None -> true
   set!(b-rooting(b), flag)
@@ -2554,7 +2559,7 @@ let lower-one-func(ld: LDefn, num-globals: Int, funcs: Map Str FuncRef, noop: Ma
   emit-main-init-if-needed!(b, is-main, num-globals, pool)
   match (lower-sequence(ldefn-body(ld), env0, b, funcs, noop, pool))
     | Ok(result-abs) -> lower-one-func-finish(ld, is-main, result-abs, b)
-    | Err(msg) -> Err(str-concat(ldefn-name(ld), ": ", msg))
+    | Err(msg) -> Err(String.concat(ldefn-name(ld), ": ", msg))
 }
 
 ; Call `mn_init(argc, argv)` at the start of `main` so `arg` / `arg-count`
@@ -2568,17 +2573,17 @@ let emit-main-init-if-needed!(b: Builder, is-main: Bool, num-globals: Int, pool:
 ; `main` is the bootstrap C entry. `mn_<hash>_…` is already the link symbol
 ; of a module `main` or init (see `modules/graph.mnd`).
 let is-mn-symbol(name: Str) -> Bool =
-  str-byte-length(name) >= 3 && str-slice(name, 0, 3) == "mn_"
+  String.length(name) >= 3 && String.slice(0, 3, name) == "mn_"
 
 ; `with-module-init` names the generated function `mn_<hash>_init`. A user
 ; function named `init` is renamed to `__mN_init` and does not match.
 let is-module-init-name(name: Str) -> Bool {
-  let n = str-byte-length(name)
-  is-mn-symbol(name) && n >= 8 && str-slice(name, n - 5, 5) == "_init"
+  let n = String.length(name)
+  is-mn-symbol(name) && n >= 8 && String.slice(n - 5, 5, name) == "_init"
 }
 
 let link-symbol(name: Str) -> Str =
-  if (name == "main" || is-mn-symbol(name)) -> name | str-concat("menard.", name)
+  if (name == "main" || is-mn-symbol(name)) -> name | String.concat("menard.", name)
 
 let lower-one-func-finish(ld: LDefn, is-main: Bool, result-abs: Int, b: Builder) -> Result LFunc Str {
   finish-return!(b, is-main, result-abs)
@@ -2606,7 +2611,7 @@ let lower-all-funcs-cons(lf: LFunc, rest: List LDefn, num-globals: Int, funcs: M
 ; expressions, keeps that behavior unchanged for any program that has
 ; one.
 let is-declaration-head(s: Str) -> Bool =
-  s == "defn" || s == "defrec" || s == "variant" || s == "alias" || s == "extern" || s == "import"
+  s == "defn" || s == "defrec" || s == "variant" || s == "alias" || s == "extern" || s == "runtime" || s == "import"
 
 let is-declaration-form(ast: Ast) -> Bool =
   match (unwrap-pub(ast))
@@ -2661,7 +2666,7 @@ let add-int-constant-named(name-ast: Ast, expr: Ast, acc: Map Str Int) -> Map St
     | None -> acc
     | Some(n) ->
       match (expr)
-        | IntNode(k, _) -> map-set(acc, n, k)
+        | IntNode(k, _) -> Map.set(acc, n, k)
         | _ -> acc
 
 let collect-int-constants-from(forms: List Ast, acc: Map Str Int) -> Map Str Int =
@@ -2670,7 +2675,7 @@ let collect-int-constants-from(forms: List Ast, acc: Map Str Int) -> Map Str Int
     | f :: rest -> collect-int-constants-from(rest, add-int-constant(f, acc))
 
 let collect-int-constants(forms: List Ast) -> Map Str Int =
-  collect-int-constants-from(forms, map-new())
+  collect-int-constants-from(forms, Map.empty())
 
 let name-is-bound(name: Str, bound: List Str) -> Bool =
   match (bound)
@@ -2687,7 +2692,7 @@ let subst-sym(name: Str, sp: Span, consts: Map Str Int, bound: List Str) -> Ast 
   cond
     | name-is-bound(name, bound) -> SymNode(name, sp)
     | else ->
-      match (map-get(consts, name))
+      match (Map.lookup(consts, name))
         | Some(k) -> IntNode(k, sp)
         | None -> SymNode(name, sp)
 
@@ -2700,8 +2705,8 @@ let let-bound-name(name-ast: Ast) -> Str =
 ; symbol text. The name shadows an integer constant of the same spelling,
 ; so `(stdin: Str)` is not `(let stdin 0)`.
 let strip-trailing-colon(raw: Str) -> Str {
-  let n = str-byte-length(raw)
-  if (n > 0 && str-byte(raw, n - 1) == 58) -> str-slice(raw, 0, n - 1) | raw
+  let n = String.length(raw)
+  if (n > 0 && String.byte(n - 1, raw) == 58) -> String.slice(0, n - 1, raw) | raw
 }
 
 let param-bound-name(a: Ast) -> Str =
@@ -2812,13 +2817,13 @@ let mc-pure(hn: Str) -> Bool =
   mc-pure-body(effect-alias(seam-menard-name(hn)))
 
 let mc-pure-body(hn: Str) -> Bool =
-  str-in-list(hn, ["isatty", "mtime", "now-ms", "ensure-dir", "remove", "is-dir"]) || hn == "if" || hn == "let" || hn == "do" || hn == "loop" || hn == "recur" || hn == "match" || hn == "println" || hn == "print" || hn == "shadow-push" || hn == "shadow-pop" || hn == "exit" || hn == "deref" || hn == "set!" || hn == "str-byte" || hn == "str-byte-length" || hn == "map-has" || hn == "map-size" || hn == "mn-env-get" || hn == "arg-count" || hn == "exists" || hn == "sb-length" || hn == "sb-to-str" || hn == "dump" || hn == "+" || hn == "-" || hn == "*" || hn == "/" || hn == "%" || hn == "<" || hn == ">" || hn == "<=" || hn == ">=" || hn == "=" || hn == "compare"
+  str-in-list(hn, ["isatty", "mtime", "now-ms", "ensure-dir", "remove", "is-dir"]) || hn == "if" || hn == "let" || hn == "do" || hn == "loop" || hn == "recur" || hn == "match" || hn == "println" || hn == "print" || hn == "shadow-push" || hn == "shadow-pop" || hn == "exit" || hn == "deref" || hn == "set!" || hn == "str-byte" || hn == "str-byte-length" || hn == "sb-clear!" || hn == "map-has" || hn == "map-size" || hn == "mn-env-get" || hn == "arg-count" || hn == "exists" || hn == "sb-length" || hn == "sb-to-str" || hn == "dump" || hn == "+" || hn == "-" || hn == "*" || hn == "/" || hn == "%" || hn == "<" || hn == ">" || hn == "<=" || hn == ">=" || hn == "=" || hn == "compare"
 
 let mc-alloc-name(hn: Str) -> Bool =
   mc-alloc-body(seam-menard-name(hn))
 
 let mc-alloc-body(hn: Str) -> Bool =
-  hn == "write" || hn == "str-concat" || hn == "str-slice" || hn == "ref" || hn == "sb-new" || hn == "sb-append!" || hn == "sb-append-byte!" || hn == "sb-take-str!" || hn == "map-new" || hn == "map-set" || hn == "map-get" || hn == "map-keys" || hn == "mn-env-0" || hn == "mn-env-1" || hn == "mn-env-new" || hn == "mn-closure-new" || hn == "mn-apply-0" || hn == "mn-apply-1" || hn == "mn-apply-2" || hn == "arg" || hn == "read-file" || hn == "write-file" || hn == "show" || hn == "spawn" || hn == "spawn-capture" || hn == "getenv" || hn == "rename" || hn == "f+" || hn == "f-" || hn == "f*" || hn == "f/" || hn == "cwd" || hn == "list-dir" || hn == "realpath"
+  hn == "write" || hn == "str-concat" || hn == "str-slice" || hn == "char->str" || hn == "ref" || hn == "sb-new" || hn == "sb-append!" || hn == "sb-append-byte!" || hn == "sb-take-str!" || hn == "map-new" || hn == "map-set" || hn == "map-get" || hn == "map-keys" || hn == "mn-env-0" || hn == "mn-env-1" || hn == "mn-env-new" || hn == "mn-closure-new" || hn == "mn-apply-0" || hn == "mn-apply-1" || hn == "mn-apply-2" || hn == "arg" || hn == "read-file" || hn == "write-file" || hn == "show" || hn == "spawn" || hn == "spawn-capture" || hn == "getenv" || hn == "rename" || hn == "f+" || hn == "f-" || hn == "f*" || hn == "f/" || hn == "cwd" || hn == "list-dir" || hn == "realpath"
 
 let mc-ctor-alloc(hn: Str) -> Bool =
   is-upper-name(hn) && hn != "Nil" && hn != "None"
@@ -2849,7 +2854,7 @@ let mc-note-head(hn: Str, names: Map Str Bool) -> McWalk =
     | mc-pure(hn) -> mc-walk-empty()
     | mc-alloc-name(hn) || mc-ctor-alloc(hn) -> McWalk(true, [])
     | else ->
-      match (map-get(names, hn))
+      match (Map.lookup(names, hn))
         | Some(_) -> McWalk(false, [hn])
         | None -> McWalk(true, [])
 
@@ -2932,19 +2937,19 @@ let mc-walk-paren(elems: List Ast, names: Map Str Bool) -> McWalk =
 
 let mc-seed(lds: List LDefn) -> Map Str Bool =
   match (lds)
-    | [] -> map-new()
-    | ld :: rest -> map-set(mc-seed(rest), ldefn-name(ld), false)
+    | [] -> Map.empty()
+    | ld :: rest -> Map.set(mc-seed(rest), ldefn-name(ld), false)
 
 let mc-build(lds: List LDefn, names: Map Str Bool) -> Map Str McWalk =
   match (lds)
-    | [] -> map-new()
-    | ld :: rest -> map-set(mc-build(rest, names), ldefn-name(ld), mc-walk-forms(ldefn-body(ld), names))
+    | [] -> Map.empty()
+    | ld :: rest -> Map.set(mc-build(rest, names), ldefn-name(ld), mc-walk-forms(ldefn-body(ld), names))
 
 let mc-any-callee(xs: List Str, flags: Map Str Bool) -> Bool =
   match (xs)
     | [] -> false
     | n :: rest ->
-      match (map-get(flags, n))
+      match (Map.lookup(flags, n))
         | Some(f) ->
           if (f) -> true | mc-any-callee(rest, flags)
         | None -> mc-any-callee(rest, flags)
@@ -2962,27 +2967,27 @@ let mc-apply(lds: List LDefn, info: Map Str McWalk, flags: Map Str Bool) -> Map 
 let mc-apply-one(ld: LDefn, rest: List LDefn, info: Map Str McWalk, flags: Map Str Bool) -> Map Str Bool {
   let name = ldefn-name(ld)
   let now =
-    match (map-get(flags, name))
+    match (Map.lookup(flags, name))
       | Some(f) -> f
       | None -> false
   let next-flag =
     cond
       | now -> true
       | else ->
-        match (map-get(info, name))
+        match (Map.lookup(info, name))
           | Some(w) -> mc-body-true(w, flags)
           | None -> true
-  mc-apply(rest, info, map-set(flags, name, next-flag))
+  mc-apply(rest, info, Map.set(flags, name, next-flag))
 }
 
 let mc-flags-equal(lds: List LDefn, a: Map Str Bool, b: Map Str Bool) -> Bool =
   match (lds)
     | [] -> true
     | ld :: rest ->
-      match (map-get(a, ldefn-name(ld)))
+      match (Map.lookup(a, ldefn-name(ld)))
         | None -> false
         | Some(fa) ->
-          match (map-get(b, ldefn-name(ld)))
+          match (Map.lookup(b, ldefn-name(ld)))
             | None -> false
             | Some(fb) ->
               if (fa == fb) -> mc-flags-equal(rest, a, b) | false
@@ -3017,7 +3022,7 @@ pub record CtorTable {
 let seed-specs(seeds: List CtorSeed, acc: Map Str CtorSpec) -> Map Str CtorSpec =
   match (seeds)
     | [] -> acc
-    | CtorSeed(n, t, a) :: rest -> seed-specs(rest, map-set(acc, n, CtorSpec(t, a)))
+    | CtorSeed(n, t, a) :: rest -> seed-specs(rest, Map.set(acc, n, CtorSpec(t, a)))
 
 let max-seed-tag(seeds: List CtorSeed, acc: Int) -> Int =
   match (seeds)
@@ -3036,14 +3041,14 @@ let reverse-seeds(xs: List CtorSeed, acc: List CtorSeed) -> List CtorSeed =
     | x :: rest -> reverse-seeds(rest, x :: acc)
 
 let note-ctor(acc: Map Str CtorSpec, name: Str, arity: Int, tag-ref: Ref Int, local: Ref (List CtorSeed)) -> Map Str CtorSpec =
-  match (map-get(acc, name))
+  match (Map.lookup(acc, name))
     | Some(_) -> acc
     | None ->
       {
         let tag = deref(tag-ref)
         set!(tag-ref, tag + 1)
         set!(local, CtorSeed(name, tag, arity) :: deref(local))
-        map-set(acc, name, CtorSpec(tag, arity))
+        Map.set(acc, name, CtorSpec(tag, arity))
       }
 
 let note-one-variant(c: Ast, acc: Map Str CtorSpec, tag-ref: Ref Int, local: Ref (List CtorSeed)) -> Map Str CtorSpec =
@@ -3098,7 +3103,7 @@ let note-ctor-forms(forms: List Ast, acc: Map Str CtorSpec, tag-ref: Ref Int, lo
 pub let ctor-info(forms: List Ast, seeds: List CtorSeed) -> CtorTable {
   let local = ref([])
   let tag-ref = ref(seed-start(seeds))
-  let specs = note-ctor-forms(forms, seed-specs(seeds, map-new()), tag-ref, local)
+  let specs = note-ctor-forms(forms, seed-specs(seeds, Map.empty()), tag-ref, local)
   CtorTable(specs, reverse-seeds(deref(local), []))
 }
 
@@ -3114,9 +3119,9 @@ let add-imp-refs(imps: List Imp, idx: Int, acc: Map Str FuncRef) -> Map Str Func
   match (imps)
     | [] -> acc
     | Imp(name, _, ar) :: rest ->
-      match (map-get(acc, name))
+      match (Map.lookup(acc, name))
         | Some(_) -> add-imp-refs(rest, idx + 1, acc)
-        | None -> add-imp-refs(rest, idx + 1, map-set(acc, name, FuncRef(idx, ar)))
+        | None -> add-imp-refs(rest, idx + 1, Map.set(acc, name, FuncRef(idx, ar)))
 
 ; A non-integer top-level `(let name expr)`. Integer lets are already
 ; folded away before this runs.
@@ -3181,7 +3186,7 @@ let lower-program-build(word-lds: List LDefn, all-lds: List LDefn, forms: List A
   let mc = mc-analyze(word-lds2)
   match (lower-all-funcs(word-lds2, num-globals, funcs, noop, pool, mc, slots))
     | Ok(lfuncs) -> Ok(write-module-bc(LlvmModule(lfuncs, str-pool-strs(pool), imports), triple))
-    | Err(msg) -> Err(str-concat("cannot lower `main`: ", msg))
+    | Err(msg) -> Err(String.concat("cannot lower `main`: ", msg))
 }
 
 let lower-program-collected-sep(forms: List Ast, triple: Str, paths: List Str, imports: List Imp, seeds: List CtorSeed) -> Result Str Str {

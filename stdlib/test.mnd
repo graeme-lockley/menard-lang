@@ -18,8 +18,8 @@ pub record Counts {
 let join-path(dir: Str, name: Str) -> Str =
   cond
     | dir == "" || dir == "." -> name
-    | dir == "/" -> str-concat("/", name)
-    | else -> str-concat(dir, "/", name)
+    | dir == "/" -> String.concat("/", name)
+    | else -> String.concat(dir, "/", name)
 
 ; Hidden names, dependencies, and build output are not test roots.
 let skip-name(name: Str) -> Bool =
@@ -29,13 +29,13 @@ let skip-name(name: Str) -> Bool =
 let split-acc(s: Str, i: Int, start: Int, n: Int, acc: List Str) -> List Str =
   cond
     | i > n -> acc
-    | i == n || str-byte(s, i) == 10 ->
-      if (i == start) -> split-acc(s, i + 1, i + 1, n, acc) | split-acc(s, i + 1, i + 1, n, str-slice(s, start, i - start) :: acc)
+    | i == n || String.byte(i, s) == 10 ->
+      if (i == start) -> split-acc(s, i + 1, i + 1, n, acc) | split-acc(s, i + 1, i + 1, n, String.slice(start, i - start, s) :: acc)
     | else -> split-acc(s, i + 1, start, n, acc)
 
 ; The lines of s.
 let lines-of(s: Str) -> List Str =
-  reverse(split-acc(s, 0, 0, str-byte-length(s), []))
+  reverse(split-acc(s, 0, 0, String.length(s), []))
 
 ; Whether the file source contains a test form.
 let contains-test(path: Str) -> Bool =
@@ -101,7 +101,7 @@ pub let count-lines(lines: List Str) -> Counts =
 pub let summary-text(c: Counts, ms: Int) -> Str =
   match (c)
     | Counts(p, f) ->
-      if (f > 0) -> str-concat(show(f), " failed, ", show(p), " passed (", show(ms), "ms)") | str-concat(show(p), " passed (", show(ms), "ms)")
+      if (f > 0) -> String.concat(show(f), " failed, ", show(p), " passed (", show(ms), "ms)") | String.concat(show(p), " passed (", show(ms), "ms)")
 
 ; Write the summary line. Failures are red and passes green when on is true.
 ; @test summary(Counts(1, 0), 1, false)
@@ -112,12 +112,12 @@ pub let summary(c: Counts, ms: Int, on: Bool) -> Unit =
         cond
           | f > 0 ->
             {
-              write(stdout, paint(on, "[31m", str-concat(show(f), " failed")))
+              write(stdout, paint(on, "[31m", String.concat(show(f), " failed")))
               write(stdout, ", ")
               ()
             }
-        write(stdout, paint(on, "[32m", str-concat(show(p), " passed")))
-        write(stdout, str-concat(" (", show(ms), "ms)"))
+        write(stdout, paint(on, "[32m", String.concat(show(p), " passed")))
+        write(stdout, String.concat(" (", show(ms), "ms)"))
         write(stdout, "\n")
         ()
       }

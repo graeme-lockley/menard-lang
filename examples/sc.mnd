@@ -13,11 +13,11 @@ pub let add(input: Str) -> Result Int (List Int) {
       | input == "" -> []
       | starts-with("//[") -> {
           let idx = String.index-of("\n", input) |> Maybe.with-default(0)
-          let separators = str-slice(input, 3, idx - 4) |> String.split("][")
-          
+          let separators = String.slice(3, idx - 4, input) |> String.split("][")
+
           input |> String.drop(idx + 1) |> String.split-using(separators)
         }
-      | starts-with("//") -> String.drop(4, input) |> String.split(str-slice(input, 2, 1))
+      | starts-with("//") -> String.drop(4, input) |> String.split(String.slice(2, 1, input))
       | else -> String.split-using([",", "\n"], input)
 
   let numbers = tokens |> List.map(Int.parse) |> List.filter(fn (n) = n <= 1000)

@@ -8,6 +8,7 @@
 import "../reader/ast.mnd"
 import std/console
 import std/io
+import std/string as String
 
 pub alias Span = Span
 
@@ -15,18 +16,18 @@ pub alias Span = Span
 ; Color follows stderr, same rule as diagnostics.
 pub let progress-line(verb: Str, name: Str, ms: Int) -> Str {
   let on = tty-color(2)
-  str-concat(paint(on, "[38;5;248m", verb), " ", paint(on, "[38;5;240m", name), " ", paint(on, "[38;5;248m", str-concat(show(ms), "ms")), "\n")
+  String.concat(paint(on, "[38;5;248m", verb), " ", paint(on, "[38;5;240m", name), " ", paint(on, "[38;5;248m", String.concat(show(ms), "ms")), "\n")
 }
 
 let color-on() -> Bool =
   tty-color(2)
 
 let repeat-str(s: Str, n: Int, acc: Str) -> Str =
-  if (n <= 0) -> acc | repeat-str(s, n - 1, str-concat(acc, s))
+  if (n <= 0) -> acc | repeat-str(s, n - 1, String.concat(acc, s))
 
 let pad-left(s: Str, w: Int) -> Str {
-  let n = str-byte-length(s)
-  if (n >= w) -> s | str-concat(repeat-str(" ", w - n, ""), s)
+  let n = String.length(s)
+  if (n >= w) -> s | String.concat(repeat-str(" ", w - n, ""), s)
 }
 
 let digits-of(n: Int, acc: Int) -> Int =
@@ -38,40 +39,40 @@ let walk-loc(src: Str, offset: Int, i: Int, line: Int, start: Int, n: Int) -> In
   loop (j = i, ln = line, st = start)
     cond
       | j >= offset || j >= n -> st
-      | str-byte(src, j) == 10 -> recur(j + 1, ln + 1, j + 1)
+      | String.byte(j, src) == 10 -> recur(j + 1, ln + 1, j + 1)
       | else -> recur(j + 1, ln, st)
 
 let walk-line(src: Str, offset: Int, i: Int, line: Int, n: Int) -> Int =
   loop (j = i, ln = line)
     cond
       | j >= offset || j >= n -> ln
-      | str-byte(src, j) == 10 -> recur(j + 1, ln + 1)
+      | String.byte(j, src) == 10 -> recur(j + 1, ln + 1)
       | else -> recur(j + 1, ln)
 
 let line-end(src: Str, i: Int, n: Int) -> Int =
   loop (j = i)
     cond
       | j >= n -> n
-      | str-byte(src, j) == 10 -> j
+      | String.byte(j, src) == 10 -> j
       | else -> recur(j + 1)
 
 let drop-cr(src: Str, start: Int, end: Int) -> Int =
-  if (end > start && str-byte(src, end - 1) == 13) -> end - 1 | end
+  if (end > start && String.byte(end - 1, src) == 13) -> end - 1 | end
 
 let line-text(src: Str, start: Int) -> Str {
-  let n = str-byte-length(src)
+  let n = String.length(src)
   let end = drop-cr(src, start, line-end(src, start, n))
-  if (start >= end) -> "" | str-slice(src, start, end - start)
+  if (start >= end) -> "" | String.slice(start, end - start, src)
 }
 
 let loc-line(src: Str, offset: Int) -> Int =
-  walk-line(src, clamp(0, str-byte-length(src), offset), 0, 1, str-byte-length(src))
+  walk-line(src, clamp(0, String.length(src), offset), 0, 1, String.length(src))
 
 let loc-start(src: Str, offset: Int) -> Int =
-  walk-loc(src, clamp(0, str-byte-length(src), offset), 0, 1, 0, str-byte-length(src))
+  walk-loc(src, clamp(0, String.length(src), offset), 0, 1, 0, String.length(src))
 
 let loc-col(src: Str, offset: Int) -> Int {
-  let n = str-byte-length(src)
+  let n = String.length(src)
   let off = clamp(0, n, offset)
   off - loc-start(src, off) + 1
 }
@@ -84,11 +85,11 @@ let caret-len(src: Str, sp: Span, col: Int, text: Str) -> Int {
     if (span-end(sp) > span-start(sp)) -> span-end(sp) - 1 | span-start(sp)
   let end-line = loc-line(src, end-off)
   let end-col =
-    if (end-line == start-line) -> loc-col(src, end-off) | str-byte-length(text) + 1
+    if (end-line == start-line) -> loc-col(src, end-off) | String.length(text) + 1
   let raw =
     if (span-end(sp) > span-start(sp)) -> end-col - col + 1 | 1
   let capped =
-    if (col - 1 + raw > str-byte-length(text) + 1) -> str-byte-length(text) + 1 - col - 1 | raw
+    if (col - 1 + raw > String.length(text) + 1) -> String.length(text) + 1 - col - 1 | raw
   if (capped < 1) -> 1 | capped
 }
 
@@ -101,7 +102,7 @@ let format-span(path: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str) ->
   let sev-color =
     if (sev == "warning") -> "[33m" | "[31m"
   let carets = caret-len(src, sp, col, text)
-  str-concat(paint(on, "[1m", path), ":", show(line), ":", show(col), ": ", paint(on, sev-color, sev), "[", code, "]: ", msg, "\n  |\n", pad-left(show(line), gw), " | ", text, "\n", repeat-str(" ", gw, ""), " | ", repeat-str(" ", col - 1, ""), paint(on, sev-color, repeat-str("^", carets, "")), "\n")
+  String.concat(paint(on, "[1m", path), ":", show(line), ":", show(col), ": ", paint(on, sev-color, sev), "[", code, "]: ", msg, "\n  |\n", pad-left(show(line), gw), " | ", text, "\n", repeat-str(" ", gw, ""), " | ", repeat-str(" ", col - 1, ""), paint(on, sev-color, repeat-str("^", carets, "")), "\n")
 }
 
 pub let report-span(path: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str) -> Unit {

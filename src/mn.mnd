@@ -107,7 +107,7 @@ let note-compiling(path: Str, ms: Int) -> Unit =
       }
 
 let explicit-out() -> Bool =
-  str-byte-length(opt("-o")) > 0
+  String.length(opt("-o")) > 0
 
 let positional-arg(want: Int) -> Str =
   positional(argv(), mn-flags(), want)
@@ -173,7 +173,7 @@ let report-type-errors(paths: List Str, es: List TypeError) -> Unit =
       }
 
 let fail-cannot-read(path: Str) -> Unit {
-  write-line(2, str-concat("error: cannot read ", path))
+  write-line(2, String.concat("error: cannot read ", path))
   exit(2)
 }
 
@@ -190,7 +190,7 @@ let maybe-dump(forms: List Ast, dump-after: Bool) -> Unit =
   if (dump-after) -> dump(forms)
 
 let fail-load(msg: Str) -> Unit {
-  write-line(2, str-concat("error: ", msg))
+  write-line(2, String.concat("error: ", msg))
   exit(1)
 }
 
@@ -249,7 +249,13 @@ let front-end-loaded(path: Str, src: Str, desugared: List Ast, dump-after-type: 
     | else ->
       {
         let stamped = stamp-spans(desugared, src, 0)
-        front-end-typechecked(path, stamped, [path], dump-after-type, dump-after-close, dump-after-root, dump-after-derive, on-ok)
+        match (runtime-misplaced(path, stamped))
+          | Some(msg) -> fail-load(msg)
+          | None ->
+            {
+              let prepared = prepare-runtime-forms(path, stamped)
+              front-end-typechecked(path, prepared, [path], dump-after-type, dump-after-close, dump-after-root, dump-after-derive, on-ok)
+            }
       }
 
 let front-end-typechecked(path: Str, forms: List Ast, paths: List Str, dump-after-type: Bool, dump-after-close: Bool, dump-after-root: Bool, dump-after-derive: Bool, on-ok: (List Ast, List Str) -> Unit) -> Unit =
@@ -257,7 +263,8 @@ let front-end-typechecked(path: Str, forms: List Ast, paths: List Str, dump-afte
     | Ok(checked) ->
       {
         maybe-dump(checked, dump-after-type)
-        front-end-closed(path, checked, paths, dump-after-close, dump-after-root, dump-after-derive, on-ok)
+        let lowered = lower-runtime-forms(checked)
+        front-end-closed(path, lowered, paths, dump-after-close, dump-after-root, dump-after-derive, on-ok)
       }
     | Err(es) ->
       {
@@ -323,18 +330,18 @@ let run-check(path: Str, dump-after-reader: Bool, dump-after-desugar: Bool, dump
 ; emit
 
 let default-output-path(path: Str) -> Str =
-  if (String.ends-with(".mnd", path)) -> str-concat(str-slice(path, 0, str-byte-length(path) - 4), ".bc") | str-concat(path, ".bc")
+  if (String.ends-with(".mnd", path)) -> String.concat(String.slice(0, String.length(path) - 4, path), ".bc") | String.concat(path, ".bc")
 
 let output-path(path: Str, has-out: Bool, out: Str) -> Str =
   if (has-out) -> out | default-output-path(path)
 
 let fail-cannot-write(out: Str) -> Unit {
-  write-line(2, str-concat("error: cannot write ", out))
+  write-line(2, String.concat("error: cannot write ", out))
   exit(2)
 }
 
 let fail-emit(msg: Str) -> Unit {
-  write-line(2, str-concat("error: ", msg))
+  write-line(2, String.concat("error: ", msg))
   exit(1)
 }
 
@@ -353,33 +360,33 @@ let triple-marker() -> Str =
 
 let bytes-match-at(s: Str, i: Int, pat: Str, j: Int) -> Bool =
   cond
-    | j >= str-byte-length(pat) -> true
-    | i + j >= str-byte-length(s) -> false
-    | str-byte(s, i + j) == str-byte(pat, j) -> bytes-match-at(s, i, pat, j + 1)
+    | j >= String.length(pat) -> true
+    | i + j >= String.length(s) -> false
+    | String.byte(i + j, s) == String.byte(j, pat) -> bytes-match-at(s, i, pat, j + 1)
     | else -> false
 
 let find-bytes(s: Str, pat: Str, i: Int) -> Int =
   cond
-    | i + str-byte-length(pat) > str-byte-length(s) -> -1
+    | i + String.length(pat) > String.length(s) -> -1
     | bytes-match-at(s, i, pat, 0) -> i
     | else -> find-bytes(s, pat, i + 1)
 
 let copy-until(s: Str, i: Int, stop: Int, acc: Str) -> Str =
   cond
-    | i >= str-byte-length(s) -> acc
-    | str-byte(s, i) == stop -> acc
-    | else -> copy-until(s, i + 1, stop, str-concat(acc, str-slice(s, i, 1)))
+    | i >= String.length(s) -> acc
+    | String.byte(i, s) == stop -> acc
+    | else -> copy-until(s, i + 1, stop, String.concat(acc, String.slice(i, 1, s)))
 
 let triple-from-text(text: Str) -> Str {
   let mark = triple-marker()
   let at = find-bytes(text, mark, 0)
-  if (at < 0) -> "" | copy-until(text, at + str-byte-length(mark), 34, "")
+  if (at < 0) -> "" | copy-until(text, at + String.length(mark), 34, "")
 }
 
 let triple-or-fail(text: Str) -> Str {
   let triple = triple-from-text(text)
   cond
-    | str-byte-length(triple) == 0 ->
+    | String.length(triple) == 0 ->
       {
         write-line(2, "error: clang IR has no target triple")
         exit(1)
@@ -439,49 +446,49 @@ let recorded-runtime() -> Str =
 let chosen-cc-menard() -> Str =
   match (getenv("MENARD_CC"))
     | Some(s) ->
-      if (str-byte-length(s) > 0) -> s | recorded-cc()
+      if (String.length(s) > 0) -> s | recorded-cc()
     | None -> recorded-cc()
 
 let chosen-cc(flag: Str) -> Str =
   cond
-    | str-byte-length(flag) > 0 -> flag
+    | String.length(flag) > 0 -> flag
     | else ->
       match (getenv("CC"))
         | Some(s) ->
-          if (str-byte-length(s) > 0) -> s | chosen-cc-menard()
+          if (String.length(s) > 0) -> s | chosen-cc-menard()
         | None -> chosen-cc-menard()
 
 let chosen-runtime(flag: Str) -> Str =
-  if (str-byte-length(flag) > 0) -> flag | recorded-runtime()
+  if (String.length(flag) > 0) -> flag | recorded-runtime()
 
 let last-slash-from(s: Str, i: Int, last: Int, n: Int) -> Int =
   cond
     | i >= n -> last
-    | str-byte(s, i) == 47 -> last-slash-from(s, i + 1, i + 1, n)
+    | String.byte(i, s) == 47 -> last-slash-from(s, i + 1, i + 1, n)
     | else -> last-slash-from(s, i + 1, last, n)
 
 let basename(s: Str) -> Str {
-  let n = str-byte-length(s)
+  let n = String.length(s)
   let i = last-slash-from(s, 0, 0, n)
-  str-slice(s, i, n - i)
+  String.slice(i, n - i, s)
 }
 
 let stem-of(file: Str) -> Str {
   let b = basename(file)
-  if (String.ends-with(".mnd", b)) -> str-slice(b, 0, str-byte-length(b) - 4) | b
+  if (String.ends-with(".mnd", b)) -> String.slice(0, String.length(b) - 4, b) | b
 }
 
 let default-bin(file: Str) -> Str =
-  str-concat("build/", stem-of(file))
+  String.concat("build/", stem-of(file))
 
 let rt-src(runtime: Str, name: Str) -> Str =
-  str-concat(runtime, "/src/", name)
+  String.concat(runtime, "/src/", name)
 
 let clang-argv(cc: Str, runtime: Str, bc: Str, link-out: Str) -> List Str =
-  [cc, "-std=c11", "-D_DEFAULT_SOURCE", "-Wall", "-Wextra", "-O2", str-concat("-I", runtime, "/include"), bc, rt-src(runtime, "alloc.c"), rt-src(runtime, "gc.c"), rt-src(runtime, "panic.c"), rt-src(runtime, "print.c"), rt-src(runtime, "shadow.c"), rt-src(runtime, "variants.c"), rt-src(runtime, "str.c"), rt-src(runtime, "map.c"), rt-src(runtime, "closure.c"), rt-src(runtime, "io.c"), rt-src(runtime, "equal.c"), "-lm", "-o", link-out]
+  [cc, "-std=c11", "-D_DEFAULT_SOURCE", "-Wall", "-Wextra", "-O2", String.concat("-I", runtime, "/include"), bc, rt-src(runtime, "alloc.c"), rt-src(runtime, "gc.c"), rt-src(runtime, "panic.c"), rt-src(runtime, "print.c"), rt-src(runtime, "shadow.c"), rt-src(runtime, "variants.c"), rt-src(runtime, "str.c"), rt-src(runtime, "map.c"), rt-src(runtime, "closure.c"), rt-src(runtime, "io.c"), rt-src(runtime, "equal.c"), "-lm", "-o", link-out]
 
 let fail-spawn(what: Str) -> Unit {
-  write-line(2, str-concat("error: cannot spawn ", what))
+  write-line(2, String.concat("error: cannot spawn ", what))
   exit(2)
 }
 
@@ -497,7 +504,7 @@ let link-rename(cc: Str, runtime: Str, bc: Str, link-out: Str, bin: Str) -> Unit
               | Ok(_) -> ()
               | Err(_) ->
                 {
-                  write-line(2, str-concat("error: cannot rename ", bin))
+                  write-line(2, String.concat("error: cannot rename ", bin))
                   exit(2)
                 }
           | else -> exit(code)
@@ -509,8 +516,8 @@ let run-built(bin: Str) -> Unit =
     | Ok(st) -> exit(status-exit-code(st))
 
 let accept-build(cc: Str, runtime: Str, bin: Str, and-run: Bool, forms: List Ast, paths: List Str) -> Unit {
-  let bc = str-concat(bin, ".bc")
-  let link-out = str-concat(bin, ".tmp")
+  let bc = String.concat(bin, ".bc")
+  let link-out = String.concat(bin, ".tmp")
   match (emit-program-bc(forms, clang-target-triple(cc), paths))
     | Err(msg) -> fail-emit(msg)
     | Ok(bytes) ->
@@ -523,7 +530,7 @@ let accept-build(cc: Str, runtime: Str, bin: Str, and-run: Bool, forms: List Ast
               | and-run -> run-built(bin)
               | else ->
                 {
-                  write-line(2, str-concat("wrote ", bin))
+                  write-line(2, String.concat("wrote ", bin))
                   exit(0)
                 }
           }
@@ -536,23 +543,23 @@ let run-build(file: Str, cc: Str, runtime: Str, bin: Str, and-run: Bool, dump-af
 let path-dir-end(s: Str, i: Int, n: Int) -> Int =
   cond
     | i >= n -> n
-    | str-byte(s, i) == 58 -> i
+    | String.byte(i, s) == 58 -> i
     | else -> path-dir-end(s, i + 1, n)
 
 let probe-dir(dir: Str, name: Str) -> Maybe Str {
   let candidate =
-    if (str-byte-length(dir) == 0) -> name | str-concat(dir, "/", name)
+    if (String.length(dir) == 0) -> name | String.concat(dir, "/", name)
   if (exists(candidate)) -> Some(candidate) | None()
 }
 
 let search-path(path: Str, name: Str, i: Int) -> Maybe Str {
-  let n = str-byte-length(path)
+  let n = String.length(path)
   cond
     | i > n -> None()
     | else ->
       {
         let end = path-dir-end(path, i, n)
-        let dir = str-slice(path, i, end - i)
+        let dir = String.slice(i, end - i, path)
         match (probe-dir(dir, name))
           | Some(c) -> Some(c)
           | None ->
@@ -577,7 +584,7 @@ let bun-on-path() -> Str =
 let chosen-bun() -> Str =
   match (getenv("MENARD_BUN"))
     | Some(s) ->
-      if (str-byte-length(s) > 0) -> s | bun-on-path()
+      if (String.length(s) > 0) -> s | bun-on-path()
     | None -> bun-on-path()
 
 let append-strs(a: List Str, b: List Str) -> List Str =
@@ -602,7 +609,7 @@ let run-inter(file: Str) -> Unit =
       {
         let bun = chosen-bun()
         cond
-          | str-byte-length(bun) == 0 -> fail-spawn("bun")
+          | String.length(bun) == 0 -> fail-spawn("bun")
           | else ->
             match (spawn(inter-argv(bun, file, has-show-result(), prog-args())))
               | Err(_) -> fail-spawn(bun)
@@ -628,15 +635,15 @@ let run-cached-existing(file: Str, bin: Str, do-link: Bool, and-run: Bool) -> Un
         | and-run -> run-built(out)
         | do-link ->
           {
-            write-line(2, str-concat("wrote ", out))
+            write-line(2, String.concat("wrote ", out))
             exit(0)
           }
         | else -> exit(0)
     | Err(msg) ->
       {
-        if (str-byte-length(msg) > 0) ->
+        if (String.length(msg) > 0) ->
           {
-            write-line(2, str-concat("error: ", msg))
+            write-line(2, String.concat("error: ", msg))
             ()
           }
         exit(1)
@@ -659,7 +666,7 @@ let dispatch(mode: Str, file: Str, has-out: Bool, out: Str, bin: Str, dump-after
     | mode == "test" ->
       exit(
         run-suite(
-          if (str-byte-length(file) > 0) -> file | ".",
+          if (String.length(file) > 0) -> file | ".",
           has-clean(),
           has-verbose(),
           has-show-output(),
@@ -682,7 +689,7 @@ let main() -> Unit {
           if (n >= 2) -> positional-arg(1) | ""
         let o-flag = opt("-o")
         let bin =
-          if (str-byte-length(o-flag) > 0) -> o-flag | default-bin(file)
+          if (String.length(o-flag) > 0) -> o-flag | default-bin(file)
         dispatch(
           mode,
           file,

@@ -3,16 +3,18 @@
 ; Run with: `./mn run examples/stringbuffer.mnd`
 
 import std/io
+import std/string as String
+import std/string-buffer as Buf
 
 let main() -> Int {
-  let sb = sb-new()
-  sb-append!(sb, "hi")
-  sb-append-byte!(sb, 33)
-  let s = sb-take-str!(sb)
+  let sb = Buf.new()
+  Buf.append!(sb, "hi")
+  Buf.append-byte!(sb, 33)
+  let s = Buf.take-str!(sb)
   print("built ")
   write(stdout, s)
   print(" (")
-  print(str-byte-length(s))
+  print(String.length(s))
   println(" bytes)")
   0
 }
