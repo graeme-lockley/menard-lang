@@ -1,22 +1,26 @@
-import std/int as I
+import std/int as Int
 import std/list as List
 import std/maybe as Maybe
 import std/string as String
 
 ; Reports all negative values in encounter order; values above 1000 are ignored.
 pub let add(input: Str) -> Result Int (List Int) {
+  let starts-with(prefix: String) -> Bool =
+    input |> String.starts-with(prefix)
+
   let tokens =
     cond
       | input == "" -> []
-      | String.starts-with("//[", input) -> {
-          let idx = input |> String.index-of("\n") |> Maybe.with-default(0)
+      | starts-with("//[") -> {
+          let idx = String.index-of("\n", input) |> Maybe.with-default(0)
           let separators = str-slice(input, 3, idx - 4) |> String.split("][")
+          
           input |> String.drop(idx + 1) |> String.split-using(separators)
         }
-      | input |> String.starts-with("//") -> input |> String.drop(4) |> String.split(str-slice(input, 2, 1))
-      | else -> input |> String.split-using([",", "\n"])
+      | starts-with("//") -> String.drop(4, input) |> String.split(str-slice(input, 2, 1))
+      | else -> String.split-using([",", "\n"], input)
 
-  let numbers = tokens |> List.map(I.parse) |> List.filter(fn (n) = n <= 1000)
+  let numbers = tokens |> List.map(Int.parse) |> List.filter(fn (n) = n <= 1000)
 
   cond
     | numbers |> List.any(is-negative) -> numbers |> List.filter(is-negative) |> Err()
