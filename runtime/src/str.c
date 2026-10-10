@@ -326,6 +326,26 @@ MnWord mn_show(MnWord v) {
     MnShape *sh = (MnShape *)(uintptr_t)obj[0];
     if (sh != NULL && sh->tag == TAG_FLOAT) {
       n = format_float(unbox_float(v), buf, sizeof(buf));
+    } else if (sh != NULL && sh->tag == TAG_STR) {
+      int64_t len = str_len(v);
+      if (len < 0 || (uint64_t)len > (SIZE_MAX - 2) / 2) {
+        mn_panic("mn_show: string too large");
+      }
+      uint8_t *quoted = malloc((size_t)len * 2 + 2);
+      if (quoted == NULL) {
+        mn_panic("mn_show: out of memory");
+      }
+      size_t at = 0;
+      quoted[at++] = '"';
+      const uint8_t *bytes = str_bytes(v);
+      for (int64_t i = 0; i < len; i++) {
+        if (bytes[i] == '\\' || bytes[i] == '"') quoted[at++] = '\\';
+        quoted[at++] = bytes[i];
+      }
+      quoted[at++] = '"';
+      MnWord result = mn_str_new((int64_t)(uintptr_t)quoted, (int64_t)at);
+      free(quoted);
+      return result;
     } else {
       n = snprintf(buf, sizeof(buf), "#<obj>");
     }

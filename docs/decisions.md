@@ -74,6 +74,45 @@ bearing choices; everything in the specification follows from them.
 | 40 | **The compiler emits LLVM bitcode (`.bc`), never textual `.ll` as the product** | Textual IR is a second spelling of the same module and invites non-determinism (whitespace, type printing); bitcode is the binary artifact the gate and the driver consume; `llvm-dis` stays a debug aid only | A Menard bitcode writer (~subset of LLVM encoding) must stay deterministic and in sync with the pinned LLVM/clang |
 ---
 
+## 2026-10-09 — String-literal escapes (Kestrel's set, adapted)
+
+### The decision
+
+A `Str` literal decodes `\\`, `\"`, `\n`, `\r`, `\t`, and `\u{` hex `}` (one
+to six hex digits). `\u{…}` is one Unicode scalar encoded as UTF-8. A
+surrogate or a code point above `U+10FFFF` is a lexical error. Every other
+byte between the quotes is copied unchanged. `$` is not special. `show`
+still escapes only `\` and `"` and emits every other byte raw.
+
+### Why this and not the rest of Kestrel
+
+Kestrel's escape set is what a source literal needs in order to name the
+non-printable bytes. The rest of that encoding does not fit a Menard `Str`:
+
+- **No interpolation.** Kestrel strings are templates (`$x`, `${…}`). A
+  Menard string is data. `$` stays a byte.
+- **Raw bytes stay legal.** Kestrel rejects a raw newline because its
+  strings are UTF-8 text. A Menard `Str` is an arbitrary byte sequence, and
+  the reader has to be able to spell every sequence, including NUL and
+  invalid UTF-8. `\u{…}` cannot spell a non-scalar byte, so it is an
+  additional spelling, not a replacement for raw bytes.
+- **Surrogates are rejected.** Kestrel's JavaScript lexer can keep a lone
+  surrogate in a UTF-16 string. Menard has no encoding for one: `Char` is a
+  scalar, and `\u{…}` writes UTF-8. `U+D800`–`U+DFFF` is a lexical error,
+  the same exclusion that makes `char->str` total.
+- **`show` stays raw.** The canonical spelling has to be total on invalid
+  UTF-8. Emitting `\n` / `\u{…}` from `show` would drop that. Source escapes
+  and the `show` spelling are different jobs; several source spellings may
+  denote one byte string, and `show` remains the single spelling.
+
+### Cost
+
+Both readers accept the same escapes and reject the same ones. A program
+that wrote `\` followed by anything other than `\` or `"` was already a
+lexical error, so no existing literal changes meaning.
+
+---
+
 ## 2026-10-04 — `cond`, projection, and `Pair` (amends ADR 1)
 
 ### The decision

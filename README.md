@@ -147,12 +147,18 @@ make                                 # compile src/mn.mnd → ./mn
 ./mn inter path/to/file.mnd          # reference interpreter only
 ./mn inter path/to/file.mnd --show-result
 ./mn test                            # colocated *.test.mnd (also `make native-test`)
+./mn test path/to/file.test.mnd --show-output # captured stdout alongside each test result
 ```
 
 `make` bootstraps `./mn` with the interpreter (stage0) and links it with
 clang. After that, `build` / `run` emit in-process and spawn the recorded
 `cc`. `inter` still spawns the Phase 1 host. Override the linker with `CC`
 or `MENARD_CC`, and the bootstrap host with `MENARD_BUN`.
+
+`test --show-output` also shows individual pass/fail results (without needing
+`--verbose`). Captured stdout is indented before the result of the test that
+produced it, in execution order. Output is shown after the suite process exits,
+not streamed live. Without this flag, test stdout remains hidden.
 
 ### Check / run a program (Phase 1 host CLI)
 

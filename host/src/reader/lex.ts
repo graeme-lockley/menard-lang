@@ -75,6 +75,44 @@ function isIdentCont(b: number): boolean {
 
 const OPS = ["==", "!=", "<=", ">=", "&&", "||", "->", "::", "+", "-", "*", "/", "%", "<", ">", "=", "|"];
 
+/** Kestrel's simple escapes. `-1` means this byte is not one of them. */
+function simpleEscape(e: number): number {
+  if (e === 0x5c || e === 0x22) return e; // \\ \"
+  if (e === 0x6e) return 0x0a; // \n
+  if (e === 0x72) return 0x0d; // \r
+  if (e === 0x74) return 0x09; // \t
+  return -1;
+}
+
+function hexVal(b: number): number {
+  if (b >= 0x30 && b <= 0x39) return b - 0x30;
+  if (b >= 0x61 && b <= 0x66) return b - 0x61 + 10;
+  if (b >= 0x41 && b <= 0x46) return b - 0x41 + 10;
+  return -1;
+}
+
+/** UTF-8 of one Unicode scalar. The caller has already rejected non-scalars. */
+function pushUtf8(out: number[], cp: number): void {
+  if (cp <= 0x7f) {
+    out.push(cp);
+    return;
+  }
+  if (cp <= 0x7ff) {
+    out.push(0xc0 | (cp >> 6), 0x80 | (cp & 0x3f));
+    return;
+  }
+  if (cp <= 0xffff) {
+    out.push(0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
+    return;
+  }
+  out.push(
+    0xf0 | (cp >> 18),
+    0x80 | ((cp >> 12) & 0x3f),
+    0x80 | ((cp >> 6) & 0x3f),
+    0x80 | (cp & 0x3f),
+  );
+}
+
 export function lex(src: Uint8Array): { ok: true; toks: Tok[] } | { ok: false; error: LexErr } {
   const toks: Tok[] = [];
   let i = 0;
@@ -100,6 +138,32 @@ export function lex(src: Uint8Array): { ok: true; toks: Tok[] } | { ok: false; e
       col++;
     }
     return b;
+  }
+
+  // `\u{` hex `}` — 1 to 6 digits, one Unicode scalar (no surrogates, ≤ U+10FFFF).
+  function readUnicodeScalar(
+    escAt: number,
+    strAt: number,
+  ): { ok: true; cp: number } | { ok: false; error: LexErr } {
+    if (peek() === -1) return err(strAt, i, "unterminated string");
+    if (peek() !== 0x7b) return err(escAt, i, "invalid string escape");
+    bump();
+    let cp = 0;
+    let digits = 0;
+    while (digits < 6 && hexVal(peek()) >= 0) {
+      cp = cp * 16 + hexVal(peek());
+      bump();
+      digits++;
+    }
+    if (peek() === -1) return err(strAt, i, "unterminated string");
+    if (digits === 0 || hexVal(peek()) >= 0 || peek() !== 0x7d) {
+      return err(escAt, i, "invalid string escape");
+    }
+    bump();
+    if (cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) {
+      return err(escAt, i, "invalid string escape");
+    }
+    return { ok: true, cp };
   }
 
   while (i < src.length) {
@@ -168,10 +232,18 @@ export function lex(src: Uint8Array): { ok: true; toks: Tok[] } | { ok: false; e
           break;
         }
         if (c === 0x5c) {
+          const escAt = i - 1;
           if (i >= src.length) return err(start, i, "unterminated string");
           const e = bump();
-          if (e !== 0x5c && e !== 0x22) return err(i - 2, i, "invalid string escape");
-          out.push(e);
+          const simple = simpleEscape(e);
+          if (simple >= 0) {
+            out.push(simple);
+            continue;
+          }
+          if (e !== 0x75) return err(escAt, i, "invalid string escape");
+          const scalar = readUnicodeScalar(escAt, start);
+          if (!scalar.ok) return scalar;
+          pushUtf8(out, scalar.cp);
           continue;
         }
         out.push(c);

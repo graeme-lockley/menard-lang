@@ -19,13 +19,7 @@ import std/proc
 import std/string
 import std/test
 
-let nl = {
-  let sb = sb-new()
-  sb-append-byte!(sb, 10)
-  sb-take-str!(sb)
-}
-
-let print-verbose(lines: List Str, on: Bool) -> Unit =
+let print-verbose(lines: List Str, on: Bool, show-output: Bool) -> Unit =
   match (lines)
     | [] -> ()
     | line :: rest ->
@@ -38,10 +32,17 @@ let print-verbose(lines: List Str, on: Bool) -> Unit =
                 stdout,
                 if (starts-with(line, "pass ")) -> paint(on, "[32m", line) | paint(on, "[31m", line)
               )
-              write(stdout, nl)
+              write(stdout, "\n")
               ()
             }
-        print-verbose(rest, on)
+          | show-output ->
+            {
+              write(stdout, "    ")
+              write(stdout, line)
+              write(stdout, "\n")
+              ()
+            }
+        print-verbose(rest, on, show-output)
       }
 
 ; A passing file stays a single status line. A failure points at the
@@ -134,7 +135,7 @@ let file-line(path: Str, ok: Bool, on: Bool) -> Unit {
     stdout,
     if (ok) -> paint(on, "[32m", "ok") | paint(on, "[31m", "FAILED")
   )
-  write(stdout, nl)
+  write(stdout, "\n")
   ()
 }
 
@@ -156,14 +157,14 @@ record RunAcc {
 
 ; `exit-bad` is the process status, applied only to the file that was
 ; running when the process stopped. A panic aborts the rest of the suite.
-let flush-file(path: Str, lines: List Str, verbose: Bool, on: Bool, exit-bad: Bool) -> Counts =
+let flush-file(path: Str, lines: List Str, verbose: Bool, show-output: Bool, on: Bool, exit-bad: Bool) -> Counts =
   cond
     | str-byte-length(path) == 0 ->
       if (exit-bad) -> Counts(0, 1) | Counts(0, 0)
     | else ->
       {
         let ordered = rev-strs(lines, [])
-        if (verbose) -> print-verbose(ordered, on)
+        if (verbose || show-output) -> print-verbose(ordered, on, show-output)
         match (count-lines(ordered))
           | Counts(p, f) ->
             {
@@ -174,7 +175,7 @@ let flush-file(path: Str, lines: List Str, verbose: Bool, on: Bool, exit-bad: Bo
             }
       }
 
-let take-lines(lines: List Str, acc: RunAcc, verbose: Bool, on: Bool) -> RunAcc =
+let take-lines(lines: List Str, acc: RunAcc, verbose: Bool, show-output: Bool, on: Bool) -> RunAcc =
   match (lines)
     | [] -> acc
     | line :: rest ->
@@ -182,22 +183,22 @@ let take-lines(lines: List Str, acc: RunAcc, verbose: Bool, on: Bool) -> RunAcc 
         | RunAcc(path, buf, passed, failed) ->
           match (file-path(line))
             | Some(next) ->
-              match (flush-file(path, buf, verbose, on, false))
-                | Counts(p, f) -> take-lines(rest, RunAcc(next, [], passed + p, failed + f), verbose, on)
-            | None -> take-lines(rest, RunAcc(path, line :: buf, passed, failed), verbose, on)
+              match (flush-file(path, buf, verbose, show-output, on, false))
+                | Counts(p, f) -> take-lines(rest, RunAcc(next, [], passed + p, failed + f), verbose, show-output, on)
+            | None -> take-lines(rest, RunAcc(path, line :: buf, passed, failed), verbose, show-output, on)
 
-let finish-acc(acc: RunAcc, verbose: Bool, on: Bool, exit-bad: Bool, err: Str) -> Counts =
+let finish-acc(acc: RunAcc, verbose: Bool, show-output: Bool, on: Bool, exit-bad: Bool, err: Str) -> Counts =
   match (acc)
     | RunAcc(path, buf, passed, failed) ->
       {
-        match (flush-file(path, buf, verbose, on, exit-bad))
+        match (flush-file(path, buf, verbose, show-output, on, exit-bad))
           | Counts(p, f) ->
             {
               cond
                 | exit-bad && str-byte-length(err) > 0 ->
                   {
                     write(stderr, err)
-                    write(stderr, nl)
+                    write(stderr, "\n")
                     ()
                   }
               Counts(passed + p, failed + f)
@@ -210,7 +211,7 @@ let report-suite-error(msg: Str, started: Int, on: Bool) -> Int {
   1
 }
 
-pub let run-suite(path: Str, clean: Bool, verbose: Bool, quiet: Bool, cc: Str, runtime: Str) -> Int {
+pub let run-suite(path: Str, clean: Bool, verbose: Bool, show-output: Bool, quiet: Bool, cc: Str, runtime: Str) -> Int {
   let files = discover(path)
   match (files)
     | [] ->
@@ -230,8 +231,8 @@ pub let run-suite(path: Str, clean: Bool, verbose: Bool, quiet: Bool, cc: Str, r
               | Ok(SpawnOutput(st, text, err)) ->
                 {
                   let exit-bad = status-exit-code(st) != 0
-                  let acc = take-lines(split-lines(text), RunAcc("", [], 0, 0), verbose, on)
-                  let totals = finish-acc(acc, verbose, on, exit-bad, err)
+                  let acc = take-lines(split-lines(text), RunAcc("", [], 0, 0), verbose, show-output, on)
+                  let totals = finish-acc(acc, verbose, show-output, on, exit-bad, err)
                   summary(totals, now-ms() - started, on)
                   match (totals)
                     | Counts(_, f) ->

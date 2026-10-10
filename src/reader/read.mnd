@@ -244,6 +244,93 @@ let line-ready-start(lx: Lex, failed: Ref (Maybe ParseError)) -> Bool {
 let line-ready(lx: Lex, failed: Ref (Maybe ParseError)) -> Bool =
   if (not(deref(lx-at-start(lx)))) -> true | line-ready-start(lx, failed)
 
+let hex-val(b: Int) -> Int =
+  cond
+    | b >= 48 && b <= 57 -> b - 48
+    | b >= 97 && b <= 102 -> b - 87
+    | b >= 65 && b <= 70 -> b - 55
+    | else -> -1
+
+; UTF-8 of one Unicode scalar. The caller has rejected surrogates and values above U+10FFFF.
+let append-utf8!(sb: StringBuffer, cp: Int) -> Unit =
+  cond
+    | cp <= 127 -> sb-append-byte!(sb, cp)
+    | cp <= 2047 ->
+      {
+        sb-append-byte!(sb, 192 + cp / 64)
+        sb-append-byte!(sb, 128 + cp % 64)
+      }
+    | cp <= 65535 ->
+      {
+        sb-append-byte!(sb, 224 + cp / 4096)
+        sb-append-byte!(sb, 128 + (cp / 64) % 64)
+        sb-append-byte!(sb, 128 + cp % 64)
+      }
+    | else ->
+      {
+        sb-append-byte!(sb, 240 + cp / 262144)
+        sb-append-byte!(sb, 128 + (cp / 4096) % 64)
+        sb-append-byte!(sb, 128 + (cp / 64) % 64)
+        sb-append-byte!(sb, 128 + cp % 64)
+      }
+
+let escape-invalid!(lx: Lex, failed: Ref (Maybe ParseError), esc: Int, line: Int) -> Unit =
+  set!(failed, Some(perr-at(esc, deref(lx-pos(lx)), line, "invalid string escape")))
+
+; `\u{` hex `}` — 1 to 6 digits. `u` is already consumed. `esc` is the backslash.
+let append-unicode-escape!(lx: Lex, sb: StringBuffer, failed: Ref (Maybe ParseError), esc: Int, start: Int, line: Int) -> Unit {
+  cond
+    | lex-peek(lx, 0) == -1 -> set!(failed, Some(perr-at(start, deref(lx-pos(lx)), line, "unterminated string")))
+    | lex-peek(lx, 0) != 123 -> escape-invalid!(lx, failed, esc, line)
+    | else ->
+      {
+        lex-bump(lx)
+        let cp = ref(0)
+        let digits = ref(0)
+        while (deref(digits) < 6 && hex-val(lex-peek(lx, 0)) >= 0) {
+          let v = hex-val(lex-peek(lx, 0))
+          lex-bump(lx)
+          set!(cp, deref(cp) * 16 + v)
+          set!(digits, deref(digits) + 1)
+        }
+        let nxt = lex-peek(lx, 0)
+        let n = deref(digits)
+        let cpv = deref(cp)
+        cond
+          | nxt == -1 -> set!(failed, Some(perr-at(start, deref(lx-pos(lx)), line, "unterminated string")))
+          | n == 0 -> escape-invalid!(lx, failed, esc, line)
+          | hex-val(nxt) >= 0 -> escape-invalid!(lx, failed, esc, line)
+          | nxt != 125 -> escape-invalid!(lx, failed, esc, line)
+          | else ->
+            {
+              lex-bump(lx)
+              cond
+                | cpv > 1114111 -> escape-invalid!(lx, failed, esc, line)
+                | cpv >= 55296 && cpv <= 57343 -> escape-invalid!(lx, failed, esc, line)
+                | else -> append-utf8!(sb, cpv)
+            }
+      }
+}
+
+; The backslash is already consumed.
+let append-string-escape!(lx: Lex, sb: StringBuffer, failed: Ref (Maybe ParseError), start: Int, line: Int) -> Unit {
+  let esc = deref(lx-pos(lx)) - 1
+  cond
+    | lex-peek(lx, 0) == -1 -> set!(failed, Some(perr-at(start, deref(lx-pos(lx)), line, "unterminated string")))
+    | else ->
+      {
+        let e = lex-bump(lx)
+        cond
+          | e == 92 -> sb-append-byte!(sb, 92)
+          | e == 34 -> sb-append-byte!(sb, 34)
+          | e == 110 -> sb-append-byte!(sb, 10)
+          | e == 114 -> sb-append-byte!(sb, 13)
+          | e == 116 -> sb-append-byte!(sb, 9)
+          | e == 117 -> append-unicode-escape!(lx, sb, failed, esc, start, line)
+          | else -> escape-invalid!(lx, failed, esc, line)
+      }
+}
+
 let scan-string(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), start: Int, col: Int, ind: Int, bol: Bool, line: Int) -> Unit {
   lex-bump(lx)
   let sb = sb-new()
@@ -252,14 +339,7 @@ let scan-string(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), s
     let c = lex-bump(lx)
     cond
       | c == 34 -> set!(closed, true)
-      | c == 92 ->
-        cond
-          | lex-peek(lx, 0) == -1 -> set!(failed, Some(perr-at(start, deref(lx-pos(lx)), line, "unterminated string")))
-          | else ->
-            {
-              let e = lex-bump(lx)
-              if (e != 92 && e != 34) -> set!(failed, Some(perr-at(deref(lx-pos(lx)) - 2, deref(lx-pos(lx)), line, "invalid string escape"))) | sb-append-byte!(sb, e)
-            }
+      | c == 92 -> append-string-escape!(lx, sb, failed, start, line)
       | else -> sb-append-byte!(sb, c)
   }
   cond

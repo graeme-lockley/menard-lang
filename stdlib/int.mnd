@@ -1,0 +1,20 @@
+import std/string as String
+
+pub let parse(n: Str) -> Int =
+  if (String.starts-with(n, "-")) -> -parse-rest(n, 1) | parse-rest(n, 0)
+
+let is-digit(d: Int) -> Bool =
+  d > 47 && d < 58
+
+let parse-rest(n: Str, i: Int) -> Int {
+  let len = str-byte-length(n)
+
+  loop(iter = i, result = 0) {
+      cond
+        | iter >= len -> result
+        | else -> {
+            let d = str-byte(n, iter)
+            if (is-digit(d)) -> recur(iter + 1, result * 10 + d - 48) | result
+          }
+  }
+}

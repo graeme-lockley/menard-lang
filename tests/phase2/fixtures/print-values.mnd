@@ -1,0 +1,46 @@
+record Point {
+  x: Int
+  y: Bool
+}
+
+type Color =
+  | Red
+  | Rgb(Int, Int, Int)
+
+record Box[a] {
+  value: a
+}
+
+type Tree =
+  | Empty
+  | Node(Bool, Tree)
+
+let next(counter: Ref Int) -> Str {
+  let n = deref(counter)
+  set!(counter, n + 1)
+  str-concat("value", show(n))
+}
+
+let output(input: Str, tokens: List Str) -> Unit {
+  print("Input: [", input, "], Tokens: [", tokens, "]")
+  println()
+  println(true, " ", false, " ", (), " ", -42, " ", 1.5)
+  println(Point(7, true), " ", Red(), " ", Rgb(1, 2, 3))
+  println([true, false], " ", [[1, 2], [3]])
+  println(Some("hello"), " ", Ok(42))
+  println(str-concat("com", "puted"))
+  println(Box(false), " ", Node(true, Node(false, Empty())))
+  println(["a\"b", "c\\d"])
+  let pairs = map-set(map-set(map-new(), "b", false), "a", true)
+  println(pairs)
+  println(show("quoted"))
+  let counter = ref(0)
+  println(next(counter), " ", next(counter), " ", deref(counter))
+  println([], " ", [7], " ", [[], [1]], " ", Box([true, false]))
+  print()
+}
+
+let main() -> Int {
+  output("1,2", ["1", "2"])
+  0
+}

@@ -1081,9 +1081,8 @@ let arith-rem!(b: Builder, panic-at-abs: Int, file-gid: Int, line: Int, msg-gid:
 ; lowering needs a global for, deduped by content (so two `(println
 ; "x")` call sites, or a `println` and an unrelated `(write 1 "x")` that
 ; happen to share literal text, share one global rather than each
-; getting their own — see `newline-str`'s own doc comment for why this
-; matters even for a program with only one distinct user-visible
-; string). Two passes share this one type:
+; getting their own). `"\n"`, which `println` always writes, shares that
+; global with any literal of the same bytes. Two passes share this one type:
 ;
 ; 1. **Collection** (`collect-str-pool`, called once by `lower-program`,
 ;    before lowering anything): a pure syntactic walk of *every* form —
@@ -1091,7 +1090,7 @@ let arith-rem!(b: Builder, panic-at-abs: Int, file-gid: Int, line: Int, msg-gid:
 ;    nested `ParenNode`/`BracketNode` unconditionally — looking for a
 ;    `println`/`print`/`write` call shape and pulling out its `Str`-
 ;    literal argument(s) (`println` additionally, always, adds
-;    `newline-str` — even a bare `(println)`). This never calls
+;    `"\n"` — even a bare `(println)`). This never calls
 ;    `lower-expr` and needs no `env`/`funcs`/`noop`: it is *purely*
 ;    syntactic, so it cannot fail, and — critically — it can run before
 ;    `num-globals` (how many ids every function's own local `Builder`
@@ -1206,7 +1205,7 @@ let str-pool-finalize(p: StrPool, ctors: Map Str CtorSpec) -> StrPool {
   StrPool(str-pool-order-rev(p), str-pool-by-content(p), str-pool-next(p), s, s + 1, s + 2, ctors, str-pool-origins(p), str-pool-file-gids(p))
 }
 
-; String globals come from `pool.mnd`'s sorted literals. `newline-str` is
+; String globals come from `pool.mnd`'s sorted literals. `"\n"` is
 ; appended so a bare `(println)` still has a global; `str-pool-add` leaves
 ; an existing literal where the sort put it.
 let str-pool-from-list(xs: List Str, p: StrPool) -> StrPool =
@@ -1254,7 +1253,7 @@ let file-gid-of(pool: StrPool, origin: Int) -> Int {
 }
 
 let collect-str-pool(forms: List Ast, paths: List Str) -> StrPool =
-  add-origin-cstrs(paths, str-pool-add(str-pool-add(str-pool-from-list(pool-string-literals(forms), str-pool-new(paths)), newline-str()), div-zero-msg()))
+  add-origin-cstrs(paths, str-pool-add(str-pool-add(str-pool-from-list(pool-string-literals(forms), str-pool-new(paths)), "\n"), div-zero-msg()))
 
 ; -- real lowering's own void-call emission: `println`/`print`/`write`
 ; call one of the three fixed runtime externs directly (never a real
@@ -2294,7 +2293,7 @@ let is-unit-noop-call-named(head: Ast, noop: Map Str Bool) -> Bool =
 ; for the two-pass string-global scheme these lower against.
 
 let is-effect-head(s: Str) -> Bool =
-  s == "println" || s == "print" || s == "exit" || s == "mn_exit"
+  s == "println" || s == "print" || s == "print-text" || s == "exit" || s == "mn_exit"
 
 let is-effect-call(f: Ast) -> Bool =
   match (f)
@@ -2305,17 +2304,6 @@ let is-effect-call-named(head: Ast) -> Bool =
   match (sym-str(head))
     | Some(n) -> is-effect-head(n)
     | None -> false
-
-; A one-byte "\n" `Str`, `println`'s own trailing newline — built the
-; same way `src/mn.mnd`'s `nl` is, and deliberately run through the
-; very same `StrPool` (deduped by content) every `println` call needs,
-; rather than kept as some separate always-present global: a program
-; with no `println` at all pays for zero string globals, not one.
-let newline-str() -> Str {
-  let sb = sb-new()
-  sb-append-byte!(sb, 10)
-  sb-take-str!(sb)
-}
 
 ; Trailing 0 so `mn_panic`'s `strlen` stops at the end of the message.
 ; The pool stores the bytes as given; a Menard string literal has no NUL.
@@ -2343,6 +2331,10 @@ let lower-effect-known(hn: Str, rest: List Ast, env: Map Str Int, b: Builder, fu
   cond
     | hn == "println" -> lower-println(rest, env, b, funcs, noop, pool)
     | hn == "print" -> lower-print(rest, env, b, funcs, noop, pool)
+    | hn == "print-text" ->
+      match (rest)
+        | [value] -> lower-print-text(value, env, b, funcs, noop, pool)
+        | _ -> Err("print-text requires exactly one Str argument")
     | hn == "exit" -> lower-exit(rest, env, b, funcs, noop, pool)
     | else -> Err(str-concat("unknown effect ", hn))
 
@@ -2352,11 +2344,15 @@ let lower-exit(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str Func
     | [code-ast] -> result-bind(lower-expr(code-ast, env, b, funcs, noop, pool), fn (v) = Ok(emit-call-void!(b, extern-kind-print, extern-exit-abs(str-pool-count(pool)), [get!(b, v)])))
     | _ -> Err("exit requires exactly one Int argument")
 
-; `println`/`print`'s variadic args: each is either a `Str` literal
-; (written directly to fd 1, byte for byte) or an `Int`-valued
-; expression (untagged and written via `mn_print_i64`) — anything else
-; (a `Bool`, a non-literal `Str`, …) is a clean `Err`, same rationale as
-; every other not-yet-supported value shape in this module.
+; Typechecking expands user print calls into print-text calls, formatting
+; non-Str arguments using their inferred types. Literal-only generated calls
+; can still use the original print/println path.
+let lower-print-text(a: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
+  match (a)
+    | StrNode(s, _) -> Ok(emit-write-str-to!(b, pool, s, str-pool-write-stdout-abs(pool)))
+    | _ ->
+      result-bind(lower-expr(a, env, b, funcs, noop, pool), fn (v) = Ok(emit-call-void!(b, extern-kind-print, extern-print-str-abs(str-pool-count(pool)), [get!(b, v)])))
+
 let lower-print-args(args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
   match (args)
     | [] -> Ok(())
@@ -2374,7 +2370,7 @@ let lower-print(args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str Fun
   lower-print-args(args, env, b, funcs, noop, pool)
 
 let lower-println(args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
-  result-then(lower-print-args(args, env, b, funcs, noop, pool), fn () = Ok(emit-write-str-to!(b, pool, newline-str(), str-pool-write-stdout-abs(pool))))
+  result-then(lower-print-args(args, env, b, funcs, noop, pool), fn () = Ok(emit-write-str-to!(b, pool, "\n", str-pool-write-stdout-abs(pool))))
 
 let lower-sequence(forms: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (forms)

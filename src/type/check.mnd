@@ -112,6 +112,15 @@ record ProjNote {
 ; Indexes of record projections, filled during inference.
 let proj-notes = ref([])
 
+record PrintNote {
+  span: Span
+  types: List Type
+}
+
+let print-notes = ref([])
+let print-functions = ref([])
+let print-names = ref(map-new())
+
 ; Remember which slot a project form selected.
 let note-project!(sp: Span, index: Int) -> Unit =
   set!(proj-notes, ProjNote(span-start(sp), span-end(sp), span-origin(sp), index) :: deref(proj-notes))
@@ -1639,22 +1648,20 @@ let type-is-str(t: Type) -> Bool =
     | TStr -> true
     | _ -> false
 
-let check-print-arg(env: TypeEnv, a: Ast, local: Map Str Type) -> Unit {
+let check-print-arg(env: TypeEnv, a: Ast, local: Map Str Type) -> Type {
   let t = apply-subst(env, infer(env, a, local))
   if (type-is-str(t) || is-showable(t)) -> () | err!(env, "E_TYPE_SHOWABLE", str-concat("type ", type-show(t), " is not showable"), ast-span(a))
+  t
 }
 
-let check-print-args(env: TypeEnv, args: List Ast, local: Map Str Type) -> Unit =
+let check-print-args(env: TypeEnv, args: List Ast, local: Map Str Type) -> List Type =
   match (args)
-    | [] -> ()
-    | a :: rest ->
-      {
-        check-print-arg(env, a, local)
-        check-print-args(env, rest, local)
-      }
+    | [] -> []
+    | a :: rest -> check-print-arg(env, a, local) :: check-print-args(env, rest, local)
 
-let infer-print-args(env: TypeEnv, args: List Ast, local: Map Str Type) -> Type {
-  check-print-args(env, args, local)
+let infer-print-args(env: TypeEnv, args: List Ast, local: Map Str Type, sp: Span) -> Type {
+  let types = check-print-args(env, args, local)
+  set!(print-notes, PrintNote(sp, types) :: deref(print-notes))
   t-unit()
 }
 
@@ -1693,7 +1700,7 @@ let infer-app-core(env: TypeEnv, head: Ast, args: List Ast, sp: Span, local: Map
 }
 
 let infer-app-dispatch(env: TypeEnv, head: Ast, args: List Ast, sp: Span, local: Map Str Type) -> Type =
-  if (is-sym(head, "print") || is-sym(head, "println")) -> infer-print-args(env, args, local) | infer-app-core(env, head, args, sp, local)
+  if (is-sym(head, "print") || is-sym(head, "println")) -> infer-print-args(env, args, local, sp) | infer-app-core(env, head, args, sp, local)
 
 let infer-app(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) -> Type =
   match (elems)
@@ -1942,42 +1949,208 @@ let proj-index-of(note: ProjNote) -> Int =
   match (note)
     | ProjNote(_, _, _, index) -> index
 
-; Rewrite each child, leaving non-project forms intact.
-let rewrite-project-list(elems: List Ast, notes: List ProjNote) -> List Ast =
+; Preserve print argument types before lowering erases Bool/Unit/Int distinctions.
+let print-sym(s: Str) -> Ast =
+  SymNode(s, Span(0, 0, 0, 1))
+
+let print-str(s: Str) -> Ast =
+  StrNode(s, Span(0, 0, 0, 1))
+
+let print-call(name: Str, args: List Ast) -> Ast =
+  ParenNode(print-sym(name) :: args, Span(0, 0, 0, 1))
+
+let print-type-ast(t: Type) -> Ast =
+  match (t)
+    | TList(e) -> print-call("List", [print-type-ast(e)])
+    | TMaybe(e) -> print-call("Maybe", [print-type-ast(e)])
+    | TResult(a, b) -> print-call("Result", [print-type-ast(a), print-type-ast(b)])
+    | TMap(a, b) -> print-call("Map", [print-type-ast(a), print-type-ast(b)])
+    | TNominal(n, args, _) ->
+      if (args == []) -> print-sym(n) | print-call(n, map(print-type-ast, args))
+    | _ -> print-sym(type-show(t))
+
+let print-def(name: Str, t: Type, body: Ast) -> Ast =
+  print-call("defn", [print-sym(name), print-call("v:", [print-type-ast(t)]), print-sym("->"), print-sym("Str"), body])
+
+let print-concat(a: Ast, b: Ast) -> Ast =
+  print-call("str-concat", [a, b])
+
+let print-error(message: Str) -> Ast =
+  print-call("do", [print-call("write", [IntNode(2, Span(0, 0, 0, 1)), print-str(str-concat(message, "\n"))]), print-call("exit", [IntNode(1, Span(0, 0, 0, 1))]), print-str("")])
+
+let print-format(env: TypeEnv, t: Type, value: Ast) -> Ast {
+  let resolved = apply-subst(env, t)
+  let key = type-show(resolved)
+  let name =
+    match (map-get(deref(print-names), key))
+      | Some(n) -> n
+      | None ->
+        {
+          let n = str-concat("__print-value", show(map-size(deref(print-names))))
+          set!(print-names, map-set(deref(print-names), key, n))
+          let body = print-format-body(env, resolved)
+          set!(print-functions, print-def(n, resolved, body) :: deref(print-functions))
+          n
+        }
+  print-call(name, [value])
+}
+
+let print-payloads(env: TypeEnv, ts: List Type, i: Int) -> Ast =
+  match (ts)
+    | [] -> print-str("")
+    | t :: rest ->
+      print-concat(print-str(" "), print-concat(print-format(env, t, print-sym(str-concat("p", show(i)))), print-payloads(env, rest, i + 1)))
+
+let print-pattern(name: Str, ts: List Type, i: Int) -> List Ast =
+  match (ts)
+    | [] -> []
+    | _ :: rest -> print-sym(str-concat("p", show(i))) :: print-pattern(name, rest, i + 1)
+
+let print-ctor-body(env: TypeEnv, name: Str, ts: List Type) -> Ast =
+  print-concat(print-str(str-concat("(", name)), print-concat(print-payloads(env, ts, 0), print-str(")")))
+
+let print-ctor-arms(env: TypeEnv, cs: List VariantCtor, params: Map Str Type) -> List Ast =
+  match (cs)
+    | [] -> []
+    | VariantCtor(name, ts) :: rest ->
+      {
+        let concrete = replace-params-list(ts, params)
+        let pat = print-call(name, print-pattern(name, concrete, 0))
+        pat :: print-ctor-body(env, name, concrete) :: print-ctor-arms(env, rest, params)
+      }
+
+let print-field-types(fs: List RecordField) -> List Type =
+  match (fs)
+    | [] -> []
+    | RecordField(_, t) :: rest -> t :: print-field-types(rest)
+
+let print-nominal-body(env: TypeEnv, name: Str, args: List Type) -> Ast =
+  match (type-get(env, name))
+    | None -> print-error(str-concat("print: missing type ", name))
+    | Some(td) ->
+      match (td)
+        | RecordDef(_, ps, fs) ->
+          print-call("match", print-sym("v") :: print-ctor-arms(env, [VariantCtor(name, print-field-types(fs))], bind-type-params(ps, args, map-new())))
+        | VariantDef(_, ps, cs) ->
+          print-call("match", print-sym("v") :: print-ctor-arms(env, cs, bind-type-params(ps, args, map-new())))
+
+let print-map-body(env: TypeEnv, t: Type, k: Type, value: Type) -> Ast {
+  let name = str-concat("__print-map", show(map-size(deref(print-names))))
+  let found = print-call("match", [print-call("map-get", [print-sym("v"), print-sym("key")]), print-call("Some", [print-sym("item")]), print-format(env, value, print-sym("item")), print-call("None", []), print-error("print: map key disappeared")])
+  let entry = print-concat(print-format(env, k, print-sym("key")), print-concat(print-str(" "), found))
+  let tail = print-call("if", [print-call("=", [print-sym("rest"), print-call("Nil", [])]), print-str(""), print-concat(print-str(" "), print-call(name, [print-sym("v"), print-sym("rest")]))])
+  let body = print-call("match", [print-sym("keys"), print-call("Nil", []), print-str(""), print-call("Cons", [print-sym("key"), print-sym("rest")]), print-concat(entry, tail)])
+  let def = print-call("defn", [print-sym(name), print-call("v:", [print-type-ast(t)]), print-call("keys:", [print-type-ast(TList(k))]), print-sym("->"), print-sym("Str"), body])
+  set!(print-functions, def :: deref(print-functions))
+  print-concat(print-str("{"), print-concat(print-call(name, [print-sym("v"), print-call("map-keys", [print-sym("v")])]), print-str("}")))
+}
+
+let print-list-body(env: TypeEnv, t: Type, elem: Type) -> Ast {
+  let name = str-concat("__print-list", show(map-size(deref(print-names))))
+  let item = print-format(env, elem, print-sym("item"))
+  let tail = print-call("if", [print-call("=", [print-sym("rest"), print-call("Nil", [])]), print-str(""), print-concat(print-str(", "), print-call(name, [print-sym("rest")]))])
+  let body = print-call("match", [print-sym("v"), print-call("Nil", []), print-str(""), print-call("Cons", [print-sym("item"), print-sym("rest")]), print-concat(item, tail)])
+  set!(print-functions, print-def(name, t, body) :: deref(print-functions))
+  print-concat(print-str("["), print-concat(print-call(name, [print-sym("v")]), print-str("]")))
+}
+
+let print-format-body(env: TypeEnv, t: Type) -> Ast =
+  match (t)
+    | TBool -> print-call("if", [print-sym("v"), print-str("true"), print-str("false")])
+    | TUnit -> print-str("()")
+    | TList(e) -> print-list-body(env, t, e)
+    | TMaybe(e) ->
+      print-call("match", print-sym("v") :: print-ctor-arms(env, [VariantCtor("None", []), VariantCtor("Some", [e])], map-new()))
+    | TResult(a, b) ->
+      print-call("match", print-sym("v") :: print-ctor-arms(env, [VariantCtor("Ok", [a]), VariantCtor("Err", [b])], map-new()))
+    | TNominal(n, args, _) -> print-nominal-body(env, n, args)
+    | TMap(k, v) -> print-map-body(env, t, k, v)
+    | TParam(_) | TVar(_, _) ->
+      print-error("print: cannot format an unresolved type parameter")
+    | TInt | TFloat | TChar | TStr -> print-call("show", [print-sym("v")])
+    | _ -> print-error(str-concat("print: type ", type-show(t), " is not supported"))
+
+let find-print-note(sp: Span, notes: List PrintNote) -> Maybe (List Type) =
+  match (notes)
+    | [] -> None()
+    | PrintNote(saved, ts) :: rest ->
+      if (span-start(sp) == span-start(saved) && span-end(sp) == span-end(saved) && span-origin(sp) == span-origin(saved)) -> Some(ts) | find-print-note(sp, rest)
+
+let print-write(value: Ast) -> Ast =
+  print-call("print-text", [value])
+
+let rewrite-print-args(args: List Ast, ts: List Type, notes: List ProjNote, env: TypeEnv) -> List Ast =
+  match (args)
+    | [] -> []
+    | a :: rest ->
+      match (ts)
+        | [] -> [print-error("print: missing argument type")]
+        | t :: tail ->
+          {
+            let value = rewrite-project-ast(a, notes, env)
+            let formatted = if (type-is-str(apply-subst(env, t))) -> value | print-format(env, t, value)
+            print-write(formatted) :: rewrite-print-args(rest, tail, notes, env)
+          }
+
+let rewrite-print(elems: List Ast, sp: Span, notes: List ProjNote, env: TypeEnv) -> Ast =
+  match (elems)
+    | head :: args ->
+      match (find-print-note(sp, deref(print-notes)))
+        | None -> ParenNode(elems, sp)
+        | Some(ts) ->
+          {
+            let writes = rewrite-print-args(args, ts, notes, env)
+            let unit = ParenNode([], sp)
+            let suffix = if (is-sym(head, "println")) -> [print-write(print-str("\n")), unit] | [unit]
+            ParenNode(print-sym("do") :: append(writes, suffix), sp)
+          }
+    | [] -> ParenNode([], sp)
+
+; Rewrite projections and typed print calls together so nested expressions agree.
+let rewrite-project-list(elems: List Ast, notes: List ProjNote, env: TypeEnv) -> List Ast =
   match (elems)
     | [] -> []
-    | e :: rest -> rewrite-project-ast(e, notes) :: rewrite-project-list(rest, notes)
+    | e :: rest -> rewrite-project-ast(e, notes, env) :: rewrite-project-list(rest, notes, env)
 
 ; A project node becomes a slot read when its index is known.
-let rewrite-project-node(elems: List Ast, sp: Span, notes: List ProjNote) -> Ast =
+let rewrite-project-node(elems: List Ast, sp: Span, notes: List ProjNote, env: TypeEnv) -> Ast =
   match (elems)
     | head :: obj :: _ ->
-      if (is-sym(head, "project")) -> rewrite-noted-project(obj, sp, notes) | ParenNode(rewrite-project-list(elems, notes), sp)
-    | _ -> ParenNode(rewrite-project-list(elems, notes), sp)
+      cond
+        | is-sym(head, "project") -> rewrite-noted-project(obj, sp, notes, env)
+        | is-sym(head, "print") || is-sym(head, "println") -> rewrite-print(elems, sp, notes, env)
+        | else -> ParenNode(rewrite-project-list(elems, notes, env), sp)
+    | [head] ->
+      if (is-sym(head, "print") || is-sym(head, "println")) -> rewrite-print(elems, sp, notes, env) | ParenNode(elems, sp)
+    | _ -> ParenNode(rewrite-project-list(elems, notes, env), sp)
 
 ; `(slot obj index)` is what the lowerer reads.
-let rewrite-noted-project(obj: Ast, sp: Span, notes: List ProjNote) -> Ast =
+let rewrite-noted-project(obj: Ast, sp: Span, notes: List ProjNote, env: TypeEnv) -> Ast =
   match (find-proj-note(sp, notes))
-    | None -> ParenNode([SymNode("project", sp), rewrite-project-ast(obj, notes)], sp)
+    | None -> ParenNode([SymNode("project", sp), rewrite-project-ast(obj, notes, env)], sp)
     | Some(note) ->
-      ParenNode([SymNode("slot", sp), rewrite-project-ast(obj, notes), IntNode(proj-index-of(note), sp)], sp)
+      ParenNode([SymNode("slot", sp), rewrite-project-ast(obj, notes, env), IntNode(proj-index-of(note), sp)], sp)
 
 ; Walk one form, replacing record projections with slot reads.
-let rewrite-project-ast(ast: Ast, notes: List ProjNote) -> Ast =
+let rewrite-project-ast(ast: Ast, notes: List ProjNote, env: TypeEnv) -> Ast =
   match (ast)
-    | ParenNode(elems, sp) -> rewrite-project-node(elems, sp, notes)
-    | BracketNode(elems, sp) -> BracketNode(rewrite-project-list(elems, notes), sp)
+    | ParenNode(elems, sp) -> rewrite-project-node(elems, sp, notes, env)
+    | BracketNode(elems, sp) -> BracketNode(rewrite-project-list(elems, notes, env), sp)
     | _ -> ast
 
 ; Rewrite every top-level form after a successful check.
-let rewrite-project-forms(forms: List Ast, notes: List ProjNote) -> List Ast =
+let rewrite-project-forms(forms: List Ast, notes: List ProjNote, env: TypeEnv) -> List Ast =
   match (forms)
     | [] -> []
-    | f :: rest -> rewrite-project-ast(f, notes) :: rewrite-project-forms(rest, notes)
+    | f :: rest -> rewrite-project-ast(f, notes, env) :: rewrite-project-forms(rest, notes, env)
 
-let finish-typecheck(forms: List Ast, errs: List TypeError) -> Result (List Ast) (List TypeError) =
+let finish-typecheck(forms: List Ast, errs: List TypeError, env: TypeEnv) -> Result (List Ast) (List TypeError) =
   match (errs)
-    | [] -> Ok(rewrite-project-forms(forms, deref(proj-notes)))
+    | [] ->
+      {
+        let rewritten = rewrite-project-forms(forms, deref(proj-notes), env)
+        Ok(append(rewritten, reverse(deref(print-functions))))
+      }
     | _ -> Err(reverse-errs(errs))
 
 let rest-to-type(es: List RestError) -> List TypeError =
@@ -1992,12 +2165,15 @@ let rest-to-type(es: List RestError) -> List TypeError =
 ; packed first, so the typer sees an ordinary list parameter.
 let typecheck-collected(forms: List Ast) -> Result (List Ast) (List TypeError) {
   set!(proj-notes, [])
+  set!(print-notes, [])
+  set!(print-functions, [])
+  set!(print-names, map-new())
   let env = empty-env()
   collect-defs(env, forms)
   collect-defn-schemes(env, forms)
   let top-local = ref(map-new())
   run-typecheck-top(env, forms, top-local)
-  finish-typecheck(forms, deref(env-diags(env)))
+  finish-typecheck(forms, deref(env-diags(env)), env)
 }
 
 pub let typecheck-forms(forms: List Ast) -> Result (List Ast) (List TypeError) =

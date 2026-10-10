@@ -28,8 +28,11 @@ export function showValue(v: Value): string {
     case "sym":
       return "'" + new TextDecoder().decode(v.name);
     case "list":
-      return `[${v.elems.map(showValue).join(" ")}]`;
+      return `[${v.elems.map(showValue).join(", ")}]`;
     case "variant":
+      if (v.ctor === "Nil" || v.ctor === "Cons") {
+        return showList(v);
+      }
       return v.payloads.length === 0
         ? `(${v.ctor})`
         : `(${v.ctor} ${v.payloads.map(showValue).join(" ")})`;
@@ -51,6 +54,21 @@ export function showValue(v: Value): string {
     case "sb":
       throw new Error(`type ${v.tag} is not showable`);
   }
+}
+
+function showList(value: Value): string {
+  const parts: string[] = [];
+  let tail = value;
+  while (tail.tag === "variant" && tail.ctor === "Cons" && tail.payloads.length === 2) {
+    parts.push(showValue(tail.payloads[0]!));
+    tail = tail.payloads[1]!;
+  }
+  if (tail.tag === "list") {
+    parts.push(...tail.elems.map(showValue));
+  } else if (!(tail.tag === "variant" && tail.ctor === "Nil" && tail.payloads.length === 0)) {
+    throw new Error("cannot show a list with an invalid tail");
+  }
+  return `[${parts.join(", ")}]`;
 }
 
 export function equalValue(a: Value, b: Value): boolean {

@@ -108,7 +108,7 @@ describe("strings", () => {
     if (a.tag === "str") expect(a.bytes.length).toBe(0);
   });
 
-  test("escapes only backslash and quote", () => {
+  test("backslash and quote", () => {
     const a = mustRead('"a\\"b\\\\c"');
     expect(a.tag).toBe("str");
     if (a.tag === "str") {
@@ -116,9 +116,70 @@ describe("strings", () => {
     }
   });
 
+  test("named escapes", () => {
+    const a = mustRead('"\\n\\r\\t"');
+    expect(a.tag).toBe("str");
+    if (a.tag === "str") expect([...a.bytes]).toEqual([0x0a, 0x0d, 0x09]);
+  });
+
+  test("unicode scalar escapes encode UTF-8", () => {
+    const cases: [string, number[]][] = [
+      ['"\\u{0}"', [0x00]],
+      ['"\\u{7f}"', [0x7f]],
+      ['"\\u{80}"', [0xc2, 0x80]],
+      ['"\\u{7ff}"', [0xdf, 0xbf]],
+      ['"\\u{800}"', [0xe0, 0xa0, 0x80]],
+      ['"\\u{e9}"', [0xc3, 0xa9]],
+      ['"\\u{000A}"', [0x0a]],
+      ['"\\u{1F600}"', [0xf0, 0x9f, 0x98, 0x80]],
+      ['"\\u{10FFFF}"', [0xf4, 0x8f, 0xbf, 0xbf]],
+    ];
+    for (const [src, bytes] of cases) {
+      const a = mustRead(src);
+      expect(a.tag).toBe("str");
+      if (a.tag === "str") expect([...a.bytes]).toEqual(bytes);
+    }
+  });
+
+  test("dollar is a byte, not interpolation", () => {
+    const a = mustRead('"$x${y}"');
+    expect(a.tag).toBe("str");
+    if (a.tag === "str") {
+      expect([...a.bytes]).toEqual([0x24, 0x78, 0x24, 0x7b, 0x79, 0x7d]);
+    }
+  });
+
+  test("a raw newline inside quotes is a newline byte", () => {
+    const a = mustRead('"a\nb"');
+    expect(a.tag).toBe("str");
+    if (a.tag === "str") expect([...a.bytes]).toEqual([0x61, 0x0a, 0x62]);
+  });
+
+  test("an escaped newline round-trips through the raw show spelling", () => {
+    const a = mustRead('"\\n"');
+    expect(a.tag).toBe("str");
+    if (a.tag !== "str") return;
+    expect([...a.bytes]).toEqual([0x0a]);
+    const printed = print(a);
+    expect([...printed]).toEqual([0x22, 0x0a, 0x22]);
+    expect(astEqual(a, mustRead(printed))).toBe(true);
+  });
+
   test("invalid escape is an error", () => {
-    const r = read('"\\n"');
-    expect(r.ok).toBe(false);
+    for (const src of [
+      '"\\q"',
+      '"\\u"',
+      '"\\u{}"',
+      '"\\u{D800}"',
+      '"\\u{dfff}"',
+      '"\\u{110000}"',
+      '"\\u{0000001}"',
+      '"\\u{FFFFFF}"',
+    ]) {
+      const r = read(src);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error.message).toBe("invalid string escape");
+    }
   });
 
   test("raw non-UTF-8 bytes", () => {

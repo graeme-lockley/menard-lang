@@ -540,7 +540,7 @@ output — §2.16.
 
 #### `Str` is bytes; `Char` is a scalar value
 
-Three clarifications that make byte-level I/O well defined:
+These rules make byte-level I/O well defined:
 
 - **A `Str` need not be valid UTF-8.** It is an arbitrary byte sequence; UTF-8
   is a *convention the library interprets*, never an invariant the type carries
@@ -549,6 +549,13 @@ Three clarifications that make byte-level I/O well defined:
   produce invalid UTF-8, since it escapes only `\` and `"`.) **It may also
   contain NUL bytes**, which has one hard consequence at the OS boundary — see
   §2.15, where a NUL in an argument is an error rather than a truncation.
+- **A string literal decodes a fixed set of escapes, then stores bytes.**
+  The sequences are in [syntax.md](syntax.md) §1.4: `\\`, `\"`, `\n`, `\r`,
+  `\t`, and `\u{` hex `}` for one Unicode scalar written as UTF-8 (one to six
+  hex digits, `U+0000`–`U+10FFFF`, surrogates excluded). Any other byte
+  between the quotes is stored as itself, so a literal can still hold a
+  newline, a NUL, or invalid UTF-8. `$` is a byte. There is no interpolation.
+  `show` (§2.13) still escapes only `\` and `"`.
 - **`Char` is a Unicode *scalar value*** — a code point excluding the surrogate
   range `U+D800–U+DFFF`. This makes `char->str` **total** and never failing,
   while `str-chars` (decode) is the **fallible** direction. **Not in this
@@ -945,6 +952,19 @@ fd 1 as **raw bytes** — no automatic quoting, and `print` adds **no** newline:
 
 `println(a, …)` is identical, then one `\n` (`0x0a`). `println()` alone writes
 just that newline. Both return `Unit`.
+
+Native compilation retains the inferred argument types when lowering these
+calls. Computed strings are written just like string literals; booleans,
+collections, records, and variants are formatted by type rather than interpreted
+as integer words. Strings inside collections and record payloads are quoted,
+with quotes and backslashes escaped. Lists use literal syntax such as
+`["one", "two"]`, with `[]` for an empty list, rather than nested `Cons`/`Nil`
+constructors. Nested lists and lists inside records use the same formatting,
+matching the reference interpreter.
+Formatting an erased, unresolved type parameter still reports an explicit
+native-runtime error; the runtime word alone cannot distinguish an `Int` from
+a `Bool` or `Unit`. Concrete instantiations of generic records and variants
+retain their payload types for printing.
 
 `show` itself is unchanged: `show("hi")` is still the quoted spelling `"hi"`.
 Use `print(show(s))` when the quoted form is what should reach stdout.
@@ -1563,6 +1583,8 @@ same spelling, because the spelling is defined on bytes alone.
 | `(Map K V)` | `{k1 v1 k2 v2 …}` in sorted key order |
 | `(Maybe T)` / `(Result T E)` | `(Some v)` / `(None)` / `(Ok v)` / `(Err e)` |
 | `Ref`, `StringBuffer`, `Fn` | **no spelling — a compile error to show** (§2.12). Debug output is a separate contract: §2.16 |
+
+A source literal may spell the same bytes with the escapes in [syntax.md](syntax.md) §1.4. Those spellings are decoded before the value exists. `show` keeps the one spelling in the table, raw bytes included, so a string that is not valid UTF-8 still has a spelling.
 
 The exact punctuation is a detail and may be revised; what is **not** revisable
 is that the interpreter and the compiled program implement the *same* table, and

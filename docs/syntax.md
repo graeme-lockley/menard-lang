@@ -103,12 +103,38 @@ There is no overloading.
 | `Int` | decimal, optional leading `-` or `+` glued to the digits |
 | `Float` | the same, with `.` or an exponent (`e` / `E`, optional sign) |
 | `Bool` | `true`, `false` |
-| `Str` | `"` … `"`, with `\` and `"` backslash-escaped and nothing else escaped |
+| `Str` | `"` … `"`, with the escapes below |
 | `Sym` | `'` glued to an identifier (`'red`) |
 | `Unit` | `()` |
 | list | `[e, …]`, or `[]` |
 
 `Char` has no literal syntax. There is no map literal.
+
+A string literal is the bytes between `"` quotes. These backslash sequences
+are decoded; every other byte is copied unchanged, including newline, NUL,
+and bytes that are not UTF-8:
+
+| Escape | Bytes |
+|---|---|
+| `\\` | `0x5C` |
+| `\"` | `0x22` |
+| `\n` | `0x0A` |
+| `\r` | `0x0D` |
+| `\t` | `0x09` |
+| `\u{` hex `}` | the UTF-8 encoding of one Unicode scalar |
+
+Hex is one to six digits (`0-9`, `a-f`, `A-F`). The scalar is a code point
+in `U+0000`–`U+10FFFF` excluding the surrogate range `U+D800`–`U+DFFF`. Any
+other `\` sequence is a lexical error (`\q`, `\u`, `\u{}`, a seventh digit,
+a surrogate, a value above `U+10FFFF`).
+
+`$` is an ordinary byte. There is no interpolation.
+
+This is Kestrel's string-escape set, kept suitable for a byte string: `\u{…}`
+writes UTF-8 rather than a code-point string, and a raw byte stays a raw
+byte so a literal can still hold an arbitrary `Str`. `show` does not emit
+these escapes. It escapes only `\` and `"` and writes every other byte raw,
+which is what stays total on invalid UTF-8.
 
 ### 1.5 Keywords
 
@@ -235,10 +261,8 @@ the same line as `=`. Indent the block contents two spaces further than
 the declaration and align the closing brace with the declaration:
 
 ```
-let nl = {
-  let sb = sb-new()
-  sb-append-byte!(sb, 10)
-  sb-take-str!(sb)
+test "two numbers" = {
+  add("1,2") == Ok(3)
 }
 ```
 
@@ -291,10 +315,10 @@ expression. The value of a block is the value of its last expression. A
 block contains at least one expression. `()` is the unit value.
 
 ```
-let nl() -> Str {
-  let sb = sb-new()
-  sb-append-byte!(sb, 10)
-  sb-take-str!(sb)
+let line(s: Str) -> Unit {
+  write(stdout, s)
+  write(stdout, "\n")
+  ()
 }
 ```
 
@@ -569,7 +593,7 @@ diagnostic code at the same primary span.
 
 ## 10. Worked fragment
 
-Today's `join-path`, `nl`, and `summary` from `stdlib/test.mnd`:
+Today's `join-path` and `summary` from `stdlib/test.mnd`:
 
 ```
 pub record Counts {
@@ -583,12 +607,6 @@ let join-path(dir: Str, name: Str) -> Str =
     | dir == "/" -> str-concat("/", name)
     | else -> str-concat(dir, "/", name)
 
-let nl() -> Str {
-  let sb = sb-new()
-  sb-append-byte!(sb, 10)
-  sb-take-str!(sb)
-}
-
 pub let summary(c: Counts, ms: Int, on: Bool) -> Unit =
   match (c)
     | Counts(p, f) -> {
@@ -598,6 +616,6 @@ pub let summary(c: Counts, ms: Int, on: Bool) -> Unit =
         }
         write(stdout, paint(on, "[32m", str-concat(show(p), " passed")))
         write(stdout, str-concat(" (", show(ms), "ms)"))
-        write(stdout, nl())
+        write(stdout, "\n")
       }
 ```

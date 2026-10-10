@@ -3,10 +3,12 @@
 Short programs that exercise Phase 3 emitter features. Each one prints a
 short description of its result and exits 0. Run with
 `./mn run examples/<file>.mnd` (native) or `./mn inter examples/<file>.mnd`
-(interpreter).
+(interpreter). `sc.mnd` is an implementation of the [String Calculator Kata](https://osherove.com/tdd-kata-1); run its colocated kata tests with
+`./mn test examples/sc.test.mnd`.
 
 | File | Slice | Shows |
 | --- | --- | --- |
+| `sc.mnd` + `sc.test.mnd` | kata | String Calculator, built as a test-driven module |
 | `loop-sum.mnd` | A | `loop` / `recur` |
 | `bool-unit.mnd` | B | Bool/Unit immediates, Bool-returning helpers |
 | `list-sum.mnd` | C | `List` + `match` on `Cons`/`Nil` |

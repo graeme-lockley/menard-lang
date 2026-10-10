@@ -51,7 +51,7 @@ import std/sys
 
 ; Flags the driver understands. A valued flag consumes the next word.
 let mn-flags() -> List Flag =
-  [Flag("--dump-after=reader", false), Flag("--dump-after=desugar", false), Flag("--dump-after=type", false), Flag("--dump-after=close", false), Flag("--dump-after=root", false), Flag("--dump-after=derive", false), Flag("--show-result", false), Flag("--clean", false), Flag("--verbose", false), Flag("--quiet", false), Flag("-o", true), Flag("--cc", true), Flag("--runtime", true)]
+  [Flag("--dump-after=reader", false), Flag("--dump-after=desugar", false), Flag("--dump-after=type", false), Flag("--dump-after=close", false), Flag("--dump-after=root", false), Flag("--dump-after=derive", false), Flag("--show-result", false), Flag("--clean", false), Flag("--verbose", false), Flag("--show-output", false), Flag("--quiet", false), Flag("-o", true), Flag("--cc", true), Flag("--runtime", true)]
 
 let argv-onto(i: Int, n: Int, acc: List Str) -> List Str =
   if (i >= n) -> reverse(acc) | argv-onto(i + 1, n, arg(i) :: acc)
@@ -85,6 +85,9 @@ let has-clean() -> Bool =
 
 let has-verbose() -> Bool =
   has-flag(argv(), "--verbose")
+
+let has-show-output() -> Bool =
+  has-flag(argv(), "--show-output")
 
 let has-quiet() -> Bool =
   has-flag(argv(), "--quiet")
@@ -175,7 +178,7 @@ let fail-cannot-read(path: Str) -> Unit {
 }
 
 let usage() -> Unit {
-  write-line(2, "usage: mn <check|emit|build|run|test|inter> <file.mnd> [out.bc] [-o bin] [--cc path] [--runtime dir] [--clean] [--quiet] [--verbose] [--show-result] [--dump-after=reader|desugar|type|close|root|derive]")
+  write-line(2, "usage: mn <check|emit|build|run|test|inter> <file.mnd> [out.bc] [-o bin] [--cc path] [--runtime dir] [--clean] [--quiet] [--verbose] [--show-output] [--show-result] [--dump-after=reader|desugar|type|close|root|derive]")
   exit(2)
 }
 
@@ -659,6 +662,7 @@ let dispatch(mode: Str, file: Str, has-out: Bool, out: Str, bin: Str, dump-after
           if (str-byte-length(file) > 0) -> file | ".",
           has-clean(),
           has-verbose(),
+          has-show-output(),
           has-quiet(),
           chosen-cc(opt("--cc")),
           chosen-runtime(opt("--runtime"))

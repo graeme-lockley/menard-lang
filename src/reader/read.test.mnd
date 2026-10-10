@@ -26,6 +26,48 @@ test "round-trips spec-examples.mnd" = roundtrip("tests/corpus/spec-examples.mnd
 
 test "round-trips invalid-utf8.mnd" = roundtrip("tests/corpus/invalid-utf8.mnd")
 
+test "named string escapes decode to bytes" = {
+  match (read("\"\\n\\r\\t\""))
+    | Err(_) -> false
+    | Ok(a) ->
+      match (a)
+        | StrNode(s, _) -> str-byte-length(s) == 3 && str-byte(s, 0) == 10 && str-byte(s, 1) == 13 && str-byte(s, 2) == 9
+        | _ -> false
+}
+
+test "unicode escapes encode UTF-8" = {
+  match (read("\"\\u{00e9}\\u{1F600}\""))
+    | Err(_) -> false
+    | Ok(a) ->
+      match (a)
+        | StrNode(s, _) -> str-byte-length(s) == 6 && str-byte(s, 0) == 195 && str-byte(s, 1) == 169 && str-byte(s, 2) == 240 && str-byte(s, 3) == 159 && str-byte(s, 4) == 152 && str-byte(s, 5) == 128
+        | _ -> false
+}
+
+test "a surrogate escape is rejected" = {
+  match (read("\"\\u{D800}\""))
+    | Err(_) -> true
+    | Ok(_) -> false
+}
+
+test "dollar is not interpolation" = {
+  match (read("\"$x\""))
+    | Err(_) -> false
+    | Ok(a) ->
+      match (a)
+        | StrNode(s, _) -> str-byte-length(s) == 2 && str-byte(s, 0) == 36 && str-byte(s, 1) == 120
+        | _ -> false
+}
+
+test "an escaped newline round-trips through print" = {
+  match (read("\"\\n\""))
+    | Err(_) -> false
+    | Ok(a) ->
+      match (read(print-form(a)))
+        | Err(_) -> false
+        | Ok(b) -> ast-equal(a, b)
+}
+
 test "binding and test blocks put the opening brace after equals" = {
   let src = "let value = {
   let inner = {
