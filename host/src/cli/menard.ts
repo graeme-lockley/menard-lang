@@ -3,6 +3,7 @@
  * Thin Menard check/run CLI (Phase 1 host).
  * Exit: 0 ok, 1 program error/panic, 2 interpreter fault
  * `(exit n)` ends the program with status `n & 0xff`.
+ * Otherwise an `Int` returned from `main` is that status, as in the native binary.
  *
  * print/println/dump write live to process streams during evaluation.
  * Pass --show-result to also print the final non-Unit value (REPL-style).
@@ -53,7 +54,11 @@ withInternalGuard(
       if (showResult && result.exitCode === undefined && result.value.tag !== "unit") {
         process.stdout.write(showValue(result.value) + "\n");
       }
-      process.exit(result.exitCode ?? 0);
+      const fromMain =
+        result.exitCode === undefined && result.value.tag === "int"
+          ? Number(BigInt.asUintN(8, result.value.value))
+          : 0;
+      process.exit(result.exitCode ?? fromMain);
     }
 
     if (result.kind === "diagnostics" || result.kind === "panic") {
