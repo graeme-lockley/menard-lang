@@ -35,12 +35,14 @@ extern mn_read_file(path: Str) -> Result Str IoError
 extern mn_write_file(path: Str, data: Str) -> Result Unit IoError
 
 ; Write data to fd. A stream is not a value, so this carries no !.
-; @test write(stdout, "hi")
+; @test write(stdout, "hi") => Ok(())
+; @test write(-1, "") != Ok(()) => true
 pub let write(fd: Int, data: Str) -> Result Unit IoError =
   mn_write(fd, data)
 
 ; Write data and a newline to fd, or an IoError from either write.
-; @test write-line(stdout, "hi")
+; @test write-line(stdout, "hi") => Ok(())
+; @test write-line(-1, "must not appear") != Ok(()) => true
 pub let write-line(fd: Int, data: Str) -> Result Unit IoError =
   Result.and-then(fn (_) = write(fd, "\n"), write(fd, data))
 

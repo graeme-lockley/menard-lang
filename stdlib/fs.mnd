@@ -12,7 +12,7 @@ extern mn_exists(path: Str) -> Bool
 extern mn_rename(from: Str, to: Str) -> Result Unit IoError
 
 ; Whether a file or directory is at path.
-; @test exists("no-such-file")
+; @test exists("no-such-file-menard") => false
 pub let exists(path: Str) -> Bool =
   mn_exists(path)
 
@@ -80,6 +80,6 @@ pub let remove(path: Str) -> Bool =
   mn_remove(path)
 
 ; Whether path names a directory.
-; @test is-dir(".")
+; @test is-dir(".") => true
 pub let is-dir(path: Str) -> Bool =
   mn_is_dir(path)

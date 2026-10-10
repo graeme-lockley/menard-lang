@@ -3,6 +3,7 @@
 
 ; Apply f to an Ok value and leave Err in place.
 ; @test map(fn (n) = n + 1, Ok(1)) => Ok(2)
+; @test map(fn (n) = n + 1, Err("x")) => Err("x")
 pub let map[a, b, e](f: (a) -> b, r: Result a e) -> Result b e =
   match (r)
     | Ok(v) -> Ok(f(v))
@@ -10,6 +11,7 @@ pub let map[a, b, e](f: (a) -> b, r: Result a e) -> Result b e =
 
 ; Replace an Ok value with the Result that f returns.
 ; @test and-then(fn (n) = Ok(n + 1), Ok(1)) => Ok(2)
+; @test and-then(fn (n) = Ok(n + 1), Err("x")) => Err("x")
 ; @test and-then(fn (_) = Ok(1), Ok(())) => Ok(1)
 pub let and-then[a, b, e](f: (a) -> Result b e, r: Result a e) -> Result b e =
   match (r)

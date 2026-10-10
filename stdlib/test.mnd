@@ -69,7 +69,8 @@ let walk-child(dir: Str, child: Str, rest: List Str, acc: List Str) -> List Str 
     | else -> walk-names(dir, rest, acc)
 
 ; Test files under path, or a one-element list when path itself is a test file.
-; @test contains(discover("stdlib/basics.test.mnd"), "stdlib/basics.test.mnd") => true
+; @test contains(discover("stdlib/list.test.mnd"), "stdlib/list.test.mnd") => true
+; @test contains(discover("stdlib"), "stdlib/list.test.mnd") => true
 pub let discover(path: Str) -> List Str =
   cond
     | is-dir(path) -> reverse(walk(path, []))
@@ -93,10 +94,12 @@ let count-onto(lines: List Str, c: Counts) -> Counts =
 
 ; Pass and fail totals from a test process's stdout lines.
 ; @test count-lines(["pass a", "fail b", "noise"]) => Counts(1, 1)
+; @test count-lines(["pass a", "fail b", "noise", "pass c"]) => Counts(2, 1)
 pub let count-lines(lines: List Str) -> Counts =
   count-onto(lines, Counts(0, 0))
 
 ; The summary sentence, without color.
+; @test summary-text(Counts(2, 0), 5) => "2 passed (5ms)"
 ; @test summary-text(Counts(2, 1), 5) => "1 failed, 2 passed (5ms)"
 pub let summary-text(c: Counts, ms: Int) -> Str =
   match (c)

@@ -5,6 +5,12 @@ import std/string as String
 
 ; The integer spelled by the leading digits of n. A leading minus negates it. No digits means 0.
 ; @test parse("123") => 123
+; @test parse("456abc") => 456
+; @test parse("-123abc") => -123
+; @test parse("0") => 0
+; @test parse("") => 0
+; @test parse("abc456") => 0
+; @test parse("-") => 0
 pub let parse(n: Str) -> Int =
   if (String.starts-with("-", n)) -> -parse-rest(n, 1) | parse-rest(n, 0)
 

@@ -21,6 +21,7 @@ let flag-named(name: Str, flags: List Flag) -> Maybe Flag =
 
 ; Whether name occurs as its own word before `--`.
 ; @test has-flag(["run", "--clean", "a.mnd"], "--clean") => true
+; @test not(has-flag(["run", "--", "--clean"], "--clean")) => true
 pub let has-flag(args: List Str, name: Str) -> Bool =
   match (args)
     | [] -> false
@@ -32,6 +33,7 @@ pub let has-flag(args: List Str, name: Str) -> Bool =
 
 ; The word after name, or "" when name is absent or has no following word.
 ; @test flag-value(["-o", "out", "a.mnd"], "-o") => "out"
+; @test flag-value(["run"], "-o") => ""
 pub let flag-value(args: List Str, name: Str) -> Str =
   match (args)
     | [] -> ""
@@ -66,6 +68,7 @@ let positionals-onto(args: List Str, flags: List Flag, acc: List Str) -> List St
 
 ; Words that are not flags in the table and not a valued flag's argument.
 ; @test positionals(["check", "-o", "out", "a.mnd"], [Flag("-o", true)]) => ["check", "a.mnd"]
+; @test positionals(["check", "--clean", "-o", "out", "a.mnd", "--", "x"], [Flag("--clean", false), Flag("-o", true)]) => ["check", "a.mnd"]
 pub let positionals(args: List Str, flags: List Flag) -> List Str =
   positionals-onto(args, flags, [])
 
@@ -78,6 +81,7 @@ pub let positional(args: List Str, flags: List Flag, index: Int) -> Str =
 
 ; The words after the first `--`.
 ; @test args-after(["run", "a.mnd", "--", "-n"]) => ["-n"]
+; @test args-after(["run", "a.mnd", "--", "-n", "1"]) => ["-n", "1"]
 pub let args-after(args: List Str) -> List Str =
   match (args)
     | [] -> []

@@ -31,5 +31,28 @@ pub runtime take-str!(sb: StringBuffer) -> Str
 
 ; Append the show spelling of v.
 ; @test append-show!(new(), 41) => ()
+; @test {
+;   let sb = new()
+;   append-show!(sb, 41)
+;   to-str(sb)
+; } => "41"
+; @test {
+;   let sb = new()
+;   append!(sb, "hi")
+;   append-byte!(sb, 33)
+;   length(sb) == 3 && to-str(sb) != "hi"
+; } => true
+; @test {
+;   let sb = new()
+;   append!(sb, "hi")
+;   clear!(sb)
+;   append!(sb, "x")
+;   length(sb) == 1 && to-str(sb) == "x"
+; } => true
+; @test {
+;   let sb = new()
+;   append!(sb, "hi")
+;   take-str!(sb) == "hi" && length(sb) == 0
+; } => true
 pub let append-show![a](sb: StringBuffer, v: a) -> Unit =
   append!(sb, show(v))

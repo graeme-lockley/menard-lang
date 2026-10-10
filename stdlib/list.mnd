@@ -13,6 +13,7 @@ pub let length[a](xs: List a) -> Int =
 
 ; The element at i, or None when i is past the end.
 ; @test nth([10, 20], 1) => Some(20)
+; @test nth([10], 3) => None()
 pub let nth[a](xs: List a, i: Int) -> Maybe a =
   match (xs)
     | [] -> None()
@@ -25,6 +26,7 @@ pub let nth[a](xs: List a, i: Int) -> Maybe a =
 ; @test nth-with-default([10, 20], 2, 0) => 0
 ; @test nth-with-default([], 0, 42) => 42
 ; @test nth-with-default([10, 20], -1, 0) => 10
+; @test nth-with-default(["first", "second"], 1, "fallback") => "second"
 pub let nth-with-default[a](xs: List a, i: Int, default: a) -> a =
   Maybe.with-default(default, nth(xs, i))
 
@@ -105,6 +107,7 @@ pub let sort[a](xs: List a) -> List a =
 
 ; The first element for which f returns true.
 ; @test find(fn (n) = n > 1, [1, 2, 3]) => Some(2)
+; @test find(fn (n) = n > 9, [1, 2]) => None()
 pub let find[a](f: (a) -> Bool, xs: List a) -> Maybe a =
   match (xs)
     | [] -> None()

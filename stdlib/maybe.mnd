@@ -3,6 +3,7 @@
 
 ; Apply f to a Some value and leave None in place.
 ; @test map(fn (n) = n + 1, Some(1)) => Some(2)
+; @test map(fn (n) = n + 1, None()) => None()
 pub let map[a, b](f: (a) -> b, m: Maybe a) -> Maybe b =
   match (m)
     | Some(v) -> Some(f(v))
@@ -25,5 +26,7 @@ pub let unwrap-or[a](m: Maybe a, default: a) -> a =
 ; Return the Some value, using default when m is None.
 ; @test with-default(100, Some(42)) => 42
 ; @test with-default(100, None()) => 100
+; @test with-default("unknown", Some("known")) => "known"
+; @test with-default("unknown", None()) => "unknown"
 pub let with-default[a](default: a, m: Maybe a) -> a =
   unwrap-or(m, default)

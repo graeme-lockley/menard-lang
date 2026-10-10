@@ -15,7 +15,7 @@ pub let exit(code: Int) -> Unit =
   mn_exit(code)
 
 ; How many arguments the process received.
-; @test arg-count()
+; @test arg-count() >= 0
 pub let arg-count() -> Int =
   mn_arg_count()
 
@@ -27,5 +27,6 @@ pub let arg(i: Int) -> Str =
 
 ; The environment value named name, or None when it is unset.
 ; @test getenv("PATH")
+; @test getenv("MENARD_NOT_A_REAL_VAR") => None()
 pub let getenv(name: Str) -> Maybe Str =
   mn_getenv(name)

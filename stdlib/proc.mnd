@@ -39,6 +39,7 @@ pub let spawn-capture(argv: List Str, stdin: Str) -> Result SpawnOutput SpawnErr
 
 ; A process status as an exit code, folding signal death the way a shell does.
 ; @test status-exit-code(Exited(3)) => 3
+; @test status-exit-code(Signalled(9)) => 137
 pub let status-exit-code(s: SpawnStatus) -> Int =
   match (s)
     | Exited(n) -> n

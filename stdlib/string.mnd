@@ -1,5 +1,6 @@
 ; Helpers over Str bytes.
 ; @module std/string
+; @test-import std/string-buffer as Buf
 
 ; Byte length of s.
 ; @test length("hi") => 2
@@ -15,6 +16,9 @@ pub runtime slice(start: Int, len: Int, s: Str) -> Str
 
 ; a and b joined. Further arguments nest to the left.
 ; @test concat("a", "b") => "ab"
+; @test concat("hel", "lo") => "hello"
+; @test concat("a", "b", "c") => "abc"
+; @test concat("a") => "a"
 pub runtime concat(a: Str, b: Str) -> Str
 
 ; c encoded as UTF-8. A scalar outside 0..U+10FFFF encodes as U+FFFD.
@@ -39,6 +43,19 @@ pub let ends-with(suffix: Str, s: Str) -> Bool {
 
 ; Drop the first n bytes. Non-positive counts keep s; counts past the end return "".
 ; @test drop(2, "hello") => "llo"
+; @test drop(0, "hello") => "hello"
+; @test drop(-1, "hello") => "hello"
+; @test drop(5, "hello") => ""
+; @test drop(10, "hello") => ""
+; @test drop(1, "") => ""
+; @test {
+;   let sb = Buf.new()
+;   Buf.append-byte!(sb, 195)
+;   Buf.append-byte!(sb, 169)
+;   Buf.append-byte!(sb, 120)
+;   let remaining = drop(1, Buf.to-str(sb))
+;   length(remaining) == 2 && byte(0, remaining) == 169 && byte(1, remaining) == 120
+; } => true
 pub let drop(n: Int, s: Str) -> Str {
   let l = length(s)
 
@@ -58,6 +75,7 @@ let bytes-eq(s: Str, i: Int, pat: Str, j: Int, n: Int) -> Bool =
 ; Whether s contains needle as a byte substring.
 ; Named `has` so a program can import std/list, which also publishes `contains`.
 ; @test has("ell", "hello") => true
+; @test has("x", "hello") => false
 pub let has(needle: Str, s: Str) -> Bool {
   let n = length(needle)
   let sn = length(s)
@@ -76,6 +94,7 @@ let join-rest(sep: Str, acc: Str, rest: List Str) -> Str =
 
 ; parts joined by sep.
 ; @test join(",", ["a", "b"]) => "a,b"
+; @test join(",", []) => ""
 pub let join(sep: Str, parts: List Str) -> Str =
   match (parts)
     | [] -> ""
@@ -83,6 +102,11 @@ pub let join(sep: Str, parts: List Str) -> Str =
 
 ; Byte index of the first occurrence of sep, or None when it does not occur.
 ; @test index-of("ell", "hello") => Some(1)
+; @test index-of(",", "a,b,c") => Some(1)
+; @test index-of("xyz", "hello") => None()
+; @test index-of("", "abc") => Some(0)
+; @test index-of("", "") => Some(0)
+; @test index-of("a", "") => None()
 pub let index-of(sep: Str, s: Str) -> Maybe Int =
   index-of-from(sep, 0, s)
 
@@ -90,6 +114,11 @@ pub let index-of(sep: Str, s: Str) -> Maybe Int =
 ; Negative starts search from zero; an empty separator matches at the start.
 ; The string is last so a pipe can fill it: `s |> index-of-from(sep, i)`.
 ; @test index-of-from(",", 2, "a,b,c") => Some(3)
+; @test index-of-from(",", 1, "a,b,c") => Some(1)
+; @test index-of-from(",", -1, "a,b") => Some(1)
+; @test index-of-from("", 4, "abc") => None()
+; @test index-of-from("", 3, "abc") => Some(3)
+; @test index-of-from("c", 3, "abc") => None()
 pub let index-of-from(sep: Str, i: Int, s: Str) -> Maybe Int {
   let n = length(sep)
   let sn = length(s)
@@ -111,11 +140,23 @@ let split-from(s: Str, sep: Str, i: Int) -> List Str {
 
 ; s split on sep. An empty separator is not a split: the whole string is the one piece.
 ; @test split(",", "a,b,c") => ["a", "b", "c"]
+; @test split(",", "abc") => ["abc"]
+; @test split(",", "a,") => ["a", ""]
+; @test split(",", "a,,b") => ["a", "", "b"]
 pub let split(sep: Str, s: Str) -> List Str =
   if (length(sep) == 0) -> [s] | split-from(s, sep, 0)
 
 ; s split on any separator. List order breaks ties; empty separators are ignored.
 ; @test split-using([",", ";"], "a,b;c") => ["a", "b", "c"]
+; @test split-using(["::", "--"], "a::b--c") => ["a", "b", "c"]
+; @test split-using([",", ";"], ",a,;b;") => ["", "a", "", "b", ""]
+; @test split-using([":", "::"], "a::b") => ["a", "", "b"]
+; @test split-using(["::", ":"], "a::b") => ["a", "b"]
+; @test split-using(["", ",", ""], "a,b") => ["a", "b"]
+; @test split-using(["", ""], "a,b") => ["a,b"]
+; @test split-using([], "a,b") => ["a,b"]
+; @test split-using(["abcd", ";"], "abc") => ["abc"]
+; @test split-using([",", ";"], "") => [""]
 pub let split-using(seps: List Str, s: Str) -> List Str =
   split-using-from(s, seps, 0)
 
@@ -155,6 +196,7 @@ let drop-trailing-empty(parts: List Str) -> List Str =
 
 ; s split into lines. A trailing newline does not add an empty last line. The empty string has no lines.
 ; @test lines("\n") => [""]
+; @test lines("a\nb") => ["a", "b"]
 pub let lines(s: Str) -> List Str =
   if (s == "") -> [] | lines-split(s, "\n")
 

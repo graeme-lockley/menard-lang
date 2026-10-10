@@ -1,31 +1,9 @@
-; List operations.
+; Qualified names stay distinct from the unqualified list operations.
+; These do not belong on a list function: they check the import.
 
 import std/list
 import std/maybe as Maybe
-import std/pair
 import std/result as Result
-
-test "length of three" = length([1, 2, 3]) == 3
-
-test "nth returns the element" = nth([10, 20], 1) == Some(20)
-
-test "nth past the end is none" = nth([10], 3) == None()
-
-test "nth-with-default returns an element" = nth-with-default([10, 20], 1, 0) == 20
-
-test "nth-with-default uses the default past the end" = nth-with-default([10, 20], 2, 0) == 0
-
-test "nth-with-default uses the default for an empty list" = nth-with-default([], 0, 42) == 42
-
-test "nth-with-default selects the first element for a negative index" = nth-with-default([10, 20], -1, 0) == 10
-
-test "nth-with-default works with strings" = nth-with-default(["first", "second"], 1, "fallback") == "second"
-
-test "append joins two lists" = append([1], [2, 3]) == [1, 2, 3]
-
-test "reverse flips the order" = reverse([1, 2, 3]) == [3, 2, 1]
-
-test "map adds one" = map(fn (n) = n + 1, [1, 2]) == [2, 3]
 
 test "qualified Maybe.map does not replace List.map" = {
   let optional = Maybe.map(fn (n) = n + 1, Some(1))
@@ -38,31 +16,3 @@ test "qualified maps from two modules stay distinct" = {
   let result = Result.map(fn (n) = n + 2, Ok(1))
   optional == Some(2) && result == Ok(3)
 }
-
-test "filter keeps the larger ints" = filter(fn (n) = n > 1, [1, 2, 3]) == [2, 3]
-
-test "fold sums" = fold(fn (a, n) = a + n, 0, [1, 2, 3]) == 6
-
-test "zip pairs until the shorter list ends" = zip([1, 2], ["a", "b"]) == [Pair(1, "a"), Pair(2, "b")]
-
-test "contains finds an element" = contains([1, 2, 3], 2) == true
-
-test "sort orders ints" = sort([3, 1, 2]) == [1, 2, 3]
-
-test "find returns the first match" = find(fn (n) = n > 1, [1, 2, 3]) == Some(2)
-
-test "find of nothing is none" = find(fn (n) = n > 9, [1, 2]) == None()
-
-test "any is true when one element matches" = any(fn (n) = n > 2, [1, 2, 3]) == true
-
-test "all requires every element" = all(fn (n) = n > 0, [1, 2, 3]) == true
-
-test "concat joins the inner lists" = concat([[1], [2, 3]]) == [1, 2, 3]
-
-test "flat-map joins what the function returns" = flat-map(fn (n) = [n, n], [1, 2]) == [1, 1, 2, 2]
-
-test "take keeps a prefix" = take(2, [1, 2, 3]) == [1, 2]
-
-test "drop skips a prefix" = drop(2, [1, 2, 3]) == [3]
-
-test "sort-by orders by the key" = sort-by(fn (n) = 0 - n, [1, 3, 2]) == [3, 2, 1]
