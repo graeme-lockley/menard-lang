@@ -24,7 +24,7 @@ import std/fs
 import std/io
 import std/list
 import std/proc
-import std/string
+import std/string as String
 
 record Ctx {
   entry: Str
@@ -151,9 +151,9 @@ let unwrap-pub(form: Ast) -> Ast =
 
 let parse-code(msg: Str) -> Str =
   cond
-    | has(msg, "unclosed") -> "E_PARSE_UNCLOSED"
-    | has(msg, "'!'") -> "E_PARSE_BANG"
-    | has(msg, "unterminated") -> "E_PARSE_STRING"
+    | String.has("unclosed", msg) -> "E_PARSE_UNCLOSED"
+    | String.has("'!'", msg) -> "E_PARSE_BANG"
+    | String.has("unterminated", msg) -> "E_PARSE_STRING"
     | else -> "E_PARSE"
 
 let report-parse(path: Str, src: Str, e: ParseError) -> Unit =

@@ -16,7 +16,7 @@ import std/console
 import std/fs
 import std/io
 import std/proc
-import std/string
+import std/string as String
 import std/test
 
 let print-verbose(lines: List Str, on: Bool, show-output: Bool) -> Unit =
@@ -25,12 +25,12 @@ let print-verbose(lines: List Str, on: Bool, show-output: Bool) -> Unit =
     | line :: rest ->
       {
         cond
-          | starts-with(line, "pass ") || starts-with(line, "fail ") ->
+          | String.starts-with("pass ", line) || String.starts-with("fail ", line) ->
             {
               write(stdout, "  ")
               write(
                 stdout,
-                if (starts-with(line, "pass ")) -> paint(on, "[32m", line) | paint(on, "[31m", line)
+                if (String.starts-with("pass ", line)) -> paint(on, "[32m", line) | paint(on, "[31m", line)
               )
               write(stdout, "\n")
               ()
@@ -48,7 +48,7 @@ let print-verbose(lines: List Str, on: Bool, show-output: Bool) -> Unit =
 ; A passing file stays a single status line. A failure points at the
 ; assertion expression, the same way a compile error points at its span.
 let fail-name(line: Str) -> Maybe Str =
-  if (starts-with(line, "fail ")) -> Some(str-slice(line, 5, str-byte-length(line) - 5)) | None()
+  if (String.starts-with("fail ", line)) -> Some(str-slice(line, 5, str-byte-length(line) - 5)) | None()
 
 let sym-text(a: Ast) -> Maybe Str =
   match (a)
@@ -146,7 +146,7 @@ let rev-strs(xs: List Str, acc: List Str) -> List Str =
 
 ; `file <path>` is printed by the suite bootstrap before that file's tests.
 let file-path(line: Str) -> Maybe Str =
-  if (starts-with(line, "file ")) -> Some(str-slice(line, 5, str-byte-length(line) - 5)) | None()
+  if (String.starts-with("file ", line)) -> Some(str-slice(line, 5, str-byte-length(line) - 5)) | None()
 
 record RunAcc {
   path: Str

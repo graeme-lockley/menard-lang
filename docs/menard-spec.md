@@ -720,7 +720,9 @@ ref   deref   set!     quote   fn
 ```
 
 `while` and `&&` / `||` (lowered to `and` / `or`) are sugar over `if` and
-`loop`, expanded during desugaring (before typing). `[e1, e2, …]` and `[]`
+`loop`, expanded during desugaring (before typing). `|>` is the same kind of
+sugar: the right-hand side is a call, and the left-hand value is appended as
+its last argument. `[e1, e2, …]` and `[]`
 are sugar for a `Cons` / `Nil` chain, in expression position and in `match`
 patterns. `h :: t` is the same chain, associating to the right, in
 expressions and in patterns. A bracket list on a `let`, `record`, or `type`
@@ -1580,7 +1582,7 @@ same spelling, because the spelling is defined on bytes alone.
 | record | `(Name f1 f2 …)` in declaration order |
 | variant | `(Con payload…)` |
 | `(List T)` / `(Arr T n)` | `[e1 e2 …]` |
-| `(Map K V)` | `{k1 v1 k2 v2 …}` in sorted key order |
+| `(Map K V)` | `{k1 -> v1, k2 -> v2, …}` in sorted key order |
 | `(Maybe T)` / `(Result T E)` | `(Some v)` / `(None)` / `(Ok v)` / `(Err e)` |
 | `Ref`, `StringBuffer`, `Fn` | **no spelling — a compile error to show** (§2.12). Debug output is a separate contract: §2.16 |
 

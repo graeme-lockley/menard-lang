@@ -28,7 +28,7 @@ import std/fs
 import std/io
 import std/list
 import std/proc
-import std/string
+import std/string as String
 import std/sys
 
 ; Re-export shim — see `emit/bitcode.mnd` / `reader/casing.mnd`.
@@ -240,7 +240,7 @@ let index-of-byte(s: Str, b: Int, i: Int) -> Int =
 
 ; name.mnd when name does not already end in .mnd.
 let ensure-mnd(name: Str) -> Str =
-  if (ends-with(name, ".mnd")) -> name | str-concat(name, ".mnd")
+  if (String.ends-with(".mnd", name)) -> name | str-concat(name, ".mnd")
 
 ; `std/list` → `stdlib/list.mnd`, independent of the importing file.
 let std-path(spec: Str) -> Str =
@@ -281,13 +281,13 @@ let github-cache-path(spec: Str) -> Str {
 
 let resolve-import-path(from-path: Str, spec: Str) -> Str =
   cond
-    | starts-with(spec, "std/") -> std-path(spec)
-    | starts-with(spec, "github:") -> github-cache-path(spec)
+    | String.starts-with("std/", spec) -> std-path(spec)
+    | String.starts-with("github:", spec) -> github-cache-path(spec)
     | else -> path-normalize(path-join(path-dirname(from-path), spec))
 
 ; True when path is inside the github dependency cache.
 let in-deps(path: Str) -> Bool =
-  starts-with(path, ".menard/deps") || starts-with(path, "/.menard/deps") || index-of-from(path, "/.menard/deps/") >= 0
+  String.starts-with(".menard/deps", path) || String.starts-with("/.menard/deps", path) || index-of-from(path, "/.menard/deps/") >= 0
 
 let index-of-from(s: Str, needle: Str) -> Int =
   index-of-from-at(s, needle, 0)
@@ -318,7 +318,7 @@ let dep-spec-of(path: Str) -> Maybe DepSpec {
   let mark = "/.menard/deps/"
   let rel =
     cond
-      | starts-with(path, ".menard/deps/") -> drop-prefix(path, 13)
+      | String.starts-with(".menard/deps/", path) -> drop-prefix(path, 13)
       | else ->
         {
           let i = index-of-from(path, mark)
@@ -390,7 +390,7 @@ record GithubVer {
 
 let github-ver(spec: Str) -> Maybe GithubVer =
   cond
-    | starts-with(spec, "github:") ->
+    | String.starts-with("github:", spec) ->
       {
         let rest = drop-prefix(spec, 7)
         let at = index-of-byte(rest, 64, 0)
@@ -426,7 +426,7 @@ pub let note-versions(versions: Ref (Map Str Str), specs: List Str) -> Result Un
     | spec :: rest -> result-bind(note-version(versions, spec), fn (_) = note-versions(versions, rest))
 
 let is-basics-path(path: Str) -> Bool =
-  path == "stdlib/basics.mnd" || ends-with(path, "/stdlib/basics.mnd")
+  path == "stdlib/basics.mnd" || String.ends-with("/stdlib/basics.mnd", path)
 
 let is-basics-spec(spec: Str) -> Bool =
   spec == "std/basics" || spec == "std/basics.mnd"

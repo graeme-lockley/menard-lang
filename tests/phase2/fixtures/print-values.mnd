@@ -31,6 +31,7 @@ let output(input: Str, tokens: List Str) -> Unit {
   println(str-concat("com", "puted"))
   println(Box(false), " ", Node(true, Node(false, Empty())))
   println(["a\"b", "c\\d"])
+  println(map-set(map-set(map-new(), 2, 20), 1, 10))
   let pairs = map-set(map-set(map-new(), "b", false), "a", true)
   println(pairs)
   println(show("quoted"))

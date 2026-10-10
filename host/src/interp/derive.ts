@@ -44,9 +44,9 @@ export function showValue(v: Value): string {
       const { keys, vals } = mapEntries(v.map);
       const parts: string[] = [];
       for (let i = 0; i < keys.length; i++) {
-        parts.push(showValue(keys[i]!), showValue(vals[i]!));
+        parts.push(`${showValue(keys[i]!)} -> ${showValue(vals[i]!)}`);
       }
-      return `{${parts.join(" ")}}`;
+      return `{${parts.join(", ")}}`;
     }
     case "ref":
     case "fn":

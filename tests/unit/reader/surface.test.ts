@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { read, readAll, print, printAll, astEqual } from "../../../host/src/reader/index.ts";
+import { lex } from "../../../host/src/reader/lex.ts";
+import type { Ast } from "../../../host/src/reader/ast.ts";
 import { typecheckForms } from "../../../host/src/type/check.ts";
 
 function mustRead(src: string) {
@@ -21,6 +23,11 @@ function text(ast: Uint8Array): string {
 function sym(ast: ReturnType<typeof mustRead>): string {
   if (ast.tag !== "sym") throw new Error("expected sym");
   return new TextDecoder().decode(ast.name);
+}
+
+function headOf(ast: Ast): string | null {
+  if (ast.tag !== "list" || ast.elems[0]?.tag !== "sym") return null;
+  return new TextDecoder().decode(ast.elems[0].name);
 }
 
 describe("infix surface", () => {
@@ -141,6 +148,35 @@ let f(xs: List Int) -> Int =
     | [] -> 0
 `);
     expect(astEqual(mustAll(text(printAll(forms)))[0]!, forms[0]!)).toBe(true);
+  });
+
+  test("|> is one token, needs whitespace, and an arm bar stays a bar", () => {
+    const piped = lex(new TextEncoder().encode("a |> b"));
+    expect(piped.ok).toBe(true);
+    if (piped.ok) expect(piped.toks.filter((t) => t.kind !== "eof").map((t) => t.text)).toEqual(["a", "|>", "b"]);
+    expect(read("a|>b").ok).toBe(false);
+    const arm = lex(new TextEncoder().encode("| n < 0 -> 1"));
+    expect(arm.ok).toBe(true);
+    if (arm.ok) {
+      const ops = arm.toks.filter((t) => t.kind === "op").map((t) => t.text);
+      expect(ops).toEqual(["|", "<", "->"]);
+    }
+  });
+
+  test("|> binds looser than + and associates to the left", () => {
+    const a = mustRead("a + b |> f(c) |> g(d)");
+    expect(text(print(a))).toBe("a + b |> f(c) |> g(d)");
+    expect(astEqual(mustRead(text(print(a))), a)).toBe(true);
+    expect(headOf(a)).toBe("|>");
+    if (a.tag === "list") {
+      expect(headOf(a.elems[1]!)).toBe("|>");
+      expect(headOf(a.elems[2]!)).toBe("g");
+      const inner = a.elems[1]!;
+      if (inner.tag === "list") expect(headOf(inner.elems[1]!)).toBe("+");
+    }
+    const looser = mustRead("a || b |> f(c)");
+    expect(headOf(looser)).toBe("|>");
+    if (looser.tag === "list") expect(headOf(looser.elems[1]!)).toBe("or");
   });
 
   test("operators need whitespace and bangs stay final", () => {

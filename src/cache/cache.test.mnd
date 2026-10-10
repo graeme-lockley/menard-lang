@@ -5,7 +5,7 @@ import "./cache.mnd"
 import "../reader/print.mnd"
 import "../reader/read.mnd"
 import std/io
-import std/string
+import std/string as String
 
 let forms-of(src: Str) -> List Ast =
   match (read-all(src))
@@ -42,7 +42,7 @@ let ctor-ok(ctors: List CtorRec) -> Bool =
 
 let stubs-ok(stubs: List Ast) -> Bool =
   match (stubs)
-    | a :: b :: [] -> starts-with(print-form(a), "extern id[a]") && starts-with(print-form(b), "record Pair")
+    | a :: b :: [] -> String.starts-with("extern id[a]", print-form(a)) && String.starts-with("record Pair", print-form(b))
     | _ -> false
 
 let same(got: Iface) -> Bool =

@@ -136,6 +136,7 @@ function desugarNode(ast: Ast, diags: Diagnostic[]): Ast {
   if (nameEquals(head.name, "cond")) return desugarCond(ast, diags);
   if (nameEquals(head.name, "when")) return desugarWhen(ast, diags);
   if (nameEquals(head.name, "while")) return desugarWhile(ast, diags);
+  if (nameEquals(head.name, "|>")) return desugarPipe(ast, diags);
   const op = headText(head);
   if (op !== null && FOLD_OPS.has(op)) return desugarFold(op, ast, diags);
   if (op !== null && SUB_OPS.has(op)) return desugarSub(op, ast, diags);
@@ -159,6 +160,75 @@ const SUB_OPS = new Set(["-", "f-"]);
 const DIV_OPS = new Set(["/", "f/"]);
 // Chain: `(< a b c)` → `(and (< a b) (< b c))`. Middle operands are evaluated twice.
 const CMP_OPS = new Set(["<", ">", "<=", ">=", "="]);
+
+const PIPE_BLOCKED = new Set([
+  "project",
+  "if",
+  "do",
+  "cond",
+  "when",
+  "match",
+  "fn",
+  "let",
+  "loop",
+  "while",
+  "and",
+  "or",
+  "quote",
+  "Cons",
+  "Nil",
+  "+",
+  "-",
+  "*",
+  "/",
+  "%",
+  "<",
+  ">",
+  "<=",
+  ">=",
+  "=",
+  "|>",
+  "f+",
+  "f-",
+  "f*",
+  "f/",
+  "::",
+]);
+
+/** A call is a parenthesized application. A bare name or a projection is not. */
+function isPipeCall(ast: Ast): ast is Ast & { tag: "list" } {
+  if (ast.tag !== "list" || ast.kind !== "paren" || ast.elems.length === 0) return false;
+  const head = ast.elems[0]!;
+  if (head.tag === "sym") {
+    const name = headText(head);
+    return name !== null && !PIPE_BLOCKED.has(name);
+  }
+  return head.tag === "list";
+}
+
+function desugarPipe(ast: Ast & { tag: "list" }, diags: Diagnostic[]): Ast {
+  const lhs = ast.elems[1];
+  const rhs = ast.elems[2];
+  if (!lhs || !rhs || ast.elems.length !== 3) {
+    pushArity(diags, ast.span, "|>", "a value and a call");
+    return list("paren", mapElems(ast.elems, diags), ast.span);
+  }
+  const left = desugarNode(lhs, diags);
+  const right = desugarNode(rhs, diags);
+  if (!isPipeCall(right)) {
+    diags.push(
+      diagnostic({
+        severity: "error",
+        category: "semantic",
+        code: "E_DESUGAR_PIPE",
+        message: "pipe expects a call",
+        span: ast.span,
+      }),
+    );
+    return list("paren", [sym("|>", ast.span), left, right], ast.span);
+  }
+  return list("paren", [...right.elems, left], ast.span);
+}
 
 function pushArity(diags: Diagnostic[], span: Ast["span"], name: string, how: string): void {
   diags.push(

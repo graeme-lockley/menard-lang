@@ -274,6 +274,7 @@ function matchOp(lx: Value | undefined): Value | null {
   if (b0 === 62 && b1 === 61 && afterWs(at2)) return opStr(">=");
   if (b0 === 38 && b1 === 38 && afterWs(at2)) return opStr("&&");
   if (b0 === 124 && b1 === 124 && afterWs(at2)) return opStr("||");
+  if (b0 === 124 && b1 === 62 && afterWs(at2)) return opStr("|>");
   if (b0 === 45 && b1 === 62 && afterWs(at2)) return opStr("->");
   if (b0 === 58 && b1 === 58 && afterWs(at2)) return opStr("::");
   if (b0 === 43 && afterWs(b1)) return opStr("+");
@@ -469,7 +470,7 @@ export function runAccel(accel: Accel, args: Value[]): Value | null {
       if (args.length !== 1 || !args[0] || args[0].tag !== "str") return null;
       const s = asciiOf(args[0]);
       if (s === null) return vInt(1n);
-      const two = s === "==" || s === "!=" || s === "<=" || s === ">=" || s === "&&" || s === "||" || s === "->" || s === "::";
+      const two = s === "==" || s === "!=" || s === "<=" || s === ">=" || s === "&&" || s === "||" || s === "->" || s === "::" || s === "|>";
       return vInt(two ? 2n : 1n);
     }
     case "bitsink-flush-fields": {

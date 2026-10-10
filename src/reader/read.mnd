@@ -436,6 +436,7 @@ let match-op(lx: Lex) -> Str {
     | b0 == 62 && b1 == 61 && after-ws(byte-or-end(s, i + 2, n)) -> ">="
     | b0 == 38 && b1 == 38 && after-ws(byte-or-end(s, i + 2, n)) -> "&&"
     | b0 == 124 && b1 == 124 && after-ws(byte-or-end(s, i + 2, n)) -> "||"
+    | b0 == 124 && b1 == 62 && after-ws(byte-or-end(s, i + 2, n)) -> "|>"
     | b0 == 45 && b1 == 62 && after-ws(byte-or-end(s, i + 2, n)) -> "->"
     | b0 == 58 && b1 == 58 && after-ws(byte-or-end(s, i + 2, n)) -> "::"
     | b0 == 43 && after-ws(b1) -> "+"
@@ -454,7 +455,7 @@ let byte-or-end(s: Str, i: Int, n: Int) -> Int =
   if (i < n) -> str-byte(s, i) | -1
 
 let op-len(op: Str) -> Int =
-  if (op == "==" || op == "!=" || op == "<=" || op == ">=" || op == "&&" || op == "||" || op == "->" || op == "::") -> 2 | 1
+  if (op == "==" || op == "!=" || op == "<=" || op == ">=" || op == "&&" || op == "||" || op == "->" || op == "::" || op == "|>") -> 2 | 1
 
 let scan-ident(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), start: Int, col: Int, ind: Int, bol: Bool, line: Int) -> Unit {
   lex-bump(lx)
@@ -622,12 +623,13 @@ let delim(ps: Ps, text: Str) -> Bool {
 
 let prec-of(op: Str) -> Int =
   cond
+    | op == "|>" -> 0
     | op == "||" -> 1
     | op == "&&" -> 2
     | op == "==" || op == "!=" || op == "<" || op == ">" || op == "<=" || op == ">=" -> 3
     | op == "+" || op == "-" || op == "::" -> 4
     | op == "*" || op == "/" || op == "%" -> 5
-    | else -> 0
+    | else -> -1
 
 let is-cmp(op: Str) -> Bool =
   op == "==" || op == "!=" || op == "<" || op == ">" || op == "<=" || op == ">="
@@ -707,7 +709,7 @@ let parse-prec-rest(ps: Ps, min: Int, stop: Str, stopping: Bool, left: Ast) -> R
   cond
     | stopping && tok-text(op) == stop -> Ok(left)
     | tok-kind(op) != "op" || tok-text(op) == "->" || tok-text(op) == "u-" || tok-text(op) == "|" -> Ok(left)
-    | prec-of(tok-text(op)) == 0 || prec-of(tok-text(op)) < min -> Ok(left)
+    | prec-of(tok-text(op)) < 0 || prec-of(tok-text(op)) < min -> Ok(left)
     | is-cmp(tok-text(op)) ->
       match (parse-cmp-chain(ps, left, tok-text(op)))
         | Err(e) -> Err(e)

@@ -2037,8 +2037,8 @@ let print-nominal-body(env: TypeEnv, name: Str, args: List Type) -> Ast =
 let print-map-body(env: TypeEnv, t: Type, k: Type, value: Type) -> Ast {
   let name = str-concat("__print-map", show(map-size(deref(print-names))))
   let found = print-call("match", [print-call("map-get", [print-sym("v"), print-sym("key")]), print-call("Some", [print-sym("item")]), print-format(env, value, print-sym("item")), print-call("None", []), print-error("print: map key disappeared")])
-  let entry = print-concat(print-format(env, k, print-sym("key")), print-concat(print-str(" "), found))
-  let tail = print-call("if", [print-call("=", [print-sym("rest"), print-call("Nil", [])]), print-str(""), print-concat(print-str(" "), print-call(name, [print-sym("v"), print-sym("rest")]))])
+  let entry = print-concat(print-format(env, k, print-sym("key")), print-concat(print-str(" -> "), found))
+  let tail = print-call("if", [print-call("=", [print-sym("rest"), print-call("Nil", [])]), print-str(""), print-concat(print-str(", "), print-call(name, [print-sym("v"), print-sym("rest")]))])
   let body = print-call("match", [print-sym("keys"), print-call("Nil", []), print-str(""), print-call("Cons", [print-sym("key"), print-sym("rest")]), print-concat(entry, tail)])
   let def = print-call("defn", [print-sym(name), print-call("v:", [print-type-ast(t)]), print-call("keys:", [print-type-ast(TList(k))]), print-sym("->"), print-sym("Str"), body])
   set!(print-functions, def :: deref(print-functions))

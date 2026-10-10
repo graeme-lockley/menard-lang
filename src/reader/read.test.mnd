@@ -68,6 +68,38 @@ test "an escaped newline round-trips through print" = {
         | Ok(b) -> ast-equal(a, b)
 }
 
+test "pipe groups looser than addition and prints back" = {
+  match (read("a + b |> f(c) |> g(d)"))
+    | Err(_) -> false
+    | Ok(a) ->
+      match (read(print-form(a)))
+        | Err(_) -> false
+        | Ok(b) -> print-form(a) == "a + b |> f(c) |> g(d)" && ast-equal(a, b)
+}
+
+test "pipe needs whitespace on both sides" = {
+  match (read("a|>b"))
+    | Err(_) -> true
+    | Ok(_) -> false
+}
+
+test "an arm bar stays a bar when the condition is a pipe" = {
+  let src = "let f(n: Int) -> Int =
+  cond
+    | n |> g(1) -> 0
+    | else -> 1
+"
+  match (read-all(src))
+    | Err(_) -> false
+    | Ok(forms) ->
+      {
+        let printed = print-form-all(forms)
+        match (read-all(printed))
+          | Err(_) -> false
+          | Ok(again) -> printed == "let f(n: Int) -> Int =\n  if (n |> g(1)) -> 0 | 1\n" && print-form-all(again) == printed
+      }
+}
+
 test "binding and test blocks put the opening brace after equals" = {
   let src = "let value = {
   let inner = {

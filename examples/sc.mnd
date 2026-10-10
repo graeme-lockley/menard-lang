@@ -8,24 +8,23 @@ pub let add(input: Str) -> Result Int (List Int) {
   let tokens =
     cond
       | input == "" -> []
-      | String.starts-with(input, "//[") -> {
-          let idx = Maybe.with-default(0, String.index-of(input, "\n"))
-          let separators = String.split(str-slice(input, 3, idx - 4), "][")
+      | String.starts-with("//[", input) -> {
+          let idx = input |> String.index-of("\n") |> Maybe.with-default(0)
+          let separators = str-slice(input, 3, idx - 4) |> String.split("][")
+          input |> String.drop(idx + 1) |> String.split-using(separators)
+        }
+      | input |> String.starts-with("//") -> input |> String.drop(4) |> String.split(str-slice(input, 2, 1))
+      | else -> input |> String.split-using([",", "\n"])
 
-          String.split-using(String.drop(input, idx + 1), separators)
-      }
-      | String.starts-with(input, "//") -> String.split(String.drop(input, 4), str-slice(input, 2, 1))
-      | else -> String.split-using(input, [",", "\n"])
-
-  let numbers = List.filter(fn(n) = n <= 1000, List.map(I.parse, tokens))
+  let numbers = tokens |> List.map(I.parse) |> List.filter(fn (n) = n <= 1000)
 
   cond
-    | List.any(is-negative, numbers) -> Err(List.filter(is-negative, numbers)) 
+    | numbers |> List.any(is-negative) -> numbers |> List.filter(is-negative) |> Err()
     | else -> Ok(sum(numbers))
 }
 
 let sum(numbers: List Int) -> Int =
-  List.fold(fn (a, n) = a + n, 0, numbers)
+  numbers |> List.fold(fn (a, n) = a + n, 0)
 
 let is-negative(n: Int) -> Bool =
   n < 0

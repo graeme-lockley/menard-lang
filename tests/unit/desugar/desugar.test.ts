@@ -61,4 +61,30 @@ describe("desugar", () => {
   test("pub let keeps its type-parameter bracket", () => {
     expect(desugared("pub let id[a](x: a) -> a =\n  x")).toBe("pub let id[a](x: a) -> a =\n  x");
   });
+
+  test("|> appends the left value as the last argument", () => {
+    expect(desugared("tokens |> List.map(I.parse) |> List.filter(fn (n) = n <= 1000)")).toBe(
+      "(List.filter)(fn (n) = n <= 1000, (List.map)(I.parse, tokens))",
+    );
+    expect(desugared("input |> String.drop(idx + 1) |> String.split-using(separators)")).toBe(
+      "(String.split-using)(separators, (String.drop)(idx + 1, input))",
+    );
+    expect(desugared("numbers |> List.filter(is-negative) |> Err()")).toBe(
+      "Err((List.filter)(is-negative, numbers))",
+    );
+    expect(desugared("numbers |> List.fold(fn (a, n) = a + n, 0)")).toBe(
+      "(List.fold)(fn (a, n) = a + n, 0, numbers)",
+    );
+    expect(desugared("s |> String.drop(n)")).toBe("(String.drop)(n, s)");
+    expect(desugared("s |> String.index-of-from(sep, i)")).toBe("(String.index-of-from)(sep, i, s)");
+  });
+
+  test("a bare name is not a pipe target", () => {
+    const r = desugarSrc("xs |> List.map");
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.diagnostics[0]?.code).toBe("E_DESUGAR_PIPE");
+      expect(r.diagnostics[0]?.message).toBe("pipe expects a call");
+    }
+  });
 });

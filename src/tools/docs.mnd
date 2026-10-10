@@ -10,7 +10,7 @@
 import std/fs
 import std/io
 import std/list
-import std/string
+import std/string as String
 import std/sys
 
 record Scan {
@@ -38,17 +38,17 @@ let take-sym(s: Str, i: Int, n: Int) -> Str =
 ; The function name from a defn header line.
 let defn-name(line: Str) -> Str {
   let raw =
-    if (starts-with(line, "pub let ")) -> str-slice(line, 8, str-byte-length(line) - 8) | str-slice(line, 4, str-byte-length(line) - 4)
+    if (String.starts-with("pub let ", line)) -> str-slice(line, 8, str-byte-length(line) - 8) | str-slice(line, 4, str-byte-length(line) - 4)
   take-sym(raw, 0, str-byte-length(raw))
 }
 
 ; True when line is a top-level defn header.
 let is-defn(line: Str) -> Bool =
-  starts-with(line, "let ") || starts-with(line, "pub let ")
+  String.starts-with("let ", line) || String.starts-with("pub let ", line)
 
 ; True when the defn is published.
 let is-pub(line: Str) -> Bool =
-  starts-with(line, "pub let ")
+  String.starts-with("pub let ", line)
 
 ; The first summary line.
 let summary-of(docs: List Str) -> Str =
@@ -61,11 +61,11 @@ let tests-of(docs: List Str, acc: List Str) -> List Str =
   match (docs)
     | [] -> reverse(acc)
     | h :: t ->
-      if (starts-with(h, "@test")) -> tests-of(t, h :: acc) | tests-of(t, acc)
+      if (String.starts-with("@test", h)) -> tests-of(t, h :: acc) | tests-of(t, acc)
 
 ; `@module name` from a comment body, or the current module.
 let module-of(body: Str, current: Str) -> Str =
-  if (starts-with(body, "@module ")) -> str-slice(body, 8, str-byte-length(body) - 8) | current
+  if (String.starts-with("@module ", body)) -> str-slice(body, 8, str-byte-length(body) - 8) | current
 
 ; One published record, plus a missing-summary or missing-@test note.
 let scan-record(module: Str, name: Str, sig: Str, docs: List Str, exported: Bool) -> Scan {
@@ -79,7 +79,7 @@ let scan-record(module: Str, name: Str, sig: Str, docs: List Str, exported: Bool
       | missing-test -> str-concat("error: ", module, " ", name, " has no @test\n")
       | else -> ""
   let body =
-    if (exported) -> str-concat("module: ", module, "\nname: ", name, "\nsignature: ", sig, "\nsummary: ", summary, "\n", join("\n", tests), "\n\n") | ""
+    if (exported) -> str-concat("module: ", module, "\nname: ", name, "\nsignature: ", sig, "\nsummary: ", summary, "\n", String.join("\n", tests), "\n\n") | ""
   Scan(str-concat(note, body), not(missing-summary || missing-test))
 }
 
@@ -119,7 +119,7 @@ let scan-file(path: Str) -> Scan =
 
 ; Library sources, not the colocated tests.
 let lib-name(name: Str) -> Bool =
-  ends-with(name, ".mnd") && not(ends-with(name, ".test.mnd"))
+  String.ends-with(".mnd", name) && not(String.ends-with(".test.mnd", name))
 
 ; Join dir and name.
 let join-path(dir: Str, name: Str) -> Str =

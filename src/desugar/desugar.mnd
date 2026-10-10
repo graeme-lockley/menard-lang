@@ -142,7 +142,52 @@ let desugar-paren-named(name: Str, elems: List Ast, sp: Span, diags: Ref (List D
     | name == "cond" -> desugar-cond(elems, sp, diags)
     | name == "when" -> desugar-when(elems, sp, diags)
     | name == "while" -> desugar-while(elems, sp, diags)
+    | name == "|>" -> desugar-pipe(elems, sp, diags)
     | else -> desugar-operator(name, elems, sp, diags)
+
+; ---------------------------------------------------------------------------
+; `(|> x f(a))` → `f(a, x)`. The right-hand side must be a call.
+
+let snoc-ast(xs: List Ast, x: Ast) -> List Ast =
+  match (xs)
+    | [] -> [x]
+    | h :: t -> h :: snoc-ast(t, x)
+
+let pipe-blocked(n: Str) -> Bool =
+  n == "project" || n == "if" || n == "do" || n == "cond" || n == "when" || n == "match" || n == "fn" || n == "let" || n == "loop" || n == "while" || n == "and" || n == "or" || n == "quote" || n == "Cons" || n == "Nil" || n == "+" || n == "-" || n == "*" || n == "/" || n == "%" || n == "<" || n == ">" || n == "<=" || n == ">=" || n == "=" || n == "|>" || n == "f+" || n == "f-" || n == "f*" || n == "f/" || n == "::"
+
+let pipe-callee-ok(head: Ast) -> Bool =
+  match (head)
+    | SymNode(n, _) -> not(pipe-blocked(n))
+    | ParenNode(_, _) -> true
+    | _ -> false
+
+let pipe-call(ast: Ast) -> Bool =
+  match (ast)
+    | ParenNode(h :: _, _) -> pipe-callee-ok(h)
+    | _ -> false
+
+let desugar-pipe(elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (elems)
+    | _ :: lhs :: rhs :: [] ->
+      {
+        let left = desugar-node(lhs, diags)
+        let right = desugar-node(rhs, diags)
+        if (pipe-call(right)) -> pipe-append(right, left) | {
+          push-diag!(diags, sp, "E_DESUGAR_PIPE", "pipe expects a call")
+          ParenNode([mk-sym("|>", sp), left, right], sp)
+        }
+      }
+    | _ ->
+      {
+        push-diag!(diags, sp, "E_DESUGAR_ARITY", "|> expects a value and a call")
+        ParenNode(map-desugar(elems, diags), sp)
+      }
+
+let pipe-append(call: Ast, arg: Ast) -> Ast =
+  match (call)
+    | ParenNode(elems, sp) -> ParenNode(snoc-ast(elems, arg), sp)
+    | _ -> call
 
 ; ---------------------------------------------------------------------------
 ; (and) → true; (and x) → x; (and x y …) → (if x (and y …) false)

@@ -2,23 +2,23 @@
 ; @module std/string
 
 ; Whether s begins with prefix.
-; @test starts-with("hello", "he") => true
-pub let starts-with(s: Str, prefix: Str) -> Bool {
+; @test starts-with("he", "hello") => true
+pub let starts-with(prefix: Str, s: Str) -> Bool {
   let n = str-byte-length(prefix)
   str-byte-length(s) >= n && str-slice(s, 0, n) == prefix
 }
 
 ; Whether s ends with suffix.
-; @test ends-with("hello", "lo") => true
-pub let ends-with(s: Str, suffix: Str) -> Bool {
+; @test ends-with("lo", "hello") => true
+pub let ends-with(suffix: Str, s: Str) -> Bool {
   let sn = str-byte-length(s)
   let un = str-byte-length(suffix)
   sn >= un && str-slice(s, sn - un, un) == suffix
 }
 
 ; Drop the first n bytes. Non-positive counts keep s; counts past the end return "".
-; @test drop("hello", 2) => "llo"
-pub let drop(s: Str, n: Int) -> Str {
+; @test drop(2, "hello") => "llo"
+pub let drop(n: Int, s: Str) -> Str {
   let l = str-byte-length(s)
 
   cond
@@ -36,8 +36,8 @@ let bytes-eq(s: Str, i: Int, pat: Str, j: Int, n: Int) -> Bool =
 
 ; Whether s contains needle as a byte substring.
 ; Named `has` so a program can import std/list, which also publishes `contains`.
-; @test has("hello", "ell") => true
-pub let has(s: Str, needle: Str) -> Bool {
+; @test has("ell", "hello") => true
+pub let has(needle: Str, s: Str) -> Bool {
   let n = str-byte-length(needle)
   let sn = str-byte-length(s)
   loop (i = 0)
@@ -61,14 +61,15 @@ pub let join(sep: Str, parts: List Str) -> Str =
     | h :: t -> join-rest(sep, h, t)
 
 ; Byte index of the first occurrence of sep, or None when it does not occur.
-; @test index-of("hello", "ell") => Some(1)
-pub let index-of(s: Str, sep: Str) -> Maybe Int =
-  index-of-from(s, sep, 0)
+; @test index-of("ell", "hello") => Some(1)
+pub let index-of(sep: Str, s: Str) -> Maybe Int =
+  index-of-from(sep, 0, s)
 
 ; Byte index of sep at or after i, or None when it does not occur.
 ; Negative starts search from zero; an empty separator matches at the start.
-; @test index-of-from("a,b,c", ",", 2) => Some(3)
-pub let index-of-from(s: Str, sep: Str, i: Int) -> Maybe Int {
+; The string is last so a pipe can fill it: `s |> index-of-from(sep, i)`.
+; @test index-of-from(",", 2, "a,b,c") => Some(3)
+pub let index-of-from(sep: Str, i: Int, s: Str) -> Maybe Int {
   let n = str-byte-length(sep)
   let sn = str-byte-length(s)
   loop (j = if (i < 0) -> 0 | i)
@@ -82,21 +83,22 @@ pub let index-of-from(s: Str, sep: Str, i: Int) -> Maybe Int {
 let split-from(s: Str, sep: Str, i: Int) -> List Str {
   let n = str-byte-length(sep)
   let sn = str-byte-length(s)
-  match (index-of-from(s, sep, i))
+  match (index-of-from(sep, i, s))
     | None -> [str-slice(s, i, sn - i)]
     | Some(at) -> str-slice(s, i, at - i) :: split-from(s, sep, at + n)
 }
 
 ; s split on sep. An empty separator is not a split: the whole string is the one piece.
-; @test split("a,b,c", ",") => ["a", "b", "c"]
-pub let split(s: Str, sep: Str) -> List Str =
+; @test split(",", "a,b,c") => ["a", "b", "c"]
+pub let split(sep: Str, s: Str) -> List Str =
   if (str-byte-length(sep) == 0) -> [s] | split-from(s, sep, 0)
 
 ; s split on any separator. List order breaks ties; empty separators are ignored.
-; @test split-using("a,b;c", [",", ";"]) => ["a", "b", "c"]
-pub let split-using(s: Str, seps: List Str) -> List Str =
+; @test split-using([",", ";"], "a,b;c") => ["a", "b", "c"]
+pub let split-using(seps: List Str, s: Str) -> List Str =
   split-using-from(s, seps, 0)
 
+; Length of the separator in seps that matches s at byte i, or 0 when none does.
 let matching-sep-length(s: Str, seps: List Str, i: Int) -> Int =
   match (seps)
     | [] -> 0
@@ -107,6 +109,7 @@ let matching-sep-length(s: Str, seps: List Str, i: Int) -> Int =
           n | matching-sep-length(s, rest, i)
       }
 
+; The pieces of s from byte start to the end, split on any separator in seps.
 let split-using-from(s: Str, seps: List Str, start: Int) -> List Str {
   let sn = str-byte-length(s)
   loop (i = start)
@@ -136,4 +139,4 @@ pub let lines(s: Str) -> List Str =
 
 ; Split on sep, then drop the empty piece a trailing separator would leave.
 let lines-split(s: Str, sep: Str) -> List Str =
-  if (ends-with(s, sep)) -> drop-trailing-empty(split(s, sep)) | split(s, sep)
+  if (ends-with(sep, s)) -> drop-trailing-empty(split(sep, s)) | split(sep, s)

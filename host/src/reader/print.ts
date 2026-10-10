@@ -35,6 +35,7 @@ function rootPrec(a: Ast): number | null {
   const h = head(a);
   if (!h || !isList(a)) return null;
   if (h === "Cons" && a.elems.length === 3) return 4;
+  if (h === "|>") return 0;
   if (h === "or") return 1;
   if (h === "and") return 2;
   if (h === "not" && a.elems.length === 2 && head(a.elems[1]!) === "=") return 3;
@@ -227,6 +228,7 @@ function printExpr(a: Ast, ind: number): string {
   if (h === "loop") return printLoop(a, ind);
   if (h === "while") return printWhile(a, ind);
   if (h === "quote" && a.elems[1]) return `'${printAtom(a.elems[1])}`;
+  if (h === "|>") return printOp(a, "|>", ind);
   if (h === "and" || h === "or") return printLogic(a, h === "and" ? "&&" : "||", ind);
   if (h === "not" && a.elems.length === 2 && head(a.elems[1]!) === "=") {
     const eq = a.elems[1] as Ast & { tag: "list" };
@@ -279,6 +281,7 @@ function projectLeft(obj: Ast, ind: number): string {
     h === "match" ||
     h === "and" ||
     h === "or" ||
+    h === "|>" ||
     h === "Cons" ||
     h === "-" ||
     (h !== null && OPS.has(h))

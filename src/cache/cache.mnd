@@ -19,7 +19,7 @@ import "../reader/print.mnd"
 import "../modules/graph.mnd"
 import std/fs
 import std/io
-import std/string
+import std/string as String
 import std/sys
 
 ; Version 5 invalidates objects whose print formatters use Cons/Nil list syntax.
@@ -94,7 +94,7 @@ let default-cache() -> Str =
 pub let canonical-path(path: Str) -> Str {
   let direct = realpath(path)
   if (str-byte-length(direct) > 0) -> direct | normalize-path(
-    if (starts-with(path, "/")) -> path | str-concat(cwd(), "/", path)
+    if (String.starts-with("/", path)) -> path | str-concat(cwd(), "/", path)
   )
 }
 
@@ -103,7 +103,7 @@ pub let canonical-path(path: Str) -> Str {
 ; do not contain an absolute path.
 pub let display-path(abs: Str) -> Str {
   let prefix = str-concat(cwd(), "/")
-  if (starts-with(abs, prefix)) -> str-slice(abs, str-byte-length(prefix), str-byte-length(abs) - str-byte-length(prefix)) | abs
+  if (String.starts-with(prefix, abs)) -> str-slice(abs, str-byte-length(prefix), str-byte-length(abs) - str-byte-length(prefix)) | abs
 }
 
 let cache-base(abs: Str) -> Str =

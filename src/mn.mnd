@@ -46,7 +46,7 @@ import std/fs
 import std/io
 import std/list
 import std/proc
-import std/string
+import std/string as String
 import std/sys
 
 ; Flags the driver understands. A valued flag consumes the next word.
@@ -125,9 +125,9 @@ let prog-args() -> List Str =
 
 let parse-code(msg: Str) -> Str =
   cond
-    | has(msg, "unclosed") -> "E_PARSE_UNCLOSED"
-    | has(msg, "'!'") -> "E_PARSE_BANG"
-    | has(msg, "unterminated") -> "E_PARSE_STRING"
+    | String.has("unclosed", msg) -> "E_PARSE_UNCLOSED"
+    | String.has("'!'", msg) -> "E_PARSE_BANG"
+    | String.has("unterminated", msg) -> "E_PARSE_STRING"
     | else -> "E_PARSE"
 
 let report-parse-error(path: Str, src: Str, e: ParseError) -> Unit =
@@ -323,7 +323,7 @@ let run-check(path: Str, dump-after-reader: Bool, dump-after-desugar: Bool, dump
 ; emit
 
 let default-output-path(path: Str) -> Str =
-  if (ends-with(path, ".mnd")) -> str-concat(str-slice(path, 0, str-byte-length(path) - 4), ".bc") | str-concat(path, ".bc")
+  if (String.ends-with(".mnd", path)) -> str-concat(str-slice(path, 0, str-byte-length(path) - 4), ".bc") | str-concat(path, ".bc")
 
 let output-path(path: Str, has-out: Bool, out: Str) -> Str =
   if (has-out) -> out | default-output-path(path)
@@ -468,7 +468,7 @@ let basename(s: Str) -> Str {
 
 let stem-of(file: Str) -> Str {
   let b = basename(file)
-  if (ends-with(b, ".mnd")) -> str-slice(b, 0, str-byte-length(b) - 4) | b
+  if (String.ends-with(".mnd", b)) -> str-slice(b, 0, str-byte-length(b) - 4) | b
 }
 
 let default-bin(file: Str) -> Str =

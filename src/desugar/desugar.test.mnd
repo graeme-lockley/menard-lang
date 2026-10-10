@@ -8,7 +8,7 @@ import std/io
 import std/string
 
 let has-head(text: Str, name: Str) -> Bool =
-  has(text, str-concat("(", name, " ")) || has(text, str-concat("(", name, ")"))
+  has(str-concat("(", name, " "), text) || has(str-concat("(", name, ")"), text)
 
 let read-forms(path: Str) -> Maybe (List Ast) =
   match (read-file(path))
@@ -51,17 +51,41 @@ let desugar-has-code(path: Str, code: Str) -> Bool =
 test "and/or/while expand to if and loop" =
   match (desugared-text("tests/phase2/fixtures/desugar-ok.mnd"))
     | None -> false
-    | Some(text) -> has(text, "if ") && has(text, "loop (") && not(has(text, "while")) && not(has(text, "&&")) && not(has(text, "||"))
+    | Some(text) -> has("if ", text) && has("loop (", text) && not(has("while", text)) && not(has("&&", text)) && not(has("||", text))
 
 test "while expands to loop" =
   match (desugared-text("tests/phase2/fixtures/desugar-while.mnd"))
     | None -> false
-    | Some(text) -> has(text, "loop (") && not(has(text, "while"))
+    | Some(text) -> has("loop (", text) && not(has("while", text))
 
 test "bracket lists become cons and a type-parameter list stays" =
   match (desugared-text("tests/phase2/fixtures/list-sugar.mnd"))
     | None -> false
-    | Some(text) -> has(text, "[a]") && has(text, "::") && has(text, "Nil") && not(has(text, "Cons")) && not(has(text, "[h")) && not(has(text, "[10"))
+    | Some(text) -> has("[a]", text) && has("::", text) && has("Nil", text) && not(has("Cons", text)) && not(has("[h", text)) && not(has("[10", text))
+
+let desugars-to(src: Str, want: Str) -> Bool =
+  match (read(src))
+    | Err(_) -> false
+    | Ok(a) ->
+      match (desugar-all([a]))
+        | Err(_) -> false
+        | Ok(forms) ->
+          match (forms)
+            | h :: [] -> print-form(h) == want
+            | _ -> false
+
+let pipe-rejected(src: Str) -> Bool =
+  match (read(src))
+    | Err(_) -> false
+    | Ok(a) ->
+      match (desugar-all([a]))
+        | Ok(_) -> false
+        | Err(es) -> codes-have(es, "E_DESUGAR_PIPE")
+
+test "pipe appends the left value as the last argument" =
+  desugars-to("tokens |> List.map(I.parse) |> List.filter(fn (n) = n <= 1000)", "(List.filter)(fn (n) = n <= 1000, (List.map)(I.parse, tokens))") && desugars-to("input |> String.drop(idx + 1) |> String.split-using(separators)", "(String.split-using)(separators, (String.drop)(idx + 1, input))") && desugars-to("numbers |> List.filter(is-negative) |> Err()", "Err((List.filter)(is-negative, numbers))") && desugars-to("numbers |> List.fold(fn (a, n) = a + n, 0)", "(List.fold)(fn (a, n) = a + n, 0, numbers)") && desugars-to("s |> String.drop(n)", "(String.drop)(n, s)") && desugars-to("s |> String.index-of-from(sep, i)", "(String.index-of-from)(sep, i, s)")
+
+test "a bare name is not a pipe target" = pipe-rejected("xs |> List.map")
 
 test "an unclosed declaration does not parse" = is-none-forms("tests/negative/bad-parse.mnd")
 

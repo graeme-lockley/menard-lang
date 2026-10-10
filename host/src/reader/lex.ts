@@ -73,7 +73,7 @@ function isIdentCont(b: number): boolean {
   );
 }
 
-const OPS = ["==", "!=", "<=", ">=", "&&", "||", "->", "::", "+", "-", "*", "/", "%", "<", ">", "=", "|"];
+const OPS = ["==", "!=", "<=", ">=", "&&", "||", "->", "::", "|>", "+", "-", "*", "/", "%", "<", ">", "=", "|"];
 
 /** Kestrel's simple escapes. `-1` means this byte is not one of them. */
 function simpleEscape(e: number): number {

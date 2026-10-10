@@ -74,6 +74,39 @@ bearing choices; everything in the specification follows from them.
 | 40 | **The compiler emits LLVM bitcode (`.bc`), never textual `.ll` as the product** | Textual IR is a second spelling of the same module and invites non-determinism (whitespace, type printing); bitcode is the binary artifact the gate and the driver consume; `llvm-dis` stays a debug aid only | A Menard bitcode writer (~subset of LLVM encoding) must stay deterministic and in sync with the pinned LLVM/clang |
 ---
 
+## 2026-10-10 — Pipe operator `|>`
+
+### The decision
+
+`|>` is syntactic sugar, erased before typechecking. The right-hand side is a
+call, and the left-hand value is appended as its last argument. A chain is
+left-associative and binds looser than `||`. A bare name, including a
+projection written without parentheses, is a desugar error. There is no `<|`,
+no currying, and no placeholder argument.
+
+`std/string` takes the subject string last (`starts-with(prefix, s)`,
+`drop(n, s)`, `split(sep, s)`, `index-of-from(sep, i, s)`), matching the
+data-last order `List`, `Result`, and `Maybe` already use. The start index of
+`index-of-from` stays between the separator and the string, so a pipe fills
+only the string: `s |> String.index-of-from(sep, i)`.
+
+### Why this shape
+
+Menard functions take a flat argument list. Elm's `x |> f` meaning `f x`
+needs currying, which this language does not have, so the right-hand side has
+to be a call whose parentheses show the arguments already filled. Last-argument
+insertion is the slot `List.map`, `List.filter`, `List.fold`,
+`Result.and-then`, and `Maybe.with-default` already leave open. A hole such
+as `String.drop(_, n)` would be a second calling convention.
+
+### Cost
+
+Both readers lex, parse, print, and desugar the operator. Call sites of the
+string functions change argument order. A non-call on the right is
+`E_DESUGAR_PIPE` (`pipe expects a call`).
+
+---
+
 ## 2026-10-09 — String-literal escapes (Kestrel's set, adapted)
 
 ### The decision

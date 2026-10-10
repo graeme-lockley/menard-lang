@@ -75,6 +75,7 @@ inside an identifier.
 | `::` | list cons, in expressions and in patterns |
 | `->` | return type, arm body, function type |
 | `\|` | alternative, at the start of an arm or between or-patterns |
+| `\|>` | pipe: append the left-hand value as the last argument of the call on the right |
 | `.` | field or export projection, glued to both names |
 
 Unary minus and a negative numeric literal are the exception: `-` immediately
@@ -91,6 +92,10 @@ call; `::` is the spelling programs use.
 `.` is not a whitespace operator. It is glued to the receiver and the name:
 `pair.fst`, `Lexer.read(src)`. A call of a projection is still a call. There
 is no method call; the function takes the collection as an argument.
+
+`|>` is one operator, and it needs whitespace on both sides, the same way
+`||` does. An arm's `|` stays `|`: the following `>` is part of the operator
+only when it is the next byte. Desugaring is in [§5.3](#53-operators).
 
 Float arithmetic is not infix. `f+`, `f-`, `f*`, and `f/` are ordinary
 identifiers, called as functions: `f+(a, b)`. `+` is `Int` addition only.
@@ -468,6 +473,7 @@ Precedence, tightest first. Associativity is left.
 | 3 | `==` `!=` | chaining, see below |
 | 2 | `&&` | short-circuit |
 | 1 | `\|\|` | short-circuit |
+| 0 | `\|>` | last-argument insertion; the right-hand side is a call |
 
 `a + b + c` is `(a + b) + c`. `a :: b :: c` is `a :: (b :: c)`. `a < b < c` is `a < b && b < c`, and `b` is
 evaluated twice. The same chaining rule applies to `==` and `!=` and to the
@@ -475,6 +481,23 @@ relational operators, including mixtures that the existing desugarer already
 chains. `!=` is `not` of `==`.
 
 `&&` and `||` are binary and short-circuit. They are today's `and` and `or`.
+
+`|>` associates to the left and binds looser than `||`. The right-hand side
+is a call. Desugaring, which runs before typechecking, appends the left-hand
+value as that call's last argument:
+
+```
+tokens |> List.map(I.parse) |> List.filter(fn (n) = n <= 1000)
+```
+
+is `List.filter(fn (n) = n <= 1000, List.map(I.parse, tokens))`. `Err()` and
+`List.sort()` are calls with no written arguments, so
+`numbers |> List.filter(is-negative) |> Err()` is
+`Err(List.filter(is-negative, numbers))`. A bare name, including `List.map`
+with no parentheses, is a desugar error (`pipe expects a call`): the
+parentheses show which arguments are already filled. `String.drop(n)` is a
+call whose callee is a projection, so `s |> String.drop(n)` is
+`String.drop(n, s)`.
 
 ---
 
@@ -553,6 +576,7 @@ word has changed.
 | `a == b` | `(= a b)` |
 | `a != b` | `(not (= a b))` |
 | `a && b`, `a \|\| b` | `(and a b)`, `(or a b)` |
+| `x \|> f(a)` | `(f a x)` |
 | `f(a, b)` | `(f a b)` |
 | `Name(a, b)` in expression or pattern position | `(Name a b)` |
 | `[a, b]` | `(Cons a (Cons b (Nil)))` |

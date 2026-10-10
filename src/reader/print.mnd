@@ -377,7 +377,7 @@ let print-cons(rest: List Ast, ind: Int) -> Str =
     | _ -> "Cons()"
 
 let is-op(n: Str) -> Bool =
-  n == "+" || n == "*" || n == "/" || n == "%" || n == "<" || n == ">" || n == "<=" || n == ">=" || n == "="
+  n == "+" || n == "*" || n == "/" || n == "%" || n == "<" || n == ">" || n == "<=" || n == ">=" || n == "=" || n == "|>"
 
 let print-not(rest: List Ast, ind: Int) -> Str =
   match (rest)
@@ -392,12 +392,13 @@ let print-neq(inner: Ast, ind: Int) -> Str =
 
 let op-prec(op: Str) -> Int =
   cond
+    | op == "|>" -> 0
     | op == "||" -> 1
     | op == "&&" -> 2
     | op == "=" || op == "==" || op == "<" || op == ">" || op == "<=" || op == ">=" -> 3
     | op == "+" || op == "-" -> 4
     | op == "*" || op == "/" || op == "%" -> 5
-    | else -> 0
+    | else -> -1
 
 let expr-prec(a: Ast) -> Int =
   match (sym-str-of-head(a))
@@ -409,7 +410,7 @@ let expr-prec(a: Ast) -> Int =
         | n == "-" && is-unary-minus(a) -> 6
         | n == "Cons" -> 4
         | else -> op-prec(n)
-    | None -> 0
+    | None -> -1
 
 let sym-str-of-head(a: Ast) -> Maybe Str =
   match (a)
@@ -430,7 +431,7 @@ let wrap-operand(parent: Int, child: Ast, right: Bool, ind: Int) -> Str {
   let text = print-expr(child, ind)
   let cp = expr-prec(child)
   cond
-    | cp == 0 -> text
+    | cp < 0 -> text
     | right && cp <= parent -> str-concat("(", str-concat(text, ")"))
     | not(right) && cp < parent -> str-concat("(", str-concat(text, ")"))
     | else -> text

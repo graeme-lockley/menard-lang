@@ -22,6 +22,7 @@ function join(a: Span, b: Span): Span {
 }
 
 const PREC: Record<string, number> = {
+  "|>": 0,
   "||": 1,
   "&&": 2,
   "==": 3,
