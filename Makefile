@@ -25,7 +25,7 @@ BUILD_DIR := build
 
 .DEFAULT_GOAL := mn
 
-.PHONY: mn bootstrap test typecheck ci native-test runtime-smoke runtime-clean hello-native ret-native check-fixed-point
+.PHONY: mn bootstrap test typecheck ci native-test runtime-smoke runtime-sb-gc runtime-clean hello-native ret-native check-fixed-point
 
 # Full fixed-point gate: stage0 emit, stage1/stage2 link, bc0 == bc1,
 # stage1 == stage2, and the installed driver artifact. Plain `make` only
@@ -60,6 +60,15 @@ runtime-smoke:
 	@mkdir -p $(RUNTIME_BUILD)
 	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(RUNTIME_SRCS) -o $(RUNTIME_BUILD)/smoke $(LDLIBS)
 	$(RUNTIME_BUILD)/smoke
+
+# Dropped StringBuffers must not leave malloc backing stores behind.
+# Heap-verify checks that length and capacity are not traced as pointers.
+runtime-sb-gc:
+	@mkdir -p $(RUNTIME_BUILD)
+	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(RUNTIME_DIR)/src/sb_gc_main.c $(RUNTIME_LIB_SRCS) -o $(RUNTIME_BUILD)/sb-gc $(LDLIBS)
+	MENARD_HEAP_VERIFY=1 $(RUNTIME_BUILD)/sb-gc
+	MENARD_GC_STRESS=1 MENARD_HEAP_VERIFY=1 SB_GC_ITERS=40 $(RUNTIME_BUILD)/sb-gc
+	MENARD_GC_TRACE=1 MENARD_GC_TRACE_OUT=$(RUNTIME_BUILD)/gc-trace.log SB_GC_TRACE_SELFTEST=1 $(RUNTIME_BUILD)/sb-gc
 
 runtime-clean:
 	rm -rf $(RUNTIME_BUILD)

@@ -4,7 +4,7 @@ The C11 runtime a compiled program links against. Every Menard value is one 64-b
 
 Allocation comes from a copying nursery. A minor collection traces the shadow stack and the remembered set, copies survivors into old space, and resets the nursery. A major mark-sweep runs only after old space crosses a growth threshold. Static objects never move. `Float` and `Str` payloads are `bytes` objects, so the collector does not scan them as slots.
 
-`MENARD_GC_STRESS` collects on every allocation. `MENARD_HEAP_VERIFY` checks roots and layout after each collection.
+`MENARD_GC_STRESS` collects on every allocation. `MENARD_HEAP_VERIFY` checks roots and layout after each collection. `MENARD_GC_TRACE` writes one line per collection, `gc minor|major size=<bytes> freed=<bytes> duration_ns=<ns>`. `size` is the bytes in use at the start of that collection, and `freed` is the part not retained. `MENARD_GC_TRACE_OUT` chooses where that line goes: `stdout` when unset, or a file path.
 
 ## What links
 

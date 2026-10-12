@@ -250,13 +250,24 @@ void *mn_realloc(void *old_payload, int64_t size) {
   if (aligned < 8) {
     aligned = 8;
   }
-  void *fresh = mn_alloc((int64_t)aligned, old_payload == NULL ? NULL : *(void **)old_payload);
-  if (old_payload != NULL) {
-    size_t old_n = mn_prefix_size(old_payload);
-    size_t n = old_n < aligned ? old_n : aligned;
-    memcpy(fresh, old_payload, n);
-    *(void **)fresh = *(void **)old_payload;
+  /* mn_alloc may collect and move a nursery payload. Root it first.
+   * `old_payload` must be a heap object (it has a size prefix) or NULL. */
+  MnWord held;
+  mn_root_push(&held);
+  held = (MnWord)(uintptr_t)old_payload;
+  void *shape = NULL;
+  if (held != MN_EMPTY) {
+    shape = *(void **)(uintptr_t)held;
   }
+  void *fresh = mn_alloc((int64_t)aligned, shape);
+  if (held != MN_EMPTY) {
+    void *old = (void *)(uintptr_t)held;
+    size_t old_n = mn_prefix_size(old);
+    size_t n = old_n < aligned ? old_n : aligned;
+    memcpy(fresh, old, n);
+    *(void **)fresh = shape;
+  }
+  mn_root_pop();
   return fresh;
 }
 
@@ -269,10 +280,22 @@ static int clear_mark(void *obj, size_t user_size, void *ctx) {
   return 1;
 }
 
+typedef struct {
+  size_t occupied;
+  size_t reclaimed;
+} SweepStats;
+
 static int sweep_one(void *obj, size_t user_size, void *ctx) {
-  (void)ctx;
-  (void)user_size;
+  SweepStats *st = (SweepStats *)ctx;
   uintptr_t pref = *mn_prefix(obj);
+  /* A block left free by an earlier sweep is already reclaimed. */
+  if ((pref & MN_PREF_FREE) == 0) {
+    size_t bytes = 8 + user_size;
+    st->occupied += bytes;
+    if ((pref & MN_PREF_MARK) == 0) {
+      st->reclaimed += bytes;
+    }
+  }
   if (pref & MN_PREF_MARK) {
     *mn_prefix(obj) = mn_prefix_size(obj); /* clear mark, keep live */
     return 1;
@@ -286,9 +309,12 @@ static int sweep_one(void *obj, size_t user_size, void *ctx) {
 
 void mn_old_clear_marks(void) { old_walk(clear_mark, NULL); }
 
-void mn_old_sweep(void) {
+void mn_old_sweep(size_t *occupied, size_t *reclaimed) {
+  SweepStats st = {0, 0};
   freelist_reset();
-  old_walk(sweep_one, NULL);
+  old_walk(sweep_one, &st);
+  *occupied = st.occupied;
+  *reclaimed = st.reclaimed;
 }
 
 void mn_old_mark(void *obj) {

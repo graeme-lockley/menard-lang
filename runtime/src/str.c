@@ -3,8 +3,10 @@
  *
  * Str is a `bytes`-kind object: shape | len | bytes…
  * Ref is ordinary: shape | one slot
- * StringBuffer is ordinary: shape | data-ptr | len | cap  (data is a
- * malloc'd byte buffer, not a Menard object — Phase 3 leaks).
+ * StringBuffer is ordinary: shape | bytes-object | tagged len | tagged cap | shared.
+ * The bytes object is a heap Str, so a dead buffer takes its store with it.
+ * Length and capacity are tagged immediates — a raw even size would be traced
+ * as a pointer. `shared` is set by to-str; the next mutation copies first.
  */
 #include "menard.h"
 
@@ -24,8 +26,15 @@ static MnShape shape_str = {.tag = TAG_STR, .nbytes = 16, .layout = MN_LAYOUT_BY
 /* Bytes: the f64 payload is not a Menard pointer. */
 static MnShape shape_float = {.tag = TAG_FLOAT, .nbytes = 16, .layout = MN_LAYOUT_BYTES};
 static MnShape shape_ref = {.tag = TAG_REF, .nbytes = 16, .layout = MN_LAYOUT_ORDINARY};
-/* Bytes: the data pointer, length, and capacity are not Menard pointers. */
-static MnShape shape_sb = {.tag = TAG_SB, .nbytes = 32, .layout = MN_LAYOUT_BYTES};
+/* Ordinary. Slot 1 is a heap Str; len, cap, and the shared flag are immediates. */
+static MnShape shape_sb = {.tag = TAG_SB, .nbytes = 40, .layout = MN_LAYOUT_ORDINARY};
+
+#define SB_DATA 1
+#define SB_LEN 2
+#define SB_CAP 3
+#define SB_SHARED 4
+#define SB_BYTES 40
+#define SB_INIT_CAP 16
 
 /* ptr_bits is a raw pointer bit-pattern (from ptrtoint of a string global). */
 MnWord mn_str_new(int64_t ptr_bits, int64_t len) {
@@ -193,54 +202,120 @@ MnWord mn_ref_set(MnWord r, MnWord v) {
   return MN_UNIT;
 }
 
-MnWord mn_sb_new(void) {
-  MnWord *obj = (MnWord *)mn_alloc(HDR + 24, &shape_sb);
-  int64_t cap = 16;
-  uint8_t *buf = (uint8_t *)malloc((size_t)cap);
-  if (buf == NULL) {
-    mn_panic("mn_sb_new: malloc failed");
+static MnWord sb_alloc_bytes(int64_t cap) {
+  if (cap < 0 || cap > INT64_MAX - (int64_t)(HDR + 8)) {
+    mn_panic("mn_sb: capacity overflow");
   }
-  obj[1] = (MnWord)(uintptr_t)buf;
-  obj[2] = 0;   /* len */
-  obj[3] = (MnWord)cap;
+  MnWord *obj = (MnWord *)mn_alloc(HDR + 8 + cap, &shape_str);
+  obj[1] = 0;
   return (MnWord)obj;
 }
 
-static void sb_grow(MnWord *obj, int64_t need) {
-  int64_t cap = (int64_t)obj[3];
+static void sb_set_len(MnWord *obj, int64_t len) {
+  obj[SB_LEN] = mn_int_to_word(len);
+  ((MnWord *)(uintptr_t)obj[SB_DATA])[1] = (MnWord)len;
+}
+
+/* Copy the store if to-str has handed it out. `slot` is a rooted word. */
+static void sb_unshare(MnWord *slot) {
+  MnWord *obj = (MnWord *)(uintptr_t)(*slot);
+  if (obj[SB_SHARED] != MN_TRUE) {
+    return;
+  }
+  int64_t len = mn_word_to_int(obj[SB_LEN]);
+  int64_t cap = mn_word_to_int(obj[SB_CAP]);
+  if (cap < len) {
+    cap = len;
+  }
+  MnWord fresh;
+  mn_root_push(&fresh);
+  fresh = sb_alloc_bytes(cap);
+  obj = (MnWord *)(uintptr_t)(*slot);
+  MnWord *old = (MnWord *)(uintptr_t)obj[SB_DATA];
+  MnWord *dst = (MnWord *)(uintptr_t)fresh;
+  if (len > 0) {
+    memcpy((uint8_t *)(dst + 2), (uint8_t *)(old + 2), (size_t)len);
+  }
+  dst[1] = (MnWord)len;
+  mn_gc_store(obj, &obj[SB_DATA], fresh);
+  obj[SB_SHARED] = MN_FALSE;
+  mn_root_pop();
+}
+
+static void sb_grow(MnWord *slot, int64_t need) {
+  MnWord *obj = (MnWord *)(uintptr_t)(*slot);
+  int64_t cap = mn_word_to_int(obj[SB_CAP]);
   if (need <= cap) {
     return;
   }
-  while (cap < need) {
-    cap = cap < 1 ? 16 : cap * 2;
+  int64_t ncap = cap < 1 ? SB_INIT_CAP : cap;
+  while (ncap < need) {
+    if (ncap > INT64_MAX / 2) {
+      mn_panic("mn_sb_grow: capacity overflow");
+    }
+    ncap *= 2;
   }
-  uint8_t *buf = (uint8_t *)realloc((void *)(uintptr_t)obj[1], (size_t)cap);
-  if (buf == NULL) {
-    mn_panic("mn_sb_grow: realloc failed");
-  }
-  obj[1] = (MnWord)(uintptr_t)buf;
-  obj[3] = (MnWord)cap;
+  MnWord fresh;
+  mn_root_push(&fresh);
+  obj = (MnWord *)(uintptr_t)(*slot);
+  fresh = (MnWord)(uintptr_t)mn_realloc((void *)(uintptr_t)obj[SB_DATA], HDR + 8 + ncap);
+  obj = (MnWord *)(uintptr_t)(*slot);
+  mn_gc_store(obj, &obj[SB_DATA], fresh);
+  obj[SB_CAP] = mn_int_to_word(ncap);
+  mn_root_pop();
+}
+
+MnWord mn_sb_new(void) {
+  MnWord slot;
+  mn_root_push(&slot);
+  slot = (MnWord)(uintptr_t)mn_alloc(SB_BYTES, &shape_sb);
+  MnWord data;
+  mn_root_push(&data);
+  data = sb_alloc_bytes(SB_INIT_CAP);
+  MnWord *obj = (MnWord *)(uintptr_t)slot;
+  mn_gc_store(obj, &obj[SB_DATA], data);
+  obj[SB_LEN] = mn_int_to_word(0);
+  obj[SB_CAP] = mn_int_to_word(SB_INIT_CAP);
+  obj[SB_SHARED] = MN_FALSE;
+  mn_root_pop();
+  mn_root_pop();
+  return slot;
 }
 
 MnWord mn_sb_length(MnWord sb) {
   if (mn_is_immediate(sb)) {
     mn_panic("mn_sb_length: expected StringBuffer");
   }
-  return mn_int_to_word((int64_t)((MnWord *)(uintptr_t)sb)[2]);
+  return ((MnWord *)(uintptr_t)sb)[SB_LEN];
 }
 
 MnWord mn_sb_append(MnWord sb, MnWord s) {
   if (mn_is_immediate(sb)) {
     mn_panic("mn_sb_append: expected StringBuffer");
   }
-  MnWord *obj = (MnWord *)(uintptr_t)sb;
-  int64_t len = (int64_t)obj[2];
-  int64_t n = str_len(s);
-  sb_grow(obj, len + n);
-  if (n > 0) {
-    memcpy((uint8_t *)(uintptr_t)obj[1] + len, str_bytes(s), (size_t)n);
+  MnWord slot;
+  MnWord src;
+  mn_root_push(&slot);
+  slot = sb;
+  mn_root_push(&src);
+  src = s;
+  sb_unshare(&slot);
+  int64_t n = str_len(src);
+  MnWord *obj = (MnWord *)(uintptr_t)slot;
+  int64_t len = mn_word_to_int(obj[SB_LEN]);
+  if (n > INT64_MAX - len) {
+    mn_panic("mn_sb_append: length overflow");
   }
-  obj[2] = (MnWord)(len + n);
+  sb_grow(&slot, len + n);
+  obj = (MnWord *)(uintptr_t)slot;
+  len = mn_word_to_int(obj[SB_LEN]);
+  n = str_len(src);
+  if (n > 0) {
+    memcpy(str_bytes(obj[SB_DATA]) + len, str_bytes(src), (size_t)n);
+  }
+  sb_set_len(obj, len + n);
+  mn_root_pop();
+  mn_root_pop();
   return MN_UNIT;
 }
 
@@ -248,12 +323,22 @@ MnWord mn_sb_append_byte(MnWord sb, MnWord b_tagged) {
   if (mn_is_immediate(sb)) {
     mn_panic("mn_sb_append_byte: expected StringBuffer");
   }
-  MnWord *obj = (MnWord *)(uintptr_t)sb;
-  int64_t len = (int64_t)obj[2];
+  MnWord slot;
+  mn_root_push(&slot);
+  slot = sb;
+  sb_unshare(&slot);
+  MnWord *obj = (MnWord *)(uintptr_t)slot;
+  int64_t len = mn_word_to_int(obj[SB_LEN]);
+  if (len == INT64_MAX) {
+    mn_panic("mn_sb_append_byte: length overflow");
+  }
+  sb_grow(&slot, len + 1);
+  obj = (MnWord *)(uintptr_t)slot;
+  len = mn_word_to_int(obj[SB_LEN]);
   int64_t byte = mn_word_to_int(b_tagged) & 255;
-  sb_grow(obj, len + 1);
-  ((uint8_t *)(uintptr_t)obj[1])[len] = (uint8_t)byte;
-  obj[2] = (MnWord)(len + 1);
+  str_bytes(obj[SB_DATA])[len] = (uint8_t)byte;
+  sb_set_len(obj, len + 1);
+  mn_root_pop();
   return MN_UNIT;
 }
 
@@ -261,29 +346,49 @@ MnWord mn_sb_take_str(MnWord sb) {
   if (mn_is_immediate(sb)) {
     mn_panic("mn_sb_take_str: expected StringBuffer");
   }
-  MnWord held;
-  mn_root_push(&held);
-  held = sb;
-  MnWord *obj = (MnWord *)(uintptr_t)held;
-  int64_t len = (int64_t)obj[2];
-  int64_t total = HDR + 8 + len;
-  MnWord *str = (MnWord *)mn_alloc(total, &shape_str);
-  obj = (MnWord *)(uintptr_t)held;
-  len = (int64_t)obj[2];
-  str[1] = (MnWord)len;
-  if (len > 0) {
-    memcpy((uint8_t *)(str + 2), (uint8_t *)(uintptr_t)obj[1], (size_t)len);
-  }
-  obj[2] = 0;
+  MnWord slot;
+  mn_root_push(&slot);
+  slot = sb;
+  MnWord fresh;
+  mn_root_push(&fresh);
+  fresh = sb_alloc_bytes(SB_INIT_CAP);
+  MnWord *obj = (MnWord *)(uintptr_t)slot;
+  MnWord data = obj[SB_DATA];
+  mn_gc_store(obj, &obj[SB_DATA], fresh);
+  obj[SB_LEN] = mn_int_to_word(0);
+  obj[SB_CAP] = mn_int_to_word(SB_INIT_CAP);
+  obj[SB_SHARED] = MN_FALSE;
   mn_root_pop();
-  return (MnWord)str;
+  mn_root_pop();
+  return data;
 }
 
 MnWord mn_sb_clear(MnWord sb) {
   if (mn_is_immediate(sb)) {
     mn_panic("mn_sb_clear: expected StringBuffer");
   }
-  ((MnWord *)(uintptr_t)sb)[2] = 0;
+  MnWord slot;
+  mn_root_push(&slot);
+  slot = sb;
+  MnWord *obj = (MnWord *)(uintptr_t)slot;
+  if (obj[SB_SHARED] == MN_TRUE) {
+    int64_t cap = mn_word_to_int(obj[SB_CAP]);
+    if (cap < SB_INIT_CAP) {
+      cap = SB_INIT_CAP;
+    }
+    MnWord fresh;
+    mn_root_push(&fresh);
+    fresh = sb_alloc_bytes(cap);
+    obj = (MnWord *)(uintptr_t)slot;
+    mn_gc_store(obj, &obj[SB_DATA], fresh);
+    obj[SB_LEN] = mn_int_to_word(0);
+    obj[SB_CAP] = mn_int_to_word(cap);
+    obj[SB_SHARED] = MN_FALSE;
+    mn_root_pop();
+  } else {
+    sb_set_len(obj, 0);
+  }
+  mn_root_pop();
   return MN_UNIT;
 }
 
@@ -291,21 +396,9 @@ MnWord mn_sb_to_str(MnWord sb) {
   if (mn_is_immediate(sb)) {
     mn_panic("mn_sb_to_str: expected StringBuffer");
   }
-  MnWord held;
-  mn_root_push(&held);
-  held = sb;
-  MnWord *obj = (MnWord *)(uintptr_t)held;
-  int64_t len = (int64_t)obj[2];
-  int64_t total = HDR + 8 + len;
-  MnWord *str = (MnWord *)mn_alloc(total, &shape_str);
-  obj = (MnWord *)(uintptr_t)held;
-  len = (int64_t)obj[2];
-  str[1] = (MnWord)len;
-  if (len > 0) {
-    memcpy((uint8_t *)(str + 2), (uint8_t *)(uintptr_t)obj[1], (size_t)len);
-  }
-  mn_root_pop();
-  return (MnWord)str;
+  MnWord *obj = (MnWord *)(uintptr_t)sb;
+  obj[SB_SHARED] = MN_TRUE;
+  return obj[SB_DATA];
 }
 
 static MnWord box_float(double d) {

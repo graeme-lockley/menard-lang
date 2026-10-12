@@ -37,7 +37,9 @@ void *mn_nursery_bump(size_t user_size);
 void mn_nursery_reset(void);
 void *mn_old_alloc(size_t user_size);
 void mn_old_clear_marks(void);
-void mn_old_sweep(void);
+/* occupied: old-space objects not already free, including the prefix.
+ * reclaimed: the unmarked subset of those, returned to the freelist. */
+void mn_old_sweep(size_t *occupied, size_t *reclaimed);
 void mn_old_mark(void *obj);
 int mn_old_is_marked(void *obj);
 int mn_old_is_free(void *obj);

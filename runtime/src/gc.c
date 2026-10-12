@@ -9,19 +9,32 @@
  * MENARD_GC_STRESS  — minor-collect on every mn_alloc.
  * MENARD_HEAP_VERIFY — check roots and layout after each collection.
  * MENARD_GC_STATS — print mn_gc_stats on the way out.
+ * MENARD_GC_TRACE — after each collection, write
+ *   `gc minor|major size=<bytes> freed=<bytes> duration_ns=<ns>`.
+ *   size is the bytes in use at the start of that collection (nursery
+ *   occupancy, or old-space objects that are not already free), including
+ *   the 8-byte allocator prefix. freed is the part that was not retained.
+ * MENARD_GC_TRACE_OUT — `stdout` when unset, or a file path to truncate
+ *   and write. The trace uses write(2), so it is not stuck in a stdio buffer.
  */
 #include "gc_internal.h"
 
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 static int in_gc = 0;
 static int flags_read = 0;
 static int stress = 0;
 static int verify = 0;
 static int stats_on = 0;
+static int trace_on = 0;
+static const char *trace_dest = NULL;
+static int trace_fd = -1;
+static int trace_ready = 0;
 static int exit_hooked = 0;
 
 static uint64_t minor_count = 0;
@@ -36,6 +49,7 @@ static size_t first_minor_copied = 0;
 static size_t last_minor_old = 0;
 static size_t last_minor_copied = 0;
 static size_t copied_bytes = 0;
+static size_t copied_objs = 0;
 
 static size_t old_threshold = MN_OLD_CHUNK_BYTES;
 
@@ -61,6 +75,60 @@ static void read_flags(void) {
   stress = getenv("MENARD_GC_STRESS") != NULL;
   verify = getenv("MENARD_HEAP_VERIFY") != NULL;
   stats_on = getenv("MENARD_GC_STATS") != NULL;
+  trace_on = getenv("MENARD_GC_TRACE") != NULL;
+  trace_dest = getenv("MENARD_GC_TRACE_OUT");
+}
+
+static void trace_write(const char *p, size_t n) {
+  size_t off = 0;
+  while (off < n) {
+    ssize_t w = write(trace_fd, p + off, n - off);
+    if (w < 0) {
+      mn_panic("mn_gc: trace write failed");
+    }
+    off += (size_t)w;
+  }
+}
+
+static void trace_open(void) {
+  if (trace_ready) {
+    return;
+  }
+  trace_ready = 1;
+  if (trace_dest == NULL || trace_dest[0] == '\0' || strcmp(trace_dest, "stdout") == 0) {
+    trace_fd = 1;
+    return;
+  }
+  trace_fd = open(trace_dest, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (trace_fd < 0) {
+    mn_panic("mn_gc: cannot open MENARD_GC_TRACE_OUT");
+  }
+}
+
+static void trace_event(const char *kind, size_t size, size_t freed, uint64_t ns) {
+  if (!trace_on) {
+    return;
+  }
+  trace_open();
+  char buf[160];
+  int n = snprintf(buf, sizeof(buf), "gc %s size=%zu freed=%zu duration_ns=%llu\n", kind, size, freed,
+                   (unsigned long long)ns);
+  if (n < 0 || (size_t)n >= sizeof(buf)) {
+    mn_panic("mn_gc: trace line truncated");
+  }
+  trace_write(buf, (size_t)n);
+}
+
+/* Survivors leave the nursery; what stays behind is garbage. */
+static void trace_minor_done(size_t before, uint64_t dt) {
+  if (!trace_on) {
+    return;
+  }
+  size_t retained = copied_bytes + copied_objs * 8;
+  if (retained > before) {
+    mn_panic("mn_gc: minor retained more than the nursery held");
+  }
+  trace_event("minor", before, before - retained, dt);
 }
 
 static void stats_hook(void) {
@@ -168,6 +236,7 @@ static MnWord relocate(MnWord w) {
   memcpy(nobj, p, sz);
   *(uintptr_t *)p = ((uintptr_t)nobj) | (uintptr_t)2;
   copied_bytes += sz;
+  copied_objs++;
   work_push(nobj);
   return (MnWord)(uintptr_t)nobj;
 }
@@ -311,6 +380,7 @@ static void verify_heap(void) {
 
 static void minor_collect(void) {
   copied_bytes = 0;
+  copied_objs = 0;
   work_n = 0;
   mn_shadow_visit(visit_root, NULL);
   mn_slots_visit(visit_root, NULL);
@@ -371,9 +441,13 @@ static void major_root(MnWord *slot, void *ctx) {
 
 static void major_collect(void) {
   if (mn_nursery_used() != 0) {
+    size_t before = mn_nursery_used();
+    uint64_t t0 = now_ns();
     minor_collect();
     minor_count++;
+    trace_minor_done(before, now_ns() - t0);
   }
+  uint64_t t0 = now_ns();
   mn_old_clear_marks();
   work_n = 0;
   mn_shadow_visit(major_root, NULL);
@@ -384,7 +458,9 @@ static void major_collect(void) {
     i++;
   }
   work_n = 0;
-  mn_old_sweep();
+  size_t occupied = 0;
+  size_t reclaimed = 0;
+  mn_old_sweep(&occupied, &reclaimed);
   /* Sweep rewrites prefixes, which drops REMEMBERED. Drop the list too. */
   remembered_n = 0;
   size_t used = mn_old_used();
@@ -394,16 +470,20 @@ static void major_collect(void) {
   }
   old_threshold = next;
   verify_heap();
+  trace_event("major", occupied, reclaimed, now_ns() - t0);
 }
 
 void mn_gc_minor(void) {
+  read_flags();
   if (in_gc) {
     return;
   }
   in_gc = 1;
+  size_t before = mn_nursery_used();
   uint64_t t0 = now_ns();
   minor_collect();
   uint64_t dt = now_ns() - t0;
+  trace_minor_done(before, dt);
   minor_count++;
   minor_last_ns = dt;
   if (dt > minor_max_ns) {
@@ -420,6 +500,7 @@ void mn_gc_minor(void) {
 }
 
 void mn_gc_major(void) {
+  read_flags();
   if (in_gc) {
     return;
   }
