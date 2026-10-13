@@ -2994,8 +2994,7 @@ in two well-understood places.
 ## 8. Definition of done
 
 - [ ] All eight success criteria (§1.2) hold, with correctness and agreement
-      evidenced separately. Gap: §2.11 is not checked row by row, and no test
-      measures a memory bound for the stress corpus.
+      evidenced separately. Gap: §2.11 is not checked row by row.
 - [x] `make bootstrap` builds from a clean checkout, one command, from source
       alone — interpreter, then stage0, stage1, stage2 — and, once `mn` exists,
       that command runs the Menard driver.
@@ -3016,16 +3015,18 @@ in two well-understood places.
       and builds large maps inside a time budget, and `make check-fixed-point`
       refuses a stage0 emit of `src/mn.mnd` that takes longer than two minutes.
 - [x] The interpreter's typer and the compiler's agree on every negative fixture.
-- [ ] The collector is precise, and the GC stress corpus runs in bounded memory.
-      Gap: `tests/phase2/print-values.test.ts` runs one program with
-      `MENARD_GC_STRESS` and `MENARD_HEAP_VERIFY`. Nothing measures a memory bound.
-- [ ] **The §2.2 invariants hold and are asserted in the heap-verify build**,
+- [x] The collector is precise, and the GC stress corpus runs in bounded memory.
+      `tests/gc-stress/bound.test.ts` runs `tests/gc-stress/churn.mnd` with
+      `MENARD_HEAP_VERIFY` and `MENARD_GC_TRACE`. Retained bytes on each major
+      collection (`size - freed`) stay under a fixed cap.
+- [x] **The §2.2 invariants hold and are asserted in the heap-verify build**,
       including that every slot word matches its declared **layout kind**, that
       every object — heap and static — is 8-byte aligned, and that **every
       scanned slot word is an immediate, the empty word, or an aligned object**.
-      Gap: heap-verify checks reachable words after a collection, and only
-      `print-values` turns it on. It does not walk the static pool, and it is
-      not run over the corpus.
+      `tests/corpus/oracle.test.ts` runs every hermetic native binary with
+      `MENARD_HEAP_VERIFY`. That walk also checks the registered runtime static
+      objects: alignment, static location, and a `bytes` layout or a header-only
+      `ordinary` object.
 - [x] **`Float` is a `bytes` object**: its f64 payload is never scanned as slots,
       and no boxed float can be traced as a pointer.
 - [ ] **Static objects are 8-byte aligned, deduplicated by byte content, and
@@ -3041,13 +3042,15 @@ in two well-understood places.
       including `None` and every payload-free constructor of a user variant,
       shared across all instantiations. Gap: the pool summary names a nullary
       constructor. Its size, and sharing across instantiations, are not asserted.
-- [ ] **A `StringBuffer`'s backing store is always heap-owned**; no static payload
-      is ever written. Gap: no test tries to place a buffer's bytes in the
-      static pool.
-- [ ] **No static object holds word slots**, or, if one does, the
-      statics-hold-only-immediates invariant is stated and asserted. Gap: the
-      pool emitter keeps statics as bytes or header-only. Heap-verify does not
-      scan the pool for word slots.
+- [x] **A `StringBuffer`'s backing store is always heap-owned**; no static payload
+      is ever written. Installing a store outside the nursery or old space
+      panics. `tests/corpus/buffer-literal.mnd` appends a string literal and
+      then more bytes; the literal is unchanged.
+- [x] **No static object holds word slots**, or, if one does, the
+      statics-hold-only-immediates invariant is stated and asserted.
+      Heap-verify walks every registered static and panics when an ordinary
+      static is larger than its header. An empty table panics too, so the walk
+      cannot be skipped.
 - [ ] **There is no `null`**: no operation returns one, no `deref` needs a null
       check, and the empty word appears in no Menard type, no canonical text form
       (§2.13), and no `dump` output (§2.16). Gap: no test rejects an empty-word
@@ -3084,10 +3087,10 @@ in two well-understood places.
       `Str` values that are not valid UTF-8 are handled, not assumed away.
       Gap: the reader round-trips `tests/corpus/invalid-utf8.mnd`. Nothing
       asserts that equality skips normalisation.
-- [ ] `Map` is persistent and its keys are orderable; nothing in the compiler or
-      the prelude relies on aliasing. Gap: map round-trips are tested. No test
-      shows that updating one binding leaves another binding of the same map
-      unchanged.
+- [x] `Map` is persistent and its keys are orderable; nothing in the compiler or
+      the prelude relies on aliasing. `tests/corpus/map-persist.mnd` binds a
+      map, updates a second name with `Map.set`, and prints both lookups. The
+      first map does not show the new key.
 - [x] Exactly two reference types — `Ref` and `StringBuffer` — both non-showable,
       both non-orderable, neither reaching an output path. The buffer's
       copy-on-write rule is implemented in the interpreter and the runtime, and

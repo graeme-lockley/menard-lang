@@ -5,6 +5,7 @@
  * Payload constructors allocate via mn_alloc and store slots after the
  * shape header. `mn_tag` / `mn_slot` are what `match` lowering calls.
  */
+#include "gc_internal.h"
 #include "menard.h"
 
 #include <stdint.h>
@@ -40,6 +41,11 @@ static struct {
 
 MnWord mn_nil(void) { return (MnWord)&mn_static_nil; }
 MnWord mn_none(void) { return (MnWord)&mn_static_none; }
+
+void mn_register_variant_statics(void) {
+  mn_register_static(&mn_static_nil);
+  mn_register_static(&mn_static_none);
+}
 
 static MnWord alloc_slots(MnShape *shape, int64_t nbytes, MnWord a, MnWord b, int n) {
   MnWord as, bs;

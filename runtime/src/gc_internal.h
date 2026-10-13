@@ -61,4 +61,10 @@ int mn_gc_stress(void);
 int mn_gc_verify(void);
 void mn_gc_note_exit(void);
 
+/* Record a static singleton so heap-verify can check it. */
+void mn_register_static(void *obj);
+void mn_register_variant_statics(void);
+void mn_register_io_statics(void);
+void mn_register_closure_statics(void);
+
 #endif

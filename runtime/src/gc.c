@@ -61,6 +61,10 @@ static void **work = NULL;
 static size_t work_n = 0;
 static size_t work_cap = 0;
 
+static void **statics = NULL;
+static size_t static_n = 0;
+static size_t static_cap = 0;
+
 static uint64_t now_ns(void) {
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -166,6 +170,27 @@ static void work_push(void *obj) {
     work_cap = ncap;
   }
   work[work_n++] = obj;
+}
+
+void mn_register_static(void *obj) {
+  if (obj == NULL) {
+    mn_panic("mn_gc: register static received an empty pointer");
+  }
+  for (size_t i = 0; i < static_n; i++) {
+    if (statics[i] == obj) {
+      return;
+    }
+  }
+  if (static_n == static_cap) {
+    size_t ncap = static_cap == 0 ? 16 : static_cap * 2;
+    void **n = (void **)realloc(statics, ncap * sizeof(void *));
+    if (n == NULL) {
+      mn_panic("mn_gc: static table oom");
+    }
+    statics = n;
+    static_cap = ncap;
+  }
+  statics[static_n++] = obj;
 }
 
 static void remember(void *obj) {
@@ -309,6 +334,28 @@ static int valid_object(void *p) {
   return sh->location == MN_LOC_STATIC;
 }
 
+/* Static objects are leaves. Ordinary ones are header-only: a word slot
+ * would be a second place the collector has to be told what it is looking at. */
+static void verify_static(void *obj) {
+  if (((uintptr_t)obj & (uintptr_t)7) != 0) {
+    mn_panic("mn_gc: static object is not 8-byte aligned");
+  }
+  if (!shape_ok(obj)) {
+    mn_panic("mn_gc: static object has an empty header");
+  }
+  MnShape *sh = *(MnShape **)obj;
+  if (sh->location != MN_LOC_STATIC) {
+    mn_panic("mn_gc: registered object is not static");
+  }
+  if (sh->layout == MN_LAYOUT_BYTES) {
+    return;
+  }
+  if (sh->layout == MN_LAYOUT_ORDINARY && sh->nbytes == (int32_t)sizeof(void *)) {
+    return;
+  }
+  mn_panic("mn_gc: static object holds word slots");
+}
+
 static void verify_push(MnWord w) {
   if (mn_is_immediate(w) || w == MN_EMPTY) {
     return;
@@ -321,10 +368,8 @@ static void verify_push(MnWord w) {
     mn_panic("mn_gc: heap-verify found a nursery pointer after collection");
   }
   if (!mn_ptr_in_old(p)) {
-    if (((uintptr_t)p & (uintptr_t)7) != 0) {
-      mn_panic("mn_gc: static object is not 8-byte aligned");
-    }
-    return; /* static leaf */
+    verify_static(p);
+    return;
   }
   if (mn_old_is_marked(p)) {
     return;
@@ -364,6 +409,12 @@ static void verify_root(MnWord *slot, void *ctx) {
 static void verify_heap(void) {
   if (!verify) {
     return;
+  }
+  if (static_n == 0) {
+    mn_panic("mn_gc: heap-verify has no static objects to walk");
+  }
+  for (size_t s = 0; s < static_n; s++) {
+    verify_static(statics[s]);
   }
   mn_old_clear_marks();
   work_n = 0;

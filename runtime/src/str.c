@@ -8,6 +8,7 @@
  * Length and capacity are tagged immediates — a raw even size would be traced
  * as a pointer. `shared` is set by to-str; the next mutation copies first.
  */
+#include "gc_internal.h"
 #include "menard.h"
 
 #include <math.h>
@@ -202,13 +203,22 @@ MnWord mn_ref_set(MnWord r, MnWord v) {
   return MN_UNIT;
 }
 
+static void sb_expect_heap(MnWord data) {
+  void *p = (void *)(uintptr_t)data;
+  if (!mn_ptr_in_nursery(p) && !mn_ptr_in_old(p)) {
+    mn_panic("mn_sb: backing store is not on the heap");
+  }
+}
+
 static MnWord sb_alloc_bytes(int64_t cap) {
   if (cap < 0 || cap > INT64_MAX - (int64_t)(HDR + 8)) {
     mn_panic("mn_sb: capacity overflow");
   }
   MnWord *obj = (MnWord *)mn_alloc(HDR + 8 + cap, &shape_str);
   obj[1] = 0;
-  return (MnWord)obj;
+  MnWord w = (MnWord)obj;
+  sb_expect_heap(w);
+  return w;
 }
 
 static void sb_set_len(MnWord *obj, int64_t len) {
@@ -259,6 +269,7 @@ static void sb_grow(MnWord *slot, int64_t need) {
   mn_root_push(&fresh);
   obj = (MnWord *)(uintptr_t)(*slot);
   fresh = (MnWord)(uintptr_t)mn_realloc((void *)(uintptr_t)obj[SB_DATA], HDR + 8 + ncap);
+  sb_expect_heap(fresh);
   obj = (MnWord *)(uintptr_t)(*slot);
   mn_gc_store(obj, &obj[SB_DATA], fresh);
   obj[SB_CAP] = mn_int_to_word(ncap);

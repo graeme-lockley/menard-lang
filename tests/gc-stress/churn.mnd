@@ -1,0 +1,40 @@
+; Drop a list, a map, and a large string each iteration.
+; The strings differ in length so old space cannot reuse one freelist size.
+; Prints one number: the sum of the dropped lengths.
+; Run under MENARD_GC_TRACE and MENARD_HEAP_VERIFY. See bound.test.ts.
+
+import std/string as String
+import std/string-buffer as Buf
+import std/map as Map
+
+let fill-buf(n: Int) -> Str {
+  let sb = Buf.new()
+  loop (i = 0)
+    cond
+      | i == n -> Buf.take-str!(sb)
+      | else ->
+        {
+          Buf.append-byte!(sb, 97)
+          recur(i + 1)
+        }
+}
+
+let singleton(n: Int) -> List Int =
+  n :: []
+
+let step(i: Int) -> Int {
+  let raw = fill-buf(131072 + i)
+  let joined = String.concat(raw, "x")
+  let m = Map.set(i, 1, Map.empty())
+  match (singleton(i))
+    | [] -> 0
+    | h :: _ -> String.length(joined) + Map.size(m) + h
+}
+
+let main() -> Int {
+  let n =
+    loop (i = 1, acc = 0)
+      if (i == 21) -> acc | recur(i + 1, acc + step(i))
+  println(n)
+  0
+}

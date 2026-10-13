@@ -1,0 +1,13 @@
+; Map.set returns a new map. The map that was updated stays as it was.
+
+import std/map as Map
+
+let main() -> Int {
+  let a = Map.set(1, 10, Map.empty())
+  let b = Map.set(2, 20, a)
+  println(Map.lookup(1, a))
+  println(Map.lookup(2, a))
+  println(Map.lookup(1, b))
+  println(Map.lookup(2, b))
+  0
+}

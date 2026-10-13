@@ -146,7 +146,11 @@ describe.skipIf(clang === null)("hermetic corpus oracle", () => {
             continue;
           }
           const interp = cli(["run", rel]);
-          const ran = spawnSync(bin, [], { cwd: ROOT, encoding: "utf-8" });
+          const ran = spawnSync(bin, [], {
+            cwd: ROOT,
+            encoding: "utf-8",
+            env: { ...process.env, MENARD_HEAP_VERIFY: "1" },
+          });
           const nativeOut = ran.stdout ?? "";
           const nativeErr = ran.stderr ?? "";
           const nativeStatus = ran.status ?? 1;

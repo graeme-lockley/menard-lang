@@ -1,0 +1,13 @@
+; Appending a literal copies it. A later append does not change the literal.
+
+import std/string-buffer as Buf
+
+let main() -> Int {
+  let lit = "hello"
+  let sb = Buf.new()
+  Buf.append!(sb, lit)
+  Buf.append!(sb, "!")
+  println(lit)
+  println(Buf.to-str(sb))
+  0
+}

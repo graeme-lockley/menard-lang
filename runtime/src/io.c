@@ -5,6 +5,7 @@
  * with the C `main(argc, argv)` parameters). File helpers return Menard
  * `(Result … IoError)` words built with `mn_ok` / `mn_err`.
  */
+#include "gc_internal.h"
 #include "menard.h"
 
 #include <dirent.h>
@@ -297,6 +298,19 @@ static struct {
 static struct {
   MnShape *shape;
 } __attribute__((aligned(8))) static_too_many_arguments = {.shape = &shape_too_many_arguments};
+
+void mn_register_io_statics(void) {
+  mn_register_static(&static_not_found);
+  mn_register_static(&static_permission);
+  mn_register_static(&static_exists);
+  mn_register_static(&static_is_a_directory);
+  mn_register_static(&static_not_a_directory);
+  mn_register_static(&static_invalid_path);
+  mn_register_static(&static_too_large);
+  mn_register_static(&static_not_executable);
+  mn_register_static(&static_invalid_argument);
+  mn_register_static(&static_too_many_arguments);
+}
 
 enum { ARG_OK = 0, ARG_BAD = 1, ARG_TOO_MANY = 2 };
 

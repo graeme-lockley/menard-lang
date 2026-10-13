@@ -56,6 +56,9 @@ void mn_heap_init(void) {
   nursery = (uint8_t *)map_bytes(nursery_cap);
   nursery_used = 0;
   heap_ready = 1;
+  mn_register_variant_statics();
+  mn_register_io_statics();
+  mn_register_closure_statics();
   mn_gc_note_exit();
 }
 

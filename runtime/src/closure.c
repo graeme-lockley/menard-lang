@@ -5,6 +5,7 @@
  * Env is an ordinary object: header | slot0 | slot1 | …
  * Apply helpers cast slot0 back to a C function pointer and call it.
  */
+#include "gc_internal.h"
 #include "menard.h"
 
 #include <stdint.h>
@@ -37,6 +38,10 @@ static struct {
 
 static int mn_env_is_bare(MnWord env) {
   return env == (MnWord)&mn_bare_marker;
+}
+
+void mn_register_closure_statics(void) {
+  mn_register_static(&mn_bare_marker);
 }
 
 MnWord mn_closure_bare(MnWord code_bits) {
