@@ -10,11 +10,12 @@ import std/string as String
 pub let add(input: Str) -> Int {
   let tokens =
     if (input == "") -> [] | String.split-using([",", "\n"], input)
+
   tokens |> List.map(Int.parse) |> List.filter(fn (n) = n <= 1000) |> List.sum()
 }
 ```
 
-The full string calculator, with custom separators and a `Result` of every negative, is [examples/sc.mnd](examples/sc.mnd). Run its tests with `./mn test examples/sc.mnd`.
+The full string calculator, with custom separators and a `Result` of every negative, is [examples/sc.mnd](examples/sc.mnd). Run its tests with `mn test examples/sc.mnd`.
 
 ## The language
 
@@ -23,13 +24,13 @@ The full string calculator, with custom separators and a `Result` of every negat
 - **Types.** `Int`, `Float`, `Bool`, `Char`, `Str`, records, and variants. Type parameters are written at the definition (`map[a, b]`) and filled in at the use. No inference, no macros.
 - **Modules.** One file is one module. `import std/list as List` qualifies the exports. `pub` publishes a name; everything else is private.
 - **The library.** Lists, maps, strings, characters, maybe, and result, in [docs/stdlib.md](docs/stdlib.md). Files, processes, and the console sit beside them.
-- **`mn`.** `./mn run` compiles and runs a program. `./mn test` runs the `@test` lines in a module.
+- **`mn`.** `mn run` compiles and runs a program. `mn test` runs the `@test` lines in a module.
 
 The guide is [docs/guide.md](docs/guide.md). The syntax reference is [docs/syntax.md](docs/syntax.md). The rules are [docs/menard-spec.md](docs/menard-spec.md).
 
 ## The compiler
 
-There is one compiler, in `src/`, written in Menard. A reference interpreter in TypeScript runs that source. The bitcode it emits is linked into a native `./mn`, and that binary compiles the same source again. The two bitcode files are byte-identical: `bc0 == bc1`. The interpreter is also the oracle for whether a program means what it should. The gate shows that the two executions agree. The oracle shows that they are right.
+There is one compiler, in `src/`, written in Menard. A reference interpreter in TypeScript runs that source. The bitcode it emits is linked into a native `mn`, and that binary compiles the same source again. The two bitcode files are byte-identical: `bc0 == bc1`. The interpreter is also the oracle for whether a program means what it should. The gate shows that the two executions agree. The oracle shows that they are right.
 
 `make bootstrap` builds that chain from a clean checkout. Nothing prebuilt is committed.
 
@@ -41,6 +42,7 @@ You need [Bun](https://bun.sh) 1.4.2, Make, and clang (LLVM 17 or newer). The pr
 cd host && bun install --frozen-lockfile && cd ..
 make                 # compile src/mn.mnd → ./mn
 make test            # host unit, corpus, fuzz, semantic, and negative tests
+make memory-checks   # collector bound and StringBuffer reclaim
 make typecheck       # tsc --noEmit
 make native-test     # ./mn test
 make bootstrap       # interpreter, stage0, stage1, stage2, and the fixed point

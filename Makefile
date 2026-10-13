@@ -25,7 +25,7 @@ BUILD_DIR := build
 
 .DEFAULT_GOAL := mn
 
-.PHONY: mn bootstrap test typecheck ci native-test runtime-smoke runtime-sb-gc runtime-clean hello-native ret-native check-fixed-point
+.PHONY: mn bootstrap test typecheck ci memory-checks native-test runtime-smoke runtime-sb-gc runtime-clean hello-native ret-native check-fixed-point
 
 # Full fixed-point gate: stage0 emit, stage1/stage2 link, bc0 == bc1,
 # stage1 == stage2, and the installed driver artifact. Plain `make` only
@@ -41,13 +41,20 @@ mn:
 	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/mn.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/mn.tmp $(LDLIBS)
 	mv $(BUILD_DIR)/mn.tmp mn
 
+# Functional suite. The collector bound lives in memory-checks so a leak
+# does not sit inside the agreement tests.
 test:
-	cd host && bun test --timeout 30000 ../tests
+	cd host && bun test --timeout 30000 --path-ignore-patterns '**/gc-stress/**' ../tests
 
 typecheck:
 	cd host && bunx tsc --noEmit -p tsconfig.json
 
 ci: typecheck test
+
+# Non-functional collector checks: StringBuffer reclaim, and a bounded
+# live set on the stress program. Separate from `test` on purpose.
+memory-checks: runtime-sb-gc
+	cd host && bun test --timeout 180000 ../tests/gc-stress
 
 # Colocated `*.test.mnd` suite (`./mn test`). The driver must already exist
 # (`make` or `make bootstrap`). The GitHub Actions bootstrap job runs this
