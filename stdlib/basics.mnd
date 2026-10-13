@@ -3,31 +3,39 @@
 
 ; Returns its argument unchanged.
 ; @test id(1) => 1
+; @test id("hello") => "hello"
+; @test id(true) => true
 pub let id[a](x: a) -> a =
   x
 
 ; Logical negation.
 ; @test not(true) => false
+; @test not(false) => true
 pub let not(b: Bool) -> Bool =
   if (b) -> false | true
 
 ; The smaller of x and y.
 ; @test min(2, 5) => 2
+; @test min(5, 2) => 2
 pub let min(x: Int, y: Int) -> Int =
   if (x < y) -> x | y
 
 ; The larger of x and y.
 ; @test max(2, 5) => 5
+; @test max(5, 2) => 5
 pub let max(x: Int, y: Int) -> Int =
   if (x > y) -> x | y
 
 ; Absolute value of n.
 ; @test abs(-3) => 3
+; @test abs(3) => 3
 pub let abs(n: Int) -> Int =
   if (n < 0) -> -n | n
 
 ; n limited to the inclusive range lo through hi.
 ; @test clamp(0, 10, 15) => 10
+; @test clamp(0, 10, -5) => 0
+; @test clamp(0, 10, 7) => 7
 pub let clamp(lo: Int, hi: Int, n: Int) -> Int =
   min(hi, max(lo, n))
 
