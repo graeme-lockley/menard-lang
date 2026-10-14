@@ -1,0 +1,16 @@
+; Distinct string literals and one user nullary, plus a `None` that must
+; be the runtime singleton. Emission order is `ctor Empty`, then the
+; strings by byte content.
+
+type Box =
+  | Empty
+  | Full(Int)
+
+let main() -> Int {
+  let a = "a"
+  let b = "b"
+  let ab = "ab"
+  let e = Empty()
+  let n = None()
+  if (a == b) -> 1 | if (ab == a) -> 2 | if (e == Empty()) -> if (n == None()) -> 0 | 3 | 4
+}

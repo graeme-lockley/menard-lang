@@ -9,8 +9,7 @@
 ; emission: it walks a program's forms for `Str` literals and nullary
 ; constructor *mentions*, then **dedups by byte content and sorts by
 ; byte content** (§2.2.1's own two determinism obligations, spec §2.11) —
-; the same two rules the real pool must satisfy so stage0 and stage1
-; agree on it byte for byte.
+; the same two rules emission uses so stage0 and stage1 agree byte for byte.
 ;
 ; `pool-summary` renders the result as one line per unique entry,
 ; `"str \"…\""` or `"ctor Name"`, sorted — a goldenable text form checked
@@ -36,22 +35,16 @@
 ; pattern). This over-approximates: a pattern never allocates or needs
 ; the static object at all, only compares a tag. The cost of the
 ; over-approximation is at most one spurious pool entry per nullary
-; constructor a program ever pattern-matches on — a header word, not a
-; correctness problem, since the module is not wired to the emitter yet
-; (see below). Narrow this once it is.
+; constructor a program ever pattern-matches on — a header word. The
+; emitter includes that header (see Wiring).
 ;
 ; ## Wiring
 ;
-; `emit/bitcode.mnd`'s `emit-program-bc` calls `pool-summary` before
-; handing `forms` to `emit/lower.mnd`'s `lower-program`, so the collector
-; runs on every real `emit`, exactly as the slice asks — but
-; `lower.mnd`'s real instruction selector only lowers `Int` (never a
-; `Str`, a `Float` or a constructor object, see that module's header
-; comment), so nothing downstream consumes the result yet.
-; `emit-program-bc` computes it and discards it: a real global
-; emission pass — one static object per pool entry, `align 8`, sorted —
-; is future work (spec §2.11's "candidates for the static pool, since it
-; is what knows their bytes").
+; `emit/lower.mnd` consumes `pool-str-literals` and `pool-nullary-names`
+; and emits one static object per entry, `align 8`, in `pool-summary`'s
+; byte order. `pool-summary` itself stays the goldenable text form.
+; Float literals stay on `mn_float_from_str`. Interned `Sym` names are
+; not collected: nothing interns one at runtime.
 
 import "../reader/ast.mnd"
 import std/list
@@ -116,7 +109,11 @@ let builtin-ctor-arities() -> Map Str Int {
   let m11 = Map.set("NotADirectory", 0, m10)
   let m12 = Map.set("InvalidPath", 0, m11)
   let m13 = Map.set("TooLarge", 0, m12)
-  Map.set("Other", 1, m13)
+  let m14 = Map.set("NotExecutable", 0, m13)
+  let m15 = Map.set("InvalidArgument", 0, m14)
+  let m16 = Map.set("TooManyArguments", 0, m15)
+  let m17 = Map.set("Unsupported", 0, m16)
+  Map.set("Other", 1, m17)
 }
 
 let register-ctor-arity(cname-ast: Ast, arity: Int, acc: Map Str Int) -> Map Str Int =
@@ -223,6 +220,8 @@ let walk-list(xs: List Ast, arities: Map Str Int, entries: Ref (List Str)) -> Un
 let walk-expr(ast: Ast, arities: Map Str Int, entries: Ref (List Str)) -> Unit =
   match (ast)
     | StrNode(s, _) -> record-str!(entries, s)
+    | SymNode(name, _) ->
+      if (is-nullary-ctor(name, arities)) -> record-ctor!(entries, name) | ()
     | ParenNode(elems, _) -> walk-paren(elems, arities, entries)
     | BracketNode(elems, _) -> walk-list(elems, arities, entries)
     | _ -> ()
@@ -350,15 +349,80 @@ let collect-raw-tops(forms: List Ast, acc: Ref (List Str)) -> Unit =
         collect-raw-tops(rest, acc)
       }
 
+let collect-str-expr(ast: Ast, acc: Ref (List Str)) -> Unit =
+  match (ast)
+    | StrNode(s, _) -> set!(acc, s :: deref(acc))
+    | ParenNode(elems, _) -> collect-str-list(elems, acc)
+    | BracketNode(elems, _) -> collect-str-list(elems, acc)
+    | _ -> ()
+
+let collect-str-list(xs: List Ast, acc: Ref (List Str)) -> Unit =
+  match (xs)
+    | [] -> ()
+    | head :: rest ->
+      if (is-sym(head, "quote")) -> () | collect-str-list-body(head :: rest, acc)
+
+let collect-str-list-body(xs: List Ast, acc: Ref (List Str)) -> Unit =
+  match (xs)
+    | [] -> ()
+    | x :: rest ->
+      {
+        collect-str-expr(x, acc)
+        collect-str-list-body(rest, acc)
+      }
+
+let collect-str-top(ast: Ast, acc: Ref (List Str)) -> Unit =
+  match (unwrap-pub(ast))
+    | ParenNode(head :: _, _) ->
+      match (sym-str(head))
+        | Some(hn) ->
+          if (is-decl-head(hn)) -> () | collect-str-expr(unwrap-pub(ast), acc)
+        | None -> collect-str-expr(unwrap-pub(ast), acc)
+    | _ -> collect-str-expr(unwrap-pub(ast), acc)
+
+let collect-str-tops(forms: List Ast, acc: Ref (List Str)) -> Unit =
+  match (forms)
+    | [] -> ()
+    | f :: rest ->
+      {
+        collect-str-top(f, acc)
+        collect-str-tops(rest, acc)
+      }
+
+; Distinct `Str` literals, sorted by byte content. Float text is not
+; included: a float literal is still parsed by `mn_float_from_str`.
+pub let pool-str-literals(forms: List Ast) -> List Str {
+  let acc = ref([])
+  collect-str-tops(forms, acc)
+  sort-strs(dedup-list(deref(acc)))
+}
+
 pub let pool-string-literals(forms: List Ast) -> List Str {
   let acc = ref([])
   collect-raw-tops(forms, acc)
   sort-strs(dedup-list(deref(acc)))
 }
 
-pub let pool-summary(forms: List Ast) -> Str {
+pub let pool-entry-lines(forms: List Ast) -> List Str {
   let arities = all-ctor-arities(forms)
   let entries = ref([])
   walk-top-forms(forms, arities, entries)
-  join-lines(sort-strs(dedup-list(deref(entries))))
+  sort-strs(dedup-list(deref(entries)))
 }
+
+let ctor-name-of(line: Str) -> Maybe Str =
+  if (String.starts-with("ctor ", line)) -> Some(String.slice(5, String.length(line) - 5, line)) | None()
+
+let ctor-names-of(lines: List Str) -> List Str =
+  match (lines)
+    | [] -> []
+    | line :: rest ->
+      match (ctor-name-of(line))
+        | Some(name) -> name :: ctor-names-of(rest)
+        | None -> ctor-names-of(rest)
+
+pub let pool-nullary-names(forms: List Ast) -> List Str =
+  ctor-names-of(pool-entry-lines(forms))
+
+pub let pool-summary(forms: List Ast) -> Str =
+  join-lines(pool-entry-lines(forms))

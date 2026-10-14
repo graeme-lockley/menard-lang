@@ -51,27 +51,13 @@ static MnShape shape_io_too_large = {
 static MnShape shape_io_other = {
     .tag = TAG_IO_OTHER, .nbytes = 16, .layout = MN_LAYOUT_ORDINARY};
 
-static struct {
-  MnShape *shape;
-} __attribute__((aligned(8))) static_not_found = {.shape = &shape_io_not_found};
-static struct {
-  MnShape *shape;
-} __attribute__((aligned(8))) static_permission = {.shape = &shape_io_permission};
-static struct {
-  MnShape *shape;
-} __attribute__((aligned(8))) static_exists = {.shape = &shape_io_exists};
-static struct {
-  MnShape *shape;
-} __attribute__((aligned(8))) static_is_a_directory = {.shape = &shape_io_is_a_directory};
-static struct {
-  MnShape *shape;
-} __attribute__((aligned(8))) static_not_a_directory = {.shape = &shape_io_not_a_directory};
-static struct {
-  MnShape *shape;
-} __attribute__((aligned(8))) static_invalid_path = {.shape = &shape_io_invalid_path};
-static struct {
-  MnShape *shape;
-} __attribute__((aligned(8))) static_too_large = {.shape = &shape_io_too_large};
+MnNullary mn_static_not_found __attribute__((aligned(8))) = {.shape = &shape_io_not_found};
+MnNullary mn_static_permission __attribute__((aligned(8))) = {.shape = &shape_io_permission};
+MnNullary mn_static_exists __attribute__((aligned(8))) = {.shape = &shape_io_exists};
+MnNullary mn_static_is_a_directory __attribute__((aligned(8))) = {.shape = &shape_io_is_a_directory};
+MnNullary mn_static_not_a_directory __attribute__((aligned(8))) = {.shape = &shape_io_not_a_directory};
+MnNullary mn_static_invalid_path __attribute__((aligned(8))) = {.shape = &shape_io_invalid_path};
+MnNullary mn_static_too_large __attribute__((aligned(8))) = {.shape = &shape_io_too_large};
 
 static int g_argc = 0;
 static char **g_argv = NULL;
@@ -129,20 +115,20 @@ MnWord mn_arg(MnWord i_tagged) {
 static MnWord io_err_from_errno(int err) {
   switch (err) {
   case ENOENT:
-    return (MnWord)&static_not_found;
+    return (MnWord)&mn_static_not_found;
   case EACCES:
   case EPERM:
-    return (MnWord)&static_permission;
+    return (MnWord)&mn_static_permission;
   case EEXIST:
-    return (MnWord)&static_exists;
+    return (MnWord)&mn_static_exists;
   case EISDIR:
-    return (MnWord)&static_is_a_directory;
+    return (MnWord)&mn_static_is_a_directory;
   case ENOTDIR:
-    return (MnWord)&static_not_a_directory;
+    return (MnWord)&mn_static_not_a_directory;
   case ENAMETOOLONG:
-    return (MnWord)&static_invalid_path;
+    return (MnWord)&mn_static_invalid_path;
   case EFBIG:
-    return (MnWord)&static_too_large;
+    return (MnWord)&mn_static_too_large;
   default: {
     MnWord *obj = (MnWord *)mn_alloc(HDR + 8, &shape_io_other);
     obj[1] = mn_int_to_word((int64_t)err);
@@ -289,27 +275,21 @@ static MnShape shape_invalid_argument = {
 static MnShape shape_too_many_arguments = {
     .tag = TAG_TOO_MANY_ARGUMENTS, .nbytes = 8, .layout = MN_LAYOUT_ORDINARY, .location = MN_LOC_STATIC};
 
-static struct {
-  MnShape *shape;
-} __attribute__((aligned(8))) static_not_executable = {.shape = &shape_not_executable};
-static struct {
-  MnShape *shape;
-} __attribute__((aligned(8))) static_invalid_argument = {.shape = &shape_invalid_argument};
-static struct {
-  MnShape *shape;
-} __attribute__((aligned(8))) static_too_many_arguments = {.shape = &shape_too_many_arguments};
+MnNullary mn_static_not_executable __attribute__((aligned(8))) = {.shape = &shape_not_executable};
+MnNullary mn_static_invalid_argument __attribute__((aligned(8))) = {.shape = &shape_invalid_argument};
+MnNullary mn_static_too_many_arguments __attribute__((aligned(8))) = {.shape = &shape_too_many_arguments};
 
 void mn_register_io_statics(void) {
-  mn_register_static(&static_not_found);
-  mn_register_static(&static_permission);
-  mn_register_static(&static_exists);
-  mn_register_static(&static_is_a_directory);
-  mn_register_static(&static_not_a_directory);
-  mn_register_static(&static_invalid_path);
-  mn_register_static(&static_too_large);
-  mn_register_static(&static_not_executable);
-  mn_register_static(&static_invalid_argument);
-  mn_register_static(&static_too_many_arguments);
+  mn_register_static(&mn_static_not_found);
+  mn_register_static(&mn_static_permission);
+  mn_register_static(&mn_static_exists);
+  mn_register_static(&mn_static_is_a_directory);
+  mn_register_static(&mn_static_not_a_directory);
+  mn_register_static(&mn_static_invalid_path);
+  mn_register_static(&mn_static_too_large);
+  mn_register_static(&mn_static_not_executable);
+  mn_register_static(&mn_static_invalid_argument);
+  mn_register_static(&mn_static_too_many_arguments);
 }
 
 enum { ARG_OK = 0, ARG_BAD = 1, ARG_TOO_MANY = 2 };
@@ -373,19 +353,19 @@ static int fill_spawn_argv(MnWord argv_list, char **argv, int *n_out) {
 
 static MnWord spawn_errno_err(int rc) {
   if (rc == ENOENT) {
-    return mn_err((MnWord)&static_not_found);
+    return mn_err((MnWord)&mn_static_not_found);
   }
   if (rc == EACCES || rc == EPERM) {
-    return mn_err((MnWord)&static_permission);
+    return mn_err((MnWord)&mn_static_permission);
   }
   if (rc == ENOEXEC) {
-    return mn_err((MnWord)&static_not_executable);
+    return mn_err((MnWord)&mn_static_not_executable);
   }
   if (rc == E2BIG) {
-    return mn_err((MnWord)&static_too_many_arguments);
+    return mn_err((MnWord)&mn_static_too_many_arguments);
   }
   /* Host `mapSpawnErrno` folds every other code to NotFound. */
-  return mn_err((MnWord)&static_not_found);
+  return mn_err((MnWord)&mn_static_not_found);
 }
 
 static int list_is_nil(MnWord xs) { return mn_tag(xs) == 0; }
@@ -415,10 +395,10 @@ MnWord mn_spawn(MnWord argv_list) {
   int n = 0;
   int built = fill_spawn_argv(argv_list, argv, &n);
   if (built == ARG_BAD) {
-    return mn_err((MnWord)&static_invalid_path);
+    return mn_err((MnWord)&mn_static_invalid_path);
   }
   if (built == ARG_TOO_MANY) {
-    return mn_err((MnWord)&static_too_large);
+    return mn_err((MnWord)&mn_static_too_large);
   }
   pid_t pid = 0;
   int rc = posix_spawn(&pid, argv[0], NULL, NULL, argv, environ);
@@ -503,10 +483,10 @@ MnWord mn_spawn_capture(MnWord argv_list, MnWord stdin_str) {
   int n = 0;
   int built = fill_spawn_argv(argv_list, argv, &n);
   if (built == ARG_BAD) {
-    return mn_err((MnWord)&static_invalid_argument);
+    return mn_err((MnWord)&mn_static_invalid_argument);
   }
   if (built == ARG_TOO_MANY) {
-    return mn_err((MnWord)&static_too_many_arguments);
+    return mn_err((MnWord)&mn_static_too_many_arguments);
   }
   prefix_dot_slash(&argv[0]);
 
@@ -515,7 +495,7 @@ MnWord mn_spawn_capture(MnWord argv_list, MnWord stdin_str) {
   int err_pipe[2];
   if (pipe(in_pipe) != 0 || pipe(out_pipe) != 0 || pipe(err_pipe) != 0) {
     free_argv(argv, n);
-    return mn_err((MnWord)&static_not_found);
+    return mn_err((MnWord)&mn_static_not_found);
   }
 
   posix_spawn_file_actions_t actions;

@@ -245,7 +245,7 @@ const fixtures: Array<{
     expectDis: /\bcall i64 @mn_(tag|cons|nil)\b/,
   },
   {
-    name: "`match` on Str literals lowers via mn_str_new/mn_equal (exit 3)",
+    name: "`match` on Str literals lowers via a static object and mn_equal (exit 3)",
     entry: "tests/phase2/oracle/ret-match-str.mnd",
     expectExit: 3,
     expectDis: /\bcall i64 @mn_equal\b/,

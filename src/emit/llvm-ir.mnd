@@ -70,6 +70,8 @@
 ; i64`) and that its `IRet`'s value is consequently already `i32`-typed by
 ; the time it is written.
 
+import std/string as String
+
   ; An i64/i32 constant already encoded per LLVM's zig-zag signed
   ; integer scheme (`v>=0: v*2`, `v<0: (-v)*2+1` — see `bc-writer.mnd`'s
   ; `encode-signed-i64`) — consumes the next value id, like an instruction.
@@ -155,14 +157,13 @@ pub let lfunc-items(f: LFunc) -> List Item =
   match (f)
     | LFunc(_, _, _, _, i) -> i
 
-; The module: an ordered list of user functions, plus every distinct
-; string literal `println`/`print`/`write` lowering needs a global for
-; (`src/emit/lower.mnd`'s `StrPool`, in id order `0..S-1`) — see that
-; module's header comment and `write-module-bc`'s "module value
-; numbering" note for exactly how `globals`, the three fixed runtime
-; externs, and `funcs` share one combined module-scope value-numbering
-; space, in that order (globals, then externs, then `funcs`), which both
-; modules must agree on byte-for-byte.
+; The module: user functions, the cstring globals (`0..S-1`), the static
+; pool objects, and the runtime singleton declarations. Value ids are
+; cstrings, then one shape and one object per `objs` entry, then the
+; twelve singleton declarations, then the runtime function externs, then
+; imports, then `funcs`. `extern-id-base` is where the function externs
+; begin. Both this module and `bc-writer.mnd` must agree on that order
+; byte for byte.
 ; A cross-module function the object calls but does not define. `name` is
 ; the Menard name the call uses; `link` is the symbol clang resolves.
 ; Abs ids follow the fixed runtime externs, in this list's order.
@@ -172,39 +173,130 @@ pub record Imp {
   arity: Int
 }
 
+; One compiler-emitted static object. `kind` 0 is a `Str` literal
+; (`payload` is the bytes, `tag` 10, `nbytes` 16 + length). `kind` 1 is a
+; header-only nullary (`payload` is the constructor name). Runtime
+; singletons (`Nil`, `None`, the `IoError` nullaries) are not in this
+; list: they are fixed external globals.
+pub record PoolObj {
+  kind: Int
+  payload: Str
+  tag: Int
+  nbytes: Int
+}
+
+pub let pool-kind-str = 0
+
+pub let pool-kind-ctor = 1
+
+; `Nil`, `None`, and the ten payload-free `IoError` / `SpawnError` objects.
+pub let static-singleton-count = 12
+
+pub let pool-obj-kind(o: PoolObj) -> Int =
+  match (o)
+    | PoolObj(k, _, _, _) -> k
+
+pub let pool-obj-payload(o: PoolObj) -> Str =
+  match (o)
+    | PoolObj(_, p, _, _) -> p
+
+pub let pool-obj-tag(o: PoolObj) -> Int =
+  match (o)
+    | PoolObj(_, _, t, _) -> t
+
+pub let pool-obj-nbytes(o: PoolObj) -> Int =
+  match (o)
+    | PoolObj(_, _, _, n) -> n
+
+pub let pool-obj-count(objs: List PoolObj) -> Int =
+  match (objs)
+    | [] -> 0
+    | _ :: rest -> 1 + pool-obj-count(rest)
+
+; Shape bytes, the length word, the payload bytes when present, and the
+; aggregate. An empty string has no payload constant. A nullary is the
+; shape bytes plus a one-word aggregate.
+let str-extra-constants(payload: Str) -> Int =
+  if (String.length(payload) == 0) -> 3 | 4
+
+let pool-extra-one(o: PoolObj) -> Int =
+  match (o)
+    | PoolObj(k, payload, _, _) ->
+      if (k == pool-kind-str) -> str-extra-constants(payload) | 2
+
+pub let pool-extra-constants(objs: List PoolObj) -> Int =
+  match (objs)
+    | [] -> 0
+    | o :: rest -> pool-extra-one(o) + pool-extra-constants(rest)
+
+; How many module-scope value ids the fixed runtime externs occupy.
+; Defined here so the id helpers below can see it. The order those
+; externs are declared in is documented with `extern-write-stdout-abs`.
+pub let extern-count = 89
+
+; Cstring globals, then two globals per emitted object (shape, object),
+; then the fixed runtime singletons. Function externs begin at this id.
+pub let extern-id-base(nstrings: Int, nobj: Int) -> Int =
+  nstrings + 2 * nobj + static-singleton-count
+
+; First function-local value id. Declarations, then one constant per
+; cstring, then the extra constants of each static object.
+pub let module-local-base(nstrings: Int, objs: List PoolObj, nimps: Int, nfuncs: Int) -> Int {
+  let nobj = pool-obj-count(objs)
+  let decls = extern-id-base(nstrings, nobj) + extern-count + nimps + nfuncs
+  decls + nstrings + pool-extra-constants(objs)
+}
+
+pub let singleton-symbol(i: Int) -> Str =
+  cond
+    | i == 0 -> "mn_static_nil"
+    | i == 1 -> "mn_static_none"
+    | i == 2 -> "mn_static_not_found"
+    | i == 3 -> "mn_static_permission"
+    | i == 4 -> "mn_static_exists"
+    | i == 5 -> "mn_static_is_a_directory"
+    | i == 6 -> "mn_static_not_a_directory"
+    | i == 7 -> "mn_static_invalid_path"
+    | i == 8 -> "mn_static_too_large"
+    | i == 9 -> "mn_static_not_executable"
+    | i == 10 -> "mn_static_invalid_argument"
+    | else -> "mn_static_too_many_arguments"
+
 pub record LlvmModule {
   funcs: List LFunc
   globals: List Str
   imports: List Imp
+  objs: List PoolObj
 }
 
 pub let llvm-module-funcs(m: LlvmModule) -> List LFunc =
   match (m)
-    | LlvmModule(fs, _, _) -> fs
+    | LlvmModule(fs, _, _, _) -> fs
 
 pub let llvm-module-globals(m: LlvmModule) -> List Str =
   match (m)
-    | LlvmModule(_, gs, _) -> gs
+    | LlvmModule(_, gs, _, _) -> gs
 
 pub let llvm-module-imports(m: LlvmModule) -> List Imp =
   match (m)
-    | LlvmModule(_, _, is) -> is
+    | LlvmModule(_, _, is, _) -> is
+
+pub let llvm-module-objs(m: LlvmModule) -> List PoolObj =
+  match (m)
+    | LlvmModule(_, _, _, os) -> os
 
 ; ---------------------------------------------------------------------------
 ; The fixed runtime externs — always declared, in this fixed order,
 ; regardless of whether a given program actually calls any of them (an
 ; unused `declare` is harmless — see `lower.mnd`'s header comment).
-; `extern-count` is how many module-scope value ids they occupy;
 ; `lower.mnd`'s `StrPool` and `write-module-bc` both derive every
-; extern's own abs id from `num-strings` (the string globals that
-; precede them) using the helpers below, so the two modules can never
+; extern's own abs id from the id base (every global that precedes the
+; function externs) using the helpers below, so the two modules can never
 ; disagree about which id is which extern.
 ;
 ; Order: mn_write_stdout, mn_print_i64, mn_write_stderr, mn_alloc,
 ; heap helpers (3C), mn_print_str, Str/Ref/SB (3D), Map (3F), closures (3E),
 ; tier-0 I/O (3G: mn_init … mn_exit).
-pub let extern-count = 89
-
 pub let extern-write-stdout-abs(num-strings: Int) -> Int =
   num-strings
 

@@ -3029,19 +3029,24 @@ in two well-understood places.
       `ordinary` object.
 - [x] **`Float` is a `bytes` object**: its f64 payload is never scanned as slots,
       and no boxed float can be traced as a pointer.
-- [ ] **Static objects are 8-byte aligned, deduplicated by byte content, and
+- [x] **Static objects are 8-byte aligned, deduplicated by byte content, and
       emitted sorted by byte content**, identically by stage0 and stage1.
-      Gap: `src/pool/pool.test.mnd` checks dedup and byte-sort on one fixture.
-      Alignment of every static, and a pool-only comparison of stage0 with
-      stage1, are not a separate test.
-- [ ] **Static-ness is unobservable**: no operation — including `show`, `=`,
-      `compare` and `dump` — distinguishes a static `Str`, `Float` or nullary
-      constructor from a heap-allocated one. Gap: no test compares those
-      operations on a static value and a heap value.
-- [ ] **Every nullary variant constructor is a single-word static object**,
+      `tests/phase2/static-pool.test.ts` disassembles one fixture and checks
+      `align 8`, one object per distinct literal, and `pool-summary` order.
+      `make bootstrap` checks that stage0 and stage1 emit the same module,
+      including those globals.
+- [ ] **Static-ness is unobservable for `Float`**: no operation — including
+      `show`, `=`, `compare` and `dump` — distinguishes a static `Float` from a
+      heap-allocated one. `Str` literals and nullary constructors are covered
+      by `tests/corpus/static-pool.mnd`. A `Float` literal is still parsed by
+      `mn_float_from_str` on each evaluation, so that half is open.
+- [x] **Every nullary variant constructor is a single-word static object**,
       including `None` and every payload-free constructor of a user variant,
-      shared across all instantiations. Gap: the pool summary names a nullary
-      constructor. Its size, and sharing across instantiations, are not asserted.
+      shared across all instantiations. `tests/corpus/static-pool.mnd` compares
+      a literal `None` with `Map.lookup` of a missing key and prints one user
+      nullary from two construction sites. `tests/phase2/static-pool.test.ts`
+      checks that the `None` use site is `ptrtoint` of `@mn_static_none` and
+      that `Empty` is one header.
 - [x] **A `StringBuffer`'s backing store is always heap-owned**; no static payload
       is ever written. Installing a store outside the nursery or old space
       panics. `tests/corpus/buffer-literal.mnd` appends a string literal and

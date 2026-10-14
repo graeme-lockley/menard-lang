@@ -30,14 +30,10 @@ static MnShape shape_some = {.tag = TAG_SOME, .nbytes = 16, .layout = MN_LAYOUT_
 static MnShape shape_ok = {.tag = TAG_OK, .nbytes = 16, .layout = MN_LAYOUT_ORDINARY};
 static MnShape shape_err = {.tag = TAG_ERR, .nbytes = 16, .layout = MN_LAYOUT_ORDINARY};
 
-/* Static nullary pool objects — header only. Leaves: not scanned. */
-static struct {
-  MnShape *shape;
-} __attribute__((aligned(8))) mn_static_nil = {.shape = &shape_nil};
-
-static struct {
-  MnShape *shape;
-} __attribute__((aligned(8))) mn_static_none = {.shape = &shape_none};
+/* Static nullary pool objects — header only. Leaves: not scanned.
+ * External linkage: the compiler points a source mention at these. */
+MnNullary mn_static_nil __attribute__((aligned(8))) = {.shape = &shape_nil};
+MnNullary mn_static_none __attribute__((aligned(8))) = {.shape = &shape_none};
 
 MnWord mn_nil(void) { return (MnWord)&mn_static_nil; }
 MnWord mn_none(void) { return (MnWord)&mn_static_none; }

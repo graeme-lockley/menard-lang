@@ -322,7 +322,11 @@ let cst-code-null = 2
 
 let cst-code-integer = 4
 
+let cst-code-aggregate = 7
+
 let cst-code-string = 8
+
+let type-code-struct-anon = 18
 
 let func-code-declareblocks = 1
 
@@ -437,9 +441,9 @@ let write-array-types!(t: BitSink, ma: Int, lens: List Int) -> Unit =
 ; `arity` in `0..ma`, then `(i32, ptr) -> i32` for `main`, then `i8`, the
 ; the fixed extern function types, then one `[len x i8]` array type per
 ; string global — see header comment.
-let write-types!(t: BitSink, ma: Int, globals: List Str) -> Unit {
+let write-types!(t: BitSink, ma: Int, globals: List Str, extra: Int) -> Unit {
   let ns = int-list-length(str-lengths(globals))
-  write-record!(t, type-code-numentry, [4 + ma + 1 + 9 + ns])
+  write-record!(t, type-code-numentry, [4 + ma + 1 + 9 + ns + extra])
   write-record!(t, type-code-opaque-pointer, [0])
   write-record!(t, type-code-integer, [64])
   write-record!(t, type-code-integer, [32])
@@ -927,6 +931,229 @@ let max-arity-of(fs: List LFunc) -> Int =
 ; Clang warns `overriding the module target triple` when this record is
 ; missing or differs from the compiler it is linking with. An empty
 ; string leaves the record out (callers that cannot ask clang).
+
+; One emitted static object, with the value ids and type indices the
+; global and constant writers both consume. `payload-ty` is -1 when the
+; string is empty (no `[0 x i8]` constant). `len-const` is -1 for a nullary.
+record ObjPlan {
+  kind: Int
+  payload: Str
+  shape-global: Int
+  obj-global: Int
+  shape-const: Int
+  agg-const: Int
+  len-const: Int
+  payload-const: Int
+  payload-ty: Int
+  struct-ty: Int
+  tag: Int
+  nbytes: Int
+}
+
+let obj-kind(p: ObjPlan) -> Int =
+  match (p)
+    | ObjPlan(k, _, _, _, _, _, _, _, _, _, _, _) -> k
+
+let obj-payload(p: ObjPlan) -> Str =
+  match (p)
+    | ObjPlan(_, s, _, _, _, _, _, _, _, _, _, _) -> s
+
+let obj-shape-global(p: ObjPlan) -> Int =
+  match (p)
+    | ObjPlan(_, _, g, _, _, _, _, _, _, _, _, _) -> g
+
+let obj-shape-const(p: ObjPlan) -> Int =
+  match (p)
+    | ObjPlan(_, _, _, _, c, _, _, _, _, _, _, _) -> c
+
+let obj-agg-const(p: ObjPlan) -> Int =
+  match (p)
+    | ObjPlan(_, _, _, _, _, c, _, _, _, _, _, _) -> c
+
+let obj-len-const(p: ObjPlan) -> Int =
+  match (p)
+    | ObjPlan(_, _, _, _, _, _, c, _, _, _, _, _) -> c
+
+let obj-payload-const(p: ObjPlan) -> Int =
+  match (p)
+    | ObjPlan(_, _, _, _, _, _, _, c, _, _, _, _) -> c
+
+let obj-payload-ty(p: ObjPlan) -> Int =
+  match (p)
+    | ObjPlan(_, _, _, _, _, _, _, _, t, _, _, _) -> t
+
+let obj-struct-ty(p: ObjPlan) -> Int =
+  match (p)
+    | ObjPlan(_, _, _, _, _, _, _, _, _, t, _, _) -> t
+
+let obj-tag(p: ObjPlan) -> Int =
+  match (p)
+    | ObjPlan(_, _, _, _, _, _, _, _, _, _, t, _) -> t
+
+let obj-nbytes(p: ObjPlan) -> Int =
+  match (p)
+    | ObjPlan(_, _, _, _, _, _, _, _, _, _, _, n) -> n
+
+let plan-statics(objs: List PoolObj, ns: Int, struct-base: Int, payload-ty: Int, cursor: Int, i: Int) -> List ObjPlan =
+  match (objs)
+    | [] -> []
+    | o :: rest -> plan-one(o, rest, ns, struct-base, payload-ty, cursor, i)
+
+let plan-one(o: PoolObj, rest: List PoolObj, ns: Int, struct-base: Int, payload-ty: Int, cursor: Int, i: Int) -> List ObjPlan {
+  let kind = pool-obj-kind(o)
+  let payload = pool-obj-payload(o)
+  let shape-g = ns + 2 * i
+  let obj-g = shape-g + 1
+  let struct-ty = struct-base + i
+  if (kind == pool-kind-str) -> plan-str(rest, ns, struct-base, payload-ty, cursor, i, kind, payload, shape-g, obj-g, struct-ty, pool-obj-tag(o), pool-obj-nbytes(o)) | plan-ctor(rest, ns, struct-base, payload-ty, cursor, i, kind, payload, shape-g, obj-g, struct-ty, pool-obj-tag(o), pool-obj-nbytes(o))
+}
+
+let plan-str-empty(rest: List PoolObj, ns: Int, struct-base: Int, payload-ty: Int, cursor: Int, i: Int, kind: Int, payload: Str, shape-g: Int, obj-g: Int, struct-ty: Int, tag: Int, nbytes: Int) -> List ObjPlan =
+  ObjPlan(kind, payload, shape-g, obj-g, cursor, cursor + 2, cursor + 1, -1, -1, struct-ty, tag, nbytes) :: plan-statics(rest, ns, struct-base, payload-ty, cursor + 3, i + 1)
+
+let plan-str-bytes(rest: List PoolObj, ns: Int, struct-base: Int, payload-ty: Int, cursor: Int, i: Int, kind: Int, payload: Str, shape-g: Int, obj-g: Int, struct-ty: Int, tag: Int, nbytes: Int) -> List ObjPlan =
+  ObjPlan(kind, payload, shape-g, obj-g, cursor, cursor + 3, cursor + 1, cursor + 2, payload-ty, struct-ty, tag, nbytes) :: plan-statics(rest, ns, struct-base, payload-ty + 1, cursor + 4, i + 1)
+
+let plan-str(rest: List PoolObj, ns: Int, struct-base: Int, payload-ty: Int, cursor: Int, i: Int, kind: Int, payload: Str, shape-g: Int, obj-g: Int, struct-ty: Int, tag: Int, nbytes: Int) -> List ObjPlan =
+  if (String.length(payload) == 0) -> plan-str-empty(rest, ns, struct-base, payload-ty, cursor, i, kind, payload, shape-g, obj-g, struct-ty, tag, nbytes) | plan-str-bytes(rest, ns, struct-base, payload-ty, cursor, i, kind, payload, shape-g, obj-g, struct-ty, tag, nbytes)
+
+let plan-ctor(rest: List PoolObj, ns: Int, struct-base: Int, payload-ty: Int, cursor: Int, i: Int, kind: Int, payload: Str, shape-g: Int, obj-g: Int, struct-ty: Int, tag: Int, nbytes: Int) -> List ObjPlan =
+  ObjPlan(kind, payload, shape-g, obj-g, cursor, cursor + 1, -1, -1, -1, struct-ty, tag, nbytes) :: plan-statics(rest, ns, struct-base, payload-ty, cursor + 2, i + 1)
+
+let payload-type-count(objs: List PoolObj) -> Int =
+  match (objs)
+    | [] -> 0
+    | o :: rest ->
+      if (pool-obj-kind(o) == pool-kind-str && String.length(pool-obj-payload(o)) > 0) -> 1 + payload-type-count(rest) | payload-type-count(rest)
+
+let write-payload-types!(t: BitSink, ma: Int, plan: List ObjPlan) -> Unit =
+  match (plan)
+    | [] -> ()
+    | p :: rest ->
+      {
+        if (obj-payload-ty(p) >= 0) -> write-record!(t, type-code-array, [String.length(obj-payload(p)), ty-i8-idx(ma)]) | ()
+        write-payload-types!(t, ma, rest)
+      }
+
+let write-str-struct!(t: BitSink, p: ObjPlan) -> Unit =
+  if (obj-payload-ty(p) < 0) -> write-record!(t, type-code-struct-anon, [0, ty-ptr, ty-i64]) | write-record!(t, type-code-struct-anon, [0, ty-ptr, ty-i64, obj-payload-ty(p)])
+
+let write-struct-type!(t: BitSink, p: ObjPlan) -> Unit =
+  if (obj-kind(p) == pool-kind-str) -> write-str-struct!(t, p) | write-record!(t, type-code-struct-anon, [0, ty-ptr])
+
+let write-struct-types!(t: BitSink, plan: List ObjPlan) -> Unit =
+  match (plan)
+    | [] -> ()
+    | p :: rest ->
+      {
+        write-struct-type!(t, p)
+        write-struct-types!(t, rest)
+      }
+
+let write-pool-types!(t: BitSink, ma: Int, plan: List ObjPlan) -> Unit =
+  match (plan)
+    | [] -> ()
+    | _ ->
+      {
+        write-record!(t, type-code-array, [16, ty-i8-idx(ma)])
+        write-payload-types!(t, ma, plan)
+        write-struct-types!(t, plan)
+      }
+
+; align 8 is log2(8)+1, the same encoding `alloca` uses.
+let global-align-8 = 4
+
+let write-defined-global!(m: BitSink, ty: Int, init-abs: Int, align: Int) -> Unit =
+  write-record!(m, module-code-globalvar, [ty, globalvar-flags, init-abs + 1, 0, align, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+
+let write-external-global!(m: BitSink, ty: Int) -> Unit =
+  write-record!(m, module-code-globalvar, [ty, globalvar-flags, 0, 0, global-align-8, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+
+let write-static-globals!(m: BitSink, shape-ty: Int, plan: List ObjPlan) -> Unit =
+  match (plan)
+    | [] -> ()
+    | p :: rest ->
+      {
+        write-defined-global!(m, shape-ty, obj-shape-const(p), global-align-8)
+        write-defined-global!(m, obj-struct-ty(p), obj-agg-const(p), global-align-8)
+        write-static-globals!(m, shape-ty, rest)
+      }
+
+let write-singleton-globals!(m: BitSink, ma: Int, i: Int) -> Unit =
+  if (i >= static-singleton-count) -> () | write-singleton-globals-step!(m, ma, i)
+
+let write-singleton-globals-step!(m: BitSink, ma: Int, i: Int) -> Unit {
+  write-external-global!(m, ty-i8-idx(ma))
+  write-singleton-globals!(m, ma, i + 1)
+}
+
+let i32-le(n: Int) -> Str {
+  let sb = Buf.new()
+  Buf.append-byte!(sb, n % 256)
+  Buf.append-byte!(sb, (n / 256) % 256)
+  Buf.append-byte!(sb, (n / 65536) % 256)
+  Buf.append-byte!(sb, (n / 16777216) % 256)
+  Buf.take-str!(sb)
+}
+
+let shape-bytes(tag: Int, nbytes: Int, layout: Int) -> Str {
+  let sb = Buf.new()
+  Buf.append!(sb, i32-le(tag))
+  Buf.append!(sb, i32-le(nbytes))
+  Buf.append!(sb, i32-le(layout))
+  Buf.append!(sb, i32-le(1))
+  Buf.take-str!(sb)
+}
+
+let write-bytes-const!(c: BitSink, ty: Int, s: Str) -> Unit {
+  write-record!(c, cst-code-settype, [ty])
+  if (String.length(s) == 0) -> write-record!(c, cst-code-null, []) | write-record!(c, cst-code-string, str-byte-ops(s))
+}
+
+let write-i64-const!(c: BitSink, n: Int) -> Unit {
+  write-record!(c, cst-code-settype, [ty-i64])
+  let enc = encode-signed-i64(n)
+  if (enc == 0) -> write-record!(c, cst-code-null, []) | write-record!(c, cst-code-integer, [enc])
+}
+
+let write-obj-const!(c: BitSink, shape-ty: Int, p: ObjPlan) -> Unit =
+  if (obj-kind(p) == pool-kind-str) -> write-str-obj-const!(c, shape-ty, p) | write-ctor-obj-const!(c, shape-ty, p)
+
+let write-str-obj-const!(c: BitSink, shape-ty: Int, p: ObjPlan) -> Unit {
+  write-bytes-const!(c, shape-ty, shape-bytes(obj-tag(p), obj-nbytes(p), 2))
+  write-i64-const!(c, String.length(obj-payload(p)))
+  if (obj-payload-ty(p) >= 0) -> write-bytes-const!(c, obj-payload-ty(p), obj-payload(p)) | ()
+  write-str-agg!(c, p)
+}
+
+let write-str-agg!(c: BitSink, p: ObjPlan) -> Unit {
+  write-record!(c, cst-code-settype, [obj-struct-ty(p)])
+  if (obj-payload-ty(p) < 0) -> write-record!(c, cst-code-aggregate, [obj-shape-global(p), obj-len-const(p)]) | write-record!(c, cst-code-aggregate, [obj-shape-global(p), obj-len-const(p), obj-payload-const(p)])
+}
+
+let write-ctor-obj-const!(c: BitSink, shape-ty: Int, p: ObjPlan) -> Unit {
+  write-bytes-const!(c, shape-ty, shape-bytes(obj-tag(p), obj-nbytes(p), 0))
+  write-record!(c, cst-code-settype, [obj-struct-ty(p)])
+  write-record!(c, cst-code-aggregate, [obj-shape-global(p)])
+}
+
+let write-obj-consts!(c: BitSink, shape-ty: Int, plan: List ObjPlan) -> Unit =
+  match (plan)
+    | [] -> ()
+    | p :: rest ->
+      {
+        write-obj-const!(c, shape-ty, p)
+        write-obj-consts!(c, shape-ty, rest)
+      }
+
+let write-singleton-vst!(v: BitSink, base: Int, i: Int) -> Unit =
+  if (i >= static-singleton-count) -> () | write-singleton-vst-step!(v, base, i)
+
+let write-singleton-vst-step!(v: BitSink, base: Int, i: Int) -> Unit {
+  write-record!(v, vst-code-entry, (base + i) :: str-byte-ops(singleton-symbol(i)))
+  write-singleton-vst!(v, base, i + 1)
+}
+
 let write-target-triple!(m: BitSink, triple: Str) -> Unit =
   if (String.length(triple) == 0) -> () | write-record!(m, module-code-triple, str-byte-ops(triple))
 
@@ -935,28 +1162,49 @@ let write-module-body!(m: BitSink, mod: LlvmModule, triple: Str) -> Unit {
   let fs = llvm-module-funcs(mod)
   let globals = llvm-module-globals(mod)
   let imps = llvm-module-imports(mod)
+  let objs = llvm-module-objs(mod)
   let ni = imp-length(imps)
   let ma0 = max-arity-of(fs)
   let ma1 = max-imp-arity(imps, ma0)
   let ma =
     if (ma1 < 3) -> 3 | ma1
   let ns = int-list-length(str-lengths(globals))
+  let nobj = pool-obj-count(objs)
+  let npay = payload-type-count(objs)
+  let nfuncs = lfunc-list-length(fs)
+  let id-base = extern-id-base(ns, nobj)
+  let const-base = id-base + extern-count + ni + nfuncs
+  let shape-ty = ty-str-array-idx(ma, ns)
+  let struct-base = shape-ty + (if (nobj == 0) -> 0 | 1) + npay
+  let payload-ty0 = shape-ty + (if (nobj == 0) -> 0 | 1)
+  let plan = plan-statics(objs, ns, struct-base, payload-ty0, const-base + ns, 0)
+  let extra =
+    if (nobj == 0) -> 0 | 1 + npay + nobj
   write-record!(m, module-code-version, [1])
   write-target-triple!(m, triple)
-  enter-subblock!(m, type-block-id, fn (t) = write-types!(t, ma, globals))
-  write-globalvars!(m, ma, str-lengths(globals), 0, ns + extern-count + ni + lfunc-list-length(fs))
+  enter-subblock!(m, type-block-id, fn (t) {
+    write-types!(t, ma, globals, extra)
+    write-pool-types!(t, ma, plan)
+  })
+  write-globalvars!(m, ma, str-lengths(globals), 0, const-base)
+  write-static-globals!(m, shape-ty, plan)
+  write-singleton-globals!(m, ma, 0)
   write-extern-decls!(m, ma)
   write-import-decls!(m, imps)
   write-function-decls!(m, fs, ma)
-  enter-subblock!(m, constants-block-id, fn (c) = write-global-consts!(c, ma, globals, 0))
+  enter-subblock!(m, constants-block-id, fn (c) {
+    write-global-consts!(c, ma, globals, 0)
+    write-obj-consts!(c, shape-ty, plan)
+  })
   write-function-bodies!(m, ma, fs)
   enter-subblock!(
     m,
     value-symtab-block-id,
     fn (v) {
-      write-extern-vst-entries!(v, ns)
-      write-import-vst!(v, imps, ns + extern-count)
-      write-vst-entries!(v, fs, ns + extern-count + ni)
+      write-singleton-vst!(v, ns + 2 * nobj, 0)
+      write-extern-vst-entries!(v, id-base)
+      write-import-vst!(v, imps, id-base + extern-count)
+      write-vst-entries!(v, fs, id-base + extern-count + ni)
     }
   )
 }

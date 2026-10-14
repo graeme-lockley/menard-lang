@@ -1,0 +1,22 @@
+; A literal and a computed string compare and show the same. A literal
+; `None` is the same value `Map.lookup` returns for a missing key. A user
+; nullary built in two places shows the same text.
+
+import std/string as String
+import std/map as Map
+
+type Box =
+  | Empty
+  | Full(Int)
+
+let main() -> Int {
+  let lit = "ab"
+  let built = String.concat("a", "b")
+  println(lit == built)
+  println(show(lit))
+  println(show(built))
+  println(None() == Map.lookup(1, Map.empty()))
+  println(show(Empty()))
+  println(show(Empty()))
+  0
+}

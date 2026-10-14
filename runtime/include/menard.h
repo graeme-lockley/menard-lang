@@ -57,6 +57,25 @@ typedef struct MnShape {
   int32_t location; /* MN_LOC_HEAP / MN_LOC_STATIC */
 } MnShape;
 
+/* Header-only nullary. The runtime exports one of each builtin that
+ * user code can name, so a literal and a runtime return are one word. */
+typedef struct MnNullary {
+  MnShape *shape;
+} MnNullary;
+
+extern MnNullary mn_static_nil;
+extern MnNullary mn_static_none;
+extern MnNullary mn_static_not_found;
+extern MnNullary mn_static_permission;
+extern MnNullary mn_static_exists;
+extern MnNullary mn_static_is_a_directory;
+extern MnNullary mn_static_not_a_directory;
+extern MnNullary mn_static_invalid_path;
+extern MnNullary mn_static_too_large;
+extern MnNullary mn_static_not_executable;
+extern MnNullary mn_static_invalid_argument;
+extern MnNullary mn_static_too_many_arguments;
+
 /*
  * `Int` is 63-bit signed, tagged in the low bit: t(v) = (v << 1) | 1, held
  * in an `i64` (spec §2.2, "why Int is 63 bits"). `+` and `-` are exact on
