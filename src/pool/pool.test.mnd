@@ -24,11 +24,25 @@ let summary-is(fixture: Str, golden: Str) -> Bool =
     | Some(forms) ->
       match (read-file(project-file(golden)))
         | Err(_) -> false
-        | Ok(text) -> String.concat(pool-summary(forms), "\n") == text
+        | Ok(text) ->
+          match (pool-summary(forms))
+            | Err(_) -> false
+            | Ok(summary) -> String.concat(summary, "\n") == text
 
 test "dedups identical Str literals, reports a nullary ctor, and sorts by bytes" = summary-is("tests/phase2/fixtures/pool-basic.mnd", "tests/phase2/goldens/pool-basic.txt")
+
+test "float spellings collapse and -0.0 stays distinct" =
+  match (read-forms("tests/phase2/fixtures/pool-float.mnd"))
+    | None -> false
+    | Some(forms) ->
+      match (pool-summary(forms))
+        | Ok(summary) -> summary == "float 0000000000000000\nfloat 0000000000000080\nfloat 000000000000f03f"
+        | Err(_) -> false
 
 test "a program with no literals and no nullary ctors has an empty pool" =
   match (read-forms("tests/corpus/comments-and-bools.mnd"))
     | None -> false
-    | Some(forms) -> pool-summary(forms) == ""
+    | Some(forms) ->
+      match (pool-summary(forms))
+        | Ok(summary) -> summary == ""
+        | Err(_) -> false

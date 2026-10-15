@@ -5,6 +5,7 @@
 ; ("unclosed", "'!'", "unterminated") so both front ends report the same code.
 
 import "./ast.mnd"
+import "../pool/float-bits.mnd"
 import std/string as String
 import std/string-buffer as Buf
 
@@ -1120,6 +1121,15 @@ let parse-call-close(ps: Ps, callee: Ast, acc: List Ast) -> Result Ast ParseErro
     | None -> perr(peek(ps), "unclosed (")
     | Some(close) -> Ok(paren-at(acc, span-join(ast-span(callee), tok-span(close))))
 
+; A non-finite literal is rejected here, with the host reader's message,
+; so stage0 and the interpreter agree before any bitcode is emitted.
+let parse-float-tok(ps: Ps, t: Tok) -> Result Ast ParseError {
+  advance(ps)
+  match (float-bits(tok-text(t)))
+    | Err(_) -> perr(t, "invalid float")
+    | Ok(_) -> Ok(FloatNode(tok-text(t), tok-span(t)))
+}
+
 let parse-atom(ps: Ps) -> Result Ast ParseError {
   let t = peek(ps)
   cond
@@ -1137,11 +1147,7 @@ let parse-atom(ps: Ps) -> Result Ast ParseError {
         advance(ps)
         Ok(IntNode(int-value(tok-text(t)), tok-span(t)))
       }
-    | tok-kind(t) == "float" ->
-      {
-        advance(ps)
-        Ok(FloatNode(tok-text(t), tok-span(t)))
-      }
+    | tok-kind(t) == "float" -> parse-float-tok(ps, t)
     | tok-kind(t) == "str" ->
       {
         advance(ps)

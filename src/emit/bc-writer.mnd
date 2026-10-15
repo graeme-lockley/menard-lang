@@ -1005,7 +1005,10 @@ let plan-one(o: PoolObj, rest: List PoolObj, ns: Int, struct-base: Int, payload-
   let shape-g = ns + 2 * i
   let obj-g = shape-g + 1
   let struct-ty = struct-base + i
-  if (kind == pool-kind-str) -> plan-str(rest, ns, struct-base, payload-ty, cursor, i, kind, payload, shape-g, obj-g, struct-ty, pool-obj-tag(o), pool-obj-nbytes(o)) | plan-ctor(rest, ns, struct-base, payload-ty, cursor, i, kind, payload, shape-g, obj-g, struct-ty, pool-obj-tag(o), pool-obj-nbytes(o))
+  cond
+    | kind == pool-kind-str -> plan-str(rest, ns, struct-base, payload-ty, cursor, i, kind, payload, shape-g, obj-g, struct-ty, pool-obj-tag(o), pool-obj-nbytes(o))
+    | kind == pool-kind-float -> plan-float(rest, ns, struct-base, payload-ty, cursor, i, kind, payload, shape-g, obj-g, struct-ty, pool-obj-tag(o), pool-obj-nbytes(o))
+    | else -> plan-ctor(rest, ns, struct-base, payload-ty, cursor, i, kind, payload, shape-g, obj-g, struct-ty, pool-obj-tag(o), pool-obj-nbytes(o))
 }
 
 let plan-str-empty(rest: List PoolObj, ns: Int, struct-base: Int, payload-ty: Int, cursor: Int, i: Int, kind: Int, payload: Str, shape-g: Int, obj-g: Int, struct-ty: Int, tag: Int, nbytes: Int) -> List ObjPlan =
@@ -1020,11 +1023,18 @@ let plan-str(rest: List PoolObj, ns: Int, struct-base: Int, payload-ty: Int, cur
 let plan-ctor(rest: List PoolObj, ns: Int, struct-base: Int, payload-ty: Int, cursor: Int, i: Int, kind: Int, payload: Str, shape-g: Int, obj-g: Int, struct-ty: Int, tag: Int, nbytes: Int) -> List ObjPlan =
   ObjPlan(kind, payload, shape-g, obj-g, cursor, cursor + 1, -1, -1, -1, struct-ty, tag, nbytes) :: plan-statics(rest, ns, struct-base, payload-ty, cursor + 2, i + 1)
 
+; Shape, 8-byte payload, aggregate. No length word: a float is not a string.
+let plan-float(rest: List PoolObj, ns: Int, struct-base: Int, payload-ty: Int, cursor: Int, i: Int, kind: Int, payload: Str, shape-g: Int, obj-g: Int, struct-ty: Int, tag: Int, nbytes: Int) -> List ObjPlan =
+  ObjPlan(kind, payload, shape-g, obj-g, cursor, cursor + 2, -1, cursor + 1, payload-ty, struct-ty, tag, nbytes) :: plan-statics(rest, ns, struct-base, payload-ty + 1, cursor + 3, i + 1)
+
 let payload-type-count(objs: List PoolObj) -> Int =
   match (objs)
     | [] -> 0
     | o :: rest ->
-      if (pool-obj-kind(o) == pool-kind-str && String.length(pool-obj-payload(o)) > 0) -> 1 + payload-type-count(rest) | payload-type-count(rest)
+      if (has-payload-type(o)) -> 1 + payload-type-count(rest) | payload-type-count(rest)
+
+let has-payload-type(o: PoolObj) -> Bool =
+  pool-obj-kind(o) == pool-kind-float || pool-obj-kind(o) == pool-kind-str && String.length(pool-obj-payload(o)) > 0
 
 let write-payload-types!(t: BitSink, ma: Int, plan: List ObjPlan) -> Unit =
   match (plan)
@@ -1039,7 +1049,10 @@ let write-str-struct!(t: BitSink, p: ObjPlan) -> Unit =
   if (obj-payload-ty(p) < 0) -> write-record!(t, type-code-struct-anon, [0, ty-ptr, ty-i64]) | write-record!(t, type-code-struct-anon, [0, ty-ptr, ty-i64, obj-payload-ty(p)])
 
 let write-struct-type!(t: BitSink, p: ObjPlan) -> Unit =
-  if (obj-kind(p) == pool-kind-str) -> write-str-struct!(t, p) | write-record!(t, type-code-struct-anon, [0, ty-ptr])
+  cond
+    | obj-kind(p) == pool-kind-str -> write-str-struct!(t, p)
+    | obj-kind(p) == pool-kind-float -> write-record!(t, type-code-struct-anon, [0, ty-ptr, obj-payload-ty(p)])
+    | else -> write-record!(t, type-code-struct-anon, [0, ty-ptr])
 
 let write-struct-types!(t: BitSink, plan: List ObjPlan) -> Unit =
   match (plan)
@@ -1117,7 +1130,17 @@ let write-i64-const!(c: BitSink, n: Int) -> Unit {
 }
 
 let write-obj-const!(c: BitSink, shape-ty: Int, p: ObjPlan) -> Unit =
-  if (obj-kind(p) == pool-kind-str) -> write-str-obj-const!(c, shape-ty, p) | write-ctor-obj-const!(c, shape-ty, p)
+  cond
+    | obj-kind(p) == pool-kind-str -> write-str-obj-const!(c, shape-ty, p)
+    | obj-kind(p) == pool-kind-float -> write-float-obj-const!(c, shape-ty, p)
+    | else -> write-ctor-obj-const!(c, shape-ty, p)
+
+let write-float-obj-const!(c: BitSink, shape-ty: Int, p: ObjPlan) -> Unit {
+  write-bytes-const!(c, shape-ty, shape-bytes(obj-tag(p), obj-nbytes(p), 2))
+  write-bytes-const!(c, obj-payload-ty(p), obj-payload(p))
+  write-record!(c, cst-code-settype, [obj-struct-ty(p)])
+  write-record!(c, cst-code-aggregate, [obj-shape-global(p), obj-payload-const(p)])
+}
 
 let write-str-obj-const!(c: BitSink, shape-ty: Int, p: ObjPlan) -> Unit {
   write-bytes-const!(c, shape-ty, shape-bytes(obj-tag(p), obj-nbytes(p), 2))

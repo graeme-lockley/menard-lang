@@ -14,17 +14,9 @@
 ; the more natural Menard idiom for a two-way discriminator and needs no
 ; extra enum type to match on.
 ;
-; Float is a deliberate deviation from the host. The host reader stores an
-; f64 and normalises it on print (see host/src/reader/print.ts: -0.0, 0.0,
-; and integer-valued floats get a printed ".0"). Menard has no float
-; arithmetic yet — `f+`/`f-`/`f*`/`f/` are reserved builtin names with no
-; implementation in the Phase 1 host (host/src/interp/eval.ts has no case
-; for them), and there is no `int->float` conversion either — so a running
-; Menard program has no way to turn scanned decimal digits into a real
-; Float value. FloatNode therefore carries the literal source text
-; verbatim; printing it back out is still a byte-identical round trip for
-; every input, at the cost of not reproducing the host's normalised form.
-; Revisit once float arithmetic lands.
+; FloatNode carries the literal source text. Printing it back is a
+; byte-identical round trip. The emitter turns that text into one static
+; IEEE payload (`pool/float-bits.mnd`); it does not keep the spelling.
 
 ; `origin` is the module index in the flatten path list. A single file is 0.
 ; `line` is the 1-based source line of `start`, filled before typechecking.

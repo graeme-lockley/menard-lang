@@ -1,0 +1,4 @@
+; A parameter written without a type is rejected.
+
+let f(x) -> Int =
+  x

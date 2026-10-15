@@ -182,6 +182,7 @@
 
 import "../reader/ast.mnd"
 import "../pool/pool.mnd"
+import "../pool/float-bits.mnd"
 import "./llvm-ir.mnd"
 import "./bc-writer.mnd"
 import std/list
@@ -1139,55 +1140,60 @@ record StrPool {
   objs: List PoolObj
   str-ids: Map Str Int
   ctor-ids: Map Str Int
+  float-ids: Map Str Int
 }
 
 let str-pool-order-rev(p: StrPool) -> List Str =
   match (p)
-    | StrPool(o, _, _, _, _, _, _, _, _, _, _, _) -> o
+    | StrPool(o, _, _, _, _, _, _, _, _, _, _, _, _) -> o
 
 let str-pool-by-content(p: StrPool) -> Map Str Int =
   match (p)
-    | StrPool(_, m, _, _, _, _, _, _, _, _, _, _) -> m
+    | StrPool(_, m, _, _, _, _, _, _, _, _, _, _, _) -> m
 
 let str-pool-next(p: StrPool) -> Int =
   match (p)
-    | StrPool(_, _, n, _, _, _, _, _, _, _, _, _) -> n
+    | StrPool(_, _, n, _, _, _, _, _, _, _, _, _, _) -> n
 
 let str-pool-write-stdout-abs(p: StrPool) -> Int =
   match (p)
-    | StrPool(_, _, _, w, _, _, _, _, _, _, _, _) -> w
+    | StrPool(_, _, _, w, _, _, _, _, _, _, _, _, _) -> w
 
 let str-pool-print-i64-abs(p: StrPool) -> Int =
   match (p)
-    | StrPool(_, _, _, _, pr, _, _, _, _, _, _, _) -> pr
+    | StrPool(_, _, _, _, pr, _, _, _, _, _, _, _, _) -> pr
 
 let str-pool-write-stderr-abs(p: StrPool) -> Int =
   match (p)
-    | StrPool(_, _, _, _, _, e, _, _, _, _, _, _) -> e
+    | StrPool(_, _, _, _, _, e, _, _, _, _, _, _, _) -> e
 
 let str-pool-ctors(p: StrPool) -> Map Str CtorSpec =
   match (p)
-    | StrPool(_, _, _, _, _, _, c, _, _, _, _, _) -> c
+    | StrPool(_, _, _, _, _, _, c, _, _, _, _, _, _) -> c
 
 let str-pool-origins(p: StrPool) -> List Str =
   match (p)
-    | StrPool(_, _, _, _, _, _, _, o, _, _, _, _) -> o
+    | StrPool(_, _, _, _, _, _, _, o, _, _, _, _, _) -> o
 
 let str-pool-file-gids(p: StrPool) -> Ref (Map Str Int) =
   match (p)
-    | StrPool(_, _, _, _, _, _, _, _, g, _, _, _) -> g
+    | StrPool(_, _, _, _, _, _, _, _, g, _, _, _, _) -> g
 
 let str-pool-objs(p: StrPool) -> List PoolObj =
   match (p)
-    | StrPool(_, _, _, _, _, _, _, _, _, os, _, _) -> os
+    | StrPool(_, _, _, _, _, _, _, _, _, os, _, _, _) -> os
 
 let str-pool-str-ids(p: StrPool) -> Map Str Int =
   match (p)
-    | StrPool(_, _, _, _, _, _, _, _, _, _, ids, _) -> ids
+    | StrPool(_, _, _, _, _, _, _, _, _, _, ids, _, _) -> ids
 
 let str-pool-ctor-ids(p: StrPool) -> Map Str Int =
   match (p)
-    | StrPool(_, _, _, _, _, _, _, _, _, _, _, ids) -> ids
+    | StrPool(_, _, _, _, _, _, _, _, _, _, _, ids, _) -> ids
+
+let str-pool-float-ids(p: StrPool) -> Map Str Int =
+  match (p)
+    | StrPool(_, _, _, _, _, _, _, _, _, _, _, _, ids) -> ids
 
 ; After finalize, the first function extern's id. Cstring ids stay below it.
 let str-pool-extern-base(p: StrPool) -> Int =
@@ -1197,7 +1203,7 @@ let str-pool-extern-base(p: StrPool) -> Int =
 ; (collection alone never reads them) — `0 - 1` (`-1`) as a visibly
 ; invalid placeholder, same convention `new-bb`'s unresolved index uses.
 let str-pool-new(origins: List Str) -> StrPool =
-  StrPool([], Map.empty(), 0, -1, -1, -1, Map.empty(), origins, ref(Map.empty()), [], Map.empty(), Map.empty())
+  StrPool([], Map.empty(), 0, -1, -1, -1, Map.empty(), origins, ref(Map.empty()), [], Map.empty(), Map.empty(), Map.empty())
 
 let str-pool-count(p: StrPool) -> Int =
   str-pool-next(p)
@@ -1205,7 +1211,7 @@ let str-pool-count(p: StrPool) -> Int =
 let str-pool-add(p: StrPool, s: Str) -> StrPool =
   match (Map.lookup(s, str-pool-by-content(p)))
     | Some(_) -> p
-    | None -> StrPool(s :: str-pool-order-rev(p), Map.set(s, str-pool-next(p), str-pool-by-content(p)), str-pool-next(p) + 1, str-pool-write-stdout-abs(p), str-pool-print-i64-abs(p), str-pool-write-stderr-abs(p), str-pool-ctors(p), str-pool-origins(p), str-pool-file-gids(p), str-pool-objs(p), str-pool-str-ids(p), str-pool-ctor-ids(p))
+    | None -> StrPool(s :: str-pool-order-rev(p), Map.set(s, str-pool-next(p), str-pool-by-content(p)), str-pool-next(p) + 1, str-pool-write-stdout-abs(p), str-pool-print-i64-abs(p), str-pool-write-stderr-abs(p), str-pool-ctors(p), str-pool-origins(p), str-pool-file-gids(p), str-pool-objs(p), str-pool-str-ids(p), str-pool-ctor-ids(p), str-pool-float-ids(p))
 
 ; Always found once `str-pool-add` has run over every occurrence
 ; `collect-str-pool` sees — see that function's header comment for why
@@ -1222,9 +1228,9 @@ let str-pool-strs(p: StrPool) -> List Str =
 ; abs`/etc.) once the final string count is known — called exactly once,
 ; by `lower-program-build`, right after collection finishes and before
 ; any real lowering begins. Also attaches the program's user-ctor table.
-let str-pool-finalize(p: StrPool, ctors: Map Str CtorSpec, objs: List PoolObj, str-ids: Map Str Int, ctor-ids: Map Str Int) -> StrPool {
+let str-pool-finalize(p: StrPool, ctors: Map Str CtorSpec, objs: List PoolObj, str-ids: Map Str Int, ctor-ids: Map Str Int, float-ids: Map Str Int) -> StrPool {
   let base = extern-id-base(str-pool-count(p), pool-obj-count(objs))
-  StrPool(str-pool-order-rev(p), str-pool-by-content(p), str-pool-next(p), base, base + 1, base + 2, ctors, str-pool-origins(p), str-pool-file-gids(p), objs, str-ids, ctor-ids)
+  StrPool(str-pool-order-rev(p), str-pool-by-content(p), str-pool-next(p), base, base + 1, base + 2, ctors, str-pool-origins(p), str-pool-file-gids(p), objs, str-ids, ctor-ids, float-ids)
 }
 
 ; String globals come from `pool.mnd`'s sorted literals. `"\n"` is
@@ -1310,7 +1316,13 @@ let emitted-ctor-tag(name: Str, ctors: Map Str CtorSpec) -> Int =
         | None -> 0
 
 let classify-line(line: Str, ctors: Map Str CtorSpec) -> PoolLine =
-  if (String.starts-with("ctor ", line)) -> classify-ctor(String.slice(5, String.length(line) - 5, line), ctors) | classify-str(line)
+  cond
+    | String.starts-with("ctor ", line) -> classify-ctor(String.slice(5, String.length(line) - 5, line), ctors)
+    | String.starts-with("float ", line) -> classify-float(line)
+    | else -> classify-str(line)
+
+let classify-float(line: Str) -> PoolLine =
+  PoolLine(pool-kind-float, unhex-float(String.slice(6, 16, line)), -1, 13, 16)
 
 let classify-ctor(name: Str, ctors: Map Str CtorSpec) -> PoolLine {
   let si = singleton-index(name)
@@ -1344,35 +1356,43 @@ record BuiltPool {
   objs: List PoolObj
   str-ids: Map Str Int
   ctor-ids: Map Str Int
+  float-ids: Map Str Int
 }
 
-let assign-lines(lines: List PoolLine, ns: Int, nobj: Int, i: Int, objs: List PoolObj, str-ids: Map Str Int, ctor-ids: Map Str Int) -> BuiltPool =
+let assign-lines(lines: List PoolLine, ns: Int, nobj: Int, i: Int, objs: List PoolObj, str-ids: Map Str Int, ctor-ids: Map Str Int, float-ids: Map Str Int) -> BuiltPool =
   match (lines)
-    | [] -> BuiltPool(rev-objs(objs, []), str-ids, ctor-ids)
-    | line :: rest -> assign-one(line, rest, ns, nobj, i, objs, str-ids, ctor-ids)
+    | [] -> BuiltPool(rev-objs(objs, []), str-ids, ctor-ids, float-ids)
+    | line :: rest -> assign-one(line, rest, ns, nobj, i, objs, str-ids, ctor-ids, float-ids)
 
-let assign-one(line: PoolLine, rest: List PoolLine, ns: Int, nobj: Int, i: Int, objs: List PoolObj, str-ids: Map Str Int, ctor-ids: Map Str Int) -> BuiltPool =
+let assign-one(line: PoolLine, rest: List PoolLine, ns: Int, nobj: Int, i: Int, objs: List PoolObj, str-ids: Map Str Int, ctor-ids: Map Str Int, float-ids: Map Str Int) -> BuiltPool =
   match (line)
     | PoolLine(kind, text, si, tag, nbytes) ->
-      if (si >= 0) -> assign-lines(rest, ns, nobj, i, objs, str-ids, Map.set(text, ns + 2 * nobj + si, ctor-ids)) | assign-emitted(rest, ns, nobj, i, objs, str-ids, ctor-ids, kind, text, tag, nbytes)
+      if (si >= 0) -> assign-lines(rest, ns, nobj, i, objs, str-ids, Map.set(text, ns + 2 * nobj + si, ctor-ids), float-ids) | assign-emitted(rest, ns, nobj, i, objs, str-ids, ctor-ids, float-ids, kind, text, tag, nbytes)
 
-let assign-emitted(rest: List PoolLine, ns: Int, nobj: Int, i: Int, objs: List PoolObj, str-ids: Map Str Int, ctor-ids: Map Str Int, kind: Int, text: Str, tag: Int, nbytes: Int) -> BuiltPool {
+let assign-emitted(rest: List PoolLine, ns: Int, nobj: Int, i: Int, objs: List PoolObj, str-ids: Map Str Int, ctor-ids: Map Str Int, float-ids: Map Str Int, kind: Int, text: Str, tag: Int, nbytes: Int) -> BuiltPool {
   let gid = ns + 2 * i + 1
   let obj = PoolObj(kind, text, tag, nbytes)
   let str-ids2 =
     if (kind == pool-kind-str) -> Map.set(text, gid, str-ids) | str-ids
   let ctor-ids2 =
     if (kind == pool-kind-ctor) -> Map.set(text, gid, ctor-ids) | ctor-ids
-  assign-lines(rest, ns, nobj, i + 1, obj :: objs, str-ids2, ctor-ids2)
+  let float-ids2 =
+    if (kind == pool-kind-float) -> Map.set(text, gid, float-ids) | float-ids
+  assign-lines(rest, ns, nobj, i + 1, obj :: objs, str-ids2, ctor-ids2, float-ids2)
 }
 
-let attach-static-pool(p: StrPool, forms: List Ast, ctors: Map Str CtorSpec) -> StrPool {
-  let lines = classify-lines(pool-entry-lines(forms), ctors)
-  let nobj = emitted-count(lines)
-  let built = assign-lines(lines, str-pool-count(p), nobj, 0, [], Map.empty(), Map.empty())
+let attach-built(p: StrPool, lines: List Str, ctors: Map Str CtorSpec) -> StrPool {
+  let classified = classify-lines(lines, ctors)
+  let nobj = emitted-count(classified)
+  let built = assign-lines(classified, str-pool-count(p), nobj, 0, [], Map.empty(), Map.empty(), Map.empty())
   match (built)
-    | BuiltPool(objs, str-ids, ctor-ids) -> str-pool-finalize(p, ctors, objs, str-ids, ctor-ids)
+    | BuiltPool(objs, str-ids, ctor-ids, float-ids) -> str-pool-finalize(p, ctors, objs, str-ids, ctor-ids, float-ids)
 }
+
+let attach-static-pool(p: StrPool, forms: List Ast, ctors: Map Str CtorSpec, extra-arities: Map Str Int) -> Result StrPool Str =
+  match (pool-entry-lines-with(forms, extra-arities))
+    | Err(msg) -> Err(msg)
+    | Ok(lines) -> Ok(attach-built(p, lines, ctors))
 
 ; -- real lowering's own void-call emission: `println`/`print`/`write`
 ; call one of the three fixed runtime externs directly (never a real
@@ -1441,14 +1461,15 @@ let lower-expr-raw(ast: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRe
     | ParenNode(elems, sp) -> lower-paren(elems, sp, env, b, funcs, noop, pool)
     | BracketNode(_, _) -> Err("cannot lower a list literal with the real instruction lowerer yet")
     | StrNode(s, _) -> Ok(emit-str-lit!(b, pool, s))
-    | FloatNode(s, _) -> Ok(emit-float-lit!(b, pool, s))
+    | FloatNode(s, _) -> emit-float-lit!(b, pool, s)
 
-let emit-float-lit!(b: Builder, pool: StrPool, s: Str) -> Int {
-  let gid = str-pool-get(pool, s)
-  let ptr-i64 = emit-cast!(b, cast-ptrtoint, gid, ty-i64)
-  let len = const-i64!(b, String.length(s))
-  emit-call!(b, extern-float-from-str-abs(str-pool-extern-base(pool)), [ptr-i64, len])
-}
+let emit-float-lit!(b: Builder, pool: StrPool, s: Str) -> Result Int Str =
+  match (float-bits(s))
+    | Err(msg) -> Err(String.concat(msg, ": ", s))
+    | Ok(bits) ->
+      match (Map.lookup(bits, str-pool-float-ids(pool)))
+        | Some(gid) -> Ok(emit-static!(b, gid))
+        | None -> Err(String.concat("missing static float ", s))
 
 let emit-static!(b: Builder, gid: Int) -> Int =
   emit-cast!(b, cast-ptrtoint, gid, ty-i64)
@@ -3145,6 +3166,11 @@ pub record CtorTable {
   local: List CtorSeed
 }
 
+let seed-arities(seeds: List CtorSeed, acc: Map Str Int) -> Map Str Int =
+  match (seeds)
+    | [] -> acc
+    | CtorSeed(name, _, arity) :: rest -> seed-arities(rest, Map.set(name, arity, acc))
+
 let seed-specs(seeds: List CtorSeed, acc: Map Str CtorSpec) -> Map Str CtorSpec =
   match (seeds)
     | [] -> acc
@@ -3301,7 +3327,12 @@ let lower-program-build(word-lds: List LDefn, all-lds: List LDefn, forms: List A
   let specs =
     match (ctor-info(forms2, seeds))
       | CtorTable(s, _) -> s
-  let pool = attach-static-pool(add-slot-strs(slots, collect-str-pool(forms2, paths)), forms2, specs)
+  match (attach-static-pool(add-slot-strs(slots, collect-str-pool(forms2, paths)), forms2, specs, seed-arities(seeds, Map.empty())))
+    | Err(msg) -> Err(msg)
+    | Ok(pool) -> lower-program-pooled(word-lds2, triple, pool, imports, slots, all-lds)
+}
+
+let lower-program-pooled(word-lds2: List LDefn, triple: Str, pool: StrPool, imports: List Imp, slots: List Str, all-lds: List LDefn) -> Result Str Str {
   let ns = str-pool-count(pool)
   let base = str-pool-extern-base(pool)
   let num-funcs = length(word-lds2)

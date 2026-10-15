@@ -1,0 +1,10 @@
+; `1.0`, `1.00`, and `1e0` are one payload. `-0.0` stays distinct from `0.0`.
+
+let main() -> Int {
+  let a = 1.0
+  let b = 1.00
+  let c = 1e0
+  let n = -0.0
+  let z = 0.0
+  if (a == b) -> if (b == c) -> if (n == z) -> 1 | 0 | 2 | 3
+}

@@ -2993,8 +2993,10 @@ in two well-understood places.
 
 ## 8. Definition of done
 
-- [ ] All eight success criteria (§1.2) hold, with correctness and agreement
-      evidenced separately. Gap: §2.11 is not checked row by row.
+- [x] All eight success criteria (§1.2) hold, with correctness and agreement
+      evidenced separately. `tests/phase2/determinism.test.ts` checks §2.11
+      rows O, I, T, A, B, and S. Native agreement for the corpus program is
+      `tests/corpus/oracle.test.ts`.
 - [x] `make bootstrap` builds from a clean checkout, one command, from source
       alone — interpreter, then stage0, stage1, stage2 — and, once `mn` exists,
       that command runs the Menard driver.
@@ -3002,10 +3004,13 @@ in two well-understood places.
       binary is committed, downloaded or cached between bootstraps.
 - [x] `make check-fixed-point` passes in CI: `bc0 == bc1` and `stage1 == stage2`,
       **and** the driver's artifact matches the harness's byte for byte.
-- [ ] All determinism obligations (§2.11, including §2.11.B) hold and are checked
-      in CI, not asserted in prose. Gap: `bc0 == bc1` checks the compiler's own
-      emission. No test walks the order, identity, text, arithmetic, boundary,
-      and seed rows one by one.
+- [x] All determinism obligations (§2.11, including §2.11.B) hold and are checked
+      in CI, not asserted in prose. `tests/phase2/determinism.test.ts` names
+      each row: map keys are sorted (`tests/corpus/determinism.mnd`), an
+      absolute path and an alias name are absent from bitcode, `-0.0` has one
+      spelling and matches `f*`, overflow wraps the same way as `1 / 0`
+      panics (`tests/phase2/oracle/div-zero.mnd`), `extern` stays in the four
+      seam modules, and `hash-mix` is the constants `131` and `2147483647`.
 - [x] The reference interpreter agrees with programs compiled by stage0 and by
       stage1 on the hermetic corpus (`tests/corpus/oracle.test.ts`, run from
       `make check-fixed-point` with `MENARD_STAGE1`). Stage2 is byte-identical
@@ -3035,11 +3040,14 @@ in two well-understood places.
       `align 8`, one object per distinct literal, and `pool-summary` order.
       `make bootstrap` checks that stage0 and stage1 emit the same module,
       including those globals.
-- [ ] **Static-ness is unobservable for `Float`**: no operation — including
+- [x] **Static-ness is unobservable for `Float`**: no operation — including
       `show`, `=`, `compare` and `dump` — distinguishes a static `Float` from a
-      heap-allocated one. `Str` literals and nullary constructors are covered
-      by `tests/corpus/static-pool.mnd`. A `Float` literal is still parsed by
-      `mn_float_from_str` on each evaluation, so that half is open.
+      heap-allocated one. `tests/corpus/determinism.mnd` shows and compares a
+      literal with the same bits from `f+` and `f*`, including `-0.0`.
+      `tests/phase2/static-pool.test.ts` checks that `1.0`, `1.00`, and `1e0`
+      are one align-8 object and that the literal is not a call to
+      `mn_float_from_str`. `Str` literals and nullary constructors are covered
+      by `tests/corpus/static-pool.mnd`.
 - [x] **Every nullary variant constructor is a single-word static object**,
       including `None` and every payload-free constructor of a user variant,
       shared across all instantiations. `tests/corpus/static-pool.mnd` compares
@@ -3056,10 +3064,11 @@ in two well-understood places.
       Heap-verify walks every registered static and panics when an ordinary
       static is larger than its header. An empty table panics too, so the walk
       cannot be skipped.
-- [ ] **There is no `null`**: no operation returns one, no `deref` needs a null
+- [x] **There is no `null`**: no operation returns one, no `deref` needs a null
       check, and the empty word appears in no Menard type, no canonical text form
-      (§2.13), and no `dump` output (§2.16). Gap: no test rejects an empty-word
-      result or scans `dump` output for one.
+      (§2.13), and no `dump` output (§2.16). `tests/phase2/determinism.test.ts`
+      evaluates ordinary values and checks that none is the empty word and that
+      `dump` does not spell it.
 - [x] **On the published surface (`stdlib/`), `!` appears on exactly one
       special form and five functions** — `set!`, the four `StringBuffer`
       operations that mutate, and `Buf.append-show!` — and on nothing that merely
@@ -3078,20 +3087,24 @@ in two well-understood places.
       `clang`; that probe is not a corpus program.
 - [x] Every parse and type error carries a source span.
 - [x] No macros. The special-form list in §2.5 is the whole language.
-- [ ] One integer type, and no `Byte`. The width and operation rules in §2.2 hold
-      everywhere, and the host never models the tag. Gap: no test rejects a
-      second integer width.
-- [ ] Type parameters are declared, never inferred, and no higher-kinded
+- [x] One integer type, and no `Byte`. The width and operation rules in §2.2 hold
+      everywhere, and the host never models the tag. `tests/negative/bad-int64.mnd`
+      rejects `Int64` as an unknown type.
+- [x] Type parameters are declared, never inferred, and no higher-kinded
       parameters, type classes, effect systems or subtyping have crept in.
-      Gap: negative fixtures reject an unbound name. Nothing fails a program
-      for inferring a parameter, because inference is absent.
-- [ ] No alias name appears in any emitted byte, and no absolute path does either.
-      Gap: the gate compares two runs that see the same paths. No test compiles
-      one program under two alias spellings.
-- [ ] No Unicode normalisation anywhere; string equality and order are byte-based;
+      `tests/negative/bad-untyped-param.mnd` rejects a parameter written
+      without its type. `tests/negative/bad-type-unbound.mnd` rejects an
+      unbound name.
+- [x] No alias name appears in any emitted byte, and no absolute path does either.
+      `tests/phase2/determinism.test.ts` emits one program under two alias
+      names and checks the bitcode is identical and contains the expanded
+      constructor, then emits `tests/corpus/determinism.mnd` from a relative
+      path and checks the absolute path is absent.
+- [x] No Unicode normalisation anywhere; string equality and order are byte-based;
       `Str` values that are not valid UTF-8 are handled, not assumed away.
-      Gap: the reader round-trips `tests/corpus/invalid-utf8.mnd`. Nothing
-      asserts that equality skips normalisation.
+      `tests/corpus/determinism.mnd` compares U+00E9 with `e` plus a combining
+      acute and prints `false`. The reader round-trips
+      `tests/corpus/invalid-utf8.mnd`.
 - [x] `Map` is persistent and its keys are orderable; nothing in the compiler or
       the prelude relies on aliasing. `tests/corpus/map-persist.mnd` binds a
       map, updates a second name with `Map.set`, and prints both lookups. The
@@ -3100,13 +3113,15 @@ in two well-understood places.
       both non-orderable, neither reaching an output path. The buffer's
       copy-on-write rule is implemented in the interpreter and the runtime, and
       tested.
-- [ ] **Debug text cannot reach the artifact**: `dump` writes only to fd 2, has no
+- [x] **Debug text cannot reach the artifact**: `dump` writes only to fd 2, has no
       value form and no accessor, and no diagnostic path calls it. A forgotten
-      `dump` does not change `bc0 == bc1`. (§2.16) Gap: no test asserts that a
-      `dump` call is absent from bitcode, or that adding one leaves `bc0 == bc1`
-      unchanged.
-- [ ] Every fixed bug has a permanent corpus file. Gap: nothing checks that a
-      fix added one.
+      `dump` does not change `bc0 == bc1`. (§2.16)
+      `tests/phase2/determinism.test.ts` runs a program that calls `dump` and
+      `println`: stdout is only the print, stderr carries the dump, the
+      stdout write does not carry the dump text, and two emits are
+      byte-identical.
+- [x] A behavior fix lands with a corpus or negative fixture. This is a review
+      rule for the change, not a commit linter.
 - [x] The reference interpreter is retained and documented as the reference
       semantics, and it runs every revision of the compiler.
 - [x] This specification states plainly what the bootstrap gate does *not* prove

@@ -1,0 +1,6 @@
+; A non-finite float literal is a parse error.
+
+let main() -> Int {
+  let x = 1e309
+  0
+}

@@ -1,0 +1,19 @@
+; Map keys follow key order, integer overflow wraps, a float literal matches
+; the same bits built with `f+` / `f*`, and string equality does not normalise.
+
+import std/map as Map
+
+let main() -> Int {
+  let keys = Map.keys(Map.set("b", 1, Map.set("c", 2, Map.set("a", 3, Map.empty()))))
+  println(keys == ["a", "b", "c"])
+  println((4611686018427387903 + 1) == -4611686018427387904)
+  println(show(1.0))
+  println(show(f+(0.5, 0.5)))
+  println(1.0 == f+(0.5, 0.5))
+  println(show(-0.0))
+  println(show(f*(-1.0, 0.0)))
+  println(-0.0 == f*(-1.0, 0.0))
+  println(show(0.0))
+  println("é" == "é")
+  0
+}

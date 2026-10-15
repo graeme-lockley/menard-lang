@@ -12,5 +12,11 @@ let main() -> Int {
   let ab = "ab"
   let e = Empty()
   let n = None()
-  if (a == b) -> 1 | if (ab == a) -> 2 | if (e == Empty()) -> if (n == None()) -> 0 | 3 | 4
+  let one = 1.0
+  let one-wide = 1.00
+  let one-exp = 1e0
+  let neg-zero = -0.0
+  let pos-zero = 0.0
+  let summed = f+(0.5, 0.5)
+  if (a == b) -> 1 | if (ab == a) -> 2 | if (e == Empty()) -> if (n == None()) -> if (one == one-wide) -> if (one == one-exp) -> if (one == summed) -> if (neg-zero == pos-zero) -> 8 | 0 | 7 | 6 | 5 | 4 | 3
 }

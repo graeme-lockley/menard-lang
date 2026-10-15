@@ -1,0 +1,512 @@
+; Decimal float literal text to 8 little-endian IEEE-754 binary64 bytes.
+;
+; The compiler runs this itself, on whichever host is executing it, so
+; stage0 and stage1 emit the same payload. The arithmetic is integer
+; only: a significand times a power of ten, divided down to a 53-bit
+; significand, round-to-nearest-even. `-0.0` and `0.0` stay distinct.
+; `1.0`, `1.00`, and `1e0` are one payload. A value that overflows to
+; infinity is an error; underflow becomes a signed zero.
+
+import std/list
+import std/result as Result
+import std/string as String
+import std/string-buffer as Buf
+
+; 2^30. Two limbs multiply to 2^60, which still fits in a 63-bit Int.
+let limb-base() -> Int =
+  1073741824
+
+let two52() -> Int =
+  4503599627370496
+
+let two53() -> Int =
+  9007199254740992
+
+let two54() -> Int =
+  18014398509481984
+
+; A parsed decimal: sign, significant digits (most significant first,
+; no leading zeros), and the power of ten that places the radix point.
+; An empty digit list is zero.
+record Parsed {
+  neg: Bool
+  digits: List Int
+  e10: Int
+}
+
+let parsed-neg(p: Parsed) -> Bool =
+  match (p)
+    | Parsed(n, _, _) -> n
+
+let parsed-digits(p: Parsed) -> List Int =
+  match (p)
+    | Parsed(_, d, _) -> d
+
+let parsed-e10(p: Parsed) -> Int =
+  match (p)
+    | Parsed(_, _, e) -> e
+
+; ---------------------------------------------------------------------------
+; Base-2^30 integers, least-significant limb first. [] is zero.
+
+let bi-norm(xs: List Int) -> List Int =
+  match (xs)
+    | [] -> []
+    | h :: t -> bi-norm-cons(h, bi-norm(t))
+
+let bi-norm-cons(h: Int, t: List Int) -> List Int =
+  match (t)
+    | [] ->
+      if (h == 0) -> [] | [h]
+    | _ -> h :: t
+
+let bi-add(xs: List Int, ys: List Int) -> List Int =
+  bi-norm(bi-add-c(xs, ys, 0))
+
+let bi-add-c(xs: List Int, ys: List Int, c: Int) -> List Int =
+  match (xs)
+    | [] -> bi-add-rest(ys, c)
+    | x :: xt -> bi-add-both(x, xt, ys, c)
+
+let bi-add-both(x: Int, xt: List Int, ys: List Int, c: Int) -> List Int =
+  match (ys)
+    | [] -> bi-add-rest(x :: xt, c)
+    | y :: yt ->
+      {
+        let s = x + y + c
+        (s % limb-base()) :: bi-add-c(xt, yt, s / limb-base())
+      }
+
+let bi-add-rest(xs: List Int, c: Int) -> List Int =
+  cond
+    | c == 0 -> xs
+    | else ->
+      match (xs)
+        | [] -> [c]
+        | x :: xt ->
+          {
+            let s = x + c
+            (s % limb-base()) :: bi-add-rest(xt, s / limb-base())
+          }
+
+let bi-sub(xs: List Int, ys: List Int) -> List Int =
+  bi-norm(bi-sub-c(xs, ys, 0))
+
+let bi-sub-c(xs: List Int, ys: List Int, b: Int) -> List Int =
+  match (xs)
+    | [] -> []
+    | x :: xt -> bi-sub-both(x, xt, ys, b)
+
+let bi-sub-both(x: Int, xt: List Int, ys: List Int, b: Int) -> List Int =
+  match (ys)
+    | [] -> bi-sub-borrow(x, xt, b)
+    | y :: yt -> bi-sub-digits(x, xt, y, yt, b)
+
+let bi-sub-borrow(x: Int, xt: List Int, b: Int) -> List Int =
+  if (b == 0) -> x :: xt | bi-sub-digits(x, xt, 0, [], 1)
+
+let bi-sub-digits(x: Int, xt: List Int, y: Int, yt: List Int, b: Int) -> List Int {
+  let d = x - y - b
+  if (d < 0) -> (d + limb-base()) :: bi-sub-c(xt, yt, 1) | d :: bi-sub-c(xt, yt, 0)
+}
+
+let bi-cmp(xs: List Int, ys: List Int) -> Int =
+  bi-cmp-norm(bi-norm(xs), bi-norm(ys))
+
+let bi-cmp-norm(xs: List Int, ys: List Int) -> Int {
+  let lx = length(xs)
+  let ly = length(ys)
+  cond
+    | lx < ly -> -1
+    | lx > ly -> 1
+    | else -> bi-cmp-hi(reverse(xs), reverse(ys))
+}
+
+let bi-cmp-hi(xs: List Int, ys: List Int) -> Int =
+  match (xs)
+    | [] -> 0
+    | x :: xt -> bi-cmp-hi-rest(x, xt, ys)
+
+let bi-cmp-hi-rest(x: Int, xt: List Int, ys: List Int) -> Int =
+  match (ys)
+    | [] -> 0
+    | y :: yt ->
+      cond
+        | x < y -> -1
+        | x > y -> 1
+        | else -> bi-cmp-hi(xt, yt)
+
+let bi-mul-limb(xs: List Int, m: Int) -> List Int =
+  bi-norm(bi-mul-limb-c(xs, m, 0))
+
+let bi-mul-limb-c(xs: List Int, m: Int, c: Int) -> List Int =
+  match (xs)
+    | [] ->
+      if (c == 0) -> [] | [c]
+    | h :: t ->
+      {
+        let p = h * m + c
+        (p % limb-base()) :: bi-mul-limb-c(t, m, p / limb-base())
+      }
+
+let bi-shl-words(xs: List Int, n: Int) -> List Int =
+  if (n <= 0 || is-empty(xs)) -> xs | 0 :: bi-shl-words(xs, n - 1)
+
+let pow2(n: Int) -> Int =
+  if (n <= 0) -> 1 | 2 * pow2(n - 1)
+
+let bi-shl-bits(xs: List Int, k: Int) -> List Int =
+  if (k <= 0) -> bi-norm(xs) | bi-norm(bi-shl-rem(bi-shl-words(bi-norm(xs), k / 30), k % 30))
+
+let bi-shl-rem(xs: List Int, bits: Int) -> List Int =
+  if (bits == 0) -> xs | bi-shl-rem-c(xs, bits, 0)
+
+let bi-shl-rem-c(xs: List Int, bits: Int, c: Int) -> List Int =
+  match (xs)
+    | [] ->
+      if (c == 0) -> [] | [c]
+    | h :: t ->
+      {
+        let cur = h * pow2(bits) + c
+        (cur % limb-base()) :: bi-shl-rem-c(t, bits, cur / limb-base())
+      }
+
+let bi-mul(xs: List Int, ys: List Int) -> List Int =
+  match (bi-norm(ys))
+    | [] -> []
+    | y :: yt -> bi-add(bi-mul-limb(xs, y), bi-shl-words(bi-mul(xs, yt), 1))
+
+; n is non-negative and at most a couple of limbs (a 54-bit quotient).
+let bi-mul-int(xs: List Int, n: Int) -> List Int {
+  let lo = n % limb-base()
+  let hi = n / limb-base()
+  if (hi == 0) -> bi-mul-limb(xs, lo) | bi-add(bi-mul-limb(xs, lo), bi-shl-words(bi-mul-limb(xs, hi), 1))
+}
+
+let bi-from-int(n: Int) -> List Int =
+  cond
+    | n <= 0 -> []
+    | n < limb-base() -> [n]
+    | else -> [n % limb-base(), n / limb-base()]
+
+; `ds` is most-significant digit first.
+let bi-digits-msd(ds: List Int) -> List Int =
+  bi-digits-acc(ds, [])
+
+let bi-digits-acc(ds: List Int, acc: List Int) -> List Int =
+  match (ds)
+    | [] -> acc
+    | d :: rest -> bi-digits-acc(rest, bi-add(bi-mul-limb(acc, 10), bi-from-int(d)))
+
+let small-bitlen(n: Int) -> Int =
+  if (n <= 0) -> 0 | 1 + small-bitlen(n / 2)
+
+let bi-last(xs: List Int) -> Int =
+  match (xs)
+    | [] -> 0
+    | [h] -> h
+    | _ :: t -> bi-last(t)
+
+let bi-bitlen(xs: List Int) -> Int =
+  bi-bitlen-norm(bi-norm(xs))
+
+let bi-bitlen-norm(xs: List Int) -> Int =
+  match (xs)
+    | [] -> 0
+    | _ -> small-bitlen(bi-last(xs)) + 30 * (length(xs) - 1)
+
+let pow10(n: Int) -> List Int =
+  if (n <= 0) -> bi-from-int(1) | pow10-pow(n, bi-from-int(1), bi-from-int(10))
+
+let pow10-pow(n: Int, acc: List Int, base: List Int) -> List Int =
+  if (n <= 0) -> acc | pow10-step(n, acc, base)
+
+let pow10-step(n: Int, acc: List Int, base: List Int) -> List Int =
+  if (n % 2 == 1) -> pow10-pow(n / 2, bi-mul(acc, base), bi-mul(base, base)) | pow10-pow(n / 2, acc, bi-mul(base, base))
+
+; num ? den * 2^k
+let cmp-pow2(num: List Int, den: List Int, k: Int) -> Int =
+  if (k >= 0) -> bi-cmp(num, bi-shl-bits(den, k)) | bi-cmp(bi-shl-bits(num, 0 - k), den)
+
+let exp2-up(num: List Int, den: List Int, exp2: Int) -> Int =
+  if (cmp-pow2(num, den, exp2 + 1) >= 0) -> exp2-up(num, den, exp2 + 1) | exp2
+
+let exp2-down(num: List Int, den: List Int, exp2: Int) -> Int =
+  if (cmp-pow2(num, den, exp2) < 0) -> exp2-down(num, den, exp2 - 1) | exp2-up(num, den, exp2)
+
+; Largest q with den * q <= num, and q < hi.
+let quot(den: List Int, num: List Int) -> Int =
+  quot-search(den, num, 0, two54())
+
+let quot-search(den: List Int, num: List Int, lo: Int, hi: Int) -> Int =
+  if (hi - lo <= 1) -> lo | quot-mid(den, num, lo, hi)
+
+let quot-mid(den: List Int, num: List Int, lo: Int, hi: Int) -> Int {
+  let mid = lo + (hi - lo) / 2
+  if (bi-cmp(bi-mul-int(den, mid), num) <= 0) -> quot-search(den, num, mid, hi) | quot-search(den, num, lo, mid)
+}
+
+let round-up(q: Int, rem: List Int, den: List Int) -> Bool {
+  let c = bi-cmp(bi-shl-bits(rem, 1), den)
+  cond
+    | c > 0 -> true
+    | c == 0 -> q % 2 == 1
+    | else -> false
+}
+
+; ---------------------------------------------------------------------------
+; Parsing the lexer form: optional sign, digits, one dot, optional exponent.
+
+let is-digit-byte(b: Int) -> Bool =
+  b >= 48 && b <= 57
+
+let is-exp-mark(b: Int) -> Bool =
+  b == 101 || b == 69
+
+let parse-float(text: Str) -> Result Parsed Str =
+  if (String.length(text) == 0) -> Err("malformed float") | parse-signed(text)
+
+let parse-signed(text: Str) -> Result Parsed Str {
+  let b = String.byte(0, text)
+  cond
+    | b == 43 -> parse-body(text, 1, false, [], false, 0, false)
+    | b == 45 -> parse-body(text, 1, true, [], false, 0, false)
+    | else -> parse-body(text, 0, false, [], false, 0, false)
+}
+
+let parse-body(text: Str, i: Int, neg: Bool, rev-digits: List Int, saw-dot: Bool, frac: Int, saw: Bool) -> Result Parsed Str =
+  if (i >= String.length(text)) -> finish-body(neg, rev-digits, frac, saw) | parse-at(text, i, neg, rev-digits, saw-dot, frac, saw)
+
+let parse-at(text: Str, i: Int, neg: Bool, rev-digits: List Int, saw-dot: Bool, frac: Int, saw: Bool) -> Result Parsed Str {
+  let b = String.byte(i, text)
+  cond
+    | is-digit-byte(b) -> parse-digit(text, i, neg, rev-digits, saw-dot, frac, b)
+    | b == 46 && not(saw-dot) -> parse-body(text, i + 1, neg, rev-digits, true, frac, saw)
+    | is-exp-mark(b) && saw -> parse-exp(text, i + 1, neg, rev-digits, frac)
+    | else -> Err("malformed float")
+}
+
+let parse-digit(text: Str, i: Int, neg: Bool, rev-digits: List Int, saw-dot: Bool, frac: Int, b: Int) -> Result Parsed Str {
+  let frac2 =
+    if (saw-dot) -> frac + 1 | frac
+  parse-body(text, i + 1, neg, (b - 48) :: rev-digits, saw-dot, frac2, true)
+}
+
+let finish-body(neg: Bool, rev-digits: List Int, frac: Int, saw: Bool) -> Result Parsed Str =
+  if (saw) -> Ok(Parsed(neg, reverse(rev-digits), 0 - frac)) | Err("malformed float")
+
+let parse-exp(text: Str, i: Int, neg: Bool, rev-digits: List Int, frac: Int) -> Result Parsed Str =
+  if (i >= String.length(text)) -> Err("malformed float") | parse-exp-sign(text, i, neg, rev-digits, frac)
+
+let parse-exp-sign(text: Str, i: Int, neg: Bool, rev-digits: List Int, frac: Int) -> Result Parsed Str {
+  let b = String.byte(i, text)
+  cond
+    | b == 43 -> parse-exp-digits(text, i + 1, neg, rev-digits, frac, false, 0, false)
+    | b == 45 -> parse-exp-digits(text, i + 1, neg, rev-digits, frac, true, 0, false)
+    | else -> parse-exp-digits(text, i, neg, rev-digits, frac, false, 0, false)
+}
+
+let parse-exp-digits(text: Str, i: Int, neg: Bool, rev-digits: List Int, frac: Int, exp-neg: Bool, exp: Int, saw: Bool) -> Result Parsed Str =
+  if (i >= String.length(text)) -> finish-exp(neg, rev-digits, frac, exp-neg, exp, saw) | parse-exp-at(text, i, neg, rev-digits, frac, exp-neg, exp, saw)
+
+let parse-exp-at(text: Str, i: Int, neg: Bool, rev-digits: List Int, frac: Int, exp-neg: Bool, exp: Int, saw: Bool) -> Result Parsed Str {
+  let b = String.byte(i, text)
+  if (is-digit-byte(b)) -> parse-exp-digit(text, i, neg, rev-digits, frac, exp-neg, exp, b) | Err("malformed float")
+}
+
+; An exponent past a million is already non-finite or zero. Clamp so the
+; accumulator cannot wrap the 63-bit Int.
+let parse-exp-digit(text: Str, i: Int, neg: Bool, rev-digits: List Int, frac: Int, exp-neg: Bool, exp: Int, b: Int) -> Result Parsed Str {
+  let next =
+    if (exp > 100000) -> exp | exp * 10 + b - 48
+  parse-exp-digits(text, i + 1, neg, rev-digits, frac, exp-neg, next, true)
+}
+
+let finish-exp(neg: Bool, rev-digits: List Int, frac: Int, exp-neg: Bool, exp: Int, saw: Bool) -> Result Parsed Str =
+  if (not(saw)) -> Err("malformed float") | finish-exp-ok(neg, rev-digits, frac, exp-neg, exp)
+
+let finish-exp-ok(neg: Bool, rev-digits: List Int, frac: Int, exp-neg: Bool, exp: Int) -> Result Parsed Str {
+  let e =
+    if (exp-neg) -> 0 - exp | exp
+  Ok(Parsed(neg, reverse(rev-digits), e - frac))
+}
+
+let drop-leading(ds: List Int) -> List Int =
+  match (ds)
+    | [] -> []
+    | 0 :: rest -> drop-leading(rest)
+    | _ -> ds
+
+let drop-trailing(ds: List Int, e10: Int) -> Parsed =
+  drop-trailing-rev(reverse(ds), e10)
+
+let drop-trailing-rev(rev: List Int, e10: Int) -> Parsed =
+  match (rev)
+    | [] -> Parsed(false, [], e10)
+    | 0 :: rest -> drop-trailing-rev(rest, e10 + 1)
+    | _ -> Parsed(false, reverse(rev), e10)
+
+; ---------------------------------------------------------------------------
+; Encode a sign, a biased exponent, and a 52-bit fraction.
+
+let append-zeros!(sb: StringBuffer, n: Int) -> Unit =
+  if (n <= 0) -> () | append-one-zero!(sb, n)
+
+let append-one-zero!(sb: StringBuffer, n: Int) -> Unit {
+  Buf.append-byte!(sb, 0)
+  append-zeros!(sb, n - 1)
+}
+
+let pos-zero() -> Str {
+  let sb = Buf.new()
+  append-zeros!(sb, 8)
+  Buf.take-str!(sb)
+}
+
+let neg-zero() -> Str {
+  let sb = Buf.new()
+  append-zeros!(sb, 7)
+  Buf.append-byte!(sb, 128)
+  Buf.take-str!(sb)
+}
+
+let signed-zero(neg: Bool) -> Str =
+  if (neg) -> neg-zero() | pos-zero()
+
+let encode(sign: Int, biased: Int, frac: Int) -> Str {
+  let sb = Buf.new()
+  Buf.append-byte!(sb, frac % 256)
+  Buf.append-byte!(sb, (frac / 256) % 256)
+  Buf.append-byte!(sb, (frac / 65536) % 256)
+  Buf.append-byte!(sb, (frac / 16777216) % 256)
+  Buf.append-byte!(sb, (frac / 4294967296) % 256)
+  Buf.append-byte!(sb, (frac / 1099511627776) % 256)
+  Buf.append-byte!(sb, (frac / 281474976710656) % 16 + (biased % 16) * 16)
+  Buf.append-byte!(sb, (biased / 16) % 128 + sign * 128)
+  Buf.take-str!(sb)
+}
+
+let sign-bit(neg: Bool) -> Int =
+  if (neg) -> 1 | 0
+
+; Round q against rem/den, then pack a normal or a subnormal.
+let pack-normal(neg: Bool, exp2: Int, q0: Int, rem: List Int, den: List Int) -> Result Str Str {
+  let q =
+    if (round-up(q0, rem, den)) -> q0 + 1 | q0
+  pack-normal-q(neg, exp2, q)
+}
+
+let pack-normal-q(neg: Bool, exp2: Int, q: Int) -> Result Str Str =
+  if (q >= two53()) -> pack-normal-q(neg, exp2 + 1, two52()) | pack-normal-ok(neg, exp2, q)
+
+let pack-normal-ok(neg: Bool, exp2: Int, q: Int) -> Result Str Str =
+  cond
+    | exp2 > 1023 -> Err("non-finite float")
+    | q < two52() -> Err("float conversion failed")
+    | else -> Ok(encode(sign-bit(neg), exp2 + 1023, q - two52()))
+
+let pack-sub(neg: Bool, q0: Int, rem: List Int, den: List Int) -> Str {
+  let q =
+    if (round-up(q0, rem, den)) -> q0 + 1 | q0
+  if (q >= two52()) -> encode(sign-bit(neg), 1, 0) | pack-sub-q(neg, q)
+}
+
+let pack-sub-q(neg: Bool, q: Int) -> Str =
+  if (q == 0) -> signed-zero(neg) | encode(sign-bit(neg), 0, q)
+
+let divide-round(neg: Bool, exp2: Int, num: List Int, den: List Int, sub: Bool) -> Result Str Str {
+  let q = quot(den, num)
+  let rem = bi-sub(num, bi-mul-int(den, q))
+  if (sub) -> Ok(pack-sub(neg, q, rem, den)) | pack-normal(neg, exp2, q, rem, den)
+}
+
+let convert-sub(neg: Bool, num: List Int, den: List Int) -> Result Str Str =
+  divide-round(neg, 0, bi-shl-bits(num, 1074), den, true)
+
+let convert-normal(neg: Bool, exp2: Int, num: List Int, den: List Int) -> Result Str Str =
+  if (exp2 <= 52) -> divide-round(neg, exp2, bi-shl-bits(num, 52 - exp2), den, false) | divide-round(neg, exp2, num, bi-shl-bits(den, exp2 - 52), false)
+
+let convert-exp(neg: Bool, exp2: Int, num: List Int, den: List Int) -> Result Str Str =
+  cond
+    | exp2 > 1023 -> Err("non-finite float")
+    | exp2 < -1075 -> Ok(signed-zero(neg))
+    | exp2 < -1022 -> convert-sub(neg, num, den)
+    | else -> convert-normal(neg, exp2, num, den)
+
+let convert-ratio(neg: Bool, num: List Int, den: List Int) -> Result Str Str {
+  let est = bi-bitlen(num) - bi-bitlen(den)
+  convert-exp(neg, exp2-down(num, den, est), num, den)
+}
+
+let convert-parsed(p: Parsed) -> Result Str Str =
+  convert-parts(parsed-neg(p), parsed-digits(p), parsed-e10(p))
+
+let convert-parts(neg: Bool, digits: List Int, e10: Int) -> Result Str Str {
+  let sig = bi-digits-msd(digits)
+  if (e10 >= 0) -> convert-ratio(neg, bi-mul(sig, pow10(e10)), bi-from-int(1)) | convert-ratio(neg, sig, pow10(0 - e10))
+}
+
+let approx-log10(digits: List Int, e10: Int) -> Int =
+  length(digits) - 1 + e10
+
+let convert-scaled(neg: Bool, digits: List Int, e10: Int) -> Result Str Str {
+  let mag = approx-log10(digits, e10)
+  cond
+    | length(digits) > 400 -> Err("float literal too long")
+    | mag > 400 -> Err("non-finite float")
+    | mag < -400 -> Ok(signed-zero(neg))
+    | else -> convert-parts(neg, digits, e10)
+}
+
+let convert-trimmed(neg: Bool, digits: List Int, e10: Int) -> Result Str Str =
+  match (drop-trailing(digits, e10))
+    | Parsed(_, td, te) -> convert-scaled(neg, td, te)
+
+let convert-clean(p: Parsed) -> Result Str Str {
+  let digits = drop-leading(parsed-digits(p))
+  if (is-empty(digits)) -> Ok(signed-zero(parsed-neg(p))) | convert-trimmed(parsed-neg(p), digits, parsed-e10(p))
+}
+
+; The 8 payload bytes of one literal. `Err` is a non-finite value or a
+; token the lexer would not have produced.
+pub let float-bits(text: Str) -> Result Str Str =
+  match (parse-float(text))
+    | Err(msg) -> Err(msg)
+    | Ok(p) -> convert-clean(p)
+
+let hex-digit(n: Int) -> Str =
+  String.slice(n, 1, "0123456789abcdef")
+
+let hex-byte(b: Int) -> Str =
+  String.concat(hex-digit(b / 16), hex-digit(b % 16))
+
+let hex-from(s: Str, i: Int) -> Str =
+  if (i >= String.length(s)) -> "" | String.concat(hex-byte(String.byte(i, s)), hex-from(s, i + 1))
+
+; Sixteen hex chars of `float-bits`, low byte first. The pool summary
+; sorts these, and that order is the payload's byte order.
+pub let float-hex(text: Str) -> Result Str Str =
+  match (float-bits(text))
+    | Err(msg) -> Err(msg)
+    | Ok(bits) -> Ok(hex-from(bits, 0))
+
+let hex-val(c: Int) -> Int =
+  cond
+    | c >= 48 && c <= 57 -> c - 48
+    | c >= 97 && c <= 102 -> c - 87
+    | else -> 0
+
+let unhex-into!(sb: StringBuffer, hex: Str, i: Int) -> Unit =
+  if (i >= 16) -> () | unhex-byte!(sb, hex, i)
+
+let unhex-byte!(sb: StringBuffer, hex: Str, i: Int) -> Unit {
+  Buf.append-byte!(sb, hex-val(String.byte(i, hex)) * 16 + hex-val(String.byte(i + 1, hex)))
+  unhex-into!(sb, hex, i + 2)
+}
+
+; Inverse of `float-hex` for a 16-char summary payload.
+pub let unhex-float(hex: Str) -> Str {
+  let sb = Buf.new()
+  unhex-into!(sb, hex, 0)
+  Buf.take-str!(sb)
+}

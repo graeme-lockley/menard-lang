@@ -1,0 +1,4 @@
+; Int64 is not a second integer width.
+
+let f(x: Int64) -> Int =
+  0

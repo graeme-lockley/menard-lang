@@ -1,7 +1,8 @@
 /**
- * Static pool emission: string literals and nullary constructors are
- * align-8 objects, one per distinct value, in pool-summary order.
- * `None` is the runtime singleton, not a second copy.
+ * Static pool emission: string literals, float literals, and nullary
+ * constructors are align-8 objects, one per distinct value, in
+ * pool-summary order. `None` is the runtime singleton, not a second copy.
+ * `1.0`, `1.00`, and `1e0` share one payload; `-0.0` does not share `0.0`.
  */
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
@@ -78,6 +79,13 @@ describe("static pool objects", () => {
       expect(ir).toContain("ptrtoint ptr @mn_static_none to i64");
       const nullaries = ir.match(/constant \{ ptr \} \{ ptr @\d+ \}, align 8/g);
       expect(nullaries?.length).toBe(1);
+      const one = '[8 x i8] c"\\00\\00\\00\\00\\00\\00\\F0?"';
+      const neg = '[8 x i8] c"\\00\\00\\00\\00\\00\\00\\00\\80"';
+      expect(ir.split(one).length).toBe(2);
+      expect(ir.split(neg).length).toBe(2);
+      expect(ir).toMatch(/\{ ptr, \[8 x i8\] \} \{ ptr @\d+, \[8 x i8\] zeroinitializer \}, align 8/);
+      expect(ir).toContain('constant { ptr, [8 x i8] }');
+      expect(ir).not.toContain("call i64 @mn_float_from_str");
     } finally {
       await rm(bc).catch(() => {});
     }

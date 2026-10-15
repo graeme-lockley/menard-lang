@@ -1,0 +1,30 @@
+; Decimal text to little-endian IEEE-754 binary64. The hex is the payload
+; the static pool sorts, low byte first.
+
+import "./float-bits.mnd"
+import std/result as Result
+
+let hex-is(text: Str, hex: Str) -> Bool =
+  match (float-hex(text))
+    | Ok(h) -> h == hex
+    | Err(_) -> false
+
+let is-err(text: Str) -> Bool =
+  match (float-hex(text))
+    | Ok(_) -> false
+    | Err(_) -> true
+
+test "1.0, 1.00, and 1e0 are one payload" = hex-is("1.0", "000000000000f03f") && hex-is("1.00", "000000000000f03f") && hex-is("1e0", "000000000000f03f")
+
+test "-0.0 stays distinct from 0.0" = hex-is("-0.0", "0000000000000080") && hex-is("0.0", "0000000000000000") && hex-is("+0.0", "0000000000000000")
+
+test "ordinary magnitudes" = hex-is("1.5", "000000000000f83f") && hex-is("2.0", "0000000000000040") && hex-is("-1.0", "000000000000f0bf") && hex-is("0.1", "9a9999999999b93f")
+
+test "a tie rounds to even" = hex-is("1.0000000000000002", "010000000000f03f")
+
+test "subnormals and signed underflow" = hex-is("5e-324", "0100000000000000") && hex-is("1e-320", "e807000000000000") && hex-is("1e-400", "0000000000000000") && hex-is("-1e-400", "0000000000000080")
+
+test "overflow is an error" = is-err("1e400") && is-err("-1e309")
+
+test "unhex is the inverse of a known payload" =
+  unhex-float("000000000000f03f") == unhex-float("000000000000f03f")

@@ -1,7 +1,7 @@
 ; Static pool collection — slice 2F.
 ;
 ; ADR 38/spec §2.2.1: the static pool holds `Str` literals, `Float`
-; literals, interned `Sym` names and every nullary variant constructor
+; literals, and every nullary variant constructor
 ; (`None`, `(Empty)`, `(NotFound)`, …) — "one static `None` serves every
 ; instantiation" (§2.2.1), because types are erased and a nullary
 ; constructor's object is header-only. This module is the first slice of
@@ -12,15 +12,12 @@
 ; the same two rules emission uses so stage0 and stage1 agree byte for byte.
 ;
 ; `pool-summary` renders the result as one line per unique entry,
-; `"str \"…\""` or `"ctor Name"`, sorted — a goldenable text form checked
-; by `src/pool/pool.test.mnd`. `src/tools/pool-dump.mnd` prints the same
-; text for a file. `Float` literals and interned `Sym` names
-; (the pool's other two entry kinds, per §2.2.1) are not collected yet —
-; `reader/ast.mnd`'s own header comment notes Menard has no float
-; arithmetic to *produce* a `Float` value yet, and no program under `src/`
-; interns a `Sym` at runtime (`quote` is the only source of one, and its
-; body is data, not a name to intern) — so there is nothing to exercise
-; for either today; add them here when either lands.
+; `"str \"…\""`, `"float <16 hex chars>"`, or `"ctor Name"`, sorted — a
+; goldenable text form checked by `src/pool/pool.test.mnd`.
+; `src/tools/pool-dump.mnd` prints the same text for a file. A float line
+; is the little-endian payload (`float-bits.mnd`), so `1.0` and `1.00`
+; are one entry. Interned `Sym` names are not collected: nothing interns
+; one at runtime.
 ;
 ; ## Why "mention", not "provably-constructed"
 ;
@@ -40,13 +37,13 @@
 ;
 ; ## Wiring
 ;
-; `emit/lower.mnd` consumes `pool-str-literals` and `pool-nullary-names`
-; and emits one static object per entry, `align 8`, in `pool-summary`'s
-; byte order. `pool-summary` itself stays the goldenable text form.
-; Float literals stay on `mn_float_from_str`. Interned `Sym` names are
-; not collected: nothing interns one at runtime.
+; `emit/lower.mnd` consumes `pool-entry-lines` and emits one static
+; object per entry, `align 8`, in `pool-summary`'s byte order.
+; `pool-summary` itself stays the goldenable text form. Interned `Sym`
+; names are not collected: nothing interns one at runtime.
 
 import "../reader/ast.mnd"
+import "./float-bits.mnd"
 import std/list
 import std/string as String
 import std/map as Map
@@ -173,6 +170,20 @@ let collect-arities(forms: List Ast, acc: Map Str Int) -> Map Str Int =
 let all-ctor-arities(forms: List Ast) -> Map Str Int =
   collect-arities(forms, builtin-ctor-arities())
 
+; Separate compilation drops imported `variant` declarations before
+; lowering. The dependency's constructor seeds still name those
+; nullaries, and a mention is only pooled when the arity map says 0.
+let add-extra-arities(keys: List Str, extra: Map Str Int, acc: Map Str Int) -> Map Str Int =
+  match (keys)
+    | [] -> acc
+    | k :: rest ->
+      match (Map.lookup(k, extra))
+        | Some(a) -> add-extra-arities(rest, extra, Map.set(k, a, acc))
+        | None -> add-extra-arities(rest, extra, acc)
+
+let arities-with(forms: List Ast, extra: Map Str Int) -> Map Str Int =
+  collect-arities(forms, add-extra-arities(Map.keys(extra), extra, builtin-ctor-arities()))
+
 let is-nullary-ctor(name: Str, arities: Map Str Int) -> Bool =
   match (Map.lookup(name, arities))
     | None -> false
@@ -217,9 +228,13 @@ let walk-list(xs: List Ast, arities: Map Str Int, entries: Ref (List Str)) -> Un
         walk-list(rest, arities, entries)
       }
 
+let record-float!(entries: Ref (List Str), s: Str) -> Unit =
+  set!(entries, String.concat("rawf ", s) :: deref(entries))
+
 let walk-expr(ast: Ast, arities: Map Str Int, entries: Ref (List Str)) -> Unit =
   match (ast)
     | StrNode(s, _) -> record-str!(entries, s)
+    | FloatNode(s, _) -> record-float!(entries, s)
     | SymNode(name, _) ->
       if (is-nullary-ctor(name, arities)) -> record-ctor!(entries, name) | ()
     | ParenNode(elems, _) -> walk-paren(elems, arities, entries)
@@ -320,7 +335,6 @@ let collect-raw-list(xs: List Ast, acc: Ref (List Str)) -> Unit =
 let collect-raw-expr(ast: Ast, acc: Ref (List Str)) -> Unit =
   match (ast)
     | StrNode(s, _) -> set!(acc, s :: deref(acc))
-    | FloatNode(s, _) -> set!(acc, s :: deref(acc))
     | ParenNode(elems, _) -> collect-raw-paren(elems, acc)
     | BracketNode(elems, _) -> collect-raw-list(elems, acc)
     | _ -> ()
@@ -389,8 +403,8 @@ let collect-str-tops(forms: List Ast, acc: Ref (List Str)) -> Unit =
         collect-str-tops(rest, acc)
       }
 
-; Distinct `Str` literals, sorted by byte content. Float text is not
-; included: a float literal is still parsed by `mn_float_from_str`.
+; Distinct `Str` literals, sorted by byte content. Float literals are
+; not cstrings; their payloads live in the static pool.
 pub let pool-str-literals(forms: List Ast) -> List Str {
   let acc = ref([])
   collect-str-tops(forms, acc)
@@ -403,12 +417,40 @@ pub let pool-string-literals(forms: List Ast) -> List Str {
   sort-strs(dedup-list(deref(acc)))
 }
 
-pub let pool-entry-lines(forms: List Ast) -> List Str {
-  let arities = all-ctor-arities(forms)
+; `rawf <source>` is a float literal still spelled the way the source
+; wrote it. Resolve it to `float <hex>` so two spellings of one value
+; dedup, and so a non-finite literal fails the pool.
+let resolve-line(line: Str) -> Result Str Str =
+  if (String.starts-with("rawf ", line)) -> resolve-float(String.slice(5, String.length(line) - 5, line)) | Ok(line)
+
+let resolve-float(text: Str) -> Result Str Str =
+  match (float-hex(text))
+    | Err(msg) -> Err(String.concat(msg, ": ", text))
+    | Ok(hex) -> Ok(String.concat("float ", hex))
+
+let resolve-lines(xs: List Str, acc: List Str) -> Result (List Str) Str =
+  match (xs)
+    | [] -> Ok(reverse(acc))
+    | line :: rest ->
+      match (resolve-line(line))
+        | Err(msg) -> Err(msg)
+        | Ok(done) -> resolve-lines(rest, done :: acc)
+
+let entry-lines(forms: List Ast, arities: Map Str Int) -> Result (List Str) Str {
   let entries = ref([])
   walk-top-forms(forms, arities, entries)
-  sort-strs(dedup-list(deref(entries)))
+  match (resolve-lines(deref(entries), []))
+    | Err(msg) -> Err(msg)
+    | Ok(lines) -> Ok(sort-strs(dedup-list(lines)))
 }
+
+pub let pool-entry-lines(forms: List Ast) -> Result (List Str) Str =
+  entry-lines(forms, all-ctor-arities(forms))
+
+; `extra` is imported constructor arities. A local declaration still wins,
+; because `collect-arities` is applied after the extras.
+pub let pool-entry-lines-with(forms: List Ast, extra: Map Str Int) -> Result (List Str) Str =
+  entry-lines(forms, arities-with(forms, extra))
 
 let ctor-name-of(line: Str) -> Maybe Str =
   if (String.starts-with("ctor ", line)) -> Some(String.slice(5, String.length(line) - 5, line)) | None()
@@ -421,8 +463,12 @@ let ctor-names-of(lines: List Str) -> List Str =
         | Some(name) -> name :: ctor-names-of(rest)
         | None -> ctor-names-of(rest)
 
-pub let pool-nullary-names(forms: List Ast) -> List Str =
-  ctor-names-of(pool-entry-lines(forms))
+pub let pool-nullary-names(forms: List Ast) -> Result (List Str) Str =
+  match (pool-entry-lines(forms))
+    | Err(msg) -> Err(msg)
+    | Ok(lines) -> Ok(ctor-names-of(lines))
 
-pub let pool-summary(forms: List Ast) -> Str =
-  join-lines(pool-entry-lines(forms))
+pub let pool-summary(forms: List Ast) -> Result Str Str =
+  match (pool-entry-lines(forms))
+    | Err(msg) -> Err(msg)
+    | Ok(lines) -> Ok(join-lines(lines))

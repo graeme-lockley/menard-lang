@@ -175,9 +175,10 @@ pub record Imp {
 
 ; One compiler-emitted static object. `kind` 0 is a `Str` literal
 ; (`payload` is the bytes, `tag` 10, `nbytes` 16 + length). `kind` 1 is a
-; header-only nullary (`payload` is the constructor name). Runtime
-; singletons (`Nil`, `None`, the `IoError` nullaries) are not in this
-; list: they are fixed external globals.
+; header-only nullary (`payload` is the constructor name). `kind` 2 is a
+; `Float` literal (`payload` is 8 little-endian IEEE bytes, `tag` 13,
+; `nbytes` 16). Runtime singletons (`Nil`, `None`, the `IoError`
+; nullaries) are not in this list: they are fixed external globals.
 pub record PoolObj {
   kind: Int
   payload: Str
@@ -188,6 +189,8 @@ pub record PoolObj {
 pub let pool-kind-str = 0
 
 pub let pool-kind-ctor = 1
+
+pub let pool-kind-float = 2
 
 ; `Nil`, `None`, and the ten payload-free `IoError` / `SpawnError` objects.
 pub let static-singleton-count = 12
@@ -219,10 +222,14 @@ pub let pool-obj-count(objs: List PoolObj) -> Int =
 let str-extra-constants(payload: Str) -> Int =
   if (String.length(payload) == 0) -> 3 | 4
 
+; A float is a shape, an 8-byte payload, and the aggregate. No length word.
 let pool-extra-one(o: PoolObj) -> Int =
   match (o)
     | PoolObj(k, payload, _, _) ->
-      if (k == pool-kind-str) -> str-extra-constants(payload) | 2
+      cond
+        | k == pool-kind-str -> str-extra-constants(payload)
+        | k == pool-kind-float -> 3
+        | else -> 2
 
 pub let pool-extra-constants(objs: List PoolObj) -> Int =
   match (objs)

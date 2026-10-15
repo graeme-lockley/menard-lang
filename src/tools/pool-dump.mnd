@@ -23,10 +23,14 @@ let fail-parse(path: Str, e: ParseError) -> Unit =
   match (e)
     | ParseError(_, msg) -> fail(String.concat(path, ": parse error: ", msg))
 
-let print-summary(forms: List Ast) -> Unit {
-  println(pool-summary(forms))
-  exit(0)
-}
+let print-summary(forms: List Ast) -> Unit =
+  match (pool-summary(forms))
+    | Err(msg) -> fail(msg)
+    | Ok(summary) ->
+      {
+        println(summary)
+        exit(0)
+      }
 
 let check-source(path: Str, src: Str) -> Unit =
   match (read-all(src))

@@ -16,6 +16,7 @@
 #define TAG_STR 10
 #define TAG_REF 11
 #define TAG_SB 12
+#define TAG_FLOAT 13
 #define TAG_MAP 20
 #define TAG_CLOSURE 100
 #define TAG_BARE 102
@@ -38,6 +39,20 @@ static int64_t str_len(MnWord s) { return (int64_t)((MnWord *)(uintptr_t)s)[1]; 
 
 static const uint8_t *str_bytes(MnWord s) {
   return (const uint8_t *)(((MnWord *)(uintptr_t)s) + 2);
+}
+
+/* Eight payload bytes. `-0.0` and `0.0` differ, matching the interpreter. */
+static int cmp_float(MnWord a, MnWord b) {
+  const uint8_t *pa = (const uint8_t *)(((MnWord *)(uintptr_t)a) + 1);
+  const uint8_t *pb = (const uint8_t *)(((MnWord *)(uintptr_t)b) + 1);
+  int c = memcmp(pa, pb, 8);
+  if (c < 0) {
+    return -1;
+  }
+  if (c > 0) {
+    return 1;
+  }
+  return 0;
 }
 
 /* -1 / 0 / 1, same as memcmp then length. */
@@ -152,6 +167,9 @@ static int mn_equal_raw(MnWord a, MnWord b) {
   if (ta == TAG_STR) {
     return cmp_str(a, b) == 0;
   }
+  if (ta == TAG_FLOAT) {
+    return cmp_float(a, b) == 0;
+  }
   if (ident_tag(ta)) {
     return 0;
   }
@@ -203,6 +221,9 @@ static int cmp_raw(MnWord a, MnWord b) {
   }
   if (ta == TAG_STR) {
     return cmp_str(a, b);
+  }
+  if (ta == TAG_FLOAT) {
+    return cmp_float(a, b);
   }
   int64_t n = slot_count(a);
   int64_t nb = slot_count(b);
