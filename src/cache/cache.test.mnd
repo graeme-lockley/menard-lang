@@ -14,9 +14,8 @@ let forms-of(src: Str) -> List Ast =
 
 let sample() -> Iface = {
   let stubs = forms-of("extern id[a](x: a) -> a
-record Pair[a, b] {
-  fst: a
-  snd: b
+record Box[a] {
+  value: a
 }
 ")
   Iface(41, [DepRec(7, "/tmp/dep.mnd")], "init-sym", "main-sym", "Int", [FnRec("id", "mn_id", 1)], [CtorRec("Ok", 4, 1)], stubs)
@@ -42,7 +41,7 @@ let ctor-ok(ctors: List CtorRec) -> Bool =
 
 let stubs-ok(stubs: List Ast) -> Bool =
   match (stubs)
-    | a :: b :: [] -> String.starts-with("extern id[a]", print-form(a)) && String.starts-with("record Pair", print-form(b))
+    | a :: b :: [] -> String.starts-with("extern id[a]", print-form(a)) && String.starts-with("record Box", print-form(b))
     | _ -> false
 
 let same(got: Iface) -> Bool =

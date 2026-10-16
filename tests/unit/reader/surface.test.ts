@@ -295,6 +295,32 @@ describe("map literals and question", () => {
   });
 });
 
+describe("caml tuples", () => {
+  test("product types, literals, and projection round-trip", () => {
+    const forms = mustAll(`
+let make() -> Int * Str * Bool =
+  (1, "a", true)
+let a = make().1
+let b = make().2
+`);
+    expect(headOf(forms[0]!)).toBe("defn");
+    const printed = text(printAll(forms));
+    expect(printed).toContain("Int * Str * Bool");
+    expect(printed).toContain('(1, "a", true)');
+    expect(printed).toContain(".1");
+    expect(mustAll(printed).every((f, i) => astEqual(f, forms[i]!))).toBe(true);
+  });
+
+  test("tuple patterns in match arms", () => {
+    const forms = mustAll(`
+let f(p: Int * Str) -> Int =
+  match (p)
+    | (n, _) -> n
+`);
+    expect(text(printAll(forms))).toContain("(n, _)");
+  });
+});
+
 describe("missing if else", () => {
   test("a Unit arm may omit else", () => {
     const forms = mustAll(`

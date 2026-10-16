@@ -65,7 +65,7 @@ In scope without an import.
 | `indexed-map(f, xs)` | `f` on each index and element, from zero. |
 | `filter(f, xs)` | The elements for which `f` is true. |
 | `filter-map(f, xs)` | The `Some` values of `f`. |
-| `partition(f, xs)` | A `Pair` of the elements that pass and the elements that do not. |
+| `partition(f, xs)` | A product of the elements that pass and the elements that do not. |
 | `intersperse(sep, xs)` | `sep` between the elements. |
 | `fold(f, acc, xs)` | `f` from the left, starting at `acc`. `f` is `(acc, element) -> acc`. |
 | `sum(xs)` | The sum of a `List Int`. Empty sums to `0`. |
@@ -108,28 +108,21 @@ A map is persistent. Keys are orderable, and `keys` returns them in that order. 
 | `to-list(m)` | The entries, as pairs, in key order. |
 | `map(f, m)` | `f(key, value)` for each value. Keys stay. |
 | `filter(f, m)` | The entries for which `f(key, value)` is true. |
-| `fold(f, acc, m)` | `f` over the entries in key order. `f` is `(acc, Pair key value) -> acc`, because a function value takes at most two arguments. |
+| `fold(f, acc, m)` | `f` over the entries in key order. `f` is `(acc, key * value) -> acc`, because a function value takes at most two arguments. |
 | `remove(k, m)` | `m` without `k`. |
 | `merge(overlay, base)` | `base`, then `overlay`. Overlap keeps `overlay`. `base \|> Map.merge(overlay)`. |
 
-## Pair
+## Tuple
 
-`import std/pair`
+`import std/tuple`
 
-```
-pub record Pair[a, b] {
-  fst: a
-  snd: b
-}
-```
+Helpers over the product type `a * b`. Projection is `p.1` / `p.2`.
 
 | Function | |
 | --- | --- |
-| `map-fst(f, p)` | `f` on `fst`. |
-| `map-snd(f, p)` | `f` on `snd`. |
-| `map-both(f, g, p)` | `f` on `fst` and `g` on `snd`. |
-
-`p.fst` selects a field. `Pair.map-fst` is the function.
+| `map-fst(f, p)` | `f` on the first component. |
+| `map-snd(f, p)` | `f` on the second component. |
+| `map-both(f, g, p)` | `f` on the first and `g` on the second. |
 
 ## String
 

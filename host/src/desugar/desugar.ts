@@ -101,6 +101,19 @@ function desugarPub(ast: Ast & { tag: "list" }, diags: Diagnostic[]): Ast {
   if (kw === undefined || !isDeclKeyword(kw) || name === undefined) {
     return list("paren", mapElems(ast.elems, diags), ast.span);
   }
+  if (kw.tag === "sym" && nameEquals(kw.name, "defn")) {
+    const inner: Ast & { tag: "list" } = {
+      tag: "list",
+      kind: "paren",
+      elems: ast.elems.slice(1),
+      span: ast.span,
+    };
+    const desugared = desugarDefn(inner, diags);
+    if (desugared.tag !== "list") {
+      return list("paren", [desugarNode(ast.elems[0]!, diags), desugared], ast.span);
+    }
+    return list("paren", [desugarNode(ast.elems[0]!, diags), ...desugared.elems], ast.span);
+  }
   const nameOut =
     name.tag === "list" && name.kind === "paren"
       ? desugarNameForm(name, diags)
@@ -129,6 +142,7 @@ function desugarNode(ast: Ast, diags: Diagnostic[]): Ast {
     return list("paren", mapElems(ast.elems, diags), ast.span);
   }
 
+  if (nameEquals(head.name, "defn")) return desugarDefn(ast, diags);
   if (isDeclKeyword(head)) return desugarDecl(ast, diags);
   if (nameEquals(head.name, "pub")) return desugarPub(ast, diags);
   if (nameEquals(head.name, "and")) return desugarAnd(ast, diags);
@@ -181,6 +195,7 @@ const PIPE_BLOCKED = new Set([
   "or",
   "quote",
   "char",
+  "tuple",
   "Cons",
   "Nil",
   "+",
@@ -200,6 +215,63 @@ const PIPE_BLOCKED = new Set([
   "f/",
   "::",
 ]);
+
+/**
+ * `(defn name (param PAT T) … -> Ret body)` → simple params plus a match wrap
+ * so the runtime only sees name bindings.
+ */
+function desugarDefn(ast: Ast & { tag: "list" }, diags: Diagnostic[]): Ast {
+  const base = desugarDecl(ast, diags);
+  if (base.tag !== "list") return base;
+  let arrow = -1;
+  for (let i = 2; i < base.elems.length; i++) {
+    const e = base.elems[i]!;
+    if (e.tag === "sym" && nameEquals(e.name, "->")) {
+      arrow = i;
+      break;
+    }
+  }
+  if (arrow < 0) return base;
+  const params = base.elems.slice(2, arrow);
+  const after = base.elems.slice(arrow);
+  const newParams: Ast[] = [];
+  const wraps: { name: Ast; pat: Ast }[] = [];
+  for (let i = 0; i < params.length; i++) {
+    const p = params[i]!;
+    if (
+      p.tag === "list" &&
+      p.elems[0]?.tag === "sym" &&
+      nameEquals(p.elems[0].name, "param") &&
+      p.elems[1] &&
+      p.elems[2]
+    ) {
+      const pname = sym(`__p${i}`, p.span);
+      newParams.push(
+        list("paren", [sym(`__p${i}:`, p.span), desugarNode(p.elems[2], diags)], p.span),
+      );
+      wraps.push({ name: pname, pat: desugarNode(p.elems[1], diags) });
+    } else {
+      newParams.push(desugarNode(p, diags));
+    }
+  }
+  if (wraps.length === 0) return base;
+  // body is everything after return type
+  const ret = after[1]!;
+  let bodyForms = after.slice(2).map((e) => desugarNode(e, diags));
+  let body: Ast =
+    bodyForms.length === 1
+      ? bodyForms[0]!
+      : list("paren", [sym("do", ast.span), ...bodyForms], ast.span);
+  for (let i = wraps.length - 1; i >= 0; i--) {
+    const w = wraps[i]!;
+    body = list("paren", [sym("match", w.pat.span), w.name, w.pat, body], w.pat.span);
+  }
+  return list(
+    "paren",
+    [desugarNode(base.elems[0]!, diags), desugarNode(base.elems[1]!, diags), ...newParams, sym("->", ret.span), ret, body],
+    ast.span,
+  );
+}
 
 /** A call is a parenthesized application. A bare name or a projection is not. */
 function isPipeCall(ast: Ast): ast is Ast & { tag: "list" } {

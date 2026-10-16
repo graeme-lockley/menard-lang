@@ -1,0 +1,28 @@
+; Caml-style n-tuples: construction, 1-based projection, destructuring
+; patterns (match/let/params), and the runtime's generic `=`/`compare`
+; (no derive.mnd/lower.mnd changes needed for those two — see the shape-tag
+; + slot-count comparison in runtime/src/equal.c).
+
+let swap(p: Int * Int) -> Int * Int =
+  match (p)
+    | (a, b) -> (b, a)
+
+let sum3(t: Int * Int * Int) -> Int =
+  t.1 + t.2 + t.3
+
+let main() -> Int {
+  let pair = (1, 2)
+  println(pair.1)
+  println(pair.2)
+  println(swap(pair) == (2, 1))
+  match (swap(pair))
+    | (a, b) -> println(a + b)
+  println(sum3((1, 2, 3)))
+  println((1, 2) == (1, 2))
+  println((1, 2) == (1, 3))
+  println(compare((1, 2), (1, 3)) < 0)
+  let triple = (1, (2, 3), 4)
+  match (triple)
+    | (x, (y, z), w) -> println(x + y + z + w)
+  0
+}

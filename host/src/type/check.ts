@@ -11,6 +11,7 @@ import {
   type VariantCtor,
   prim,
   tFn,
+  tProduct,
   tList,
   tMap,
   tMaybe,
@@ -291,6 +292,13 @@ export function parseTypeExpr(env: TypeEnv, ast: Ast, params: Set<string>): Type
       const ret = parseTypeExpr(env, ast.elems[arrowIdx + 1]!, params);
       return tFn(ps, ret);
     }
+    if (hn === "product") {
+      if (ast.elems.length < 3) {
+        err(env, "E_TYPE_EXPR", "product type requires at least two factors", ast.span);
+        return freshVar(env);
+      }
+      return tProduct(ast.elems.slice(1).map((e) => parseTypeExpr(env, e, params)));
+    }
     if (hn && env.types.has(hn)) {
       const def = env.types.get(hn)!;
       const args = ast.elems.slice(1).map((e) => parseTypeExpr(env, e, params));
@@ -326,6 +334,8 @@ function applySubst(t: Type, s: Subst): Type {
       return { tag: "arr", elem: applySubst(t.elem, s), n: t.n };
     case "fn":
       return tFn(t.params.map((p) => applySubst(p, s)), applySubst(t.ret, s));
+    case "product":
+      return tProduct(t.elems.map((e) => applySubst(e, s)));
     case "nominal":
       return { ...t, args: t.args.map((a) => applySubst(a, s)) };
     case "ctor":
@@ -352,6 +362,8 @@ function occurs(id: number, t: Type, s: Subst): boolean {
       return occurs(id, t2.elem, s);
     case "fn":
       return t2.params.some((p) => occurs(id, p, s)) || occurs(id, t2.ret, s);
+    case "product":
+      return t2.elems.some((e) => occurs(id, e, s));
     case "nominal":
       return t2.args.some((a) => occurs(id, a, s));
     case "ctor":
@@ -400,6 +412,21 @@ function unify(env: TypeEnv, a: Type, b: Type, s: Subst, span: Span): boolean {
     }
     return unify(env, ta.ret, tb.ret, s, span);
   }
+  if (ta.tag === "product" && tb.tag === "product") {
+    if (ta.elems.length !== tb.elems.length) {
+      err(
+        env,
+        "E_TYPE_ARITY",
+        `product arity mismatch: expected ${ta.elems.length}, found ${tb.elems.length}`,
+        span,
+      );
+      return false;
+    }
+    for (let i = 0; i < ta.elems.length; i++) {
+      if (!unify(env, ta.elems[i]!, tb.elems[i]!, s, span)) return false;
+    }
+    return true;
+  }
   if (ta.tag === "nominal" && tb.tag === "nominal" && ta.name === tb.name) {
     if (ta.args.length !== tb.args.length) {
       err(env, "E_TYPE_MISMATCH", `type argument count mismatch for ${ta.name}`, span);
@@ -447,6 +474,8 @@ function replaceParams(t: Type, map: Map<string, Type>): Type {
       return { tag: "arr", elem: replaceParams(t.elem, map), n: t.n };
     case "fn":
       return tFn(t.params.map((p) => replaceParams(p, map)), replaceParams(t.ret, map));
+    case "product":
+      return tProduct(t.elems.map((e) => replaceParams(e, map)));
     case "nominal":
       return { ...t, args: t.args.map((a) => replaceParams(a, map)) };
     case "ctor":
@@ -472,6 +501,8 @@ function isShowable(t: Type): boolean {
       return isShowable(t.ok) && isShowable(t.err);
     case "arr":
       return isShowable(t.elem);
+    case "product":
+      return t.elems.every(isShowable);
     case "nominal":
       return t.args.every(isShowable);
     case "param":
@@ -506,6 +537,8 @@ function isOrderable(t: Type): boolean {
       return isOrderable(t.ok) && isOrderable(t.err);
     case "arr":
       return isOrderable(t.elem);
+    case "product":
+      return t.elems.every(isOrderable);
     case "nominal":
       return t.args.every(isOrderable);
     case "param":
@@ -688,6 +721,8 @@ function nominalNamesInType(t: Type): string[] {
       return [...nominalNamesInType(t.ok), ...nominalNamesInType(t.err)];
     case "arr":
       return nominalNamesInType(t.elem);
+    case "product":
+      return t.elems.flatMap(nominalNamesInType);
     default:
       return [];
   }
@@ -912,12 +947,15 @@ function typecheckTop(
   }
   // Top-level (let x e) binds for later forms; (let x e body…) is a full expression
   if (hn === "let" && ast.elems.length === 3) {
-    const n = symStr(ast.elems[1]!);
+    const binder = ast.elems[1]!;
     const t = infer(env, ast.elems[2]!, topLocal, topSubst);
+    const n = symStr(binder);
     if (n) {
       topLocal.set(n, t);
       // A module-level value, visible to later `defn` bodies and to importers.
       env.values.set(n, { params: [], type: t });
+    } else {
+      bindPattern(env, binder, t, topLocal, topSubst, new Set());
     }
     return;
   }
@@ -1019,9 +1057,17 @@ function parseDefn(
       break;
     }
     if (e.tag === "list" && e.elems.length >= 2) {
-      const pn = fieldName(e.elems[0]!) ?? symStr(e.elems[0]!);
-      if (pn) {
-        paramNames.push(pn);
+      const head = fieldName(e.elems[0]!) ?? symStr(e.elems[0]!);
+      if (head === "param" && e.elems.length >= 3) {
+        // Desugar should have rewritten these; accept as a typed slot named __pN.
+        const pname = `__p${paramNames.length}`;
+        paramNames.push(pname);
+        paramTypes.push(parseTypeExpr(env, e.elems[2]!, paramSet));
+        idx++;
+        continue;
+      }
+      if (head) {
+        paramNames.push(head.endsWith(":") ? head.slice(0, -1) : head);
         paramTypes.push(parseTypeExpr(env, e.elems[1]!, paramSet));
       }
       idx++;
@@ -1107,6 +1153,7 @@ function infer(
       }
       if (hn === "char") return prim("Char");
       if (hn === "project") return inferProject(env, ast, local, subst);
+      if (hn === "tuple") return inferTuple(env, ast, local, subst);
       if (hn === "set!") {
         // (set! r v)
         if (ast.elems.length !== 3) {
@@ -1126,6 +1173,20 @@ function infer(
   }
 }
 
+function inferTuple(
+  env: TypeEnv,
+  ast: Ast & { tag: "list" },
+  local: Map<string, Type>,
+  subst: Subst,
+): Type {
+  if (ast.elems.length < 3) {
+    err(env, "E_TYPE_ARITY", "tuple requires at least two elements", ast.span);
+    return freshVar(env);
+  }
+  const elems = ast.elems.slice(1).map((e) => infer(env, e, local, subst));
+  return tProduct(elems);
+}
+
 function inferProject(
   env: TypeEnv,
   ast: Ast & { tag: "list" },
@@ -1134,7 +1195,33 @@ function inferProject(
 ): Type {
   const obj = ast.elems[1];
   const fieldAst = ast.elems[2];
-  if (!obj || fieldAst?.tag !== "sym") {
+  if (!obj || !fieldAst) {
+    err(env, "E_TYPE_ARITY", "project expects a value and a field", ast.span);
+    return freshVar(env);
+  }
+  if (fieldAst.tag === "int") {
+    const idx = Number(fieldAst.value);
+    if (idx < 1) {
+      err(env, "E_TYPE_UNBOUND", "tuple projection must be a positive index", fieldAst.span);
+      return freshVar(env);
+    }
+    const objTy = applySubst(infer(env, obj, local, subst), subst);
+    if (objTy.tag !== "product") {
+      err(env, "E_TYPE_MISMATCH", `expected a product, found ${typeShow(objTy)}`, obj.span);
+      return freshVar(env);
+    }
+    if (idx > objTy.elems.length) {
+      err(
+        env,
+        "E_TYPE_UNBOUND",
+        `tuple index ${idx} out of range for product of ${objTy.elems.length}`,
+        fieldAst.span,
+      );
+      return freshVar(env);
+    }
+    return objTy.elems[idx - 1]!;
+  }
+  if (fieldAst.tag !== "sym") {
     err(env, "E_TYPE_ARITY", "project expects a value and a field", ast.span);
     return freshVar(env);
   }
@@ -1215,19 +1302,26 @@ function inferLet(
   subst: Subst,
 ): Type {
   // (let x e) or (let x e body…) — sequential; last is result if body present
-  // Simplified: (let name expr) binds; if more forms follow as siblings in do — handle (let x e) only as binding form returning Unit, or Scheme-like (let x e body)
+  // (let (tuple …) e [body…]) binds via the pattern
   if (ast.elems.length < 3) {
     err(env, "E_TYPE_LET", "let requires name and expression", ast.span);
     return freshVar(env);
   }
-  const name = symStr(ast.elems[1]!);
-  if (!name) {
-    err(env, "E_TYPE_LET", "let name must be a symbol", ast.elems[1]!.span);
-    return freshVar(env);
-  }
-  const t = inferNamedExpr(env, name, ast.elems[2]!, local, subst);
+  const binder = ast.elems[1]!;
+  const name = symStr(binder);
   const next = new Map(local);
-  next.set(name, t);
+  if (name) {
+    const t = inferNamedExpr(env, name, ast.elems[2]!, local, subst);
+    next.set(name, t);
+    if (ast.elems.length === 3) return t;
+    let last: Type = t;
+    for (let i = 3; i < ast.elems.length; i++) {
+      last = infer(env, ast.elems[i]!, next, subst);
+    }
+    return last;
+  }
+  const t = infer(env, ast.elems[2]!, local, subst);
+  bindPattern(env, binder, t, next, subst, new Set());
   if (ast.elems.length === 3) return t;
   let last: Type = t;
   for (let i = 3; i < ast.elems.length; i++) {
@@ -1261,9 +1355,11 @@ function inferSequence(
       symStr(e.elems[0]) === "let" &&
       e.elems.length === 3
     ) {
-      const n = symStr(e.elems[1]!);
+      const binder = e.elems[1]!;
+      const n = symStr(binder);
       const t = n ? inferNamedExpr(env, n, e.elems[2]!, loc, subst) : infer(env, e.elems[2]!, loc, subst);
       if (n) loc.set(n, t);
+      else bindPattern(env, binder, t, loc, subst, new Set());
       last = t;
       continue;
     }
@@ -1433,6 +1529,9 @@ function inferMatch(
       }
     }
   }
+  if (scrut.tag === "product" && !hasWild && !covered.has("__product__")) {
+    err(env, "E_TYPE_EXHAUSTIVE", "non-exhaustive match: missing product", ast.span);
+  }
 
   return result ?? freshVar(env);
 }
@@ -1491,7 +1590,10 @@ function bindPattern(
 ): void {
   if (pat.tag === "sym") {
     const n = symStr(pat)!;
-    if (n === "_") return;
+    if (n === "_") {
+      if (applySubst(scrut, subst).tag === "product") covered.add("__product__");
+      return;
+    }
     if (env.ctors.has(n)) {
       covered.add(n);
       const ctor = env.ctors.get(n)!;
@@ -1513,6 +1615,7 @@ function bindPattern(
       }
       return;
     }
+    if (applySubst(scrut, subst).tag === "product") covered.add("__product__");
     local.set(n, applySubst(scrut, subst));
     return;
   }
@@ -1534,8 +1637,34 @@ function bindPattern(
       bindRecordPat(env, pat, scrut, local, subst, covered);
       return;
     }
+    if (cn === "tuple") {
+      const elems = pat.elems.slice(1);
+      if (elems.length < 2) {
+        err(env, "E_TYPE_ARITY", "tuple pattern requires at least two parts", pat.span);
+        return;
+      }
+      const expected = tProduct(elems.map(() => freshVar(env)));
+      expectType(env, scrut, expected, subst, pat.span);
+      const prod = applySubst(scrut, subst);
+      if (prod.tag === "product") {
+        if (prod.elems.length !== elems.length) {
+          err(
+            env,
+            "E_TYPE_ARITY",
+            `tuple pattern arity mismatch: expected ${prod.elems.length}, found ${elems.length}`,
+            pat.span,
+          );
+        } else {
+          for (let i = 0; i < elems.length; i++) {
+            bindPattern(env, elems[i]!, prod.elems[i]!, local, subst, new Set());
+          }
+        }
+      }
+      covered.add("__product__");
+      return;
+    }
     if (cn === "guard" && pat.elems[1] && pat.elems[2]) {
-      bindPattern(env, pat.elems[1], scrut, local, subst, new Set());
+      bindPattern(env, pat.elems[1], scrut, local, subst, covered);
       const gt = infer(env, pat.elems[2], local, subst);
       expectType(env, gt, prim("Bool"), subst, pat.elems[2].span);
       return;

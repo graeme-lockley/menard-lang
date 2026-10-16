@@ -585,6 +585,12 @@ pub let tag-ok = 4
 
 pub let tag-err = 5
 
+; Caml-style n-tuple `(e1, e2, …)` — a fixed, reserved tag clear of the
+; builtin ctor tags above, the str/ref/sb/float/map/closure tags in
+; `runtime/src/equal.c`, the IoError/Spawn ctor-tag range (20-36, see
+; `builtin-ctor-tag-of` in lower.mnd), and well below `user-ctor-tag-base`.
+pub let tag-tuple = 50
+
 ; `ICallVoid`'s `kind` tag — which of the two fixed extern function
 ; *types* a void call's `fnty` field references (see `ICallVoid`'s own
 ; doc comment above for why arity alone can't disambiguate them).

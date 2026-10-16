@@ -429,6 +429,22 @@ export function lex(src: Uint8Array): { ok: true; toks: Tok[] } | { ok: false; e
       continue;
     }
 
+    // Standalone `:` (typed tuple params: `((x, y): T)`). `::` stays an op
+    // and is matched below; `x:` stays an ident via isIdentCont.
+    if (b === 0x3a && peek(1) !== 0x3a) {
+      bump();
+      toks.push({
+        kind: "punct",
+        text: ":",
+        span: { start, end: i },
+        col: tokCol,
+        indent: tokIndent,
+        bol: tokBol,
+        line: tokLine,
+      });
+      continue;
+    }
+
     const prev = start === 0 ? -1 : src[start - 1]!;
     const prevWs = prev === -1 || prev === 0x20 || prev === 0x09 || prev === 0x0a || prev === 0x0d;
     const prevIdent = isLetter(prev) || isIdentCont(prev) || prev === 0x21;

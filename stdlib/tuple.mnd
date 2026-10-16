@@ -1,0 +1,17 @@
+; Helpers over a * b. Projection and patterns open the product.
+; @module std/tuple
+
+; f applied to the first component. The second stays.
+; @test map-fst(fn (n) = n + 1, (1, "a")) => (2, "a")
+pub let map-fst[a, b, c](f: (a) -> c, p: a * b) -> c * b =
+  (f(p.1), p.2)
+
+; f applied to the second component. The first stays.
+; @test map-snd(fn (s) = s == "a", (1, "a")) => (1, true)
+pub let map-snd[a, b, c](f: (b) -> c, p: a * b) -> a * c =
+  (p.1, f(p.2))
+
+; f on the first component and g on the second.
+; @test map-both(fn (n) = n + 1, fn (s) = s == "a", (1, "a")) => (2, true)
+pub let map-both[a, b, c, d](f: (a) -> c, g: (b) -> d, p: a * b) -> c * d =
+  (f(p.1), g(p.2))

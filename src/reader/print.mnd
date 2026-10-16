@@ -214,6 +214,7 @@ let print-param(a: Ast) -> Str =
 
 let print-param-elems(elems: List Ast) -> Str =
   match (elems)
+    | SymNode("param", _) :: pat :: ty :: _ -> String.concat(print-pat(pat), String.concat(": ", print-type(ty)))
     | name :: ty :: rest ->
       {
         let raw = sym-or(name, "")
@@ -392,10 +393,15 @@ let print-headed(n: Str, rest: List Ast, whole: Ast, ind: Int) -> Str =
     | n == "map-lit" -> print-map(rest, ind)
     | n == "not" -> print-not(rest, ind)
     | n == "project" -> print-project(rest, ind)
+    | n == "tuple" -> print-tuple(rest, ind)
     | n == "Cons" -> print-cons(rest, ind)
     | is-op(n) -> print-op(n, rest, ind)
     | n == "-" -> print-minus(rest, ind)
     | else -> print-call(SymNode(n, Span(0, 0, 0, 0)), rest, ind)
+
+; `(e1, e2, …)`, no ctor-name prefix (unlike every other paren head).
+let print-tuple(rest: List Ast, ind: Int) -> Str =
+  String.concat("(", String.concat(join(map-expr(rest, ind), ", "), ")"))
 
 ; `pair.fst` and `Lexer.read`, including a chain.
 let print-project(rest: List Ast, ind: Int) -> Str =
@@ -699,6 +705,7 @@ let print-pat(a: Ast) -> Str =
       }
     | ParenNode(SymNode("recpat", _) :: name :: fields, _) -> String.concat(print-atom(name), String.concat(" { ", String.concat(join(map-atom(fields), ", "), " }")))
     | ParenNode(SymNode("guard", _) :: pat :: g :: _, _) -> String.concat(print-pat(pat), String.concat(" when ", print-expr(g, 0)))
+    | ParenNode(SymNode("tuple", _) :: args, _) -> String.concat("(", String.concat(join(map-pat(args), ", "), ")"))
     | ParenNode(h :: args, _) ->
       match (sym-str(h))
         | Some(n) -> String.concat(n, String.concat("(", String.concat(join(map-pat(args), ", "), ")")))
@@ -807,9 +814,25 @@ let print-type(a: Ast) -> Str =
     | ParenNode(h :: rest, _) ->
       match (sym-str(h))
         | Some(n) ->
-          if (n == "Fn") -> print-fn-type(rest) | print-type-app(n, rest)
+          cond
+            | n == "Fn" -> print-fn-type(rest)
+            | n == "product" -> print-type-product(rest)
+            | else -> print-type-app(n, rest)
         | None -> print-atom(a)
     | _ -> print-atom(a)
+
+; `T1 * T2 * …`; a factor that is itself a function type needs parens
+; since `*` binds tighter than `->`.
+let print-type-product(args: List Ast) -> Str =
+  join(map-type-factor(args), " * ")
+
+let map-type-factor(xs: List Ast) -> List Str =
+  match (xs)
+    | [] -> []
+    | h :: t -> type-factor(h) :: map-type-factor(t)
+
+let type-factor(a: Ast) -> Str =
+  if (is-head(a, "Fn")) -> String.concat("(", String.concat(print-type(a), ")")) | print-type(a)
 
 let print-fn-type(rest: List Ast) -> Str {
   let ps = types-before-arrow(rest, [])

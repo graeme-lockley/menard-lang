@@ -295,6 +295,17 @@ class P {
 
   parseLetDecl(indent: number): R {
     const kw = this.toks[this.i++]!;
+    if (this.delim("(")) {
+      const pat = this.parseTuplePattern();
+      if (!pat.ok) return pat;
+      if (!this.eat("=")) return this.err(this.cur(), "expected =");
+      const expr = this.parseExpr();
+      if (!expr.ok) return expr;
+      return {
+        ok: true,
+        ast: paren([sym("let", kw.span), pat.ast, expr.ast], join(kw.span, expr.ast.span)),
+      };
+    }
     const name = this.cur();
     if (name.kind !== "ident" && name.kind !== "kw") return this.err(name, "expected a name");
     if (name.kind === "kw") return this.err(name, "expected a name");
@@ -310,8 +321,9 @@ class P {
       const body = this.parseBody();
       if (!body.ok) return body;
       if (indent > 0) {
-        const fnParams = paren(params.asts.map(bareParam), name.span);
-        const fnAst = paren([sym("fn", kw.span), fnParams, body.ast], join(kw.span, body.ast.span));
+        const { names, wrapped } = wrapPatternParams(params.asts, body.ast, name.span);
+        const fnParams = paren(names, name.span);
+        const fnAst = paren([sym("fn", kw.span), fnParams, wrapped], join(kw.span, body.ast.span));
         return {
           ok: true,
           ast: paren([sym("let", kw.span), sym(name.text, name.span), fnAst], join(kw.span, body.ast.span)),
@@ -357,6 +369,22 @@ class P {
     while (!this.delim(")") && this.cur().kind !== "eof") {
       this.eat(",");
       if (this.delim(")")) break;
+      if (this.delim("(")) {
+        const pat = this.parseTuplePattern();
+        if (!pat.ok) return pat;
+        if (this.cur().text === ":") this.i++;
+        else return { ok: false, error: { span: this.cur().span, message: "expected :" } };
+        const ty = this.parseType();
+        if (!ty.ok) return ty;
+        asts.push(
+          paren(
+            [sym("param", pat.ast.span), pat.ast, ty.ast],
+            join(pat.ast.span, ty.ast.span),
+          ),
+        );
+        this.eat(",");
+        continue;
+      }
       const rest = this.cur().kind === "ident" && this.cur().text === "...";
       if (rest) this.i++;
       const name = this.cur();
@@ -373,6 +401,28 @@ class P {
     }
     if (!this.eat(")")) return { ok: false, error: { span: this.cur().span, message: "unclosed (" } };
     return { ok: true, asts };
+  }
+
+  /** `(p1, p2, …)` with at least two patterns → `(tuple p1 p2 …)`. */
+  parseTuplePattern(): R {
+    if (!this.eat("(")) return this.err(this.cur(), "expected (");
+    const open = this.toks[this.i - 1]!;
+    const elems: Ast[] = [];
+    while (!this.delim(")") && this.cur().kind !== "eof") {
+      this.eat(",");
+      if (this.delim(")")) break;
+      const p = this.parsePattern();
+      if (!p.ok) return p;
+      elems.push(p.ast);
+      this.eat(",");
+    }
+    const close = this.eat(")");
+    if (!close) return this.errEnd("unclosed (");
+    if (elems.length < 2) return this.err(open, "tuple pattern requires at least two parts");
+    return {
+      ok: true,
+      ast: paren([sym("tuple", open.span), ...elems], join(open.span, close.span)),
+    };
   }
 
   parseField(): R {
@@ -609,15 +659,29 @@ class P {
   parseProject(target: Ast): R {
     const dot = this.toks[this.i++]!;
     const field = this.cur();
-    if (field.kind !== "ident") return this.err(field, "expected a field name");
-    this.i++;
-    return {
-      ok: true,
-      ast: paren(
-        [sym("project", dot.span), target, sym(field.text, field.span)],
-        join(target.span, field.span),
-      ),
-    };
+    if (field.kind === "ident") {
+      this.i++;
+      return {
+        ok: true,
+        ast: paren(
+          [sym("project", dot.span), target, sym(field.text, field.span)],
+          join(target.span, field.span),
+        ),
+      };
+    }
+    if (field.kind === "int") {
+      const n = BigInt(field.text.startsWith("+") ? field.text.slice(1) : field.text);
+      if (n <= 0n) return this.err(field, "tuple projection must be a positive index");
+      this.i++;
+      return {
+        ok: true,
+        ast: paren(
+          [sym("project", dot.span), target, { tag: "int", value: n, span: field.span }],
+          join(target.span, field.span),
+        ),
+      };
+    }
+    return this.err(field, "expected a field name or tuple index");
   }
 
   parseCallArgs(callee: Ast): R {
@@ -656,11 +720,29 @@ class P {
         const c = this.toks[this.i++]!;
         return { ok: true, ast: paren([], join(open.span, c.span)) };
       }
-      const e = this.parseExpr();
-      if (!e.ok) return e;
+      const first = this.parseExpr();
+      if (!first.ok) return first;
+      if (this.delim(",")) {
+        const elems: Ast[] = [first.ast];
+        while (this.eat(",")) {
+          if (this.delim(")")) return this.err(this.cur(), "expected an expression");
+          const next = this.parseExpr();
+          if (!next.ok) return next;
+          elems.push(next.ast);
+        }
+        const close = this.eat(")");
+        if (!close) return this.errEnd("unclosed (");
+        return {
+          ok: true,
+          ast: paren(
+            [sym("tuple", open.span), ...elems],
+            join(open.span, close.span),
+          ),
+        };
+      }
       const close = this.eat(")");
       if (!close) return this.errEnd("unclosed (");
-      return e;
+      return first;
     }
     if (t.kind === "int") {
       this.i++;
@@ -927,6 +1009,34 @@ class P {
       return { ok: true, ast: sym("_", t.span) };
     }
     if (t.kind === "punct" && t.text === "[") return this.parseList();
+    if (t.kind === "punct" && t.text === "(") {
+      const open = this.toks[this.i++]!;
+      if (this.delim(")")) {
+        const c = this.toks[this.i++]!;
+        return { ok: true, ast: paren([], join(open.span, c.span)) };
+      }
+      const first = this.parsePattern();
+      if (!first.ok) return first;
+      if (this.delim(",")) {
+        const elems: Ast[] = [first.ast];
+        while (this.eat(",")) {
+          if (this.delim(")")) return this.err(this.cur(), "expected a pattern");
+          const next = this.parsePattern();
+          if (!next.ok) return next;
+          elems.push(next.ast);
+        }
+        const close = this.eat(")");
+        if (!close) return this.errEnd("unclosed (");
+        if (elems.length < 2) return this.err(open, "tuple pattern requires at least two parts");
+        return {
+          ok: true,
+          ast: paren([sym("tuple", open.span), ...elems], join(open.span, close.span)),
+        };
+      }
+      const close = this.eat(")");
+      if (!close) return this.errEnd("unclosed (");
+      return first;
+    }
     if (t.kind === "int" || t.kind === "str" || t.kind === "sym" || t.kind === "char" || t.text === "true" || t.text === "false") {
       return this.parseAtom();
     }
@@ -1110,21 +1220,49 @@ class P {
           ast: paren([sym("Fn", open.span), first.ast, sym("->", ret.ast.span), ret.ast], join(open.span, ret.ast.span)),
         };
       }
-      return first;
+      // Grouping: `(List a) * (List a)` continues as a product after the `)`.
+      return this.parseTypeProductFrom(first.ast);
     }
-    const spine = this.parseTypeSpine();
-    if (!spine.ok) return spine;
+    const prod = this.parseTypeProduct();
+    if (!prod.ok) return prod;
     if (this.cur().kind === "op" && this.cur().text === "->") {
       this.i++;
       const ret = this.parseType();
       if (!ret.ok) return ret;
-      const ps = flattenSpine(spine.ast);
+      const ps = flattenSpine(prod.ast);
       return {
         ok: true,
-        ast: paren([sym("Fn", spine.ast.span), ...ps, sym("->", ret.ast.span), ret.ast], join(spine.ast.span, ret.ast.span)),
+        ast: paren([sym("Fn", prod.ast.span), ...ps, sym("->", ret.ast.span), ret.ast], join(prod.ast.span, ret.ast.span)),
       };
     }
-    return spine;
+    return prod;
+  }
+
+  /** `T1 * T2 * …` with ≥ 2 factors → `(product T1 T2 …)`. `*` binds tighter than `->`. */
+  parseTypeProduct(): R {
+    const head = this.parseTypeSpine();
+    if (!head.ok) return head;
+    return this.parseTypeProductFrom(head.ast);
+  }
+
+  parseTypeProductFrom(head: Ast): R {
+    if (!(this.cur().kind === "op" && this.cur().text === "*")) {
+      return { ok: true, ast: head };
+    }
+    const factors: Ast[] = [head];
+    while (this.cur().kind === "op" && this.cur().text === "*") {
+      this.i++;
+      const next = this.parseTypeSpine();
+      if (!next.ok) return next;
+      factors.push(next.ast);
+    }
+    return {
+      ok: true,
+      ast: paren(
+        [sym("product", head.span), ...factors],
+        join(head.span, factors[factors.length - 1]!.span),
+      ),
+    };
   }
 
   parseTypeSpine(): R {
@@ -1216,8 +1354,42 @@ type TokKind = Tok["kind"];
 function bareParam(p: Ast): Ast {
   if (p.tag !== "list" || p.elems[0]?.tag !== "sym") return p;
   const raw = new TextDecoder().decode(p.elems[0].name);
+  if (raw === "param") {
+    return sym(`__p`, p.elems[0].span);
+  }
   const bare = raw.endsWith(":") ? raw.slice(0, -1) : raw;
   return sym(bare, p.elems[0].span);
+}
+
+/** Nested `let f((x, y): T) = body` → `fn (__p0) (match __p0 (tuple …) body)`. */
+function wrapPatternParams(
+  params: Ast[],
+  body: Ast,
+  span: Span,
+): { names: Ast[]; wrapped: Ast } {
+  const names: Ast[] = [];
+  let wrapped = body;
+  for (let i = params.length - 1; i >= 0; i--) {
+    const p = params[i]!;
+    if (
+      p.tag === "list" &&
+      p.elems[0]?.tag === "sym" &&
+      new TextDecoder().decode(p.elems[0].name) === "param" &&
+      p.elems[1]
+    ) {
+      const pname = `__p${i}`;
+      const psym = sym(pname, p.span);
+      names[i] = psym;
+      wrapped = paren(
+        [sym("match", p.span), psym, p.elems[1], wrapped],
+        p.span,
+      );
+    } else {
+      names[i] = bareParam(p);
+    }
+  }
+  void span;
+  return { names, wrapped };
 }
 
 function strAst(t: Tok): Ast {

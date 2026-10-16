@@ -147,6 +147,9 @@ function printDefnName(a: Ast): string {
 function printParam(a: Ast): string {
   if (!isList(a)) return printAtom(a);
   const name = txt(a.elems[0]!) ?? "";
+  if (name === "param" && a.elems[1] && a.elems[2]) {
+    return `${printPat(a.elems[1])}: ${printType(a.elems[2])}`;
+  }
   const bare = nameText(name.endsWith(":") ? name.slice(0, -1) : name);
   const rest = a.elems.some((e) => txt(e) === "...");
   const ty = a.elems[1] ? printType(a.elems[1]) : "";
@@ -228,7 +231,11 @@ function printExpr(a: Ast, ind: number): string {
   if (h === "fn") return printFn(a, ind);
   if (h === "pub") return "pub " + printForm({ tag: "list", kind: "paren", elems: a.elems.slice(1), span: a.span }, ind);
   if (h === "let") {
-    if (a.elems.length === 3) return `let ${printAtom(a.elems[1]!)} =${placed(a.elems[2]!, ind + 2)}`;
+    if (a.elems.length === 3) {
+      const binder =
+        a.elems[1]!.tag === "list" ? printPat(a.elems[1]!) : printAtom(a.elems[1]!);
+      return `let ${binder} =${placed(a.elems[2]!, ind + 2)}`;
+    }
     const binding: Ast = { tag: "list", kind: "paren", elems: [a.elems[0]!, a.elems[1]!, a.elems[2]!], span: a.span };
     return printBlock({ tag: "list", kind: "paren", elems: [symDo(), binding, ...a.elems.slice(3)], span: a.span }, ind);
   }
@@ -245,6 +252,9 @@ function printExpr(a: Ast, ind: number): string {
     return `${wrapOperand(4, eq.elems[1]!, false, ind)} != ${wrapOperand(4, eq.elems[2]!, true, ind)}`;
   }
   if (h === "project" && a.elems.length === 3) return printProject(a, ind);
+  if (h === "tuple" && a.elems.length >= 3) {
+    return `(${a.elems.slice(1).map((e) => printExpr(e, ind)).join(", ")})`;
+  }
   if (h === "Cons" && a.elems.length === 3) return printCons(a, ind);
   if (h && OPS.has(h) && a.elems.length >= 3) return printOp(a, h, ind);
   if (h === "-") {
@@ -535,6 +545,9 @@ function printPat(a: Ast): string {
     const fields = a.elems.slice(2).map((e) => printAtom(e)).join(", ");
     return `${printAtom(a.elems[1])} { ${fields} }`;
   }
+  if (h === "tuple" && a.elems.length >= 3) {
+    return `(${a.elems.slice(1).map(printPat).join(", ")})`;
+  }
   if (h) return `${h}(${a.elems.slice(1).map(printPat).join(", ")})`;
   return printExpr(a, 0);
 }
@@ -574,6 +587,16 @@ function printType(a: Ast): string {
     if (ps.length === 0) return `() -> ${ret}`;
     if (ps.length === 1) return `(${printType(ps[0]!)}) -> ${ret}`;
     return `(${ps.map(printType).join(", ")}) -> ${ret}`;
+  }
+  if (h === "product" && a.elems.length >= 3) {
+    return a.elems
+      .slice(1)
+      .map((e) => {
+        const p = printType(e);
+        if (e.tag === "list" && txt(e.elems[0]!) === "Fn") return `(${p})`;
+        return p;
+      })
+      .join(" * ");
   }
   const args = a.elems.slice(1).map((e) => {
     const p = printType(e);

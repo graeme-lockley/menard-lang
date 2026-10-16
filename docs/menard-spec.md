@@ -397,14 +397,16 @@ Built-in compounds: `List T`, `Map K V`, `Maybe T`, `Result T E`, `Ref T`,
 
 Built-in reference type: `StringBuffer` (§2.8.2).
 
+Flat products: `T1 * T2 * … * Tn` with `n ≥ 2`. `*` binds tighter than `->`.
+Literals are `(e1, e2, …)`; `()` is `Unit`; `(e)` is grouping. Projection is
+1-based (`e.1`…`e.n`). Tuple patterns appear in `match`, `let`, and parameters.
+Multi-scrutinee `match (xs, ys)` stays allocation-free and is not a product
+value. A value of type `a * b` is matched as one scrutinee:
+`match (p) | (x, y) -> …`.
+
 Nominal types, **with explicit type parameters**:
 
 ```
-record Pair[a, b] {
-  fst: a
-  snd: b
-}
-
 type Tree[a] =
   | Leaf(a)
   | Node(Tree a, Tree a)
@@ -419,7 +421,7 @@ record Env[v] {
 Rules:
 
 - **Type parameters are declared with `[a]` and applied by juxtaposition
-  (`Tree a`). A nested application is parenthesized (`List (Pair a b)`).**
+  (`Tree a`). A nested application is parenthesized (`List (Int * Str)`).**
   Square brackets declare; juxtaposition applies. This keeps the two readable
   at a glance.
 - **Parameters are declared, never inferred.** No let-generalization, no
@@ -431,8 +433,9 @@ Rules:
   canonical order and equality are derived by the compiler (§2.12), never
   supplied by the user.
 - **No subtyping and no row polymorphism.** A record's field set is exactly what
-  it declares. `pair.fst` reads the field in declaration order. The same `.`
-  selects an export of `import path as Name`. Neither form is a method call.
+  it declares. `rec.fst` reads the field in declaration order. A positive int
+  after `.` projects a product component. The same `.` with a name selects an
+  export of `import path as Name`. Neither form is a method call.
 - **Every `type` and `record` name in a module is registered before its fields
   or payloads are parsed.** A record may mention itself (`Env` above). Two
   declarations in one file may mention each other, in either order. A second
@@ -1015,7 +1018,7 @@ Three deliberate choices among the maps:
   is never observable, so the interpreter's TypeScript map and the runtime's C
   table may differ freely. That is a whole agreement axis removed by §2.11.O.
 - **`map-entries` returns two parallel lists**, not a list of pairs, so that the
-  built-in surface does not depend on a prelude type. `(List (Pair k v))` is a
+  built-in surface does not depend on a product spelling. `(List (k * v))` is a
   fine prelude function over it.
 - **`Arr` is immutable and fixed-size**, so it has no growth operation. A
   growable byte buffer therefore does not appear as an array operation; it is
@@ -1101,7 +1104,7 @@ import (§2.7).
 | Import | Publishes |
 |---|---|
 | `std/basics` | `id`, `always`, `not`, `min`, `max`, `abs`, `clamp` (implicit) |
-| `std/pair` | `Pair`, `map-fst`, `map-snd`, `map-both` |
+| `std/tuple` | `map-fst`, `map-snd`, `map-both` over `a * b` |
 | `std/list` | `length`, `is-empty`, `head`, `tail`, `singleton`, `repeat`, `range`, `nth`, `append`, `reverse`, `map`, `indexed-map`, `filter`, `filter-map`, `partition`, `intersperse`, `fold`, `sum`, `product`, `minimum`, `maximum`, `zip`, `unzip`, `member`, `sort`, `sort-by`, `find`, `any`, `all`, `concat`, `flat-map`, `take`, `drop` |
 | `std/map` | `empty`, `singleton`, `set`, `lookup`, `has`, `size`, `is-empty`, `keys`, `values`, `from-list`, `to-list`, `map`, `filter`, `fold`, `remove`, `merge` |
 | `std/string` | `length`, `byte`, `slice`, `concat`, `from-char`, `from-int`, `is-empty`, `starts-with`, `ends-with`, `contains`, `drop`, `drop-right`, `left`, `right`, `repeat`, `replace`, `trim`, `trim-left`, `trim-right`, `index-of`, `index-of-from`, `split`, `split-using`, `join`, `lines`, `words` |

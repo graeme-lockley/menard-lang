@@ -691,6 +691,11 @@ let scan-real(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError)) -> 
         lex-bump(lx)
         push-tok(toks, make-tok("punct", chr(b), start, deref(lx.pos), col, ind, bol, line))
       }
+    | b == 58 && lex-peek(lx, 1) != 58 ->
+      {
+        lex-bump(lx)
+        push-tok(toks, make-tok("punct", ":", start, deref(lx.pos), col, ind, bol, line))
+      }
     | not(prev-ident(prev)) && b == 45 && (is-letter(lex-peek(lx, 1)) || lex-peek(lx, 1) == 40) && not(is-digit(lex-peek(lx, 1))) ->
       {
         lex-bump(lx)
@@ -990,18 +995,31 @@ let parse-calls(ps: Ps, left: Ast) -> Result Ast ParseError =
         | Ok(projected) -> parse-calls(ps, projected)
     | else -> Ok(left)
 
-; `expr.field` is a projection, not a method call.
+; `expr.field` is a projection, not a method call; `expr.N` (1-based) is a
+; tuple projection.
 let parse-project(ps: Ps, target: Ast) -> Result Ast ParseError {
   let dot = peek(ps)
   advance(ps)
   let field = peek(ps)
-  if (field.kind != "ident") -> perr(field, "expected a field name") | parse-project-field(ps, target, dot, field)
+  cond
+    | field.kind == "ident" -> parse-project-field(ps, target, dot, field)
+    | field.kind == "int" -> parse-project-index(ps, target, dot, field)
+    | else -> perr(field, "expected a field name or tuple index")
 }
 
 ; The name after the dot is the field or the export.
 let parse-project-field(ps: Ps, target: Ast, dot: Tok, field: Tok) -> Result Ast ParseError {
   advance(ps)
   Ok(paren-at([sym-at("project", tok-span(dot)), target, sym-at(field.text, tok-span(field))], span-join(ast-span(target), tok-span(field))))
+}
+
+; `expr.1` … `expr.N` — a positive, 1-based tuple index.
+let parse-project-index(ps: Ps, target: Ast, dot: Tok, field: Tok) -> Result Ast ParseError =
+  if (int-value(field.text) <= 0) -> perr(field, "tuple projection must be a positive index") | parse-project-index-ok(ps, target, dot, field)
+
+let parse-project-index-ok(ps: Ps, target: Ast, dot: Tok, field: Tok) -> Result Ast ParseError {
+  advance(ps)
+  Ok(paren-at([sym-at("project", tok-span(dot)), target, IntNode(int-value(field.text), tok-span(field))], span-join(ast-span(target), tok-span(field))))
 }
 
 let parse-call-args(ps: Ps, callee: Ast) -> Result Ast ParseError =
@@ -1113,11 +1131,57 @@ let parse-group(ps: Ps) -> Result Ast ParseError {
     | else ->
       match (parse-expr(ps))
         | Err(e) -> Err(e)
-        | Ok(e) ->
-          match (eat(ps, ")"))
-            | None -> perr(peek(ps), "unclosed (")
-            | Some(_) -> Ok(e)
+        | Ok(e) -> parse-group-after(ps, open, e)
 }
+
+let parse-group-after(ps: Ps, open: Tok, e: Ast) -> Result Ast ParseError =
+  match (eat(ps, ","))
+    | Some(_) -> parse-tuple-expr-rest(ps, open, [e])
+    | None ->
+      match (eat(ps, ")"))
+        | None -> perr(peek(ps), "unclosed (")
+        | Some(_) -> Ok(e)
+
+; `(e1, e2, …)` with at least two parts → `(tuple e1 e2 …)`.
+let parse-tuple-expr-rest(ps: Ps, open: Tok, acc: List Ast) -> Result Ast ParseError =
+  if (delim(ps, ")")) -> perr(peek(ps), "expected an expression") | parse-tuple-expr-one(ps, open, acc)
+
+let parse-tuple-expr-one(ps: Ps, open: Tok, acc: List Ast) -> Result Ast ParseError =
+  match (parse-expr(ps))
+    | Err(e) -> Err(e)
+    | Ok(e) -> parse-tuple-expr-more(ps, open, append-ast(acc, e))
+
+let parse-tuple-expr-more(ps: Ps, open: Tok, acc: List Ast) -> Result Ast ParseError =
+  match (eat(ps, ","))
+    | Some(_) -> parse-tuple-expr-close-or-rest(ps, open, acc)
+    | None -> parse-tuple-expr-close(ps, open, acc)
+
+let parse-tuple-expr-close-or-rest(ps: Ps, open: Tok, acc: List Ast) -> Result Ast ParseError =
+  if (delim(ps, ")")) -> parse-tuple-expr-close(ps, open, acc) | parse-tuple-expr-one(ps, open, acc)
+
+let parse-tuple-expr-close(ps: Ps, open: Tok, acc: List Ast) -> Result Ast ParseError =
+  match (eat(ps, ")"))
+    | None -> perr(peek(ps), "unclosed (")
+    | Some(close) -> Ok(paren-at(sym-at("tuple", tok-span(open)) :: acc, span-join(tok-span(open), tok-span(close))))
+
+; `(p1, p2, …)` with at least two patterns → `(tuple p1 p2 …)`, used by
+; `parse-let`/`parse-param` where only a tuple binder is accepted (not a
+; single grouped pattern).
+let parse-tuple-pattern(ps: Ps) -> Result Ast ParseError =
+  match (eat(ps, "("))
+    | None -> perr(peek(ps), "expected (")
+    | Some(open) -> parse-tuple-pattern-elems(ps, open)
+
+let parse-tuple-pattern-elems(ps: Ps, open: Tok) -> Result Ast ParseError =
+  match (collect-until(ps, ")", parse-pattern))
+    | Err(e) -> Err(e)
+    | Ok(elems) -> parse-tuple-pattern-close(ps, open, elems)
+
+let parse-tuple-pattern-close(ps: Ps, open: Tok, elems: List Ast) -> Result Ast ParseError =
+  match (eat(ps, ")"))
+    | None -> perr(peek(ps), "unclosed (")
+    | Some(close) ->
+      if (ast-len(elems) < 2) -> perr(open, "tuple pattern requires at least two parts") | Ok(paren-at(sym-at("tuple", tok-span(open)) :: elems, span-join(tok-span(open), tok-span(close))))
 
 let parse-list(ps: Ps) -> Result Ast ParseError {
   let open = peek(ps)
@@ -1556,6 +1620,7 @@ let parse-pattern-atom(ps: Ps) -> Result Ast ParseError {
         Ok(sym-at("_", tok-span(t)))
       }
     | t.kind == "punct" && t.text == "[" -> parse-list(ps)
+    | t.kind == "punct" && t.text == "(" -> parse-pattern-group(ps)
     | t.kind == "int" || t.kind == "str" || t.kind == "sym" || t.kind == "char" || t.text == "true" || t.text == "false" -> parse-atom(ps)
     | t.kind == "ident" ->
       {
@@ -1568,6 +1633,52 @@ let parse-pattern-atom(ps: Ps) -> Result Ast ParseError {
       }
     | else -> perr(t, "expected a pattern")
 }
+
+; `()` unit pattern, `(p)` grouping, or `(p1, p2, …)` (≥2) tuple pattern.
+let parse-pattern-group(ps: Ps) -> Result Ast ParseError {
+  let open = peek(ps)
+  advance(ps)
+  cond
+    | delim(ps, ")") ->
+      {
+        let close = peek(ps)
+        advance(ps)
+        Ok(paren-at([], span-join(tok-span(open), tok-span(close))))
+      }
+    | else ->
+      match (parse-pattern(ps))
+        | Err(e) -> Err(e)
+        | Ok(p) -> parse-pattern-group-after(ps, open, p)
+}
+
+let parse-pattern-group-after(ps: Ps, open: Tok, p: Ast) -> Result Ast ParseError =
+  match (eat(ps, ","))
+    | Some(_) -> parse-pat-group-rest(ps, open, [p])
+    | None ->
+      match (eat(ps, ")"))
+        | None -> perr(peek(ps), "unclosed (")
+        | Some(_) -> Ok(p)
+
+let parse-pat-group-rest(ps: Ps, open: Tok, acc: List Ast) -> Result Ast ParseError =
+  if (delim(ps, ")")) -> perr(peek(ps), "expected a pattern") | parse-pat-group-one(ps, open, acc)
+
+let parse-pat-group-one(ps: Ps, open: Tok, acc: List Ast) -> Result Ast ParseError =
+  match (parse-pattern(ps))
+    | Err(e) -> Err(e)
+    | Ok(p) -> parse-pat-group-more(ps, open, append-ast(acc, p))
+
+let parse-pat-group-more(ps: Ps, open: Tok, acc: List Ast) -> Result Ast ParseError =
+  match (eat(ps, ","))
+    | Some(_) -> parse-pat-group-close-or-rest(ps, open, acc)
+    | None -> parse-pat-group-close(ps, open, acc)
+
+let parse-pat-group-close-or-rest(ps: Ps, open: Tok, acc: List Ast) -> Result Ast ParseError =
+  if (delim(ps, ")")) -> parse-pat-group-close(ps, open, acc) | parse-pat-group-one(ps, open, acc)
+
+let parse-pat-group-close(ps: Ps, open: Tok, acc: List Ast) -> Result Ast ParseError =
+  match (eat(ps, ")"))
+    | None -> perr(peek(ps), "unclosed (")
+    | Some(close) -> Ok(paren-at(sym-at("tuple", tok-span(open)) :: acc, span-join(tok-span(open), tok-span(close))))
 
 let is-upper(text: Str) -> Bool {
   let b = String.byte(0, text)
@@ -1764,7 +1875,7 @@ let parse-type-arrow(ps: Ps) -> Result Ast ParseError =
   cond
     | delim(ps, "(") -> parse-type-paren(ps)
     | else ->
-      match (parse-type-spine(ps))
+      match (parse-type-product(ps))
         | Err(e) -> Err(e)
         | Ok(spine) ->
           cond
@@ -1776,6 +1887,26 @@ let parse-type-arrow(ps: Ps) -> Result Ast ParseError =
                   | Ok(ret) -> Ok(paren-at([sym-at("Fn", ast-span(spine)), spine, sym-at("->", ast-span(ret)), ret], span-join(ast-span(spine), ast-span(ret))))
               }
             | else -> Ok(spine)
+
+; `T1 * T2 * …` with ≥2 factors → `(product T1 T2 …)`. `*` binds tighter
+; than `->` (so a product sits directly on the arrow's spine) but is
+; parsed above `parse-type-spine` (type application).
+let parse-type-product(ps: Ps) -> Result Ast ParseError =
+  match (parse-type-spine(ps))
+    | Err(e) -> Err(e)
+    | Ok(head) ->
+      if ((peek(ps)).kind == "op" && (peek(ps)).text == "*") -> parse-type-product-rest(ps, [head]) | Ok(head)
+
+let parse-type-product-rest(ps: Ps, acc: List Ast) -> Result Ast ParseError =
+  cond
+    | (peek(ps)).kind == "op" && (peek(ps)).text == "*" ->
+      {
+        advance(ps)
+        match (parse-type-spine(ps))
+          | Err(e) -> Err(e)
+          | Ok(next) -> parse-type-product-rest(ps, append-ast(acc, next))
+      }
+    | else -> Ok(paren-at(sym-at("product", ast-span(first-ast(acc))) :: acc, span-join(ast-span(first-ast(acc)), ast-span(last-ast(acc)))))
 
 let parse-type-paren(ps: Ps) -> Result Ast ParseError {
   let open = peek(ps)
@@ -1815,7 +1946,9 @@ let parse-type-paren-rest(ps: Ps, open: Tok, first: Ast) -> Result Ast ParseErro
                   | Err(e) -> Err(e)
                   | Ok(ret) -> Ok(paren-at([sym-at("Fn", tok-span(open)), first, sym-at("->", ast-span(ret)), ret], span-join(tok-span(open), ast-span(ret))))
               }
-            | else -> Ok(first)
+            | else ->
+              ; Grouping: `(List a) * (List a)` continues as a product after `)`.
+              if ((peek(ps)).kind == "op" && (peek(ps)).text == "*") -> parse-type-product-rest(ps, [first]) | Ok(first)
 
 let parse-type-args(ps: Ps, open: Tok, acc: List Ast) -> Result Ast ParseError =
   cond
@@ -1927,7 +2060,24 @@ let parse-param-list(ps: Ps) -> Result (List Ast) ParseError =
             | None -> perr(peek(ps), "unclosed (")
             | Some(_) -> Ok(xs)
 
-let parse-param(ps: Ps) -> Result Ast ParseError {
+let parse-param(ps: Ps) -> Result Ast ParseError =
+  if (delim(ps, "(")) -> parse-tuple-param(ps) | parse-simple-param(ps)
+
+; `((x, y): a * b)` → `(param (tuple x y) (product a b))`.
+let parse-tuple-param(ps: Ps) -> Result Ast ParseError =
+  match (parse-tuple-pattern(ps))
+    | Err(e) -> Err(e)
+    | Ok(pat) -> parse-tuple-param-type(ps, pat)
+
+let parse-tuple-param-type(ps: Ps, pat: Ast) -> Result Ast ParseError =
+  match (eat(ps, ":"))
+    | None -> perr(peek(ps), "expected :")
+    | Some(_) ->
+      match (parse-type(ps))
+        | Err(e) -> Err(e)
+        | Ok(ty) -> Ok(paren-at([sym-at("param", ast-span(pat)), pat, ty], span-join(ast-span(pat), ast-span(ty))))
+
+let parse-simple-param(ps: Ps) -> Result Ast ParseError {
   let rest = (peek(ps)).kind == "ident" && (peek(ps)).text == "..."
   if (rest) -> advance(ps)
   let name = peek(ps)
@@ -1972,6 +2122,24 @@ let parse-field-type(ps: Ps, name: Tok, bare: Str) -> Result Ast ParseError =
 let parse-let(ps: Ps, indent: Int) -> Result Ast ParseError {
   let kw = peek(ps)
   advance(ps)
+  if (delim(ps, "(")) -> parse-let-tuple(ps, kw) | parse-let-named(ps, kw, indent)
+}
+
+; `let (p1, p2) = expr` → `(let (tuple p1 p2) expr)`.
+let parse-let-tuple(ps: Ps, kw: Tok) -> Result Ast ParseError =
+  match (parse-tuple-pattern(ps))
+    | Err(e) -> Err(e)
+    | Ok(pat) -> parse-let-tuple-expr(ps, kw, pat)
+
+let parse-let-tuple-expr(ps: Ps, kw: Tok, pat: Ast) -> Result Ast ParseError =
+  match (eat(ps, "="))
+    | None -> perr(peek(ps), "expected =")
+    | Some(_) ->
+      match (parse-expr(ps))
+        | Err(e) -> Err(e)
+        | Ok(expr) -> Ok(paren-at([sym-at("let", tok-span(kw)), pat, expr], span-join(tok-span(kw), ast-span(expr))))
+
+let parse-let-named(ps: Ps, kw: Tok, indent: Int) -> Result Ast ParseError {
   let name = peek(ps)
   cond
     | name.kind != "ident" -> perr(name, "expected a name")
@@ -2013,20 +2181,42 @@ let parse-defn(ps: Ps, kw: Tok, name: Tok, tp: Maybe Ast, indent: Int) -> Result
                 | Ok(body) ->
                   if (indent > 0) -> Ok(local-fn-let(kw, name, params, body)) | Ok(paren-at(defn-elems(kw, name-ast(name, tp), params, ret, body), span-join(tok-span(kw), ast-span(body))))
 
+; A nested local `let f(...)=…`'s `(param pat ty)` entries can't appear
+; directly in a `fn` parameter list, so each becomes a synthetic
+; `__p{i}` name and the body is wrapped in a `match __p{i} pat …` for
+; it (mirrors host's `wrapPatternParams`; top-level `defn` does the same
+; at desugar time instead — see `desugar.mnd`'s `desugar-defn`).
 let local-fn-let(kw: Tok, name: Tok, params: List Ast, body: Ast) -> Ast = {
-  let fn-ast = paren-at([sym-at("fn", tok-span(kw)), paren-at(bare-params(params), tok-span(name)), body], span-join(tok-span(kw), ast-span(body)))
+  let names = param-names(params, 0)
+  let wrapped = wrap-body-with-params(params, 0, body)
+  let fn-ast = paren-at([sym-at("fn", tok-span(kw)), paren-at(names, tok-span(name)), wrapped], span-join(tok-span(kw), ast-span(body)))
   paren-at([sym-at("let", tok-span(kw)), sym-at(name.text, tok-span(name)), fn-ast], span-join(tok-span(kw), ast-span(body)))
 }
 
-let bare-params(params: List Ast) -> List Ast =
+let param-names(params: List Ast, i: Int) -> List Ast =
   match (params)
     | [] -> []
-    | p :: rest -> bare-param(p) :: bare-params(rest)
+    | p :: rest -> param-name-at(p, i) :: param-names(rest, i + 1)
+
+let param-name-at(p: Ast, i: Int) -> Ast =
+  match (p)
+    | ParenNode(SymNode("param", sp) :: _, _) -> sym-at(String.concat("__p", show(i)), sp)
+    | _ -> bare-param(p)
 
 let bare-param(p: Ast) -> Ast =
   match (p)
     | ParenNode(SymNode(n, sp) :: _, _) -> sym-at(bare-name(n), sp)
     | _ -> p
+
+let wrap-body-with-params(params: List Ast, i: Int, body: Ast) -> Ast =
+  match (params)
+    | [] -> body
+    | p :: rest -> wrap-one-param(p, i, wrap-body-with-params(rest, i + 1, body))
+
+let wrap-one-param(p: Ast, i: Int, body: Ast) -> Ast =
+  match (p)
+    | ParenNode([SymNode("param", sp), pat, _], _) -> paren-at([sym-at("match", sp), sym-at(String.concat("__p", show(i)), sp), pat, body], sp)
+    | _ -> body
 
 let defn-elems(kw: Tok, name: Ast, params: List Ast, ret: Ast, body: Ast) -> List Ast =
   sym-at("defn", tok-span(kw)) :: name :: cat(params, [sym-at("->", ast-span(ret)), ret, body])

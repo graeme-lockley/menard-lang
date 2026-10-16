@@ -2,7 +2,6 @@
 ; The list is the last parameter, so a pipe can fill it.
 ; @module std/list
 
-import std/pair
 
 ; Number of elements in xs.
 ; @test length([1, 2, 3]) => 3
@@ -120,14 +119,14 @@ pub let filter-map[a, b](f: (a) -> Maybe b, xs: List a) -> List b =
         | None -> filter-map(f, t)
 
 ; Elements that pass f, then elements that do not. Order within each is kept.
-; @test partition(fn (n) = n > 1, [1, 2, 3]) => Pair([2, 3], [1])
-pub let partition[a](f: (a) -> Bool, xs: List a) -> Pair (List a) (List a) =
+; @test partition(fn (n) = n > 1, [1, 2, 3]) => ([2, 3], [1])
+pub let partition[a](f: (a) -> Bool, xs: List a) -> (List a) * (List a) =
   match (xs)
-    | [] -> Pair([], [])
+    | [] -> ([], [])
     | h :: t ->
       match (partition(f, t))
-        | Pair(yes, no) ->
-          if (f(h)) -> Pair(h :: yes, no) | Pair(yes, h :: no)
+        | (yes, no) ->
+          if (f(h)) -> (h :: yes, no) | (yes, h :: no)
 
 ; sep between the elements of xs.
 ; @test intersperse(0, [1, 2, 3]) => [1, 0, 2, 0, 3]
@@ -187,24 +186,24 @@ let maximum-onto(xs: List Int, best: Int) -> Int =
     | h :: t -> maximum-onto(t, if (h > best) -> h | best)
 
 ; Pairs of elements taken until either list ends.
-; @test zip([1, 2], ["a", "b"]) => [Pair(1, "a"), Pair(2, "b")]
-pub let zip[a, b](xs: List a, ys: List b) -> List (Pair a b) =
+; @test zip([1, 2], ["a", "b"]) => [(1, "a"), (2, "b")]
+pub let zip[a, b](xs: List a, ys: List b) -> List (a * b) =
   match (xs)
     | [] -> []
     | x :: xt ->
       match (ys)
         | [] -> []
-        | y :: yt -> Pair(x, y) :: zip(xt, yt)
+        | y :: yt -> (x, y) :: zip(xt, yt)
 
 ; The firsts and seconds of pairs, in order.
-; @test unzip([Pair(1, "a"), Pair(2, "b")]) => Pair([1, 2], ["a", "b"])
-; @test unzip([]) => Pair([], [])
-pub let unzip[a, b](pairs: List (Pair a b)) -> Pair (List a) (List b) =
+; @test unzip([(1, "a"), (2, "b")]) => ([1, 2], ["a", "b"])
+; @test unzip([]) => ([], [])
+pub let unzip[a, b](pairs: List (a * b)) -> (List a) * (List b) =
   match (pairs)
-    | [] -> Pair([], [])
-    | Pair(a, b) :: rest ->
+    | [] -> ([], [])
+    | (a, b) :: rest ->
       match (unzip(rest))
-        | Pair(as, bs) -> Pair(a :: as, b :: bs)
+        | (as, bs) -> (a :: as, b :: bs)
 
 ; Whether x occurs in xs, compared with =.
 ; @test member(2, [1, 2, 3]) => true

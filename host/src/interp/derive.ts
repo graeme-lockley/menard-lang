@@ -38,6 +38,8 @@ export function showValue(v: Value): string {
         : `(${v.ctor} ${v.payloads.map(showValue).join(" ")})`;
     case "record":
       return `(${v.name} ${v.fields.map(showValue).join(" ")})`;
+    case "tuple":
+      return `(${v.fields.map(showValue).join(", ")})`;
     case "module":
       throw new Error("type module is not showable");
     case "map": {
@@ -108,6 +110,13 @@ export function equalValue(a: Value, b: Value): boolean {
       const bb = b as typeof a;
       return (
         a.name === bb.name &&
+        a.fields.length === bb.fields.length &&
+        a.fields.every((x, i) => equalValue(x, bb.fields[i]!))
+      );
+    }
+    case "tuple": {
+      const bb = b as typeof a;
+      return (
         a.fields.length === bb.fields.length &&
         a.fields.every((x, i) => equalValue(x, bb.fields[i]!))
       );
@@ -189,6 +198,15 @@ export function compareValue(a: Value, b: Value): number {
     case "record": {
       const bb = b as typeof a;
       if (a.name !== bb.name) return a.name < bb.name ? -1 : 1;
+      const n = Math.min(a.fields.length, bb.fields.length);
+      for (let i = 0; i < n; i++) {
+        const c = compareValue(a.fields[i]!, bb.fields[i]!);
+        if (c !== 0) return c;
+      }
+      return a.fields.length - bb.fields.length;
+    }
+    case "tuple": {
+      const bb = b as typeof a;
       const n = Math.min(a.fields.length, bb.fields.length);
       for (let i = 0; i < n; i++) {
         const c = compareValue(a.fields[i]!, bb.fields[i]!);

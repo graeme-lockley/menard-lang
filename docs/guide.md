@@ -104,7 +104,7 @@ let abs(n: Int) -> Int =
 
 An `if` or `cond` with no else has type `Unit`. Anything else needs the else arm.
 
-`match` takes the value apart. The arms cover every constructor. A guard (`when`) does not count as coverage. Several values are matched together. Each arm's pattern is a parenthesized list of the same length, and no tuple is built.
+`match` takes the value apart. The arms cover every constructor. A guard (`when`) does not count as coverage. Several values are matched together. Each arm's pattern is a parenthesized list of the same length, and no tuple is built for that form. A value of product type is a single scrutinee: `match (p) | (x, y) -> …`.
 
 ```
 let from-maybe[a, e](err: e, m: Maybe a) -> Result a e =
@@ -131,20 +131,26 @@ let sum(xs: List Int) -> Int =
 
 ## Types
 
-A record is a product. The name is the constructor, and the fields are selected with `.`.
+A flat product is written with `*`. The value is a parenthesized comma list. Components are selected with `.1`, `.2`, ….
 
 ```
-pub record Pair[a, b] {
-  fst: a
-  snd: b
+let p = (1, "a")
+p.1
+
+let fst-of[a, b]((x, _): a * b) -> a =
+  x
+```
+
+A record is a named product. The name is the constructor, and the fields are selected with `.`.
+
+```
+pub record Counts {
+  passed: Int
+  failed: Int
 }
 
-let p = Pair(1, "a")
-p.fst
-
-let fst-of[a, b](p: Pair a b) -> a =
-  match (p)
-    | Pair { fst } -> fst
+let c = Counts(1, 0)
+c.passed
 ```
 
 A variant is a sum. Each alternative is a constructor.

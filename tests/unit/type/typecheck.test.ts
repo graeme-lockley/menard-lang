@@ -425,4 +425,40 @@ f(Cons(1, Nil()), Cons(1, Nil()))`;
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(1n);
   });
+
+  test("tuple literal, projection, and product type", () => {
+    const src = `let make() -> Int * Str =
+  (1, "a")
+let p = make()
+p.1`;
+    const r = run(src);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(1n);
+  });
+
+  test("tuple pattern in match, let, and params", () => {
+    const src = `let swap((a, b): Int * Str) -> Str * Int =
+  (b, a)
+let (x, y) = swap((1, "z"))
+match ((x, y))
+  | (s, n) -> n
+`;
+    const r = run(src);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(1n);
+  });
+
+  test("multi-scrutinee match does not require a product", () => {
+    const src = `let f(xs: List Int, ys: List Int) -> Int =
+  match (xs, ys)
+    | ([], []) -> 0
+    | (_, _) -> 1
+f(Nil(), Nil())`;
+    expect(diagnose(src)).toEqual([]);
+  });
+
+  test("rejects .0 and a trailing star in a product type", () => {
+    expect(diagnose("(1, 2).0").some((d) => d.code === "E_PARSE" || d.code === "E_TYPE_UNBOUND")).toBe(true);
+    expect(diagnose(`let f() -> Int * =\n  (1, 2)`).length).toBeGreaterThan(0);
+  });
 });

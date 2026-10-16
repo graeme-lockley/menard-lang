@@ -668,11 +668,20 @@ let rename-lookup(renames: Map Str Str, name: Str) -> Str =
     | Some(n) -> n
     | None -> name
 
-; Leave `(quote …)` bodies untouched (symbols are data, not refs).
+; Core form heads must stay literal even when a value of the same name is
+; renamed (e.g. `std/list.product` vs type `(product T1 T2)` under `as`).
+let is-core-form-head(head: Ast) -> Bool =
+  is-sym(head, "quote") || is-sym(head, "char") || is-sym(head, "product") || is-sym(head, "tuple") || is-sym(head, "project") || is-sym(head, "Fn")
+
+; Leave `(quote …)` / `(char …)` bodies untouched (symbols are data, not refs).
+; For other core heads, keep the head and rename only the children.
 let rename-paren(xs: List Ast, sp: Span, renames: Map Str Str) -> Ast =
   match (xs)
     | head :: rest ->
-      if (is-sym(head, "quote") || is-sym(head, "char")) -> ParenNode(xs, sp) | ParenNode(rename-ast-list(xs, renames), sp)
+      cond
+        | is-sym(head, "quote") || is-sym(head, "char") -> ParenNode(xs, sp)
+        | is-core-form-head(head) -> ParenNode(head :: rename-ast-list(rest, renames), sp)
+        | else -> ParenNode(rename-ast-list(xs, renames), sp)
     | [] -> ParenNode(xs, sp)
 
 let rename-ast(a: Ast, renames: Map Str Str) -> Ast =

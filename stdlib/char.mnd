@@ -2,8 +2,6 @@
 ; Comparisons use character literals. There is no code-point conversion.
 ; @module std/char
 
-import std/pair
-
 ; Whether c is an ASCII digit.
 ; @test is-digit('0') => true
 ; @test is-digit('9') => true
@@ -42,18 +40,18 @@ pub let is-whitespace(c: Char) -> Bool =
   c == ' ' || c == '\n' || c == '\t' || c == '\r'
 
 ; ASCII lowercase letters and the uppercase letter each becomes.
-let upper-pairs() -> List (Pair Char Char) =
-  [Pair('a', 'A'), Pair('b', 'B'), Pair('c', 'C'), Pair('d', 'D'), Pair('e', 'E'), Pair('f', 'F'), Pair('g', 'G'), Pair('h', 'H'), Pair('i', 'I'), Pair('j', 'J'), Pair('k', 'K'), Pair('l', 'L'), Pair('m', 'M'), Pair('n', 'N'), Pair('o', 'O'), Pair('p', 'P'), Pair('q', 'Q'), Pair('r', 'R'), Pair('s', 'S'), Pair('t', 'T'), Pair('u', 'U'), Pair('v', 'V'), Pair('w', 'W'), Pair('x', 'X'), Pair('y', 'Y'), Pair('z', 'Z')]
+let upper-pairs() -> List (Char * Char) =
+  [('a', 'A'), ('b', 'B'), ('c', 'C'), ('d', 'D'), ('e', 'E'), ('f', 'F'), ('g', 'G'), ('h', 'H'), ('i', 'I'), ('j', 'J'), ('k', 'K'), ('l', 'L'), ('m', 'M'), ('n', 'N'), ('o', 'O'), ('p', 'P'), ('q', 'Q'), ('r', 'R'), ('s', 'S'), ('t', 'T'), ('u', 'U'), ('v', 'V'), ('w', 'W'), ('x', 'X'), ('y', 'Y'), ('z', 'Z')]
 
 ; ASCII uppercase letters and the lowercase letter each becomes.
-let lower-pairs() -> List (Pair Char Char) =
-  [Pair('A', 'a'), Pair('B', 'b'), Pair('C', 'c'), Pair('D', 'd'), Pair('E', 'e'), Pair('F', 'f'), Pair('G', 'g'), Pair('H', 'h'), Pair('I', 'i'), Pair('J', 'j'), Pair('K', 'k'), Pair('L', 'l'), Pair('M', 'm'), Pair('N', 'n'), Pair('O', 'o'), Pair('P', 'p'), Pair('Q', 'q'), Pair('R', 'r'), Pair('S', 's'), Pair('T', 't'), Pair('U', 'u'), Pair('V', 'v'), Pair('W', 'w'), Pair('X', 'x'), Pair('Y', 'y'), Pair('Z', 'z')]
+let lower-pairs() -> List (Char * Char) =
+  [('A', 'a'), ('B', 'b'), ('C', 'c'), ('D', 'd'), ('E', 'e'), ('F', 'f'), ('G', 'g'), ('H', 'h'), ('I', 'i'), ('J', 'j'), ('K', 'k'), ('L', 'l'), ('M', 'm'), ('N', 'n'), ('O', 'o'), ('P', 'p'), ('Q', 'q'), ('R', 'r'), ('S', 's'), ('T', 't'), ('U', 'u'), ('V', 'v'), ('W', 'w'), ('X', 'x'), ('Y', 'y'), ('Z', 'z')]
 
 ; The image of c in pairs, or c when it is absent.
-let fold-case(pairs: List (Pair Char Char), c: Char) -> Char =
+let fold-case(pairs: List (Char * Char), c: Char) -> Char =
   match (pairs)
     | [] -> c
-    | Pair(from, to) :: rest ->
+    | (from, to) :: rest ->
       if (from == c) -> to | fold-case(rest, c)
 
 ; c as an ASCII uppercase letter. Other characters stay.

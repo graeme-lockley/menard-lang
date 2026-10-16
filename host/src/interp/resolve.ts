@@ -31,6 +31,7 @@ export const enum Sf {
   Decl = 12, // defn/defrec/variant/alias — no-op as expression
   Project = 13,
   Char = 14,
+  Tuple = 15,
 }
 
 const SF_BY_NAME: Record<string, Sf> = {
@@ -52,6 +53,7 @@ const SF_BY_NAME: Record<string, Sf> = {
   variant: Sf.Decl,
   alias: Sf.Decl,
   project: Sf.Project,
+  tuple: Sf.Tuple,
 };
 
 const sfCache = new WeakMap<Uint8Array, Sf>();

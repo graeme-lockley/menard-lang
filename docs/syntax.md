@@ -206,11 +206,6 @@ pub record Counts {
   failed: Int
 }
 
-pub record Pair[a, b] {
-  fst: a
-  snd: b
-}
-
 type Tree[a] =
   | Empty
   | Leaf(a)
@@ -339,14 +334,18 @@ There is no `;` statement terminator.
 
 ## 4. Types
 
-A type is a spine or an arrow. An arrow has lower precedence than
-application, so `Map Str Int -> Bool` means `(Map Str Int) -> Bool`.
+A type is a product, a spine, or an arrow. A product has higher precedence
+than an arrow, so `Int * Str -> Bool` means `(Int * Str) -> Bool`. An arrow
+has lower precedence than application, so `Map Str Int -> Bool` means
+`(Map Str Int) -> Bool`.
 
 ```
 type        = arrow
 arrow       = "(" type,* ")" "->" type
             / "(" ")" "->" type
-            / spine "->" type
+            / product "->" type
+            / product
+product     = spine ("*" spine)+
             / spine
 spine       = atom atom*
 atom        = "(" type ")"
@@ -356,11 +355,13 @@ atom        = "(" type ")"
 ```
 
 Application is juxtaposition and is not curried: `Tree a`, `List Int`,
-`Map Str (List Int)`, `Maybe (Env v)`, `Pair k v`. A spine stops at `,`,
-`)`, `}`, `|`, `->`, `=`, or the end of the line. Parentheses group.
-`(Int, Str) -> Bool` is a function of two arguments. `() -> Str` is a
-function of none. `(Int) -> Str` is a function of one. A function type used
-as an argument is parenthesized: `List ((Int) -> Bool)`.
+`Map Str (List Int)`, `Maybe (Env v)`, `List (Int * Str)`. A spine stops at
+`,`, `)`, `}`, `|`, `->`, `*`, `=`, or the end of the line. Parentheses group.
+A product needs at least two factors and is flat: `Int * Str * Bool` is one
+product of three, not nested pairs. `(Int, Str) -> Bool` is a function of two
+arguments. `() -> Str` is a function of none. `(Int) -> Str` is a function of
+one. A function type used as an argument is parenthesized:
+`List ((Int) -> Bool)`.
 
 `[a, b]` appears only in a declaration, as the type-parameter list. It is
 not type application.
@@ -390,10 +391,15 @@ bin         = unary (operator unary)*
 unary       = ["-"] app
 app         = postfix "(" expr,* ["..."] ")"
             / postfix
-postfix     = atom ("." identifier)*
-atom        = literal / identifier / "(" expr ")" / list / map
+postfix     = atom ("." (identifier / positive-int))*
+atom        = literal / identifier / "(" ")" / "(" expr "," expr,+ ")" / "(" expr ")" / list / map
 list        = "[" expr,* "]"
 ```
+
+`()` is `Unit`. `(e)` is grouping. `(e1, e2, …)` with at least two parts is a
+tuple value. `e.1` through `e.n` project a tuple component (1-based). `.0` and
+an out-of-range index are errors. Record and module projection still use a
+name after `.`.
 
 `{}` is a map. A brace form whose first entry is a spread, or whose first
 expression is followed by `=>`, is a map. Any other `{` is a block, and a
@@ -523,6 +529,7 @@ or-pattern  = app-pattern ("|" app-pattern)*
 app-pattern = Upper "(" pattern,* ")"
             / Upper "{" lower,* "}"
             / Upper
+            / "(" pattern "," pattern,+ ")"
             / "[" pattern,* "]"
             / literal
             / lower
@@ -535,16 +542,19 @@ constructor is a bare name. A record pattern is positional, in field
 declaration order: `Counts(p, f)`, `Span(s, _, _, _)`. The same record may
 name the fields it binds: `Span { line }`. Omitted fields are wildcards. A
 bare name binds a local of that name. There is no `field: local` rename.
-`_` matches anything and binds nothing. A lowercase name binds. List
-patterns are `[h, t]` only when the list's length is fixed; the open list
-pattern is `h :: t`, and `[]` is the empty list. `::` in a pattern
-associates to the right, the same way it does in an expression. Literals
-are `Int`, `Str`, and `Sym`. Patterns nest. A `when` guard is a `Bool`
-expression and may use the names the pattern bound.
+`_` matches anything and binds nothing. A lowercase name binds. A parenthesized
+comma list with at least two parts is a tuple pattern. List patterns are
+`[h, t]` only when the list's length is fixed; the open list pattern is
+`h :: t`, and `[]` is the empty list. `::` in a pattern associates to the
+right, the same way it does in an expression. Literals are `Int`, `Str`, and
+`Sym`. Patterns nest. A `when` guard is a `Bool` expression and may use the
+names the pattern bound. Tuple patterns also appear in `let (x, y) = e` and
+in parameters written `((x, y): a * b)`.
 
 `match` takes one scrutinee or several, separated by commas. One scrutinee
-uses the pattern above. Several scrutinees require each arm's pattern to be
-a parenthesized list of the same length. No tuple value is built.
+uses the pattern above — including a tuple pattern when that scrutinee has
+product type. Several scrutinees require each arm's pattern to be a
+parenthesized list of the same length; no tuple value is built for that form.
 `(Int, Str) -> Bool` stays a function type. A length mismatch is a parse
 error. Or-patterns stay on one component. `when` stays on the arm.
 
@@ -608,13 +618,19 @@ word has changed.
 | `if (p) -> a` | `(if p a ())`, and a type error unless `a` is `Unit` |
 | `match (e) \| P -> a` | `(match e (P a) …)` |
 | `match (e1, e2) \| (P, Q) -> a` | nested `(match …)` grouped by the leftmost constructor; no tuple is built |
+| `Int * Str * Bool` | `(product Int Str Bool)` |
+| `(e1, e2, e3)` | `(tuple e1 e2 e3)` |
+| `(p1, p2)` as a pattern | `(tuple p1 p2)` |
+| `e.1` | `(project e 1)`, then slot `0` |
+| `let (x, y) = e` | `(let (tuple x y) e)` (or a `match` wrap when a body follows) |
+| `((x, y): a * b)` as a parameter | `(param (tuple x y) (product a b))`, then a `match` wrap |
 | `Span { line }` | `(recpat Span line)`, checked as the positional record pattern |
 | `type Name = …` | `(variant Name …)` |
 | `record Name { … }` | `(defrec Name …)` |
 | `alias Name = T` | `(alias Name T)` |
 | `a + b`, and the other arithmetic operators | the binary intrinsic |
 | `a :: b` | `(Cons a b)` |
-| `pair.fst` | `(project pair fst)`, then the field's slot |
+| `rec.fst` | `(project rec fst)`, then the field's slot |
 | `import path as Name` | `(import path Name)`; `Name.f` resolves `f` in that module |
 | `pub import path` | re-exports every public name of `path`, and a type's constructors |
 | `pub import path (A, B)` | re-exports those names, and a type's constructors |

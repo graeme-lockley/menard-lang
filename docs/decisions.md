@@ -28,6 +28,36 @@ specification. Where a name changed, the entry that changed it says so.
 
 ---
 
+## 2026-10-16 — Caml-style n-tuples (amends the multi-value match decision)
+
+### The decision
+
+Flat product types `T1 * T2 * … * Tn` (`n ≥ 2`), literals `(e1, e2, …)`,
+1-based projection `e.1`…`e.n`, and tuple patterns in `match`, `let`, and
+parameters are part of the language. `*` binds tighter than `->`. Multi-scrutinee
+`match (xs, ys)` stays allocation-free (`mmatch`); it is not a tuple literal.
+A value of type `a * b` is matched with one scrutinee: `match (p) | (x, y) -> …`.
+
+`std/pair` and the `Pair` record are removed. Helpers that lived on pairs move
+to `std/tuple` over `a * b` (`map-fst`, `map-snd`, `map-both`).
+
+### Why this shape
+
+Multi-value match covered the compiler's nested decisions without a heap
+product. Library code still needed a first-class product: list `zip`/`unzip`,
+map entries, and letter tables. Nested `Pair` records paid a name and a
+constructor for every site. A flat Caml product is the usual spelling, keeps
+`(Int, Str) -> Bool` as a multi-argument function type, and shares the record
+slot layout at runtime.
+
+### What was rejected
+
+- 1-tuples; Haskell `(Int, Str)` as a type spelling; turning constructor
+  argument lists into implicit tuples; allocating on multi-scrutinee `match`.
+- Keeping `Pair` as an alias of `a * b`.
+
+---
+
 ## Decision index
 
 The standing decisions, with their reasons and their costs. These are the load
@@ -35,7 +65,7 @@ bearing choices; everything in the specification follows from them.
 
 | # | Decision | Reason | Cost if wrong |
 |---|---|---|---|
-| 1 | Infix surface, `cond` for laid-out tests, `if` for an inline value, one `.` for fields and qualified imports | A four-letter keyword lines the bar up with the guard; an inline test has no newline so it is parenthesized; `:` is already the type separator so cons is `::`; `Pair` is not owned by `Map` | Two readers must lower to the same core, or the fixed point fails |
+| 1 | Infix surface, `cond` for laid-out tests, `if` for an inline value, one `.` for fields and qualified imports | A four-letter keyword lines the bar up with the guard; an inline test has no newline so it is parenthesized; `:` is already the type separator so cons is `::`; products are `a * b`, not owned by `Map` | Two readers must lower to the same core, or the fixed point fails |
 | 2 | Statically typed | Types drive the showable/orderable/equatable checks and exhaustive matching | Larger typer |
 | 3 | `Int` = 63-bit tagged, **one integer type** | The tag bit makes uniform one-word values possible, and is load-bearing for the collector too (§2.2, §4.3); narrow buys no speed, wide costs boxing; a second type doubles the ways the interpreter and the backend can disagree | Range limit; boxed `BigInt` eventually |
 | 4 | `Float` boxed in a **`bytes` payload**, **no unboxed fields** | The payload is arbitrary bits, so it must never be scanned as slots; NaN-boxing would *narrow* `Int`; unboxing would break the collector's invariants (§4.3) | Allocation churn on float-heavy code |
@@ -118,17 +148,18 @@ public signature name an imported public type removes the alias that existed
 only to satisfy the checker. `pub import` is the same idea for a module whose
 callers need the name, which is `std/fs` and `IoError`. Named fields and a
 multi-value `match` are sugar over the patterns and the exhaustiveness check
-the language already has. An n-tuple type was turned down: a product would
-need a type, a literal, and a pattern, and the matches that earned the syntax
-do not need a value.
+the language already has. An n-tuple type was turned down at the time: the
+matches that earned the syntax did not need a value. That rejection was
+reversed on 2026-10-16 — see the dated entry above — once library code still
+needed a first-class product.
 
 ### What was rejected
 
-- An n-tuple type, and pattern matching over values of that type.
 - `field: local` renames in a record pattern.
 - `pub` on `extern`, and `pub import path as Name`.
-- Growing the exhaustiveness checker with a product lattice. Grouping keeps
-  each nested match exhaustive exactly when the source match is.
+- Growing the exhaustiveness checker with a product lattice for multi-scrutinee
+  match. Grouping keeps each nested match exhaustive exactly when the source
+  match is. (A *value* of product type has its own single-constructor check.)
 
 ## 2026-10-10 — Pipe operator `|>`
 

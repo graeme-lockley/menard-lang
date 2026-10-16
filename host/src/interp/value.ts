@@ -14,6 +14,7 @@ export type Value =
   | { tag: "list"; elems: Value[] } // runtime list as array; Cons/Nil also as variants
   | { tag: "variant"; ctor: string; payloads: Value[] }
   | { tag: "record"; name: string; fields: Value[]; fieldNames: string[] }
+  | { tag: "tuple"; fields: Value[] }
   | { tag: "module"; exports: Map<string, Value> }
   | { tag: "ref"; cell: { value: Value } }
   | { tag: "fn"; params: string[]; body: unknown; env: Env; path?: string; name?: string }

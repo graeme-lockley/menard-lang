@@ -30,6 +30,7 @@ pub type Type =
   | TRef(Type)
   | TFn(List Type, Type)
   | TNominal(Str, List Type, Str)
+  | TProduct(List Type)
 
  ; name, type args, kind ("record" | "variant")
 
@@ -114,6 +115,11 @@ pub let t-fn(params: List Type, ret: Type) -> Type =
 pub let t-nominal(name: Str, args: List Type, kind: Str) -> Type =
   TNominal(name, args, kind)
 
+; Caml-style n-tuple (n>=2), structural like `TList`/`TMap` — no declared
+; name, so it is unified elementwise rather than looked up by name.
+pub let t-product(elems: List Type) -> Type =
+  TProduct(elems)
+
 ; ---------------------------------------------------------------------------
 ; Structural equality (ignores display names on TVar, exactly as host's
 ; typeEqual does — a variable's spelling is not part of its identity).
@@ -137,6 +143,7 @@ pub let type-equal(a: Type, b: Type) -> Bool =
     | (TRef(ea), TRef(eb)) -> type-equal(ea, eb)
     | (TFn(pa, ra), TFn(pb, rb)) -> type-list-equal(pa, pb) && type-equal(ra, rb)
     | (TNominal(na, aa, ka), TNominal(nb, ab, kb)) -> na == nb && ka == kb && type-list-equal(aa, ab)
+    | (TProduct(xs), TProduct(ys)) -> type-list-equal(xs, ys)
     | (_, _) -> false
 
 pub let type-list-equal(xs: List Type, ys: List Type) -> Bool =
@@ -169,11 +176,18 @@ pub let type-show(t: Type) -> Str =
     | TRef(elem) -> String.concat("(Ref ", type-show(elem), ")")
     | TFn(params, ret) -> String.concat("(Fn ", type-show-list(params), " -> ", type-show(ret), ")")
     | TNominal(name, args, _) -> type-show-nominal(name, args)
+    | TProduct(elems) -> type-show-product(elems)
 
 let type-show-nominal(name: Str, args: List Type) -> Str =
   match (args)
     | [] -> name
     | _ -> String.concat("(", name, " ", type-show-list(args), ")")
+
+let type-show-product(xs: List Type) -> Str =
+  match (xs)
+    | [] -> ""
+    | [x] -> type-show(x)
+    | x :: rest -> String.concat(type-show(x), " * ", type-show-product(rest))
 
 let type-show-list(xs: List Type) -> Str =
   match (xs)
@@ -204,6 +218,7 @@ pub let is-showable(t: Type) -> Bool =
     | TMap(k, v) -> is-showable(k) && is-showable(v)
     | TResult(ok, err) -> is-showable(ok) && is-showable(err)
     | TNominal(_, args, _) -> type-list-all-showable(args)
+    | TProduct(elems) -> type-list-all-showable(elems)
     | _ -> true
 
 let type-list-all-showable(xs: List Type) -> Bool =
@@ -230,6 +245,7 @@ pub let is-orderable(t: Type) -> Bool =
     | TMap(k, v) -> is-orderable(k) && is-orderable(v)
     | TResult(ok, err) -> is-orderable(ok) && is-orderable(err)
     | TNominal(_, args, _) -> type-list-all-orderable(args)
+    | TProduct(elems) -> type-list-all-orderable(elems)
 
 let type-list-all-orderable(xs: List Type) -> Bool =
   match (xs)

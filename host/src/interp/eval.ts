@@ -103,7 +103,11 @@ export function evalProgram(
         const v = evalExpr(binding.expr, e, host);
         // Bind on the module env functions closed over, not a child, so a
         // later `defn` can mention the name the way it mentions any other value.
-        envSet(env, binding.name, v);
+        if (binding.binder.tag === "sym") {
+          envSet(env, symName(binding.binder), v);
+        } else if (!matchPat(binding.binder, v, env)) {
+          throw new PanicError("let pattern did not match", binding.binder.span);
+        }
         e = env;
         last = v;
         continue;
@@ -141,8 +145,8 @@ export function evalProgram(
   }
 }
 
-/** `(let name expr)` or `(pub let name expr)` at the top of a module. */
-function topLet(ast: Ast): { name: string; expr: Ast } | null {
+/** `(let name expr)`, `(let (tuple …) expr)`, or `pub` of either, at module top. */
+function topLet(ast: Ast): { binder: Ast; expr: Ast } | null {
   let form = ast;
   if (
     form.tag === "list" &&
@@ -156,12 +160,15 @@ function topLet(ast: Ast): { name: string; expr: Ast } | null {
     form.tag !== "list" ||
     form.elems.length !== 3 ||
     form.elems[0]?.tag !== "sym" ||
-    !nameEquals(form.elems[0].name, "let") ||
-    form.elems[1]?.tag !== "sym"
+    !nameEquals(form.elems[0].name, "let")
   ) {
     return null;
   }
-  return { name: symName(form.elems[1]), expr: form.elems[2]! };
+  const binder = form.elems[1]!;
+  if (binder.tag !== "sym" && !(binder.tag === "list" && binder.elems[0]?.tag === "sym" && nameEquals(binder.elems[0].name, "tuple"))) {
+    return null;
+  }
+  return { binder, expr: form.elems[2]! };
 }
 
 function isTopDef(ast: Ast): boolean {
@@ -371,9 +378,17 @@ type LoopCtx = { names: string[]; env: Env };
 type Cont =
   | { tag: "seq"; forms: Ast[]; i: number; env: Env; loop: LoopCtx | null }
   | { tag: "if"; then: Ast; else_: Ast; env: Env; loop: LoopCtx | null }
-  | { tag: "let"; name: string; rest: Ast[]; env: Env; loop: LoopCtx | null }
+  | { tag: "let"; binder: Ast; rest: Ast[]; env: Env; loop: LoopCtx | null }
   | {
       tag: "list";
+      elems: Ast[];
+      i: number;
+      acc: Value[];
+      env: Env;
+      loop: LoopCtx | null;
+    }
+  | {
+      tag: "tuple";
       elems: Ast[];
       i: number;
       acc: Value[];
@@ -425,7 +440,7 @@ type Cont =
     }
   | { tag: "panic"; span?: Span }
   | { tag: "call"; callerPath: string; span: Span }
-  | { tag: "project"; field: string; span?: Span };
+  | { tag: "project"; field: string | number; span?: Span };
 
 type Step =
   | { tag: "value"; value: Value }
@@ -682,11 +697,11 @@ function beginEval(
             return { tag: "eval", ast: ast.elems[1]!, env, loop };
           }
           case Sf.Let: {
-            const name = symName(ast.elems[1]!);
+            const binder = ast.elems[1]!;
             const recEnv = emptyEnv(env);
             stack.push({
               tag: "let",
-              name,
+              binder,
               rest: ast.elems.length > 3 ? ast.elems.slice(3) : EMPTY_AST,
               env: recEnv,
               loop,
@@ -751,11 +766,28 @@ function beginEval(
           }
           case Sf.Project: {
             const field = ast.elems[2];
-            if (!ast.elems[1] || field?.tag !== "sym") {
+            if (!ast.elems[1] || (field?.tag !== "sym" && field?.tag !== "int")) {
               throw new PanicError("project expects a value and a field", ast.span);
             }
-            stack.push({ tag: "project", field: symName(field), span: ast.span });
+            const key =
+              field.tag === "int" ? Number(field.value) : symName(field);
+            stack.push({ tag: "project", field: key, span: ast.span });
             return { tag: "eval", ast: ast.elems[1], env, loop };
+          }
+          case Sf.Tuple: {
+            const elems = ast.elems.slice(1);
+            if (elems.length < 2) {
+              throw new PanicError("tuple requires at least two elements", ast.span);
+            }
+            stack.push({
+              tag: "tuple",
+              elems,
+              i: 0,
+              acc: [],
+              env,
+              loop,
+            });
+            return { tag: "eval", ast: elems[0]!, env, loop };
           }
           case Sf.Set: {
             const slot = evalFast(ast.elems[1]!, env, host, false);
@@ -835,7 +867,16 @@ function beginLoop(ast: Ast & { tag: "list" }, env: Env, stack: Cont[]): Step {
   return { tag: "eval", ast: inits[0]!, env, loop: null };
 }
 
-function projectField(value: Value, field: string, span?: Span): Value {
+function projectField(value: Value, field: string | number, span?: Span): Value {
+  if (typeof field === "number") {
+    if (value.tag !== "tuple") {
+      throw new PanicError(`cannot project ${field} from ${value.tag}`, span);
+    }
+    if (field < 1 || field > value.fields.length) {
+      throw new PanicError(`tuple index ${field} out of range`, span);
+    }
+    return value.fields[field - 1]!;
+  }
   if (value.tag === "module") {
     const found = value.exports.get(field);
     if (!found) throw new PanicError(`unknown export ${field}`, span);
@@ -864,7 +905,12 @@ function resume(c: Cont, value: Value, stack: Cont[], host: Host): Step {
         finished.elems.length === 3
       ) {
         const child = emptyEnv(e);
-        envSet(child, symName(finished.elems[1]!), value);
+        const binder = finished.elems[1]!;
+        if (binder.tag === "sym") {
+          envSet(child, symName(binder), value);
+        } else if (!matchPat(binder, value, child)) {
+          throw new PanicError("let pattern did not match", binder.span);
+        }
         e = child;
       }
       const nextI = c.i + 1;
@@ -889,7 +935,11 @@ function resume(c: Cont, value: Value, stack: Cont[], host: Host): Step {
       };
     }
     case "let": {
-      envSet(c.env, c.name, value);
+      if (c.binder.tag === "sym") {
+        envSet(c.env, symName(c.binder), value);
+      } else if (!matchPat(c.binder, value, c.env)) {
+        throw new PanicError("let pattern did not match", c.binder.span);
+      }
       if (c.rest.length === 0) return { tag: "value", value };
       if (c.rest.length === 1) {
         return { tag: "eval", ast: c.rest[0]!, env: c.env, loop: c.loop };
@@ -903,6 +953,16 @@ function resume(c: Cont, value: Value, stack: Cont[], host: Host): Step {
       const nextI = c.i + 1;
       if (nextI >= c.elems.length) {
         return { tag: "value", value: { tag: "list", elems: acc } };
+      }
+      stack.push({ ...c, i: nextI, acc });
+      return { tag: "eval", ast: c.elems[nextI]!, env: c.env, loop: c.loop };
+    }
+    case "tuple": {
+      const acc = c.acc;
+      acc.push(value);
+      const nextI = c.i + 1;
+      if (nextI >= c.elems.length) {
+        return { tag: "value", value: { tag: "tuple", fields: acc } };
       }
       stack.push({ ...c, i: nextI, acc });
       return { tag: "eval", ast: c.elems[nextI]!, env: c.env, loop: c.loop };
@@ -1158,6 +1218,15 @@ function matchPat(pat: Ast, v: Value, env: Env): boolean {
         const i = v.fieldNames.indexOf(fname);
         if (i < 0) return false;
         envSet(env, fname, v.fields[i]!);
+      }
+      return true;
+    }
+    if (cn === "tuple") {
+      if (v.tag !== "tuple") return false;
+      const elems = pat.elems.slice(1);
+      if (elems.length !== v.fields.length) return false;
+      for (let i = 0; i < elems.length; i++) {
+        if (!matchPat(elems[i]!, v.fields[i]!, env)) return false;
       }
       return true;
     }

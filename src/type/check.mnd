@@ -262,6 +262,7 @@ let apply-subst(env: TypeEnv, t: Type) -> Type =
     | TRef(e) -> t-ref(apply-subst(env, e))
     | TFn(ps, r) -> t-fn(apply-subst-list(env, ps), apply-subst(env, r))
     | TNominal(n, a, k) -> TNominal(n, apply-subst-list(env, a), k)
+    | TProduct(elems) -> t-product(apply-subst-list(env, elems))
     | _ -> t
 
 let apply-subst-var(env: TypeEnv, t: Type, id: Int) -> Type =
@@ -287,6 +288,7 @@ let occurs-in(env: TypeEnv, id: Int, t: Type) -> Bool =
     | TResult(o, e) -> occurs(env, id, o) || occurs(env, id, e)
     | TFn(ps, r) -> occurs-list(env, id, ps) || occurs(env, id, r)
     | TNominal(_, a, _) -> occurs-list(env, id, a)
+    | TProduct(elems) -> occurs-list(env, id, elems)
     | _ -> false
 
 let occurs-list(env: TypeEnv, id: Int, xs: List Type) -> Bool =
@@ -333,6 +335,7 @@ let unify-structural(env: TypeEnv, ta: Type, tb: Type, span: Span) -> Bool =
     | TResult(oa, ea) -> unify-result(env, oa, ea, tb, span)
     | TFn(pa, ra) -> unify-fn(env, pa, ra, tb, span)
     | TNominal(na, aa, ka) -> unify-nominal(env, na, aa, ka, tb, span)
+    | TProduct(ea) -> unify-product(env, ea, tb, span)
     | _ -> unify-mismatch(env, ta, tb, span)
 
 let unify-param(env: TypeEnv, na: Str, tb: Type, span: Span) -> Bool =
@@ -409,6 +412,22 @@ let unify-nominal-same(env: TypeEnv, na: Str, aa: List Type, ka: Str, nb: Str, a
           }
     | else -> unify-mismatch(env, TNominal(na, aa, ka), TNominal(nb, ab, kb), span)
 
+; Structural, elementwise — tuples have no declared name to compare, unlike
+; `unify-nominal-same`.
+let unify-product(env: TypeEnv, ea: List Type, tb: Type, span: Span) -> Bool =
+  match (tb)
+    | TProduct(eb) -> unify-product-same(env, ea, eb, span)
+    | _ -> unify-mismatch(env, t-product(ea), tb, span)
+
+let unify-product-same(env: TypeEnv, ea: List Type, eb: List Type, span: Span) -> Bool =
+  cond
+    | length(ea) == length(eb) -> unify-list-pairwise(env, ea, eb, span)
+    | else ->
+      {
+        err!(env, "E_TYPE_ARITY", String.concat("tuple arity mismatch: expected ", show(length(ea)), ", found ", show(length(eb))), span)
+        false
+      }
+
 let unify-mismatch(env: TypeEnv, ta: Type, tb: Type, span: Span) -> Bool {
   err!(env, "E_TYPE_MISMATCH", String.concat("expected ", type-show(ta), ", found ", type-show(tb)), span)
   false
@@ -437,6 +456,7 @@ let replace-params(t: Type, m: Map Str Type) -> Type =
     | TRef(e) -> t-ref(replace-params(e, m))
     | TFn(ps, r) -> t-fn(replace-params-list(ps, m), replace-params(r, m))
     | TNominal(n, a, k) -> TNominal(n, replace-params-list(a, m), k)
+    | TProduct(elems) -> t-product(replace-params-list(elems, m))
     | _ -> t
 
 let replace-param-lookup(t: Type, name: Str, m: Map Str Type) -> Type =
@@ -569,7 +589,18 @@ let parse-type-expr-app-named(env: TypeEnv, hn: Str, args: List Ast, sp: Span, p
     | "Map" -> parse-type-expr-two(env, "Map", args, sp, params, t-map)
     | "Result" -> parse-type-expr-two(env, "Result", args, sp, params, t-result)
     | "Fn" -> parse-type-expr-fn(env, args, sp, params)
+    | "product" -> parse-type-expr-product(env, args, sp, params)
     | _ -> parse-type-expr-nominal(env, hn, args, sp, params)
+
+; `T1 * T2 * …` (≥2 factors) from `parse-type-product` in the reader.
+let parse-type-expr-product(env: TypeEnv, args: List Ast, sp: Span, params: List Str) -> Type =
+  cond
+    | length(args) < 2 ->
+      {
+        err!(env, "E_TYPE_EXPR", "product type requires at least two factors", sp)
+        fresh-var-anon(env)
+      }
+    | else -> t-product(parse-type-exprs(env, args, params))
 
 let parse-type-expr-one(env: TypeEnv, name: Str, args: List Ast, sp: Span, params: List Str, mk: (Type) -> Type) -> Type =
   match (args)
@@ -1076,16 +1107,20 @@ let infer-let-body(env: TypeEnv, body: List Ast, bound-type: Type, next: Map Str
 
 let infer-let-named(env: TypeEnv, name-ast: Ast, expr-ast: Ast, body: List Ast, local: Map Str Type) -> Type =
   match (sym-str(name-ast))
-    | None ->
-      {
-        err!(env, "E_TYPE_LET", "let name must be a symbol", ast-span(name-ast))
-        fresh-var-anon(env)
-      }
+    | None -> infer-let-pattern(env, name-ast, expr-ast, body, local)
     | Some(name) ->
       {
         let t = infer-named-expr(env, name, expr-ast, local)
         infer-let-body(env, body, t, Map.set(name, t, local))
       }
+
+; `let (p1, p2) = e` — the binder is a destructuring pattern, not a name.
+let infer-let-pattern(env: TypeEnv, pat: Ast, expr-ast: Ast, body: List Ast, local: Map Str Type) -> Type {
+  let t = infer(env, expr-ast, local)
+  let loc = ref(local)
+  bind-pattern(env, pat, t, loc, ref([]))
+  infer-let-body(env, body, t, deref(loc))
+}
 
 let infer-let(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) -> Type =
   match (elems)
@@ -1096,18 +1131,15 @@ let infer-let(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) -> T
         fresh-var-anon(env)
       }
 
+; `pat` is either a plain name (`SymNode`) or a destructuring pattern
+; (e.g. a `(tuple …)` form) — `infer-sequence-let` dispatches on that.
 record SimpleLet {
-  name: Str
+  pat: Ast
   expr: Ast
 }
 
 let as-simple-let-named(head: Ast, name-ast: Ast, expr-ast: Ast) -> Maybe SimpleLet =
-  cond
-    | is-sym(head, "let") ->
-      match (sym-str(name-ast))
-        | Some(name) -> Some(SimpleLet(name, expr-ast))
-        | None -> None()
-    | else -> None()
+  if (is-sym(head, "let")) -> Some(SimpleLet(name-ast, expr-ast)) | None()
 
 let as-simple-let(f: Ast) -> Maybe SimpleLet =
   match (f)
@@ -1136,11 +1168,25 @@ let infer-sequence-rest(env: TypeEnv, rest: List Ast, local: Map Str Type, fallb
 
 let infer-sequence-let(env: TypeEnv, sl: SimpleLet, rest: List Ast, local: Map Str Type) -> Type =
   match (sl)
-    | SimpleLet(name, expr-ast) ->
+    | SimpleLet(pat, expr-ast) -> infer-sequence-let-pat(env, pat, expr-ast, rest, local)
+
+let infer-sequence-let-pat(env: TypeEnv, pat: Ast, expr-ast: Ast, rest: List Ast, local: Map Str Type) -> Type =
+  match (sym-str(pat))
+    | Some(name) ->
       {
         let t = infer-named-expr(env, name, expr-ast, local)
         infer-sequence-rest(env, rest, Map.set(name, t, local), t)
       }
+    | None -> infer-sequence-let-destructure(env, pat, expr-ast, rest, local)
+
+; `let (p1, p2) = e` mid-sequence: the destructured names must stay
+; visible to the forms after it, same as a plain `let name = e`.
+let infer-sequence-let-destructure(env: TypeEnv, pat: Ast, expr-ast: Ast, rest: List Ast, local: Map Str Type) -> Type {
+  let t = infer(env, expr-ast, local)
+  let loc = ref(local)
+  bind-pattern(env, pat, t, loc, ref([]))
+  infer-sequence-rest(env, rest, deref(loc), t)
+}
 
 let infer-sequence-plain(env: TypeEnv, f: Ast, rest: List Ast, local: Map Str Type) -> Type {
   let t = infer(env, f, local)
@@ -1452,13 +1498,29 @@ let bind-ctor-scrut(env: TypeEnv, ctor: CtorInfo, scrut: Type, sp: Span) -> Unit
   match (ctor)
     | CtorInfo(type-name, _, params) -> bind-ctor-scrut-specific(env, type-name, fresh-vars-for(params, env), scrut, sp)
 
+let is-product-type(t: Type) -> Bool =
+  match (t)
+    | TProduct(_) -> true
+    | _ -> false
+
+; A wildcard/plain-var bind against a tuple-typed scrutinee needs no
+; further decomposition, so it covers the whole product (there is no
+; declared ctor name to add to `covered` otherwise).
+let mark-product-covered(env: TypeEnv, scrut: Type, covered: Ref (List Str)) -> Unit =
+  if (is-product-type(apply-subst(env, scrut))) -> set!(covered, "__product__" :: deref(covered)) | ()
+
 let bind-pattern-sym(env: TypeEnv, name: Str, sp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
-  if (name == "_") -> () | bind-pattern-sym-lookup(env, name, sp, scrut, loc, covered)
+  if (name == "_") -> mark-product-covered(env, scrut, covered) | bind-pattern-sym-lookup(env, name, sp, scrut, loc, covered)
 
 let bind-pattern-sym-lookup(env: TypeEnv, name: Str, sp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
   match (ctor-get(env, name))
     | Some(ctor) -> bind-nullary-ctor(env, name, ctor, scrut, covered, sp)
-    | None -> set!(loc, Map.set(name, apply-subst(env, scrut), deref(loc)))
+    | None -> bind-pattern-sym-var(env, name, scrut, loc, covered)
+
+let bind-pattern-sym-var(env: TypeEnv, name: Str, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit {
+  mark-product-covered(env, scrut, covered)
+  set!(loc, Map.set(name, apply-subst(env, scrut), deref(loc)))
+}
 
 let bind-pattern-args(env: TypeEnv, arg-pats: List Ast, payloads: List Type, loc: Ref (Map Str Type)) -> Unit =
   match (payloads)
@@ -1497,10 +1559,32 @@ let bind-pattern-ctor-kind(env: TypeEnv, cname: Str, arg-pats: List Ast, psp: Sp
         unify(env, scrut, t-char(), psp)
         ()
       }
+    | cname == "tuple" -> bind-tuple-pat(env, arg-pats, psp, scrut, loc, covered)
     | else ->
       match (ctor-get(env, cname))
         | None -> ()
         | Some(ctor) -> bind-pattern-ctor-info(env, cname, ctor, arg-pats, psp, scrut, loc, covered)
+
+let fresh-vars-for-asts(xs: List Ast, env: TypeEnv) -> List Type =
+  match (xs)
+    | [] -> []
+    | _ :: rest -> fresh-var-anon(env) :: fresh-vars-for-asts(rest, env)
+
+; `(p1, p2, …)` against a tuple scrutinee: unify elementwise (structural,
+; no declared ctor to look up), then bind each sub-pattern against its
+; own slot with a fresh `covered` set, as `bind-pattern-args` already
+; does for a user ctor's payloads.
+let bind-tuple-pat(env: TypeEnv, arg-pats: List Ast, psp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit {
+  let vars = fresh-vars-for-asts(arg-pats, env)
+  unify(env, scrut, t-product(vars), psp)
+  set!(covered, "__product__" :: deref(covered))
+  bind-tuple-pat-arity(env, arg-pats, apply-subst-list(env, vars), psp, loc)
+}
+
+let bind-tuple-pat-arity(env: TypeEnv, arg-pats: List Ast, elem-types: List Type, psp: Span, loc: Ref (Map Str Type)) -> Unit =
+  cond
+    | length(arg-pats) == length(elem-types) -> bind-pattern-args(env, arg-pats, elem-types, loc)
+    | else -> err!(env, "E_TYPE_ARITY", String.concat("tuple pattern arity mismatch: expected ", show(length(elem-types)), ", found ", show(length(arg-pats))), psp)
 
 let bind-guard-pat(env: TypeEnv, arg-pats: List Ast, scrut: Type, loc: Ref (Map Str Type)) -> Unit =
   match (arg-pats)
@@ -1613,6 +1697,15 @@ let check-match-exhaustive(env: TypeEnv, scrut: Type, covered: List Str, has-wil
     | None -> ()
     | Some(tn) -> check-match-exhaustive-named(env, tn, covered, has-wild, sp)
 
+; A tuple has no declared ctor, so `nominal-type-name-of` above skips it
+; entirely — check it separately. `apply-subst` first since `scrut` may
+; still be an unresolved unification variable at the call site.
+let check-match-exhaustive-product(env: TypeEnv, scrut: Type, covered: List Str, has-wild: Bool, sp: Span) -> Unit =
+  cond
+    | has-wild || member("__product__", covered) -> ()
+    | is-product-type(apply-subst(env, scrut)) -> err!(env, "E_TYPE_EXHAUSTIVE", "non-exhaustive match: missing product", sp)
+    | else -> ()
+
 let combine-match-result(env: TypeEnv, bt: Type, result: Maybe Type, sp: Span) -> Maybe Type =
   match (result)
     | None -> Some(bt)
@@ -1648,6 +1741,7 @@ let infer-match-scrut(env: TypeEnv, scrut-ast: Ast, clauses: List Ast, sp: Span,
   let has-wild = ref(false)
   let result = run-match-clauses(env, clauses, scrut, local, covered, has-wild, None())
   check-match-exhaustive(env, scrut, deref(covered), deref(has-wild), sp)
+  check-match-exhaustive-product(env, scrut, deref(covered), deref(has-wild), sp)
   match (result)
     | Some(t) -> apply-subst(env, t)
     | None -> fresh-var-anon(env)
@@ -1813,26 +1907,80 @@ let infer-project-named(env: TypeEnv, obj: Ast, field: Str, field-ast: Ast, sp: 
   infer-project-typed(env, obj-ty, field, field-ast, sp)
 }
 
-; `pair.fst` is a field of the record, chosen by declaration order.
+; `pair.fst` is a field of the record, chosen by declaration order;
+; `pair.1`…`pair.N` (1-based) is a tuple projection.
 let infer-project(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) -> Type =
   match (elems)
-    | _ :: obj :: field-ast :: _ ->
-      match (sym-str(field-ast))
-        | None ->
-          {
-            err!(env, "E_TYPE_ARITY", "project expects a value and a field", sp)
-            fresh-var-anon(env)
-          }
-        | Some(field) -> infer-project-named(env, obj, field, field-ast, sp, local)
+    | _ :: obj :: field-ast :: _ -> infer-project-field-ast(env, obj, field-ast, sp, local)
     | _ ->
       {
         err!(env, "E_TYPE_ARITY", "project expects a value and a field", sp)
         fresh-var-anon(env)
       }
 
+let infer-project-field-ast(env: TypeEnv, obj: Ast, field-ast: Ast, sp: Span, local: Map Str Type) -> Type =
+  match (field-ast)
+    | IntNode(n, fsp) -> infer-project-index(env, obj, n, fsp, local)
+    | _ -> infer-project-field-sym(env, obj, field-ast, sp, local)
+
+let infer-project-field-sym(env: TypeEnv, obj: Ast, field-ast: Ast, sp: Span, local: Map Str Type) -> Type =
+  match (sym-str(field-ast))
+    | None ->
+      {
+        err!(env, "E_TYPE_ARITY", "project expects a value and a field", sp)
+        fresh-var-anon(env)
+      }
+    | Some(field) -> infer-project-named(env, obj, field, field-ast, sp, local)
+
+; `(project obj N)` with the index already a positive, parser-validated
+; `IntNode`; the `n < 1` branch below is defensive (mirrors host), since
+; `read.mnd`'s `parse-project-index` already rejects `n <= 0` at parse
+; time.
+let infer-project-index(env: TypeEnv, obj: Ast, n: Int, fsp: Span, local: Map Str Type) -> Type =
+  if (n < 1) -> infer-project-index-bad(env, fsp) | infer-project-index-ok(env, obj, n, fsp, local)
+
+let infer-project-index-bad(env: TypeEnv, fsp: Span) -> Type {
+  err!(env, "E_TYPE_UNBOUND", "tuple projection must be a positive index", fsp)
+  fresh-var-anon(env)
+}
+
+let infer-project-index-ok(env: TypeEnv, obj: Ast, n: Int, fsp: Span, local: Map Str Type) -> Type {
+  let obj-ty = apply-subst(env, infer(env, obj, local))
+  infer-project-index-typed(env, obj, obj-ty, n, fsp)
+}
+
+let infer-project-index-typed(env: TypeEnv, obj: Ast, obj-ty: Type, n: Int, fsp: Span) -> Type =
+  match (obj-ty)
+    | TProduct(elems) -> infer-project-index-elem(env, elems, n, fsp)
+    | _ ->
+      {
+        err!(env, "E_TYPE_MISMATCH", String.concat("expected a product, found ", type-show(obj-ty)), ast-span(obj))
+        fresh-var-anon(env)
+      }
+
+let infer-project-index-elem(env: TypeEnv, elems: List Type, n: Int, fsp: Span) -> Type =
+  if (n > length(elems)) -> infer-project-index-oor(env, elems, n, fsp) | nth-or-fresh(elems, n - 1, env)
+
+let infer-project-index-oor(env: TypeEnv, elems: List Type, n: Int, fsp: Span) -> Type {
+  err!(env, "E_TYPE_UNBOUND", String.concat("tuple index ", show(n), " out of range for product of ", show(length(elems))), fsp)
+  fresh-var-anon(env)
+}
+
+; `(e1, e2, …)` (≥2 elems, enforced by the reader already, but checked
+; again here to mirror host).
+let infer-tuple(env: TypeEnv, rest: List Ast, sp: Span, local: Map Str Type) -> Type =
+  cond
+    | length(rest) < 2 ->
+      {
+        err!(env, "E_TYPE_ARITY", "tuple requires at least two elements", sp)
+        fresh-var-anon(env)
+      }
+    | else -> t-product(infer-args(env, rest, local))
+
 let infer-paren-named(env: TypeEnv, hn: Str, elems: List Ast, rest: List Ast, sp: Span, local: Map Str Type) -> Type =
   match (hn)
     | "project" -> infer-project(env, elems, sp, local)
+    | "tuple" -> infer-tuple(env, rest, sp, local)
     | "if" -> infer-if(env, elems, sp, local)
     | "let" -> infer-let(env, elems, sp, local)
     | "do" -> infer-do(env, rest, local)
@@ -1873,7 +2021,16 @@ let typecheck-top-let-named(env: TypeEnv, name-ast: Ast, expr-ast: Ast, top-loca
   let t = infer(env, expr-ast, deref(top-local))
   match (sym-str(name-ast))
     | Some(n) -> bind-top-let(env, n, t, top-local)
-    | None -> ()
+    | None -> bind-top-let-pattern(env, name-ast, t, top-local)
+}
+
+; Top-level `let (p1, p2) = e` — bind into `top-local` only (not
+; `env.values`), matching host: a destructured top-level binding is
+; visible to later top-level forms in this file but is not exported.
+let bind-top-let-pattern(env: TypeEnv, pat: Ast, t: Type, top-local: Ref (Map Str Type)) -> Unit {
+  let loc = ref(deref(top-local))
+  bind-pattern(env, pat, t, loc, ref([]))
+  set!(top-local, deref(loc))
 }
 
 let typecheck-top-let(env: TypeEnv, elems: List Ast, sp: Span, ast: Ast, top-local: Ref (Map Str Type)) -> Unit =
@@ -2210,15 +2367,32 @@ let rewrite-project-node(elems: List Ast, sp: Span, notes: List ProjNote, env: T
   match (elems)
     | head :: obj :: _ ->
       cond
-        | is-sym(head, "project") -> rewrite-noted-project(obj, sp, notes, env)
+        | is-sym(head, "project") -> rewrite-project-field(elems, obj, sp, notes, env)
         | is-sym(head, "print") || is-sym(head, "println") -> rewrite-print(elems, sp, notes, env)
         | else -> ParenNode(rewrite-project-list(elems, notes, env), sp)
     | [head] ->
       if (is-sym(head, "print") || is-sym(head, "println")) -> rewrite-print(elems, sp, notes, env) | ParenNode(elems, sp)
     | _ -> ParenNode(rewrite-project-list(elems, notes, env), sp)
 
-; `(slot obj index)` is what the lowerer reads.
-let rewrite-noted-project(obj: Ast, sp: Span, notes: List ProjNote, env: TypeEnv) -> Ast =
+; Re-match to pick out the field (kept out of the `head :: obj :: _`
+; pattern above so that doesn't require 3 elements — `print`/`println`
+; above only ever have 2).
+let rewrite-project-field(elems: List Ast, obj: Ast, sp: Span, notes: List ProjNote, env: TypeEnv) -> Ast =
+  match (elems)
+    | _ :: _ :: field :: _ -> rewrite-noted-project(obj, field, sp, notes, env)
+    | _ -> ParenNode([SymNode("project", sp), rewrite-project-ast(obj, notes, env)], sp)
+
+; `(slot obj index)` is what the lowerer reads. A tuple's field is
+; already a positive, 1-based `IntNode` straight from the reader — no
+; `ProjNote` is ever recorded for it (that mechanism only tracks named
+; record fields), so it is handled directly rather than falling through
+; to `find-proj-note`.
+let rewrite-noted-project(obj: Ast, field: Ast, sp: Span, notes: List ProjNote, env: TypeEnv) -> Ast =
+  match (field)
+    | IntNode(n, _) -> ParenNode([SymNode("slot", sp), rewrite-project-ast(obj, notes, env), IntNode(n - 1, sp)], sp)
+    | _ -> rewrite-noted-project-named(obj, sp, notes, env)
+
+let rewrite-noted-project-named(obj: Ast, sp: Span, notes: List ProjNote, env: TypeEnv) -> Ast =
   match (find-proj-note(sp, notes))
     | None -> ParenNode([SymNode("project", sp), rewrite-project-ast(obj, notes, env)], sp)
     | Some(note) ->

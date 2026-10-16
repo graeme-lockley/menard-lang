@@ -12,6 +12,7 @@ export type Type =
   | { tag: "ref"; elem: Type }
   | { tag: "arr"; elem: Type; n: number | null }
   | { tag: "fn"; params: Type[]; ret: Type }
+  | { tag: "product"; elems: Type[] }
   | { tag: "nominal"; name: string; args: Type[]; kind: "record" | "variant" | "alias" }
   | { tag: "ctor"; typeName: string; ctor: string; payloads: Type[] }; // for patterns / values
 
@@ -23,6 +24,10 @@ export function prim(
 
 export function tFn(params: Type[], ret: Type): Type {
   return { tag: "fn", params, ret };
+}
+
+export function tProduct(elems: Type[]): Type {
+  return { tag: "product", elems };
 }
 
 export function tList(elem: Type): Type {
@@ -73,6 +78,12 @@ export function typeEqual(a: Type, b: Type): boolean {
         a.params.every((p, i) => typeEqual(p, b.params[i]!)) &&
         typeEqual(a.ret, b.ret)
       );
+    case "product":
+      return (
+        b.tag === "product" &&
+        a.elems.length === b.elems.length &&
+        a.elems.every((t, i) => typeEqual(t, b.elems[i]!))
+      );
     case "nominal":
       return (
         b.tag === "nominal" &&
@@ -115,6 +126,8 @@ export function typeShow(t: Type): string {
       return `(Arr ${typeShow(t.elem)}${t.n === null ? "" : ` ${t.n}`})`;
     case "fn":
       return `(Fn ${t.params.map(typeShow).join(" ")} -> ${typeShow(t.ret)})`;
+    case "product":
+      return t.elems.map(typeShow).join(" * ");
     case "nominal":
       return t.args.length === 0
         ? t.name

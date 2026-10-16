@@ -105,11 +105,108 @@ let desugar-decl(elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> A
     | kw :: name :: rest -> ParenNode(desugar-node(kw, diags) :: desugar-maybe-name(name, diags) :: map-desugar(rest, diags), sp)
     | _ -> ParenNode(map-desugar(elems, diags), sp)
 
+; A top-level `defn`'s `(param pat ty)` parameters can't reach the typer
+; or lowerer as-is (nothing downstream destructures a param list entry),
+; so each becomes a synthetic `__p{i}` name and the body is wrapped in a
+; `match __p{i} pat …` for it — the desugar-time counterpart to
+; `read.mnd`'s `local-fn-let`, which does the same thing at parse time
+; for a *nested* local `let f(...)=…` (mirrors host's `desugarDefn`).
+record ParamWrap {
+  pname: Ast
+  pat: Ast
+}
+
+record ArrowSplit {
+  params: List Ast
+  after: List Ast
+}
+
+let split-defn-at-arrow(elems: List Ast) -> ArrowSplit =
+  match (elems)
+    | [] -> ArrowSplit([], [])
+    | e :: rest ->
+      if (is-sym(e, "->")) -> ArrowSplit([], e :: rest) | split-defn-at-arrow-cons(e, rest)
+
+let split-defn-at-arrow-cons(e: Ast, rest: List Ast) -> ArrowSplit =
+  match (split-defn-at-arrow(rest))
+    | ArrowSplit(params, after) -> ArrowSplit(e :: params, after)
+
+record ParamSplit {
+  params: List Ast
+  wraps: List ParamWrap
+}
+
+let split-defn-params(params: List Ast, i: Int) -> ParamSplit =
+  match (params)
+    | [] -> ParamSplit([], [])
+    | p :: rest -> split-defn-param-one(p, i, rest)
+
+let split-defn-param-one(p: Ast, i: Int, rest: List Ast) -> ParamSplit =
+  match (p)
+    | ParenNode([SymNode("param", psp), pat, ty], _) -> split-defn-param-wrap(psp, pat, ty, i, rest)
+    | _ -> split-defn-param-plain(p, i, rest)
+
+let split-defn-param-wrap(psp: Span, pat: Ast, ty: Ast, i: Int, rest: List Ast) -> ParamSplit =
+  match (split-defn-params(rest, i + 1))
+    | ParamSplit(ps, ws) -> ParamSplit(ParenNode([SymNode(String.concat("__p", show(i), ":"), psp), ty], psp) :: ps, ParamWrap(SymNode(String.concat("__p", show(i)), psp), pat) :: ws)
+
+let split-defn-param-plain(p: Ast, i: Int, rest: List Ast) -> ParamSplit =
+  match (split-defn-params(rest, i + 1))
+    | ParamSplit(ps, ws) -> ParamSplit(p :: ps, ws)
+
+let wrap-defn-body-with(wraps: List ParamWrap, body: Ast, sp: Span) -> Ast =
+  match (wraps)
+    | [] -> body
+    | ParamWrap(pname, pat) :: rest -> ParenNode([mk-sym("match", sp), pname, pat, wrap-defn-body-with(rest, body, sp)], sp)
+
+let desugar-defn-wraps(defn-sym: Ast, name-ast: Ast, new-params: List Ast, wraps: List ParamWrap, arrow-sym: Ast, ret: Ast, body-forms: List Ast, sp: Span) -> Ast =
+  match (wraps)
+    | [] -> ParenNode(append-list(defn-sym :: name-ast :: new-params, arrow-sym :: ret :: body-forms), sp)
+    | _ -> ParenNode(append-list(defn-sym :: name-ast :: new-params, [arrow-sym, ret, wrap-defn-body-with(wraps, wrap-do(body-forms, sp), sp)]), sp)
+
+let desugar-defn-after(defn-sym: Ast, name-ast: Ast, params: List Ast, after: List Ast, sp: Span) -> Ast =
+  match (after)
+    | arrow-sym :: ret :: body-forms -> desugar-defn-split-params(defn-sym, name-ast, params, arrow-sym, ret, body-forms, sp)
+    | _ -> ParenNode(append-list(defn-sym :: name-ast :: params, after), sp)
+
+let desugar-defn-split-params(defn-sym: Ast, name-ast: Ast, params: List Ast, arrow-sym: Ast, ret: Ast, body-forms: List Ast, sp: Span) -> Ast =
+  match (split-defn-params(params, 0))
+    | ParamSplit(new-params, wraps) -> desugar-defn-wraps(defn-sym, name-ast, new-params, wraps, arrow-sym, ret, body-forms, sp)
+
+let desugar-defn-body(defn-sym: Ast, name-ast: Ast, rest: List Ast, sp: Span) -> Ast =
+  match (split-defn-at-arrow(rest))
+    | ArrowSplit(params, after) -> desugar-defn-after(defn-sym, name-ast, params, after, sp)
+
+; `desugar-decl` already runs the usual recursive desugar over the name
+; and every param/body form; the param-pattern rewrite above only needs
+; to happen afterwards, on its already-desugared result.
+let desugar-defn(elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  desugar-defn-maybe-wrap(desugar-decl(elems, sp, diags))
+
+; A bare `_` (not a named catch-all) is what the exhaustiveness checker
+; recognizes as covering the rest of the `Ast` variant — `d` is still
+; reachable here via the outer parameter, not the match pattern.
+let desugar-defn-maybe-wrap(d: Ast) -> Ast =
+  match (d)
+    | ParenNode(defn-sym :: name-ast :: rest, bsp) -> desugar-defn-body(defn-sym, name-ast, rest, bsp)
+    | _ -> d
+
 let desugar-pub(elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
   match (elems)
     | pub-kw :: kw :: name :: rest ->
-      if (is-decl-keyword(kw)) -> ParenNode(desugar-node(pub-kw, diags) :: desugar-node(kw, diags) :: desugar-maybe-name(name, diags) :: map-desugar(rest, diags), sp) | ParenNode(map-desugar(elems, diags), sp)
+      cond
+        | is-sym(kw, "defn") -> desugar-pub-defn(pub-kw, kw, name, rest, sp, diags)
+        | is-decl-keyword(kw) -> ParenNode(desugar-node(pub-kw, diags) :: desugar-node(kw, diags) :: desugar-maybe-name(name, diags) :: map-desugar(rest, diags), sp)
+        | else -> ParenNode(map-desugar(elems, diags), sp)
     | _ -> ParenNode(map-desugar(elems, diags), sp)
+
+let desugar-pub-defn(pub-kw: Ast, kw: Ast, name: Ast, rest: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  desugar-pub-defn-wrap(pub-kw, desugar-defn(kw :: name :: rest, sp, diags), diags, sp)
+
+let desugar-pub-defn-wrap(pub-kw: Ast, d: Ast, diags: Ref (List DesugarError), sp: Span) -> Ast =
+  match (d)
+    | ParenNode(delems, _) -> ParenNode(desugar-node(pub-kw, diags) :: delems, sp)
+    | _ -> d
 
 let desugar-node(ast: Ast, diags: Ref (List DesugarError)) -> Ast =
   match (ast)
@@ -129,7 +226,8 @@ let desugar-paren-head(head: Ast, elems: List Ast, sp: Span, diags: Ref (List De
 
 let desugar-paren-named(name: Str, elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
   cond
-    | name == "defn" || name == "defrec" || name == "variant" || name == "runtime" -> desugar-decl(elems, sp, diags)
+    | name == "defn" -> desugar-defn(elems, sp, diags)
+    | name == "defrec" || name == "variant" || name == "runtime" -> desugar-decl(elems, sp, diags)
     | name == "pub" -> desugar-pub(elems, sp, diags)
     | name == "and" -> desugar-and(elems, sp, diags)
     | name == "or" -> desugar-or(elems, sp, diags)
@@ -151,7 +249,7 @@ let snoc-ast(xs: List Ast, x: Ast) -> List Ast =
     | h :: t -> h :: snoc-ast(t, x)
 
 let pipe-blocked(n: Str) -> Bool =
-  n == "project" || n == "if" || n == "do" || n == "cond" || n == "when" || n == "match" || n == "mmatch" || n == "fn" || n == "let" || n == "loop" || n == "while" || n == "and" || n == "or" || n == "quote" || n == "char" || n == "Cons" || n == "Nil" || n == "+" || n == "-" || n == "*" || n == "/" || n == "%" || n == "<" || n == ">" || n == "<=" || n == ">=" || n == "=" || n == "|>" || n == "f+" || n == "f-" || n == "f*" || n == "f/" || n == "::"
+  n == "project" || n == "if" || n == "do" || n == "cond" || n == "when" || n == "match" || n == "mmatch" || n == "fn" || n == "let" || n == "loop" || n == "while" || n == "and" || n == "or" || n == "quote" || n == "char" || n == "Cons" || n == "Nil" || n == "tuple" || n == "+" || n == "-" || n == "*" || n == "/" || n == "%" || n == "<" || n == ">" || n == "<=" || n == ">=" || n == "=" || n == "|>" || n == "f+" || n == "f-" || n == "f*" || n == "f/" || n == "::"
 
 let pipe-callee-ok(head: Ast) -> Bool =
   match (head)

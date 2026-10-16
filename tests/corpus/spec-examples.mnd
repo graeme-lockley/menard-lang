@@ -1,10 +1,5 @@
 ; Spec examples — Phase 0 corpus (syntax only)
 
-record Pair[a, b] {
-  fst: a
-  snd: b
-}
-
 ; A type may mention itself. The name is registered before the payloads
 ; are read, so one declaration is enough.
 type Tree[a] =

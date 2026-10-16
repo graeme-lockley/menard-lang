@@ -427,7 +427,7 @@ let is-heap-type(ast: Ast) -> Bool =
 
 let is-heap-type-head(head: Ast) -> Bool =
   match (sym-str(head))
-    | Some(n) -> n == "List" || n == "Maybe" || n == "Result" || n == "Ref" || n == "Map" || n == "Fn" || is-upper-type-name(n)
+    | Some(n) -> n == "List" || n == "Maybe" || n == "Result" || n == "Ref" || n == "Map" || n == "Fn" || n == "product" || is-upper-type-name(n)
     | None -> false
 
 let is-str-type(ast: Ast) -> Bool =
@@ -1591,6 +1591,7 @@ let lower-named(hn: Str, rest: List Ast, sp: Span, env: Map Str Int, b: Builder,
     | hn == "recur" -> lower-recur(rest, env, b, funcs, noop, pool)
     | hn == "match" -> lower-match(rest, env, b, funcs, noop, pool)
     | hn == "slot" -> lower-slot(rest, env, b, funcs, noop, pool)
+    | hn == "tuple" -> lower-tuple(rest, env, b, funcs, noop, pool)
     | is-arith-binop(hn) -> lower-arith(rest, hn, sp, env, b, funcs, noop, pool)
     | is-cmp-op(hn) -> lower-cmp-value(rest, hn, env, b, funcs, noop, pool)
     | is-ctor-name(hn, pool) -> lower-ctor(hn, rest, env, b, funcs, noop, pool)
@@ -1986,6 +1987,20 @@ let lower-fixed-tag-ctor(hn: Str, args: List Ast, env: Map Str Int, b: Builder, 
           lower-args(args, env, b, funcs, noop, pool)
         ) | Err(String.concat("arity mismatch constructing ", hn))
 
+; `(tuple e1 e2 …)` — a fixed `tag-tuple` object with one slot per
+; element, filled the same way a user ctor's payload is (`lower-user-ctor`
+; above), just with a reserved tag instead of a looked-up `CtorSpec`.
+let lower-tuple(args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
+  Result.and-then(
+    fn (avs) {
+      let tag-c = const-i64!(b, tag-tuple)
+      let nslots = const-i64!(b, length(args))
+      let obj = emit-call!(b, extern-new-abs(str-pool-extern-base(pool)), [tag-c, nslots])
+      Ok(lower-user-ctor-fill(obj, avs, 0, b, pool))
+    },
+    lower-args(args, env, b, funcs, noop, pool)
+  )
+
 let lower-ctor(hn: Str, args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   cond
     | is-builtin-ctor(hn) ->
@@ -2174,7 +2189,10 @@ let bind-pat!(pat: Ast, val: Int, else-bb: BB, env: Map Str Int, b: Builder, poo
     | ParenNode(head :: args, _) ->
       match (sym-str(head))
         | Some(cname) ->
-          if (cname == "char") -> bind-char-pat!(args, val, else-bb, env, b) | bind-ctor-pat!(cname, args, val, else-bb, env, b, pool)
+          cond
+            | cname == "char" -> bind-char-pat!(args, val, else-bb, env, b)
+            | cname == "tuple" -> bind-tuple-pat!(args, val, else-bb, env, b, pool)
+            | else -> bind-ctor-pat!(cname, args, val, else-bb, env, b, pool)
         | None -> Err("unsupported match pattern")
     | IntNode(n, _) -> bind-int-pat!(n, val, else-bb, env, b)
     | BoolNode(flag, _) -> bind-bool-pat!(flag, val, else-bb, env, b)
@@ -2197,6 +2215,12 @@ let bind-ctor-pat!(cname: Str, payloads: List Ast, val: Int, else-bb: BB, env: M
         switch-to!(b, ok-bb)
         bind-payloads!(payloads, val, 0, else-bb, env, b, pool)
       }
+
+; `(p1, p2, …)` always matches a tuple-typed scrutinee (the typer already
+; guarantees it, same as a record pattern) — no tag check needed, unlike
+; `bind-ctor-pat!` which must disambiguate among a variant's alternatives.
+let bind-tuple-pat!(payloads: List Ast, val: Int, else-bb: BB, env: Map Str Int, b: Builder, pool: StrPool) -> Result (Map Str Int) Str =
+  bind-payloads!(payloads, val, 0, else-bb, env, b, pool)
 
 let bind-payloads!(payloads: List Ast, val: Int, i: Int, else-bb: BB, env: Map Str Int, b: Builder, pool: StrPool) -> Result (Map Str Int) Str =
   match (payloads)
