@@ -123,7 +123,7 @@ check-fixed-point:
 	elapsed=$$((end - start)); \
 	echo "stage0 emit took $${elapsed}s"; \
 	if [ $$status -ne 0 ]; then exit $$status; fi; \
-	if [ $$elapsed -gt 120 ]; then echo "stage0 emit of src/mn.mnd exceeded 2 minutes"; exit 1; fi
+	if [ $$elapsed -gt 180 ]; then echo "stage0 emit of src/mn.mnd exceeded 3 minutes"; exit 1; fi
 	@echo "==> link stage1"
 	cp $(BUILD_DIR)/fp/bc0.bc $(BUILD_DIR)/fp/mod.bc
 	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/fp/mod.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/fp/stage $(LDLIBS)

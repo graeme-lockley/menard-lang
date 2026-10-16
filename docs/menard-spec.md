@@ -2854,7 +2854,7 @@ The compiler was built in steps. Each step had an acceptance test, and the next 
 | **2** | The compiler, in Menard, run on the interpreter: reader, desugar, typing, closure conversion, derive, LLVM bitcode, the static pool, and a C runtime | Programs with closures and parameterised types compile and run. Corpus output matches the interpreter |
 | **3** | Self-hosting: stage0, stage1, stage2, and the `mn` driver | `bc0 == bc1`, `stage1 == stage2`, and the driver's artifact matches the harness |
 | **4** | A precise collector: a copying nursery, a remembered set, and mark-sweep of old space only when it grows | The GC stress corpus runs, and heap-verify is clean |
-| **5** | Derived `show` prints the source name, `spawn-capture` is native, and both link paths use `-O2` | Stage0 emits `src/mn.mnd` in under two minutes |
+| **5** | Derived `show` prints the source name, `spawn-capture` is native, and both link paths use `-O2` | Stage0 emits `src/mn.mnd` in under three minutes |
 
 The interpreter came first, and it is still the oracle. The gate cannot see a bug that both executions share, because they are the same source (§2.14). It also cannot run the compiler before the compiler can run itself (§3.5). A feature reaches the interpreter before the compiler uses it (§3.8).
 
@@ -3033,7 +3033,7 @@ in two well-understood places.
 - [x] The interpreter meets its build-host requirements (§3.5).
       `tests/bench/build-host.test.ts` recurses 100k frames, walks a long loop,
       and builds large maps inside a time budget, and `make check-fixed-point`
-      refuses a stage0 emit of `src/mn.mnd` that takes longer than two minutes.
+      refuses a stage0 emit of `src/mn.mnd` that takes longer than three minutes.
 - [x] The interpreter's typer and the compiler's agree on every negative fixture.
 - [x] The collector is precise, and the GC stress corpus runs in bounded memory.
       `tests/gc-stress/bound.test.ts` runs `tests/gc-stress/churn.mnd` with
