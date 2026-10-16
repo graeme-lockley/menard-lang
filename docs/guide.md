@@ -104,13 +104,19 @@ let abs(n: Int) -> Int =
 
 An `if` or `cond` with no else has type `Unit`. Anything else needs the else arm.
 
-`match` takes the value apart. The arms cover every constructor. A guard (`when`) does not count as coverage.
+`match` takes the value apart. The arms cover every constructor. A guard (`when`) does not count as coverage. Several values are matched together. Each arm's pattern is a parenthesized list of the same length, and no tuple is built.
 
 ```
 let from-maybe[a, e](err: e, m: Maybe a) -> Result a e =
   match (m)
     | Some(v) -> Ok(v)
     | None -> Err(err)
+
+let same-len[a, b](xs: List a, ys: List b) -> Bool =
+  match (xs, ys)
+    | ([], []) -> true
+    | (_ :: xt, _ :: yt) -> same-len(xt, yt)
+    | (_, _) -> false
 ```
 
 `loop` names the values that change, and `recur` starts the body again with new ones.
@@ -135,6 +141,10 @@ pub record Pair[a, b] {
 
 let p = Pair(1, "a")
 p.fst
+
+let fst-of[a, b](p: Pair a b) -> a =
+  match (p)
+    | Pair { fst } -> fst
 ```
 
 A variant is a sum. Each alternative is a constructor.
@@ -225,9 +235,12 @@ One file is one module. `pub` publishes a name. A name without `pub` stays in th
 ```
 import std/list as List
 import "./lexer.mnd" as Lexer
+pub import std/io (IoError)
 ```
 
 `List.map` and `Lexer.read` are the exports, not methods. A bare `import std/list` brings the names in directly. Two modules can both publish `map`; import one of them qualified and they stay distinct.
+
+`pub import` republishes names. With no list, every public name of that module is republished, and a type brings its constructors. With a list, only those names are republished. A public signature may name an imported public type. It may not name a type this file declares and leaves private.
 
 `std/basics` (`id`, `always`, `not`, `min`, `max`, `abs`, `clamp`) is already in scope.
 

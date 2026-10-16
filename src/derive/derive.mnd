@@ -29,11 +29,6 @@ import std/list
 import std/string as String
 import std/map as Map
 
-; Re-export shim: a `pub` signature may not mention a private nominal
-; type (ADR 27), even one imported `pub` from elsewhere — see
-; src/reader/read.mnd's header comment for why.
-pub alias Ast = Ast
-
 let sp0() -> Span =
   Span(0, 0, 0, 1)
 

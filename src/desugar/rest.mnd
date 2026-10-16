@@ -9,10 +9,6 @@
 import "../reader/ast.mnd"
 import std/string as String
 
-pub alias Ast = Ast
-
-pub alias Span = Span
-
 pub record RestError {
   span: Span
   code: Str

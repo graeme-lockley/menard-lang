@@ -191,12 +191,6 @@ import std/string as String
 import std/map as Map
 import std/string-buffer as Buf
 
-pub alias Ast = Ast
-
-pub alias Span = Span
-
-pub alias Imp = Imp
-
 ; ---------------------------------------------------------------------------
 ; Small Ast helpers, restated locally per `src/`'s "no prelude import"
 ; rule (see `type/check.mnd`'s equivalent header note).
@@ -1263,7 +1257,7 @@ let add-origin-cstrs(ps: List Str, p: StrPool) -> StrPool =
     | s :: rest -> add-origin-cstrs(rest, str-pool-add(p, c-str(s)))
 
 let span-line-clamped(sp: Span) -> Int {
-  let n = span-line(sp)
+  let n = sp.line
   if (n < 1) -> 1 | n
 }
 
@@ -1540,10 +1534,10 @@ let lower-sym-ctor-or-err(name: Str, b: Builder, pool: StrPool) -> Result Int St
 ; `main` — use a zero-width span (`graph.mnd`'s `dummy-span`). That span's
 ; origin is 0, the first loaded file, so recording it names the wrong file.
 let span-located(sp: Span) -> Bool =
-  span-end(sp) > span-start(sp)
+  sp.end > sp.start
 
 let emit-trace-push!(b: Builder, pool: StrPool, sp: Span) -> Unit {
-  let file-gid = file-gid-of(pool, span-origin(sp))
+  let file-gid = file-gid-of(pool, sp.origin)
   let line = const-i64!(b, span-line-clamped(sp))
   emit-call-void!(b, extern-kind-trace-push, extern-trace-push-abs(str-pool-extern-base(pool)), [file-gid, line])
 }
@@ -1628,7 +1622,7 @@ let lower-slot-index(obj: Ast, idx: Ast, env: Map Str Int, b: Builder, funcs: Ma
   match (idx)
     | IntNode(n, _) ->
       Result.and-then(
-        fn (val) = Ok(emit-call!(b, extern-slot-abs(str-pool-extern-base(pool)), [val, const-i64!(b, n)])),
+        fn (val) = Ok(emit-call!(b, extern-slot-abs(str-pool-extern-base(pool)), [get!(b, val), const-i64!(b, n)])),
         lower-expr(obj, env, b, funcs, noop, pool)
       )
     | _ -> Err("slot index must be an integer")
@@ -2366,7 +2360,7 @@ let apply-arith!(b: Builder, pool: StrPool, sp: Span, op: Str, av: Int, cv: Int)
   let aw = get!(b, av)
   let cw = get!(b, cv)
   let panic-at = extern-panic-at-abs(str-pool-extern-base(pool))
-  let file-gid = file-gid-of(pool, span-origin(sp))
+  let file-gid = file-gid-of(pool, sp.origin)
   let line = span-line-clamped(sp)
   let msg-gid = str-pool-get(pool, div-zero-msg())
   cond

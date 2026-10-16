@@ -77,6 +77,59 @@ bearing choices; everything in the specification follows from them.
 | 40 | **The compiler emits LLVM bitcode (`.bc`), never textual `.ll` as the product** | Textual IR is a second spelling of the same module and invites non-determinism (whitespace, type printing); bitcode is the binary artifact the gate and the driver consume; `llvm-dis` stays a debug aid only | A Menard bitcode writer (~subset of LLVM encoding) must stay deterministic and in sync with the pinned LLVM/clang |
 ---
 
+## 2026-10-15 — Registration, re-export, named patterns, multi-value match
+
+### The decision
+
+Five surface and typing changes, and no new value.
+
+A module registers every `type` and `record` name before it parses fields or
+payloads. A record may mention itself, and two declarations in one file may
+mention each other. A second definition of the same name is an error. The
+empty `type Ast =` stub is not a way to reserve a name.
+
+A `pub` signature may name a builtin, a type this module publishes, or a public
+type it imports. It may not name a nominal this module declares and does not
+publish.
+
+`pub` may prefix a bare import. `pub import path` re-exports every public name.
+`pub import path (A, B)` re-exports those names, and a type re-exports its
+constructors. `as` and a name list do not combine. A repeated re-export is
+allowed. Any other duplicate `pub` name is an error.
+
+A record pattern may name the fields it binds. Omitted fields are wildcards.
+A bare name binds a local of that name. There is no rename.
+
+`match` takes a comma-separated list of scrutinees. Each arm pattern is a
+parenthesized list of the same length. Desugar peels the leftmost pattern and
+groups arms by constructor, then matches the rest. A wildcard or a binding is
+copied into every group, so a later arm is not hidden by an earlier
+non-exhaustive inner match. `when` stays on the innermost arm. No tuple value
+is built, and `(Int, Str) -> Bool` stays a function type.
+
+### Why this shape
+
+The compiler's own source was paying for the missing forms: empty type stubs,
+`pub alias Ast = Ast` on every module that mentioned `Ast`, one-field
+functions standing in for `sp.start`, and a match nested inside a match
+wherever two values were decided together. Registering names first is what
+`record Env[v] { parent: Maybe (Env v) }` in §2.3 already describes. Letting a
+public signature name an imported public type removes the alias that existed
+only to satisfy the checker. `pub import` is the same idea for a module whose
+callers need the name, which is `std/fs` and `IoError`. Named fields and a
+multi-value `match` are sugar over the patterns and the exhaustiveness check
+the language already has. An n-tuple type was turned down: a product would
+need a type, a literal, and a pattern, and the matches that earned the syntax
+do not need a value.
+
+### What was rejected
+
+- An n-tuple type, and pattern matching over values of that type.
+- `field: local` renames in a record pattern.
+- `pub` on `extern`, and `pub import path as Name`.
+- Growing the exhaustiveness checker with a product lattice. Grouping keeps
+  each nested match exhaustive exactly when the source match is.
+
 ## 2026-10-10 — Pipe operator `|>`
 
 ### The decision

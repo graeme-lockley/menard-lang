@@ -77,8 +77,8 @@ type RawModule = {
   forms: Ast[];
   exports: Set<string>;
   imports: { path: string; spec: string; span: Span; alias?: string }[];
-  /** Import paths whose exports are also exports of this module. */
-  reexports: string[];
+  /** Imports whose public names are also exports of this module. `null` names means every export. */
+  reexports: { path: string; names: string[] | null; span: Span }[];
 };
 
 /**
@@ -200,7 +200,7 @@ export function loadModuleGraph(
     }
 
     const imports: { path: string; spec: string; span: Span; alias?: string }[] = [];
-    const reexports: string[] = [];
+    const reexports: { path: string; names: string[] | null; span: Span }[] = [];
     const exports = new Set<string>();
     const body: Ast[] = [];
 
@@ -234,7 +234,7 @@ export function loadModuleGraph(
         }
         const resolved = resolveImportPath(path, imp.spec, home);
         imports.push({ path: resolved, spec: imp.spec, span: imp.span, alias: imp.alias });
-        if (imp.reexport) reexports.push(resolved);
+        if (imp.reexport) reexports.push({ path: resolved, names: imp.names, span: imp.span });
         continue;
       }
 
@@ -392,17 +392,50 @@ export function loadModuleGraph(
   // Ensure entry is in order (it should be)
   if (!seen.has(entry)) order.push(entry);
 
+  const ctorsByType = new Map<string, Map<string, string[]>>();
+  for (const m of raw.values()) ctorsByType.set(m.path, variantCtors(m.forms));
+  const missingExport = new Set<string>();
   let grew = true;
   while (grew) {
     grew = false;
     for (const m of raw.values()) {
-      for (const depPath of m.reexports) {
-        const dep = raw.get(depPath);
+      const mine = ctorsByType.get(m.path)!;
+      for (const re of m.reexports) {
+        const dep = raw.get(re.path);
         if (!dep) continue;
-        for (const name of dep.exports) {
+        const depCtors = ctorsByType.get(re.path)!;
+        const names = re.names ?? [...dep.exports];
+        for (const name of names) {
+          if (!dep.exports.has(name)) {
+            const key = `${m.path}:${name}:${re.span.start}`;
+            if (!missingExport.has(key)) {
+              missingExport.add(key);
+              diagnostics.push(
+                diagnostic({
+                  severity: "error",
+                  category: "semantic",
+                  code: "E_IMPORT",
+                  message: `module does not export ${name}`,
+                  span: re.span,
+                }),
+              );
+            }
+            continue;
+          }
           if (!m.exports.has(name)) {
             m.exports.add(name);
             grew = true;
+          }
+          const ctors = depCtors.get(name) ?? [];
+          if (ctors.length > 0 && !mine.has(name)) {
+            mine.set(name, ctors);
+            grew = true;
+          }
+          for (const ctor of ctors) {
+            if (!m.exports.has(ctor)) {
+              m.exports.add(ctor);
+              grew = true;
+            }
           }
         }
       }
@@ -418,8 +451,8 @@ export function loadModuleGraph(
     restGrew = false;
     for (const m of raw.values()) {
       const mine = restExports.get(m.path)!;
-      for (const depPath of m.reexports) {
-        const dep = restExports.get(depPath);
+      for (const re of m.reexports) {
+        const dep = restExports.get(re.path);
         if (!dep) continue;
         for (const [name, fixed] of dep) {
           if (m.exports.has(name) && !mine.has(name)) {
@@ -464,9 +497,35 @@ export function loadModuleGraph(
   return { ok: true, graph: { order, modules } };
 }
 
+function variantCtors(forms: Ast[]): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const form of forms) {
+    if (form.tag !== "list" || form.elems.length < 2) continue;
+    const h = form.elems[0]!;
+    if (h.tag !== "sym" || !nameEquals(h.name, "variant")) continue;
+    const namePart = form.elems[1]!;
+    const name =
+      namePart.tag === "sym"
+        ? decodeBytes(namePart.name)
+        : namePart.tag === "list" && namePart.elems[0]?.tag === "sym"
+          ? decodeBytes(namePart.elems[0].name)
+          : null;
+    if (!name) continue;
+    const ctors: string[] = [];
+    for (let i = 2; i < form.elems.length; i++) {
+      const ce = form.elems[i]!;
+      if (ce.tag === "list" && ce.elems[0]?.tag === "sym") {
+        ctors.push(decodeBytes(ce.elems[0].name));
+      }
+    }
+    out.set(name, ctors);
+  }
+  return out;
+}
+
 function parseImport(
   form: Ast,
-): { spec: string; span: Span; reexport: boolean; alias?: string } | null {
+): { spec: string; span: Span; reexport: boolean; alias?: string; names: string[] | null } | null {
   let node = form;
   let reexport = false;
   if (node.tag === "list" && node.elems.length >= 2) {
@@ -486,12 +545,15 @@ function parseImport(
   if (h.tag !== "sym" || !nameEquals(h.name, "import")) return null;
   form = node;
   const spec = form.elems[1]!;
-  const aliasNode = form.elems[2];
-  const alias =
-    aliasNode?.tag === "sym" ? decodeBytes(aliasNode.name) : undefined;
-  if (spec.tag === "str") return { spec: decodeBytes(spec.bytes), span: form.span, reexport, alias };
-  if (spec.tag === "sym") return { spec: decodeBytes(spec.name), span: form.span, reexport, alias };
-  return { spec: "", span: form.span, reexport, alias };
+  const third = form.elems[2];
+  const alias = third?.tag === "sym" ? decodeBytes(third.name) : undefined;
+  const names =
+    third?.tag === "list"
+      ? third.elems.flatMap((e) => (e.tag === "sym" ? [decodeBytes(e.name)] : []))
+      : null;
+  if (spec.tag === "str") return { spec: decodeBytes(spec.bytes), span: form.span, reexport, alias, names };
+  if (spec.tag === "sym") return { spec: decodeBytes(spec.name), span: form.span, reexport, alias, names };
+  return { spec: "", span: form.span, reexport, alias, names };
 }
 
 function unwrapPub(form: Ast): { form: Ast; exported: boolean } {

@@ -1,0 +1,11 @@
+; A name is registered once. A second definition is not a reservation.
+
+type Color =
+  | Red
+  | Blue
+
+type Color =
+  | Green
+
+let main() -> Int =
+  0

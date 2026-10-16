@@ -59,12 +59,6 @@ import "./llvm-ir.mnd"
 import std/string as String
 import std/string-buffer as Buf
 
-pub alias LlvmModule = LlvmModule
-
-pub alias LFunc = LFunc
-
-pub alias Item = Item
-
 let end-block-code = 0
 
 let enter-subblock-code = 1

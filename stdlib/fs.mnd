@@ -2,10 +2,7 @@
 ; which is defined in io.mnd.
 ; @module std/fs
 
-import std/io
-
-; Re-export the error type so a public signature may name it.
-pub alias IoError = IoError
+pub import std/io (IoError)
 
 extern mn_exists(path: Str) -> Bool
 

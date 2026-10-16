@@ -5,18 +5,6 @@ import "./ast.mnd"
 import std/result as Result
 import std/string as String
 
-; Re-export shim: the current host typer (host/src/type/check.ts,
-; `checkPubPrivateTypes`) only accepts a `pub` signature mentioning a
-; nominal type if *this* module's own export set contains that type's name —
-; even when the type is `pub` in the module it was imported from. `(pub
-; alias T T)` registers the name in this module's own export set without
-; introducing a second, distinct nominal type (aliases are fully
-; transparent, so `Ast` here and `Ast` in ast.mnd remain the same type).
-; Revisit once the typer treats a re-exported type as satisfying the check.
-pub alias Ast = Ast
-
-pub alias Span = Span
-
 pub record CasingError {
   span: Span
   message: Str

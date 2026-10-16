@@ -150,6 +150,24 @@ let f(xs: List Int) -> Int =
     expect(astEqual(mustAll(text(printAll(forms)))[0]!, forms[0]!)).toBe(true);
   });
 
+  test("named record patterns and multi-value match round-trip", () => {
+    const forms = mustAll(`
+let f(sp: Span, xs: List Int, ys: List Int) -> Int =
+  match (sp)
+    | Span { line, start } -> line
+let g(xs: List Int, ys: List Int) -> Int =
+  match (xs, ys)
+    | ([], []) -> 0
+    | (x :: xt, y :: yt) when x == y -> g(xt, yt)
+    | (_, _) -> 1
+`);
+    expect(astEqual(mustAll(text(printAll(forms)))[0]!, forms[0]!)).toBe(true);
+    const printed = text(printAll(forms));
+    expect(printed).toContain("Span { line, start }");
+    expect(printed).toContain("match (xs, ys)");
+    expect(printed).toContain("when x == y");
+  });
+
   test("|> is one token, needs whitespace, and an arm bar stays a bar", () => {
     const piped = lex(new TextEncoder().encode("a |> b"));
     expect(piped.ok).toBe(true);

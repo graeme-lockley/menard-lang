@@ -128,4 +128,53 @@ pub let make(n: Int) -> Hidden =
     const fredOut = fredHost.stdout.map((b) => new TextDecoder().decode(b)).join("");
     expect(fredOut).toBe("Hello from Fred!\nMain: Fred\n");
   });
+
+  test("a pub signature may name an imported public type", () => {
+    const host = hostWith({
+      "/color.mnd": `pub type Color =\n  | Red\n`,
+      "/main.mnd": `import "./color.mnd"\npub let paint(c: Color) -> Int =\n  match (c)\n    | Red -> 1\npaint(Red())\n`,
+    });
+    const src = host.readFile("/main.mnd");
+    if (!src.ok) return;
+    const diags = diagnose(src.bytes, { path: "/main.mnd", host });
+    expect(diags).toEqual([]);
+  });
+
+  test("pub import re-exports one type and its constructors", () => {
+    const host = hostWith({
+      "/color.mnd": `pub type Color =\n  | Red\n  | Blue\npub let hidden() -> Int =\n  1\n`,
+      "/wrap.mnd": `pub import "./color.mnd" (Color)\n`,
+      "/main.mnd": `import "./wrap.mnd"\nlet f(c: Color) -> Int =\n  match (c)\n    | Red -> 1\n    | Blue -> 2\nf(Red())\n`,
+    });
+    const src = host.readFile("/main.mnd");
+    if (!src.ok) return;
+    const r = run(src.bytes, { path: "/main.mnd", host });
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(1n);
+  });
+
+  test("pub import of a whole module re-exports its names", () => {
+    const host = hostWith({
+      "/math.mnd": `pub let add(x: Int, y: Int) -> Int =\n  x + y\n`,
+      "/wrap.mnd": `pub import "./math.mnd"\n`,
+      "/main.mnd": `import "./wrap.mnd"\nadd(2, 3)\n`,
+    });
+    const src = host.readFile("/main.mnd");
+    if (!src.ok) return;
+    const r = run(src.bytes, { path: "/main.mnd", host });
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(5n);
+  });
+
+  test("pub import of a missing name is an error", () => {
+    const host = hostWith({
+      "/color.mnd": `pub type Color =\n  | Red\n`,
+      "/wrap.mnd": `pub import "./color.mnd" (Missing)\n`,
+      "/main.mnd": `import "./wrap.mnd"\n1\n`,
+    });
+    const src = host.readFile("/main.mnd");
+    if (!src.ok) return;
+    const diags = diagnose(src.bytes, { path: "/main.mnd", host });
+    expect(diags.some((d) => d.code === "E_IMPORT")).toBe(true);
+  });
 });

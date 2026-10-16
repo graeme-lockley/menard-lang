@@ -31,13 +31,6 @@ import std/list
 import std/string as String
 import std/map as Map
 
-; Re-export shim — see reader/casing.mnd for why this is needed: a `pub`
-; signature (typecheck-forms, below) may not mention a private nominal
-; type, even one imported from elsewhere.
-pub alias Ast = Ast
-
-pub alias Span = Span
-
 pub record TypeError {
   span: Span
   code: Str
@@ -70,38 +63,6 @@ record TypeEnv {
   loop-bindings: Ref (Maybe (List Type))
 }
 
-let env-values(env: TypeEnv) -> Ref (Map Str Scheme) =
-  match (env)
-    | TypeEnv(v, _, _, _, _, _, _, _) -> v
-
-let env-types(env: TypeEnv) -> Ref (Map Str TypeDef) =
-  match (env)
-    | TypeEnv(_, v, _, _, _, _, _, _) -> v
-
-let env-ctors(env: TypeEnv) -> Ref (Map Str CtorInfo) =
-  match (env)
-    | TypeEnv(_, _, v, _, _, _, _, _) -> v
-
-let env-aliases(env: TypeEnv) -> Ref (Map Str Type) =
-  match (env)
-    | TypeEnv(_, _, _, v, _, _, _, _) -> v
-
-let env-next-var(env: TypeEnv) -> Ref Int =
-  match (env)
-    | TypeEnv(_, _, _, _, v, _, _, _) -> v
-
-let env-diags(env: TypeEnv) -> Ref (List TypeError) =
-  match (env)
-    | TypeEnv(_, _, _, _, _, v, _, _) -> v
-
-let env-subst(env: TypeEnv) -> Ref (Map Int Type) =
-  match (env)
-    | TypeEnv(_, _, _, _, _, _, v, _) -> v
-
-let env-loop-bindings(env: TypeEnv) -> Ref (Maybe (List Type)) =
-  match (env)
-    | TypeEnv(_, _, _, _, _, _, _, v) -> v
-
 ; Field indexes chosen while inferring `(project obj field)`, consumed when
 ; the checked forms are rewritten to `(slot obj index)` for the lowerer.
 record ProjNote {
@@ -125,13 +86,13 @@ let print-names = ref(Map.empty())
 
 ; Remember which slot a project form selected.
 let note-project!(sp: Span, index: Int) -> Unit =
-  set!(proj-notes, ProjNote(span-start(sp), span-end(sp), span-origin(sp), index) :: deref(proj-notes))
+  set!(proj-notes, ProjNote(sp.start, sp.end, sp.origin, index) :: deref(proj-notes))
 
 ; True when the note was recorded for this span.
 let proj-note-matches(sp: Span, note: ProjNote) -> Bool =
   match (note)
     | ProjNote(start, end, origin, _) ->
-      span-start(sp) == start && span-end(sp) == end && span-origin(sp) == origin
+      sp.start == start && sp.end == end && sp.origin == origin
 
 ; The note for this span, if inference selected a field.
 let find-proj-note(sp: Span, notes: List ProjNote) -> Maybe ProjNote =
@@ -141,37 +102,37 @@ let find-proj-note(sp: Span, notes: List ProjNote) -> Maybe ProjNote =
       if (proj-note-matches(sp, note)) -> Some(note) | find-proj-note(sp, rest)
 
 let value-get(env: TypeEnv, name: Str) -> Maybe Scheme =
-  Map.lookup(name, deref(env-values(env)))
+  Map.lookup(name, deref(env.values))
 
 let value-set(env: TypeEnv, name: Str, s: Scheme) -> Unit =
-  set!(env-values(env), Map.set(name, s, deref(env-values(env))))
+  set!(env.values, Map.set(name, s, deref(env.values)))
 
 let type-get(env: TypeEnv, name: Str) -> Maybe TypeDef =
-  Map.lookup(name, deref(env-types(env)))
+  Map.lookup(name, deref(env.types))
 
 let type-set(env: TypeEnv, name: Str, td: TypeDef) -> Unit =
-  set!(env-types(env), Map.set(name, td, deref(env-types(env))))
+  set!(env.types, Map.set(name, td, deref(env.types)))
 
 let ctor-get(env: TypeEnv, name: Str) -> Maybe CtorInfo =
-  Map.lookup(name, deref(env-ctors(env)))
+  Map.lookup(name, deref(env.ctors))
 
 let ctor-set(env: TypeEnv, name: Str, c: CtorInfo) -> Unit =
-  set!(env-ctors(env), Map.set(name, c, deref(env-ctors(env))))
+  set!(env.ctors, Map.set(name, c, deref(env.ctors)))
 
 let alias-get(env: TypeEnv, name: Str) -> Maybe Type =
-  Map.lookup(name, deref(env-aliases(env)))
+  Map.lookup(name, deref(env.aliases))
 
 let alias-set(env: TypeEnv, name: Str, t: Type) -> Unit =
-  set!(env-aliases(env), Map.set(name, t, deref(env-aliases(env))))
+  set!(env.aliases, Map.set(name, t, deref(env.aliases)))
 
 ; The one true mutating primitive in this file, named the way
 ; desugar.mnd's `push-diag!` is: it is the diagnostic accumulator.
 let err!(env: TypeEnv, code: Str, message: Str, span: Span) -> Unit =
-  set!(env-diags(env), TypeError(span, code, message) :: deref(env-diags(env)))
+  set!(env.diags, TypeError(span, code, message) :: deref(env.diags))
 
 let fresh-var(env: TypeEnv, name: Str) -> Type {
-  let id = deref(env-next-var(env))
-  set!(env-next-var(env), id + 1)
+  let id = deref(env.next-var)
+  set!(env.next-var, id + 1)
   TVar(id, name)
 }
 
@@ -304,7 +265,7 @@ let apply-subst(env: TypeEnv, t: Type) -> Type =
     | _ -> t
 
 let apply-subst-var(env: TypeEnv, t: Type, id: Int) -> Type =
-  match (Map.lookup(id, deref(env-subst(env))))
+  match (Map.lookup(id, deref(env.subst)))
     | Some(bound) -> apply-subst(env, bound)
     | None -> t
 
@@ -353,7 +314,7 @@ let unify-var(env: TypeEnv, id: Int, tb: Type, span: Span) -> Bool =
       }
     | else ->
       {
-        set!(env-subst(env), Map.set(id, tb, deref(env-subst(env))))
+        set!(env.subst, Map.set(id, tb, deref(env.subst)))
         true
       }
 
@@ -712,12 +673,8 @@ let params-to-types(params: List Str) -> List Type =
     | [] -> []
     | p :: rest -> TParam(p) :: params-to-types(rest)
 
-; ---------------------------------------------------------------------------
-; Declaration collection (`collectDef`): alias/defrec/variant. Runs once
-; per top-level form, in file order — a type must be declared textually
-; before anything that mentions it in a field or signature position (see
-; reader/ast.mnd's header comment on `Ast`'s own forward declaration for
-; why this is a single forward pass, not two-pass like `defn` schemes).
+; Declaration collection. Names are registered before fields and payloads
+; (`register-stubs`), then each declaration is checked.
 
 let collect-def(env: TypeEnv, ast: Ast) -> Unit =
   match (ast)
@@ -1239,10 +1196,10 @@ let infer-loop-run(env: TypeEnv, acc: LoopAcc, body-ast: Ast) -> Type =
     | LoopAcc(loc-map, binding-types) -> infer-loop-run-with(env, loc-map, binding-types, body-ast)
 
 let infer-loop-run-with(env: TypeEnv, loc-map: Map Str Type, binding-types: List Type, body-ast: Ast) -> Type {
-  let prev = deref(env-loop-bindings(env))
-  set!(env-loop-bindings(env), Some(binding-types))
+  let prev = deref(env.loop-bindings)
+  set!(env.loop-bindings, Some(binding-types))
   let body-type = infer(env, body-ast, loc-map)
-  set!(env-loop-bindings(env), prev)
+  set!(env.loop-bindings, prev)
   body-type
 }
 
@@ -1282,7 +1239,7 @@ let infer-recur-with(env: TypeEnv, args: List Ast, expected: List Type, sp: Span
 }
 
 let infer-recur-args(env: TypeEnv, args: List Ast, sp: Span, local: Map Str Type) -> Type =
-  match (deref(env-loop-bindings(env)))
+  match (deref(env.loop-bindings))
     | None ->
       {
         err!(env, "E_TYPE_RECUR", "recur outside loop", sp)
@@ -1529,13 +1486,89 @@ let bind-pattern-ctor-info(env: TypeEnv, cname: Str, ctor: CtorInfo, arg-pats: L
 let bind-pattern-ctor-named(env: TypeEnv, cname-ast: Ast, arg-pats: List Ast, psp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
   match (sym-str(cname-ast))
     | None -> ()
-    | Some(cname) ->
-      if (cname == "char") -> {
+    | Some(cname) -> bind-pattern-ctor-kind(env, cname, arg-pats, psp, scrut, loc, covered)
+
+let bind-pattern-ctor-kind(env: TypeEnv, cname: Str, arg-pats: List Ast, psp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
+  cond
+    | cname == "recpat" -> bind-record-pat(env, arg-pats, psp, scrut, loc, covered)
+    | cname == "guard" -> bind-guard-pat(env, arg-pats, scrut, loc)
+    | cname == "char" ->
+      {
         unify(env, scrut, t-char(), psp)
         ()
-      } | match (ctor-get(env, cname))
+      }
+    | else ->
+      match (ctor-get(env, cname))
         | None -> ()
         | Some(ctor) -> bind-pattern-ctor-info(env, cname, ctor, arg-pats, psp, scrut, loc, covered)
+
+let bind-guard-pat(env: TypeEnv, arg-pats: List Ast, scrut: Type, loc: Ref (Map Str Type)) -> Unit =
+  match (arg-pats)
+    | inner :: test :: _ ->
+      {
+        bind-pattern(env, inner, scrut, loc, ref([]))
+        let gt = infer(env, test, deref(loc))
+        unify(env, gt, t-bool(), ast-span(test))
+        ()
+      }
+    | _ -> ()
+
+let bind-record-pat(env: TypeEnv, arg-pats: List Ast, psp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
+  match (arg-pats)
+    | name-ast :: fields -> bind-record-named(env, name-ast, fields, psp, scrut, loc, covered)
+    | [] -> err!(env, "E_TYPE_MISMATCH", "expected a record", psp)
+
+let bind-record-named(env: TypeEnv, name-ast: Ast, fields: List Ast, psp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
+  match (sym-str(name-ast))
+    | None -> err!(env, "E_TYPE_MISMATCH", "expected a record", psp)
+    | Some(name) ->
+      match (type-get(env, name))
+        | Some(RecordDef(_, _, rfields)) -> bind-record-fields(env, name-ast, fields, rfields, psp, scrut, loc, covered)
+        | _ -> err!(env, "E_TYPE_MISMATCH", String.concat("expected a record, found ", name), psp)
+
+let bind-record-fields(env: TypeEnv, name-ast: Ast, fields: List Ast, rfields: List RecordField, psp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
+  match (wanted-fields(env, fields, rfields, []))
+    | None -> ()
+    | Some(wanted) ->
+      bind-pattern(env, ParenNode(name-ast :: positional-fields(rfields, wanted, psp), psp), scrut, loc, covered)
+
+let wanted-fields(env: TypeEnv, fields: List Ast, rfields: List RecordField, acc: List Str) -> Maybe (List Str) =
+  match (fields)
+    | [] -> Some(acc)
+    | f :: rest -> wanted-field(env, f, rest, rfields, acc)
+
+let wanted-field(env: TypeEnv, f: Ast, rest: List Ast, rfields: List RecordField, acc: List Str) -> Maybe (List Str) =
+  match (sym-str(f))
+    | None -> wanted-fields(env, rest, rfields, acc)
+    | Some(n) ->
+      cond
+        | member(n, acc) ->
+          {
+            err!(env, "E_TYPE_MISMATCH", String.concat("duplicate field ", n), ast-span(f))
+            wanted-fields(env, rest, rfields, acc)
+          }
+        | not(record-has-field(rfields, n)) ->
+          {
+            err!(env, "E_TYPE_UNBOUND", String.concat("unknown field ", n), ast-span(f))
+            wanted-fields(env, rest, rfields, acc)
+          }
+        | else -> wanted-fields(env, rest, rfields, n :: acc)
+
+let record-has-field(fields: List RecordField, name: Str) -> Bool =
+  match (fields)
+    | [] -> false
+    | RecordField(n, _) :: rest ->
+      if (n == name) -> true | record-has-field(rest, name)
+
+let positional-fields(fields: List RecordField, wanted: List Str, sp: Span) -> List Ast =
+  match (fields)
+    | [] -> []
+    | RecordField(n, _) :: rest ->
+      {
+        let text = if (member(n, wanted)) -> n | "_"
+        SymNode(text, sp) :: positional-fields(rest, wanted, sp)
+      }
+
 
 let bind-pattern-ctor(env: TypeEnv, pelems: List Ast, psp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
   match (pelems)
@@ -1899,14 +1932,84 @@ let typecheck-top(env: TypeEnv, ast: Ast, top-local: Ref (Map Str Type)) -> Unit
 ; ---------------------------------------------------------------------------
 ; Entry point.
 
-let collect-defs(env: TypeEnv, forms: List Ast) -> Unit =
+; Every record and variant name is bound before fields and payloads are
+; checked, so a record may mention itself and two declarations in one file
+; may mention each other. A second definition of the same name is an error.
+
+let span-same(a: Span, b: Span) -> Bool =
+  match (a)
+    | Span(s1, e1, o1, _) ->
+      match (b)
+        | Span(s2, e2, o2, _) -> s1 == s2 && e1 == e2 && o1 == o2
+
+let span-skipped(sp: Span, xs: List Span) -> Bool =
+  match (xs)
+    | [] -> false
+    | h :: t ->
+      if (span-same(sp, h)) -> true | span-skipped(sp, t)
+
+let unwrap-pub-ast(ast: Ast) -> Ast =
+  match (ast)
+    | ParenNode(head :: rest, sp) ->
+      match (sym-str(head))
+        | Some(n) ->
+          if (n == "pub") -> ParenNode(rest, sp) | ast
+        | None -> ast
+    | _ -> ast
+
+let register-stubs(env: TypeEnv, forms: List Ast, seen: Ref (List Str), skip: Ref (List Span)) -> Unit =
   match (forms)
     | [] -> ()
     | f :: rest ->
       {
-        collect-def(env, f)
-        collect-defs(env, rest)
+        register-stub(env, f, seen, skip)
+        register-stubs(env, rest, seen, skip)
       }
+
+let register-stub(env: TypeEnv, form: Ast, seen: Ref (List Str), skip: Ref (List Span)) -> Unit =
+  match (unwrap-pub-ast(form))
+    | ParenNode(head :: name-part :: _, sp) -> register-stub-head(env, head, name-part, sp, seen, skip)
+    | _ -> ()
+
+let register-stub-head(env: TypeEnv, head: Ast, name-part: Ast, sp: Span, seen: Ref (List Str), skip: Ref (List Span)) -> Unit =
+  match (sym-str(head))
+    | Some(n) ->
+      if (n == "defrec" || n == "variant") -> register-stub-named(env, n, name-part, sp, seen, skip)
+    | _ -> ()
+
+let register-stub-named(env: TypeEnv, kind: Str, name-part: Ast, sp: Span, seen: Ref (List Str), skip: Ref (List Span)) -> Unit =
+  match (parse-type-name(name-part))
+    | None -> ()
+    | Some(np) -> register-stub-np(env, kind, np, sp, seen, skip)
+
+let register-stub-np(env: TypeEnv, kind: Str, np: NameParams, sp: Span, seen: Ref (List Str), skip: Ref (List Span)) -> Unit {
+  let name = name-params-name(np)
+  let params = name-params-params(np)
+  if (member(name, deref(seen))) -> note-duplicate-type(env, name, sp, skip) | note-fresh-type(env, kind, name, params, seen)
+}
+
+let note-duplicate-type(env: TypeEnv, name: Str, sp: Span, skip: Ref (List Span)) -> Unit {
+  err!(env, "E_TYPE_DUPLICATE", String.concat("type ", name, " is already defined"), sp)
+  set!(skip, sp :: deref(skip))
+}
+
+let note-fresh-type(env: TypeEnv, kind: Str, name: Str, params: List Str, seen: Ref (List Str)) -> Unit {
+  set!(seen, name :: deref(seen))
+  if (kind == "defrec") -> type-set(env, name, RecordDef(name, params, [])) | type-set(env, name, VariantDef(name, params, []))
+}
+
+let collect-defs(env: TypeEnv, forms: List Ast) -> Unit =
+  collect-defs-skip(env, forms, [])
+
+let collect-defs-skip(env: TypeEnv, forms: List Ast, skip: List Span) -> Unit =
+  match (forms)
+    | [] -> ()
+    | f :: rest ->
+      {
+        if (span-skipped(ast-span(f), skip)) -> () | collect-def(env, f)
+        collect-defs-skip(env, rest, skip)
+      }
+
 
 let collect-defn-schemes(env: TypeEnv, forms: List Ast) -> Unit =
   match (forms)
@@ -2064,7 +2167,7 @@ let find-print-note(sp: Span, notes: List PrintNote) -> Maybe (List Type) =
   match (notes)
     | [] -> None()
     | PrintNote(saved, ts) :: rest ->
-      if (span-start(sp) == span-start(saved) && span-end(sp) == span-end(saved) && span-origin(sp) == span-origin(saved)) -> Some(ts) | find-print-note(sp, rest)
+      if (sp.start == saved.start && sp.end == saved.end && sp.origin == saved.origin) -> Some(ts) | find-print-note(sp, rest)
 
 let print-write(value: Ast) -> Ast =
   print-call("print-text", [value])
@@ -2134,11 +2237,60 @@ let rewrite-project-forms(forms: List Ast, notes: List ProjNote, env: TypeEnv) -
     | [] -> []
     | f :: rest -> rewrite-project-ast(f, notes, env) :: rewrite-project-forms(rest, notes, env)
 
+let rewrite-recpat-forms(forms: List Ast, env: TypeEnv) -> List Ast =
+  match (forms)
+    | [] -> []
+    | f :: rest -> rewrite-recpat-ast(f, env) :: rewrite-recpat-forms(rest, env)
+
+let rewrite-recpat-list(xs: List Ast, env: TypeEnv) -> List Ast =
+  match (xs)
+    | [] -> []
+    | h :: t -> rewrite-recpat-ast(h, env) :: rewrite-recpat-list(t, env)
+
+let rewrite-recpat-ast(ast: Ast, env: TypeEnv) -> Ast =
+  match (ast)
+    | ParenNode(elems, sp) -> rewrite-recpat-paren(elems, sp, env)
+    | BracketNode(elems, sp) -> BracketNode(rewrite-recpat-list(elems, env), sp)
+    | _ -> ast
+
+let rewrite-recpat-paren(elems: List Ast, sp: Span, env: TypeEnv) -> Ast =
+  match (elems)
+    | head :: rest ->
+      match (sym-str(head))
+        | Some(n) ->
+          if (n == "recpat") -> expand-recpat(rest, sp, env) | ParenNode(rewrite-recpat-list(elems, env), sp)
+        | None -> ParenNode(rewrite-recpat-list(elems, env), sp)
+    | [] -> ParenNode([], sp)
+
+let expand-recpat(args: List Ast, sp: Span, env: TypeEnv) -> Ast =
+  match (args)
+    | name-ast :: fields ->
+      match (sym-str(name-ast))
+        | Some(name) -> expand-recpat-named(name-ast, name, fields, sp, env)
+        | None -> ParenNode(mk-recpat(args, sp), sp)
+    | [] -> ParenNode(mk-recpat(args, sp), sp)
+
+let expand-recpat-named(name-ast: Ast, name: Str, fields: List Ast, sp: Span, env: TypeEnv) -> Ast =
+  match (type-get(env, name))
+    | Some(RecordDef(_, _, rfields)) -> ParenNode(name-ast :: positional-fields(rfields, sym-names(fields, []), sp), sp)
+    | _ -> ParenNode(mk-recpat(name-ast :: fields, sp), sp)
+
+let mk-recpat(args: List Ast, sp: Span) -> List Ast =
+  SymNode("recpat", sp) :: args
+
+let sym-names(fields: List Ast, acc: List Str) -> List Str =
+  match (fields)
+    | [] -> acc
+    | f :: rest ->
+      match (sym-str(f))
+        | Some(n) -> sym-names(rest, n :: acc)
+        | None -> sym-names(rest, acc)
+
 let finish-typecheck(forms: List Ast, errs: List TypeError, env: TypeEnv) -> Result (List Ast) (List TypeError) =
   match (errs)
     | [] ->
       {
-        let rewritten = rewrite-project-forms(forms, deref(proj-notes), env)
+        let rewritten = rewrite-recpat-forms(rewrite-project-forms(forms, deref(proj-notes), env), env)
         Ok(append(reverse(deref(print-functions)), rewritten))
       }
     | _ -> Err(reverse-errs(errs))
@@ -2159,12 +2311,186 @@ let typecheck-collected(forms: List Ast) -> Result (List Ast) (List TypeError) {
   set!(print-functions, [])
   set!(print-names, Map.empty())
   let env = empty-env()
-  collect-defs(env, forms)
+  let skip = ref([])
+  register-stubs(env, forms, ref([]), skip)
+  collect-defs-skip(env, forms, deref(skip))
   collect-defn-schemes(env, forms)
+  push-type-errs(env, check-pub-private-forms(forms))
   let top-local = ref(Map.empty())
   run-typecheck-top(env, forms, top-local)
-  finish-typecheck(forms, deref(env-diags(env)), env)
+  finish-typecheck(forms, deref(env.diags), env)
 }
+
+let push-type-errs(env: TypeEnv, xs: List TypeError) -> Unit =
+  match (xs)
+    | [] -> ()
+    | TypeError(sp, code, msg) :: rest ->
+      {
+        err!(env, code, msg, sp)
+        push-type-errs(env, rest)
+      }
+
+; A public signature may name a builtin or an imported type. It may not
+; name a nominal this module declares and does not publish.
+pub let check-pub-private-forms(forms: List Ast) -> List TypeError {
+  let declared = declared-type-names(forms, [])
+  let pubs = published-names(forms, [])
+  let aliases = alias-targets(forms, Map.empty())
+  walk-pub-sigs(forms, declared, pubs, aliases, [])
+}
+
+let declared-type-names(forms: List Ast, acc: List Str) -> List Str =
+  match (forms)
+    | [] -> acc
+    | f :: rest -> declared-type-names(rest, declared-type-one(unwrap-pub-ast(f), acc))
+
+let declared-type-one(form: Ast, acc: List Str) -> List Str =
+  match (form)
+    | ParenNode(head :: name-part :: _, _) ->
+      match (sym-str(head))
+        | Some(n) ->
+          if (n == "defrec" || n == "variant") -> declared-type-add(name-part, acc) | acc
+        | None -> acc
+    | _ -> acc
+
+let declared-type-add(name-part: Ast, acc: List Str) -> List Str =
+  match (parse-type-name(name-part))
+    | Some(np) -> name-params-name(np) :: acc
+    | None -> acc
+
+let published-names(forms: List Ast, acc: List Str) -> List Str =
+  match (forms)
+    | [] -> acc
+    | f :: rest -> published-names(rest, published-one(f, acc))
+
+let published-one(form: Ast, acc: List Str) -> List Str =
+  match (form)
+    | ParenNode(head :: rest, sp) ->
+      if (is-sym-name(head, "pub")) -> form-bound-names(ParenNode(rest, sp), acc) | acc
+    | _ -> acc
+
+let is-sym-name(ast: Ast, name: Str) -> Bool =
+  match (sym-str(ast))
+    | Some(n) -> n == name
+    | None -> false
+
+let form-bound-names(form: Ast, acc: List Str) -> List Str =
+  match (form)
+    | ParenNode(head :: rest, _) ->
+      match (sym-str(head))
+        | Some(n) -> bound-names-of(n, rest, acc)
+        | None -> acc
+    | _ -> acc
+
+let bound-names-of(head: Str, rest: List Ast, acc: List Str) -> List Str =
+  cond
+    | head == "defn" || head == "extern" || head == "runtime" || head == "alias" || head == "defrec" -> declared-type-add(first-ast-or(rest), acc)
+    | head == "variant" -> variant-bound-names(rest, acc)
+    | else -> acc
+
+let first-ast-or(xs: List Ast) -> Ast =
+  match (xs)
+    | [] -> SymNode("", Span(0, 0, 0, 0))
+    | h :: _ -> h
+
+let variant-bound-names(rest: List Ast, acc: List Str) -> List Str =
+  match (rest)
+    | name-part :: ctors -> ctor-bound-names(ctors, declared-type-add(name-part, acc))
+    | [] -> acc
+
+let ctor-bound-names(ctors: List Ast, acc: List Str) -> List Str =
+  match (ctors)
+    | [] -> acc
+    | c :: rest ->
+      match (c)
+        | ParenNode(cname :: _, _) ->
+          match (sym-str(cname))
+            | Some(n) -> ctor-bound-names(rest, n :: acc)
+            | None -> ctor-bound-names(rest, acc)
+        | _ -> ctor-bound-names(rest, acc)
+
+let alias-targets(forms: List Ast, acc: Map Str Ast) -> Map Str Ast =
+  match (forms)
+    | [] -> acc
+    | f :: rest -> alias-targets(rest, alias-target-one(unwrap-pub-ast(f), acc))
+
+let alias-target-one(form: Ast, acc: Map Str Ast) -> Map Str Ast =
+  match (form)
+    | ParenNode(head :: name-part :: ty :: _, _) ->
+      if (is-sym-name(head, "alias")) -> alias-target-named(name-part, ty, acc) | acc
+    | _ -> acc
+
+let alias-target-named(name-part: Ast, ty: Ast, acc: Map Str Ast) -> Map Str Ast =
+  match (sym-str(name-part))
+    | Some(n) -> Map.set(n, ty, acc)
+    | None -> acc
+
+let walk-pub-sigs(forms: List Ast, declared: List Str, pubs: List Str, aliases: Map Str Ast, acc: List TypeError) -> List TypeError =
+  match (forms)
+    | [] -> acc
+    | f :: rest -> walk-pub-sigs(rest, declared, pubs, aliases, walk-pub-sig(f, declared, pubs, aliases, acc))
+
+let walk-pub-sig(form: Ast, declared: List Str, pubs: List Str, aliases: Map Str Ast, acc: List TypeError) -> List TypeError =
+  match (form)
+    | ParenNode(head :: kind :: _ :: rest, _) ->
+      if (is-sym-name(head, "pub") && is-sig-kind(kind)) -> walk-type-list(sig-nodes(rest), declared, pubs, aliases, [], acc) | acc
+    | _ -> acc
+
+let is-sig-kind(ast: Ast) -> Bool =
+  match (sym-str(ast))
+    | Some(n) -> n == "defn" || n == "extern" || n == "runtime"
+    | None -> false
+
+let sig-nodes(rest: List Ast) -> List Ast =
+  append-asts-local(nodes-before-arrow(rest, []), take-ret(nodes-after-arrow(rest)))
+
+let nodes-before-arrow(xs: List Ast, acc: List Ast) -> List Ast =
+  match (xs)
+    | [] -> acc
+    | h :: t ->
+      if (is-sym-name(h, "->")) -> acc | nodes-before-arrow(t, h :: acc)
+
+let nodes-after-arrow(xs: List Ast) -> List Ast =
+  match (xs)
+    | [] -> []
+    | h :: t ->
+      if (is-sym-name(h, "->")) -> t | nodes-after-arrow(t)
+
+let take-ret(xs: List Ast) -> List Ast =
+  match (xs)
+    | [] -> []
+    | h :: _ -> [h]
+
+let append-asts-local(xs: List Ast, ys: List Ast) -> List Ast =
+  match (xs)
+    | [] -> ys
+    | h :: t -> h :: append-asts-local(t, ys)
+
+let walk-type-list(xs: List Ast, declared: List Str, pubs: List Str, aliases: Map Str Ast, expanding: List Str, acc: List TypeError) -> List TypeError =
+  match (xs)
+    | [] -> acc
+    | h :: t -> walk-type-list(t, declared, pubs, aliases, expanding, walk-type-ast(h, declared, pubs, aliases, expanding, acc))
+
+let walk-type-ast(ast: Ast, declared: List Str, pubs: List Str, aliases: Map Str Ast, expanding: List Str, acc: List TypeError) -> List TypeError =
+  match (ast)
+    | SymNode(n, sp) -> consider-type-name(n, sp, declared, pubs, aliases, expanding, acc)
+    | ParenNode(xs, _) -> walk-type-list(xs, declared, pubs, aliases, expanding, acc)
+    | _ -> acc
+
+let consider-type-name(n: Str, sp: Span, declared: List Str, pubs: List Str, aliases: Map Str Ast, expanding: List Str, acc: List TypeError) -> List TypeError =
+  cond
+    | is-label(n) || member(n, expanding) -> acc
+    | else ->
+      match (Map.lookup(n, aliases))
+        | Some(target) -> walk-type-ast(target, declared, pubs, aliases, n :: expanding, acc)
+        | None ->
+          if (member(n, declared) && not(member(n, pubs))) -> TypeError(sp, "E_PUB_PRIVATE_TYPE", String.concat("pub signature mentions private type ", n)) :: acc | acc
+
+let is-label(n: Str) -> Bool {
+  let len = String.length(n)
+  len > 0 && String.byte(len - 1, n) == 58
+}
+
 
 pub let typecheck-forms(forms: List Ast) -> Result (List Ast) (List TypeError) =
   match (pack-rest(forms))

@@ -5,8 +5,6 @@ import "./ast.mnd"
 import std/string as String
 import std/string-buffer as Buf
 
-pub alias Ast = Ast
-
 let pad(n: Int) -> Str =
   pad-from(n, "")
 
@@ -124,10 +122,14 @@ let print-alias(a: Ast) -> Str =
 
 let print-import(a: Ast) -> Str =
   match (a)
-    | ParenNode(_ :: path :: mod :: _, _) ->
-      String.concat("import ", String.concat(print-atom(path), String.concat(" as ", print-atom(mod))))
+    | ParenNode(_ :: path :: mod :: _, _) -> print-import-tail(path, mod)
     | ParenNode(_ :: path :: _, _) -> String.concat("import ", print-atom(path))
     | _ -> "import"
+
+let print-import-tail(path: Ast, mod: Ast) -> Str =
+  match (mod)
+    | ParenNode(names, _) -> String.concat("import ", String.concat(print-atom(path), String.concat(" (", String.concat(join(map-atom(names), ", "), ")"))))
+    | _ -> String.concat("import ", String.concat(print-atom(path), String.concat(" as ", print-atom(mod))))
 
 let print-test(a: Ast, ind: Int) -> Str =
   match (a)
@@ -370,6 +372,7 @@ let print-headed(n: Str, rest: List Ast, whole: Ast, ind: Int) -> Str =
     | n == "cond" -> print-cond(rest, ind)
     | n == "when" -> print-when(rest, ind)
     | n == "match" -> print-match(rest, ind)
+    | n == "mmatch" -> print-multi-match(rest, ind)
     | n == "fn" -> print-fn(rest, ind)
     | n == "pub" -> String.concat("pub ", print-form-at(ParenNode(rest, Span(0, 0, 0, 0)), ind))
     | n == "let" -> print-let(rest, ind)
@@ -653,6 +656,28 @@ let print-match(rest: List Ast, ind: Int) -> Str =
     | scrut :: arms -> String.concat("match (", print-expr(scrut, ind), ")\n", join(match-lines(arms, ind), "\n"))
     | [] -> "match (())"
 
+let print-multi-match(rest: List Ast, ind: Int) -> Str =
+  match (rest)
+    | scruts :: arms -> String.concat("match (", String.concat(print-multi-scruts(scruts, ind), ")\n"), join(multi-lines(arms, ind), "\n"))
+    | [] -> "match (())"
+
+let print-multi-scruts(scruts: Ast, ind: Int) -> Str =
+  match (scruts)
+    | ParenNode(xs, _) -> join(map-expr(xs, ind), ", ")
+    | _ -> print-expr(scruts, ind)
+
+let multi-lines(xs: List Ast, ind: Int) -> List Str =
+  match (xs)
+    | [] -> []
+    | pat :: body :: rest -> String.concat(pad(ind + 2), String.concat("| ", String.concat(print-multi-arm(pat), String.concat(" ->", arrow-body(body, ind + 4))))) :: multi-lines(rest, ind)
+    | _ :: _ -> []
+
+let print-multi-arm(a: Ast) -> Str =
+  match (a)
+    | ParenNode(SymNode("mguard", _) :: pat :: g :: _, _) -> String.concat(print-multi-arm(pat), String.concat(" when ", print-expr(g, 0)))
+    | ParenNode(SymNode("mpat", _) :: pats, _) -> String.concat("(", String.concat(join(map-pat(pats), ", "), ")"))
+    | _ -> print-pat(a)
+
 let match-lines(xs: List Ast, ind: Int) -> List Str =
   match (xs)
     | [] -> []
@@ -672,6 +697,8 @@ let print-pat(a: Ast) -> Str =
         let wrapped = if (is-head(a, "Cons")) -> String.concat("(", String.concat(left, ")")) | left
         String.concat(wrapped, String.concat(" :: ", right))
       }
+    | ParenNode(SymNode("recpat", _) :: name :: fields, _) -> String.concat(print-atom(name), String.concat(" { ", String.concat(join(map-atom(fields), ", "), " }")))
+    | ParenNode(SymNode("guard", _) :: pat :: g :: _, _) -> String.concat(print-pat(pat), String.concat(" when ", print-expr(g, 0)))
     | ParenNode(h :: args, _) ->
       match (sym-str(h))
         | Some(n) -> String.concat(n, String.concat("(", String.concat(join(map-pat(args), ", "), ")")))

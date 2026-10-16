@@ -304,4 +304,125 @@ is-even(4)`;
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "bool") expect(r.value.value).toBe(true);
   });
+
+  test("a record may mention itself", () => {
+    const src = `record Env {
+  parent: Maybe Env
+  n: Int
+}
+let leaf() -> Env =
+  Env(None(), 1)
+leaf()`;
+    const diags = diagnose(src);
+    expect(diags).toEqual([]);
+  });
+
+  test("two types in one file may mention each other", () => {
+    const src = `type Expr =
+  | Num(Int)
+  | Call(Stmt)
+type Stmt =
+  | S(Expr)
+let f(e: Expr) -> Int =
+  match (e)
+    | Num(n) -> n
+    | Call(S(Num(n))) -> n
+    | Call(S(Call(_))) -> 0
+f(Num(3))`;
+    const r = run(src);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(3n);
+  });
+
+  test("a second definition of a type is an error", () => {
+    const src = `type Color =
+  | Red
+type Color =
+  | Blue`;
+    const diags = diagnose(src);
+    expect(diags.some((d) => d.code === "E_TYPE_DUPLICATE")).toBe(true);
+  });
+
+  test("named record pattern binds the named fields", () => {
+    const src = `record Span {
+  start: Int
+  end: Int
+  line: Int
+}
+let line-of(sp: Span) -> Int =
+  match (sp)
+    | Span { line } -> line
+line-of(Span(1, 4, 9))`;
+    const r = run(src);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(9n);
+  });
+
+  test("unknown record field is a type error", () => {
+    const src = `record Span {
+  start: Int
+}
+let f(sp: Span) -> Int =
+  match (sp)
+    | Span { missing } -> missing
+f(Span(1))`;
+    const diags = diagnose(src);
+    expect(diags.some((d) => d.code === "E_TYPE_UNBOUND")).toBe(true);
+  });
+
+  test("duplicate record field is an error", () => {
+    const src = `record Span {
+  start: Int
+  end: Int
+}
+let f(sp: Span) -> Int =
+  match (sp)
+    | Span { start, start } -> start
+f(Span(1, 2))`;
+    const diags = diagnose(src);
+    expect(diags.length).toBeGreaterThan(0);
+  });
+
+  test("a named pattern on a variant is a type error", () => {
+    const src = `type Color =
+  | Red
+let f(c: Color) -> Int =
+  match (c)
+    | Color { n } -> n
+f(Red())`;
+    const diags = diagnose(src);
+    expect(diags.some((d) => d.code === "E_TYPE_MISMATCH")).toBe(true);
+  });
+
+  test("match on two lists", () => {
+    const src = `let same-len(xs: List Int, ys: List Int) -> Bool =
+  match (xs, ys)
+    | ([], []) -> true
+    | (_ :: xt, _ :: yt) -> same-len(xt, yt)
+    | (_, _) -> false
+same-len(Cons(1, Nil()), Cons(2, Nil()))`;
+    const r = run(src);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "bool") expect(r.value.value).toBe(true);
+  });
+
+  test("non-exhaustive multi-value match is an error", () => {
+    const src = `let f(xs: List Int, ys: List Int) -> Int =
+  match (xs, ys)
+    | ([], []) -> 0
+f(Nil(), Nil())`;
+    const diags = diagnose(src);
+    expect(diags.some((d) => d.code === "E_TYPE_EXHAUSTIVE")).toBe(true);
+  });
+
+  test("multi-value match guard", () => {
+    const src = `let f(xs: List Int, ys: List Int) -> Int =
+  match (xs, ys)
+    | (x :: _, y :: _) when x == y -> 1
+    | (_, _) -> 0
+f(Cons(1, Nil()), Cons(1, Nil()))`;
+    const r = run(src);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(1n);
+  });
 });

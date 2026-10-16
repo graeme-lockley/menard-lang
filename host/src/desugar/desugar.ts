@@ -139,6 +139,7 @@ function desugarNode(ast: Ast, diags: Diagnostic[]): Ast {
   if (nameEquals(head.name, "|>")) return desugarPipe(ast, diags);
   if (nameEquals(head.name, "?")) return desugarQues(ast, diags);
   if (nameEquals(head.name, "map-lit")) return desugarMapLit(ast, diags);
+  if (nameEquals(head.name, "mmatch")) return desugarMMatch(ast, diags);
   const op = headText(head);
   if (op !== null && FOLD_OPS.has(op)) return desugarFold(op, ast, diags);
   if (op !== null && SUB_OPS.has(op)) return desugarSub(op, ast, diags);
@@ -171,6 +172,7 @@ const PIPE_BLOCKED = new Set([
   "cond",
   "when",
   "match",
+  "mmatch",
   "fn",
   "let",
   "loop",
@@ -636,5 +638,218 @@ function desugarWhile(ast: Ast & { tag: "list" }, diags: Diagnostic[]): Ast {
   return desugarNode(
     list("paren", [sym("loop", ast.span), list("paren", [], ast.span), ifForm], ast.span),
     diags,
+  );
+}
+
+type MArm = { pats: Ast[]; body: Ast; guard: Ast | null };
+type PatClass =
+  | { kind: "any" }
+  | { kind: "ctor"; name: string; payloads: Ast[]; pattern: Ast };
+
+function desugarMMatch(ast: Ast & { tag: "list" }, diags: Diagnostic[]): Ast {
+  const scrutList = ast.elems[1];
+  if (!scrutList || scrutList.tag !== "list") {
+    diags.push(
+      diagnostic({
+        severity: "error",
+        category: "semantic",
+        code: "E_DESUGAR_MATCH",
+        message: "match requires scrutinees",
+        span: ast.span,
+      }),
+    );
+    return ast;
+  }
+  const scruts = scrutList.elems.map((e) => desugarNode(e, diags));
+  const arms: MArm[] = [];
+  for (let i = 2; i + 1 < ast.elems.length; i += 2) {
+    let node = ast.elems[i]!;
+    let guard: Ast | null = null;
+    if (node.tag === "list" && isSym(node.elems[0]!, "mguard")) {
+      guard = node.elems[2] ? desugarNode(node.elems[2], diags) : null;
+      node = node.elems[1]!;
+    }
+    if (node.tag !== "list" || !isSym(node.elems[0]!, "mpat")) {
+      diags.push(
+        diagnostic({
+          severity: "error",
+          category: "semantic",
+          code: "E_DESUGAR_MATCH",
+          message: "match arm requires a pattern for each scrutinee",
+          span: ast.span,
+        }),
+      );
+      continue;
+    }
+    const pats = node.elems.slice(1).map((p) => desugarNode(p, diags));
+    if (pats.length !== scruts.length) {
+      diags.push(
+        diagnostic({
+          severity: "error",
+          category: "semantic",
+          code: "E_DESUGAR_MATCH",
+          message: `pattern has ${pats.length} parts, match has ${scruts.length}`,
+          span: node.span,
+        }),
+      );
+      continue;
+    }
+    arms.push({ pats, body: desugarNode(ast.elems[i + 1]!, diags), guard });
+  }
+  let freshN = 0;
+  const fresh = (span: Ast["span"]): Ast => sym(`__mm${freshN++}`, span);
+  return compileMulti(scruts, arms, fresh, ast.span);
+}
+
+let recPatId = 0;
+
+function classifyPat(pat: Ast): PatClass {
+  if (pat.tag === "sym") {
+    const n = headText(pat) ?? "_";
+    if (n === "_" || isLowerStart(n)) return { kind: "any" };
+    return { kind: "ctor", name: n, payloads: [], pattern: list("paren", [pat], pat.span) };
+  }
+  if (pat.tag === "int") return { kind: "ctor", name: `int:${pat.value}`, payloads: [], pattern: pat };
+  if (pat.tag === "str") {
+    return { kind: "ctor", name: `str:${new TextDecoder().decode(pat.bytes)}`, payloads: [], pattern: pat };
+  }
+  if (pat.tag === "bool") return { kind: "ctor", name: `bool:${pat.value}`, payloads: [], pattern: pat };
+  if (pat.tag === "list" && pat.elems[0]?.tag === "sym") {
+    const n = headText(pat.elems[0]) ?? "";
+    if (n === "recpat" && pat.elems[1]?.tag === "sym") {
+      const name = headText(pat.elems[1]) ?? "";
+      return { kind: "ctor", name: `rec:${name}:${recPatId++}`, payloads: [], pattern: pat };
+    }
+    if (n !== "guard" && n !== "_" && !isLowerStart(n)) {
+      return { kind: "ctor", name: n, payloads: pat.elems.slice(1), pattern: pat };
+    }
+  }
+  return { kind: "any" };
+}
+
+function isLowerStart(name: string): boolean {
+  const c = name.charCodeAt(0);
+  return c >= 97 && c <= 122;
+}
+
+function bindAnyPat(
+  pat: Ast,
+  v: Ast,
+  body: Ast,
+  guard: Ast | null,
+): { body: Ast; guard: Ast | null } {
+  if (pat.tag === "sym") {
+    const n = headText(pat);
+    if (n && n !== "_") {
+      const wrap = (e: Ast): Ast => list("paren", [sym("let", pat.span), pat, v, e], pat.span);
+      return { body: wrap(body), guard: guard ? wrap(guard) : null };
+    }
+  }
+  return { body, guard };
+}
+
+function bindScrut(span: Ast["span"], scrut: Ast, v: Ast, body: Ast): Ast {
+  const binding = list("paren", [sym("let", span), v, scrut], span);
+  return list("paren", [sym("do", span), binding, body], span);
+}
+
+function boolLit(span: Ast["span"]): Ast {
+  return { tag: "bool", value: true, span };
+}
+
+function emitMatch(span: Ast["span"], scrut: Ast, arms: { pat: Ast; body: Ast; guard: Ast | null }[]): Ast {
+  const elems: Ast[] = [sym("match", span), scrut];
+  for (const arm of arms) {
+    const pat = arm.guard
+      ? list("paren", [sym("guard", arm.pat.span), arm.pat, arm.guard], arm.pat.span)
+      : arm.pat;
+    elems.push(pat, arm.body);
+  }
+  return list("paren", elems, span);
+}
+
+function compileMulti(
+  scruts: Ast[],
+  arms: MArm[],
+  fresh: (span: Ast["span"]) => Ast,
+  span: Ast["span"],
+): Ast {
+  if (arms.length === 0) return list("paren", [], span);
+  if (scruts.length === 0) return finishArms(arms, span);
+  const scrut = scruts[0]!;
+  const rest = scruts.slice(1);
+  const kinds = arms.map((arm) => classifyPat(arm.pats[0]!));
+  if (kinds.every((k) => k.kind === "any")) {
+    const v = fresh(scrut.span);
+    const next = arms.map((arm) => {
+      const bound = bindAnyPat(arm.pats[0]!, v, arm.body, arm.guard);
+      return { pats: arm.pats.slice(1), body: bound.body, guard: bound.guard };
+    });
+    const cont = rest.length === 0 ? finishArms(next, span) : compileMulti(rest, next, fresh, span);
+    return bindScrut(span, scrut, v, cont);
+  }
+  const order: string[] = [];
+  const payloadCount = new Map<string, number>();
+  const sample = new Map<string, PatClass & { kind: "ctor" }>();
+  for (const k of kinds) {
+    if (k.kind !== "ctor") continue;
+    if (!payloadCount.has(k.name)) {
+      order.push(k.name);
+      payloadCount.set(k.name, k.payloads.length);
+      sample.set(k.name, k);
+    }
+  }
+  const v = fresh(scrut.span);
+  const branches: { pat: Ast; body: Ast; guard: Ast | null }[] = [];
+  for (const name of order) {
+    const count = payloadCount.get(name)!;
+    const ctor = sample.get(name)!;
+    const vars = Array.from({ length: count }, () => fresh(span));
+    const outer =
+      count === 0 ? ctor.pattern : list("paren", [ctor.pattern.tag === "list" ? ctor.pattern.elems[0]! : sym(name, span), ...vars], span);
+    const inner = arms.flatMap((arm, i) => {
+      const k = kinds[i]!;
+      if (k.kind === "any") {
+        const wilds = vars.map((vr) => sym("_", vr.span));
+        const bound = bindAnyPat(arm.pats[0]!, v, arm.body, arm.guard);
+        return [{ pats: [...wilds, ...arm.pats.slice(1)], body: bound.body, guard: bound.guard }];
+      }
+      if (k.name !== name) return [];
+      return [{ pats: [...k.payloads, ...arm.pats.slice(1)], body: arm.body, guard: arm.guard }];
+    });
+    const covered = arms.some((arm, i) => {
+      if (arm.guard) return false;
+      const k = kinds[i]!;
+      return k.kind === "any" || k.name === name;
+    });
+    branches.push({
+      pat: outer,
+      body: compileMulti([...vars, ...rest], inner, fresh, span),
+      guard: covered ? null : boolLit(span),
+    });
+  }
+  const anys = arms.filter((_, i) => kinds[i]!.kind === "any");
+  const anyCovers = anys.some((arm) => {
+    if (arm.guard) return false;
+    return arm.pats.slice(1).every((p) => classifyPat(p).kind === "any");
+  });
+  if (anys.length > 0 && anyCovers) {
+    const next = anys.map((arm) => {
+      const bound = bindAnyPat(arm.pats[0]!, v, arm.body, arm.guard);
+      return { pats: arm.pats.slice(1), body: bound.body, guard: bound.guard };
+    });
+    const body = rest.length === 0 ? finishArms(next, span) : compileMulti(rest, next, fresh, span);
+    const covered = anys.some((arm) => !arm.guard);
+    branches.push({ pat: sym("_", span), body, guard: covered ? null : boolLit(span) });
+  }
+  return bindScrut(span, scrut, v, emitMatch(span, v, branches));
+}
+
+function finishArms(arms: MArm[], span: Ast["span"]): Ast {
+  if (arms.length === 1 && !arms[0]!.guard) return arms[0]!.body;
+  return emitMatch(
+    span,
+    list("paren", [], span),
+    arms.map((arm) => ({ pat: sym("_", span), body: arm.body, guard: arm.guard })),
   );
 }

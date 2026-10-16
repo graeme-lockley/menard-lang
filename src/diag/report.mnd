@@ -10,8 +10,6 @@ import std/console
 import std/io
 import std/string as String
 
-pub alias Span = Span
-
 ; `Compiling` / `Linking` are light grey, the file name dark grey.
 ; Color follows stderr, same rule as diagnostics.
 pub let progress-line(verb: Str, name: Str, ms: Int) -> Str {
@@ -80,14 +78,14 @@ let loc-col(src: Str, offset: Int) -> Int {
 ; Underline from the start column through the end column on this line.
 ; A zero-width span still marks one caret.
 let caret-len(src: Str, sp: Span, col: Int, text: Str) -> Int {
-  let start-line = loc-line(src, span-start(sp))
+  let start-line = loc-line(src, sp.start)
   let end-off =
-    if (span-end(sp) > span-start(sp)) -> span-end(sp) - 1 | span-start(sp)
+    if (sp.end > sp.start) -> sp.end - 1 | sp.start
   let end-line = loc-line(src, end-off)
   let end-col =
     if (end-line == start-line) -> loc-col(src, end-off) | String.length(text) + 1
   let raw =
-    if (span-end(sp) > span-start(sp)) -> end-col - col + 1 | 1
+    if (sp.end > sp.start) -> end-col - col + 1 | 1
   let capped =
     if (col - 1 + raw > String.length(text) + 1) -> String.length(text) + 1 - col - 1 | raw
   if (capped < 1) -> 1 | capped
@@ -95,9 +93,9 @@ let caret-len(src: Str, sp: Span, col: Int, text: Str) -> Int {
 
 let format-span(path: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str) -> Str {
   let on = color-on()
-  let line = loc-line(src, span-start(sp))
-  let col = loc-col(src, span-start(sp))
-  let text = line-text(src, loc-start(src, span-start(sp)))
+  let line = loc-line(src, sp.start)
+  let col = loc-col(src, sp.start)
+  let text = line-text(src, loc-start(src, sp.start))
   let gw = digits-of(line, 1)
   let sev-color =
     if (sev == "warning") -> "[33m" | "[31m"

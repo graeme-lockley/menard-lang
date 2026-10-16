@@ -1,0 +1,9 @@
+; A named field pattern is a record pattern. A variant has no fields to name.
+
+type Color =
+  | Red
+  | Blue
+
+let main() -> Int =
+  match (Red)
+    | Color { x } -> x

@@ -1,0 +1,6 @@
+; Each arm of a multi-value match has one pattern per scrutinee.
+
+let main() -> Int =
+  match ([1], [2])
+    | ([], []) -> 0
+    | (x) -> 1

@@ -1,0 +1,10 @@
+; A named record pattern may only mention fields the record declares.
+
+record Span {
+  line: Int
+  start: Int
+}
+
+let main() -> Int =
+  match (Span(1, 2))
+    | Span { nope } -> nope

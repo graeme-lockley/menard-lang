@@ -27,33 +27,6 @@ pub record Span {
   line: Int
 }
 
-pub let span-start(sp: Span) -> Int =
-  match (sp)
-    | Span(s, _, _, _) -> s
-
-pub let span-end(sp: Span) -> Int =
-  match (sp)
-    | Span(_, e, _, _) -> e
-
-pub let span-origin(sp: Span) -> Int =
-  match (sp)
-    | Span(_, _, o, _) -> o
-
-pub let span-line(sp: Span) -> Int =
-  match (sp)
-    | Span(_, _, _, n) -> n
-
-; Forward declaration: the current host typer (host/src/type/check.ts,
-; `collectDef`) resolves each nominal type's own fields/ctors in a single
-; pass *before* registering the type's own name, so a variant cannot name
-; itself in its own ctor payloads (confirmed directly against the spec's own
-; `(variant (Tree [a]) (Leaf a) (Node (Tree a) (Tree a)) (Empty))` example,
-; which currently fails with E_TYPE_EXPR). Declaring the name once with no
-; constructors registers it in `env.types` first, so the real declaration
-; right below — which does need to reference `Ast` from within itself, for
-; `(List Ast)` — resolves. Revisit once the typer pre-registers type names.
-type Ast =
-
 pub type Ast =
   | ParenNode(List Ast, Span)
   | BracketNode(List Ast, Span)
@@ -74,44 +47,19 @@ pub let ast-span(a: Ast) -> Span =
     | BoolNode(_, sp) -> sp
 
 pub let ast-list-equal(xs: List Ast, ys: List Ast) -> Bool =
-  match (xs)
-    | [] ->
-      match (ys)
-        | [] -> true
-        | _ -> false
-    | hx :: tx ->
-      match (ys)
-        | [] -> false
-        | hy :: ty -> ast-equal(hx, hy) && ast-list-equal(tx, ty)
+  match (xs, ys)
+    | ([], []) -> true
+    | (hx :: tx, hy :: ty) -> ast-equal(hx, hy) && ast-list-equal(tx, ty)
+    | (_, _) -> false
 
 ; Structural equality, ignoring spans. Mirrors host astEqual (host/src/reader/ast.ts).
 pub let ast-equal(a: Ast, b: Ast) -> Bool =
-  match (a)
-    | ParenNode(xs, _) ->
-      match (b)
-        | ParenNode(ys, _) -> ast-list-equal(xs, ys)
-        | _ -> false
-    | BracketNode(xs, _) ->
-      match (b)
-        | BracketNode(ys, _) -> ast-list-equal(xs, ys)
-        | _ -> false
-    | SymNode(n, _) ->
-      match (b)
-        | SymNode(m, _) -> n == m
-        | _ -> false
-    | IntNode(n, _) ->
-      match (b)
-        | IntNode(m, _) -> n == m
-        | _ -> false
-    | FloatNode(n, _) ->
-      match (b)
-        | FloatNode(m, _) -> n == m
-        | _ -> false
-    | StrNode(n, _) ->
-      match (b)
-        | StrNode(m, _) -> n == m
-        | _ -> false
-    | BoolNode(n, _) ->
-      match (b)
-        | BoolNode(m, _) -> n == m
-        | _ -> false
+  match (a, b)
+    | (ParenNode(xs, _), ParenNode(ys, _)) -> ast-list-equal(xs, ys)
+    | (BracketNode(xs, _), BracketNode(ys, _)) -> ast-list-equal(xs, ys)
+    | (SymNode(n, _), SymNode(m, _)) -> n == m
+    | (IntNode(n, _), IntNode(m, _)) -> n == m
+    | (FloatNode(n, _), FloatNode(m, _)) -> n == m
+    | (StrNode(n, _), StrNode(m, _)) -> n == m
+    | (BoolNode(n, _), BoolNode(m, _)) -> n == m
+    | (_, _) -> false

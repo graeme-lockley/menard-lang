@@ -161,7 +161,7 @@ let parse-code(msg: Str) -> Str =
 ; Origin 0 is the file being compiled. Origin 1 is the source a
 ; generated `@test` module was extracted from.
 let report-at(abs: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str) -> Unit =
-  if (span-origin(sp) == 0) -> report-span(display-path(abs), src, sp, sev, code, msg) | {
+  if (sp.origin == 0) -> report-span(display-path(abs), src, sp, sev, code, msg) | {
     let orig = doctest-origin(abs)
     match (read-file(orig))
       | Ok(text) -> report-span(display-path(orig), text, sp, sev, code, msg)
@@ -240,14 +240,6 @@ let defn-name(form: Ast) -> Maybe Str =
       match (rest)
         | name :: _ -> bare-name(name)
         | [] -> None()
-
-; A stub is typechecked without the source's private `(variant Name)`
-; forward declaration. A variant that mentions itself needs that empty
-; declaration first, or the payload types are unknown.
-let variant-forward(form: Ast) -> Ast =
-  match (unwrap-pub(form))
-    | ParenNode(_ :: name-part :: _, sp) -> ParenNode([sym("variant"), name-part], sp)
-    | _ -> form
 
 let is-test-form(form: Ast) -> Bool =
   is-head(form, "test")
@@ -445,7 +437,7 @@ let collect-pub(form: Ast, rest: List Ast, path: Str, fns: List FnRec, names: Li
               match (extern-stub(form))
                 | None -> collect-exports(rest, path, fns, names, stubs)
                 | Some(stub) -> collect-exports(rest, path, push-fn(fns, n, link-of(path, n), fn-arity(r)), names, stub :: stubs)
-    | k == "variant" -> collect-exports(rest, path, fns, ctor-names-of(form, names), unwrap-pub(form) :: variant-forward(form) :: stubs)
+    | k == "variant" -> collect-exports(rest, path, fns, ctor-names-of(form, names), unwrap-pub(form) :: stubs)
     | k == "runtime" -> collect-exports(rest, path, fns, names, unwrap-pub(form) :: stubs)
     | k == "defrec" || k == "alias" || k == "extern" -> collect-exports(rest, path, fns, ctor-names-of(form, names), unwrap-pub(form) :: stubs)
     | k == "let" -> collect-exports(rest, path, fns, names, unwrap-pub(form) :: stubs)
@@ -680,7 +672,16 @@ let finish-fresh(abs: Str, iface: Iface, ctx: Ctx) -> Result Iface Str =
             Ok(iface)
           }
 
-let compile-forms(abs: Str, src: Str, display: Str, forms: List Ast, direct: List DepRec, ctx: Ctx) -> Result Iface Str {
+let compile-forms(abs: Str, src: Str, display: Str, forms: List Ast, direct: List DepRec, ctx: Ctx) -> Result Iface Str =
+  match (check-pub-private-forms(forms))
+    | [] -> compile-forms-open(abs, src, display, forms, direct, ctx)
+    | e :: rest ->
+      {
+        report-types(abs, src, e :: rest)
+        Err("")
+      }
+
+let compile-forms-open(abs: Str, src: Str, display: Str, forms: List Ast, direct: List DepRec, ctx: Ctx) -> Result Iface Str {
   let started = now-ms()
   let for-test = suite-member(ctx, abs) || ctx-for-test(ctx) && abs == ctx-entry(ctx)
   let exported = collect-exports(forms, abs, [], [], [])

@@ -1,0 +1,5 @@
+; A product of lists is exhaustive only when every combination is covered.
+
+let main(xs: List Int, ys: List Int) -> Int =
+  match (xs, ys)
+    | ([], []) -> 0

@@ -1,0 +1,37 @@
+; The forms added so the compiler can drop its boilerplate.
+
+record Env[v] {
+  parent: Maybe (Env v)
+  value: v
+}
+
+type Expr =
+  | Num(Int)
+  | Block(List Stmt)
+
+type Stmt =
+  | Bind(Expr)
+
+record Span {
+  line: Int
+  start: Int
+  end: Int
+}
+
+let line-of(sp: Span) -> Int =
+  match (sp)
+    | Span { line } -> line
+
+let same-len[a, b](xs: List a, ys: List b) -> Bool =
+  match (xs, ys)
+    | ([], []) -> true
+    | (_ :: xt, _ :: yt) -> same-len(xt, yt)
+    | (_, _) -> false
+
+let both-pos(xs: List Int, ys: List Int) -> Bool =
+  match (xs, ys)
+    | (x :: _, y :: _) when x == y -> true
+    | (_, _) -> false
+
+let main() -> Int =
+  line-of(Span(1, 0, 2))

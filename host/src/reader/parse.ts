@@ -67,10 +67,10 @@ class P {
     const t = this.cur();
     return t.kind === "punct" && t.text === text;
   }
-  err(t: Tok, message: string): R {
+  err(t: Tok, message: string): { ok: false; error: ParseErr } {
     return { ok: false, error: { span: t.span, message } };
   }
-  errEnd(message: string): R {
+  errEnd(message: string): { ok: false; error: ParseErr } {
     const t = this.cur();
     return { ok: false, error: { span: t.span, message: message.includes("unclosed") ? message : message } };
   }
@@ -112,12 +112,12 @@ class P {
 
   parseDecl(): R {
     const pub = this.eat("pub");
-    if (pub && (this.cur().text === "extern" || this.cur().text === "import" || this.cur().text === "test")) {
+    if (pub && (this.cur().text === "extern" || this.cur().text === "test")) {
       return this.err(this.cur(), "pub cannot prefix this declaration");
     }
     const t = this.cur();
     let inner: R;
-    if (t.text === "import") inner = this.parseImport();
+    if (t.text === "import") inner = this.parseImport(pub !== null);
     else if (t.text === "extern") inner = this.parseExtern();
     else if (t.text === "runtime") inner = this.parseRuntime();
     else if (t.text === "alias") inner = this.parseAlias();
@@ -131,7 +131,7 @@ class P {
     return { ok: true, ast: paren([sym("pub", pub.span), ...((inner.ast.tag === "list" && inner.ast.elems) || [])], join(pub.span, inner.ast.span)) };
   }
 
-  parseImport(): R {
+  parseImport(reexport: boolean): R {
     const kw = this.toks[this.i++]!;
     const t = this.cur();
     if (t.kind === "str" || t.kind === "ident") {
@@ -141,16 +141,42 @@ class P {
       let end = t.span;
       // `as` is a name everywhere except immediately after an import path.
       if (this.cur().kind === "ident" && this.cur().text === "as") {
+        if (reexport) return this.err(this.cur(), "pub import cannot be qualified");
         this.i++;
         const alias = this.cur();
         if (alias.kind !== "ident") return this.err(alias, "expected a module name");
         this.i++;
         elems.push(sym(alias.text, alias.span));
         end = alias.span;
+      } else if (this.delim("(")) {
+        const names = this.parseImportNames();
+        if (!names.ok) return names;
+        if (!reexport) return this.err(t, "an import name list requires pub");
+        elems.push(names.ast);
+        end = names.ast.span;
       }
       return { ok: true, ast: paren(elems, join(kw.span, end)) };
     }
     return this.err(t, "expected a module path");
+  }
+
+  parseImportNames(): R {
+    const open = this.eat("(");
+    if (!open) return this.err(this.cur(), "expected (");
+    const names: Ast[] = [];
+    while (!this.delim(")") && this.cur().kind !== "eof") {
+      this.eat(",");
+      if (this.delim(")")) break;
+      const n = this.cur();
+      if (n.kind !== "ident") return this.err(n, "expected an export name");
+      this.i++;
+      names.push(sym(n.text, n.span));
+      this.eat(",");
+    }
+    const close = this.eat(")");
+    if (!close) return this.errEnd("unclosed (");
+    if (names.length === 0) return this.err(open, "import name list is empty");
+    return { ok: true, ast: paren(names, join(open.span, close.span)) };
   }
 
   parseExtern(): R {
@@ -730,10 +756,25 @@ class P {
   parseMatch(): R {
     const kw = this.toks[this.i++]!;
     if (!this.eat("(")) return this.err(this.cur(), "expected (");
-    const scrut = this.parseExpr();
-    if (!scrut.ok) return scrut;
+    const scruts: Ast[] = [];
+    for (;;) {
+      const scrut = this.parseExprStop([",", ")"]);
+      if (!scrut.ok) return scrut;
+      scruts.push(scrut.ast);
+      if (this.eat(",")) {
+        if (this.delim(")")) return this.err(this.cur(), "expected an expression");
+        continue;
+      }
+      break;
+    }
     if (!this.eat(")")) return this.errEnd("unclosed (");
-    const elems: Ast[] = [sym("match", kw.span), scrut.ast];
+    if (scruts.length === 1) {
+      return this.parseMatchArms(kw, [sym("match", kw.span), scruts[0]!]);
+    }
+    return this.parseMultiMatch(kw, scruts);
+  }
+
+  parseMatchArms(kw: Tok, elems: Ast[]): R {
     let saw = false;
     while (this.cur().kind === "op" && this.cur().text === "|" && this.cur().bol && this.cur().indent > kw.indent) {
       this.i++;
@@ -761,6 +802,95 @@ class P {
     }
     if (!saw) return this.err(this.cur(), "match requires arms");
     return { ok: true, ast: paren(elems, join(kw.span, elems[elems.length - 1]!.span)) };
+  }
+
+  parseMultiMatch(kw: Tok, scruts: Ast[]): R {
+    const scrutList = paren(scruts, join(scruts[0]!.span, scruts[scruts.length - 1]!.span));
+    const elems: Ast[] = [sym("mmatch", kw.span), scrutList];
+    let saw = false;
+    while (this.cur().kind === "op" && this.cur().text === "|" && this.cur().bol && this.cur().indent > kw.indent) {
+      this.i++;
+      const alts = this.parseMultiOr(scruts.length);
+      if (!alts.ok) return alts;
+      let guard: Ast | null = null;
+      if (this.cur().text === "when") {
+        this.i++;
+        const g = this.parseExprStop(["->"]);
+        if (!g.ok) return g;
+        guard = g.ast;
+      }
+      if (!this.eat("->")) return this.err(this.cur(), "expected ->");
+      const body = this.parseExpr();
+      if (!body.ok) return body;
+      for (const pats of alts.asts) {
+        const mpat = paren([sym("mpat", pats[0]!.span), ...pats], join(pats[0]!.span, pats[pats.length - 1]!.span));
+        const pat = guard
+          ? paren([sym("mguard", mpat.span), mpat, guard], mpat.span)
+          : mpat;
+        elems.push(pat, body.ast);
+        saw = true;
+      }
+    }
+    if (!saw) return this.err(this.cur(), "match requires arms");
+    return { ok: true, ast: paren(elems, join(kw.span, elems[elems.length - 1]!.span)) };
+  }
+
+  parseMultiOr(n: number): { ok: true; asts: Ast[][] } | { ok: false; error: ParseErr } {
+    const asts: Ast[][] = [];
+    for (;;) {
+      const one = this.parseMultiPat(n);
+      if (!one.ok) return one;
+      asts.push(one.asts);
+      if (this.cur().kind === "op" && this.cur().text === "|" && !this.cur().bol) {
+        this.i++;
+        continue;
+      }
+      break;
+    }
+    return { ok: true, asts };
+  }
+
+  parseMultiPat(n: number): { ok: true; asts: Ast[] } | { ok: false; error: ParseErr } {
+    if (!this.eat("(")) return this.err(this.cur(), "expected a pattern for each scrutinee");
+    const asts: Ast[] = [];
+    while (!this.delim(")") && this.cur().kind !== "eof") {
+      this.eat(",");
+      if (this.delim(")")) break;
+      const p = this.parsePattern();
+      if (!p.ok) return p;
+      asts.push(p.ast);
+      this.eat(",");
+    }
+    if (!this.eat(")")) return this.errEnd("unclosed (");
+    if (asts.length !== n) {
+      return this.err(this.cur(), `pattern has ${asts.length} parts, match has ${n}`);
+    }
+    return { ok: true, asts };
+  }
+
+  parseNamedRecordPat(name: Ast): R {
+    const open = this.eat("{");
+    if (!open) return this.err(this.cur(), "expected {");
+    const fields: Ast[] = [];
+    const seen = new Set<string>();
+    while (!this.delim("}") && this.cur().kind !== "eof") {
+      this.eat(",");
+      if (this.delim("}")) break;
+      const f = this.cur();
+      if (f.kind !== "ident") return this.err(f, "expected a field name");
+      if (f.text[0]! >= "A" && f.text[0]! <= "Z") return this.err(f, "expected a field name");
+      if (seen.has(f.text)) return this.err(f, `duplicate field ${f.text}`);
+      seen.add(f.text);
+      this.i++;
+      fields.push(sym(f.text, f.span));
+      this.eat(",");
+    }
+    const close = this.eat("}");
+    if (!close) return this.errEnd("unclosed {");
+    return {
+      ok: true,
+      ast: paren([sym("recpat", name.span), name, ...fields], join(name.span, close.span)),
+    };
   }
 
   parseOrPattern(): { ok: true; asts: Ast[] } | { ok: false; error: ParseErr } {
@@ -802,6 +932,9 @@ class P {
     }
     if (t.kind === "ident") {
       this.i++;
+      if (this.delim("{") && !this.cur().bol && t.text[0]! >= "A" && t.text[0]! <= "Z") {
+        return this.parseNamedRecordPat(sym(t.text, t.span));
+      }
       if (this.delim("(") && !this.cur().bol) {
         const call = this.parsePatternArgs(sym(t.text, t.span));
         if (!call.ok) return call;

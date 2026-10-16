@@ -395,6 +395,16 @@ type Cont =
   | { tag: "set-val"; ref: Value; span?: Span }
   | { tag: "match"; clauses: Ast[]; env: Env; loop: LoopCtx | null; span?: Span }
   | {
+      tag: "match-guard";
+      clauses: Ast[];
+      index: number;
+      env: Env;
+      child: Env;
+      loop: LoopCtx | null;
+      span?: Span;
+      scrut: Value;
+    }
+  | {
       tag: "loop-init";
       names: string[];
       inits: Ast[];
@@ -933,16 +943,14 @@ function resume(c: Cont, value: Value, stack: Cont[], host: Host): Step {
       c.ref.cell.value = value;
       return { tag: "value", value: vUnit() };
     }
-    case "match": {
-      for (let i = 0; i + 1 < c.clauses.length; i += 2) {
-        const pat = c.clauses[i]!;
-        const body = c.clauses[i + 1]!;
-        const child = emptyEnv(c.env);
-        if (matchPat(pat, value, child)) {
-          return { tag: "eval", ast: body, env: child, loop: c.loop };
-        }
+    case "match":
+      return takeMatch(c.clauses, 0, value, c.env, c.loop, c.span, stack);
+    case "match-guard": {
+      if (value.tag !== "bool") throw new PanicError("match guard not Bool", c.span);
+      if (value.value) {
+        return { tag: "eval", ast: c.clauses[c.index + 1]!, env: c.child, loop: c.loop };
       }
-      throw new PanicError("match: no clause matched", c.span);
+      return takeMatch(c.clauses, c.index + 2, c.scrut, c.env, c.loop, c.span, stack);
     }
     case "loop-init": {
       envSet(c.child, c.names[c.i]!, value);
@@ -1070,6 +1078,50 @@ function evalLambda(ast: Ast & { tag: "list" }, env: Env): Value {
   };
 }
 
+function patternOf(pat: Ast): { pat: Ast; guard: Ast | null } {
+  if (
+    pat.tag === "list" &&
+    pat.elems[0]?.tag === "sym" &&
+    nameEquals(pat.elems[0].name, "guard") &&
+    pat.elems[1] &&
+    pat.elems[2]
+  ) {
+    return { pat: pat.elems[1], guard: pat.elems[2] };
+  }
+  return { pat, guard: null };
+}
+
+function takeMatch(
+  clauses: Ast[],
+  index: number,
+  scrut: Value,
+  env: Env,
+  loop: LoopCtx | null,
+  span: Span | undefined,
+  stack: Cont[],
+): Step {
+  for (let i = index; i + 1 < clauses.length; i += 2) {
+    const clause = patternOf(clauses[i]!);
+    const child = emptyEnv(env);
+    if (!matchPat(clause.pat, scrut, child)) continue;
+    if (clause.guard) {
+      stack.push({
+        tag: "match-guard",
+        clauses,
+        index: i,
+        env,
+        child,
+        loop,
+        span,
+        scrut,
+      });
+      return { tag: "eval", ast: clause.guard, env: child, loop };
+    }
+    return { tag: "eval", ast: clauses[i + 1]!, env: child, loop };
+  }
+  throw new PanicError("match: no clause matched", span);
+}
+
 function matchPat(pat: Ast, v: Value, env: Env): boolean {
   if (pat.tag === "sym") {
     const n = symName(pat);
@@ -1098,6 +1150,17 @@ function matchPat(pat: Ast, v: Value, env: Env): boolean {
   }
   if (pat.tag === "list" && pat.elems.length >= 1 && pat.elems[0]!.tag === "sym") {
     const cn = symName(pat.elems[0]!);
+    if (cn === "recpat" && v.tag === "record" && pat.elems[1]?.tag === "sym") {
+      if (v.name !== symName(pat.elems[1])) return false;
+      for (const f of pat.elems.slice(2)) {
+        if (f.tag !== "sym") return false;
+        const fname = symName(f);
+        const i = v.fieldNames.indexOf(fname);
+        if (i < 0) return false;
+        envSet(env, fname, v.fields[i]!);
+      }
+      return true;
+    }
     if (v.tag === "variant" && v.ctor === cn) {
       if (v.payloads.length !== pat.elems.length - 1) return false;
       for (let i = 0; i < v.payloads.length; i++) {

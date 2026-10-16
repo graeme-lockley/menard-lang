@@ -21,13 +21,6 @@
 import "../reader/ast.mnd"
 import std/string as String
 
-; Re-export shim: see reader/casing.mnd for why this is needed — a `pub`
-; signature here (desugar-form/desugar-all, DesugarError's own fields) may
-; only mention a nominal type this module's own export set contains.
-pub alias Ast = Ast
-
-pub alias Span = Span
-
 pub record DesugarError {
   span: Span
   code: Str
@@ -146,6 +139,7 @@ let desugar-paren-named(name: Str, elems: List Ast, sp: Span, diags: Ref (List D
     | name == "|>" -> desugar-pipe(elems, sp, diags)
     | name == "?" -> desugar-ques(elems, sp, diags)
     | name == "map-lit" -> desugar-map-lit(elems, sp, diags)
+    | name == "mmatch" -> desugar-mmatch(elems, sp, diags)
     | else -> desugar-operator(name, elems, sp, diags)
 
 ; ---------------------------------------------------------------------------
@@ -157,7 +151,7 @@ let snoc-ast(xs: List Ast, x: Ast) -> List Ast =
     | h :: t -> h :: snoc-ast(t, x)
 
 let pipe-blocked(n: Str) -> Bool =
-  n == "project" || n == "if" || n == "do" || n == "cond" || n == "when" || n == "match" || n == "fn" || n == "let" || n == "loop" || n == "while" || n == "and" || n == "or" || n == "quote" || n == "char" || n == "Cons" || n == "Nil" || n == "+" || n == "-" || n == "*" || n == "/" || n == "%" || n == "<" || n == ">" || n == "<=" || n == ">=" || n == "=" || n == "|>" || n == "f+" || n == "f-" || n == "f*" || n == "f/" || n == "::"
+  n == "project" || n == "if" || n == "do" || n == "cond" || n == "when" || n == "match" || n == "mmatch" || n == "fn" || n == "let" || n == "loop" || n == "while" || n == "and" || n == "or" || n == "quote" || n == "char" || n == "Cons" || n == "Nil" || n == "+" || n == "-" || n == "*" || n == "/" || n == "%" || n == "<" || n == ">" || n == "<=" || n == ">=" || n == "=" || n == "|>" || n == "f+" || n == "f-" || n == "f*" || n == "f/" || n == "::"
 
 let pipe-callee-ok(head: Ast) -> Bool =
   match (head)
@@ -492,7 +486,440 @@ let desugar-while-body(test: Ast, body: List Ast, sp: Span, diags: Ref (List Des
 }
 
 ; ---------------------------------------------------------------------------
-; Entry points
+; Match on several values. No tuple is built: each scrutinee becomes a
+; nested match, grouped by constructor so a later arm of the same
+; constructor stays reachable. Mirrors host/src/desugar/desugar.ts.
+
+record MArm {
+  pats: List Ast
+  body: Ast
+  guard: Maybe Ast
+}
+
+record Arm1 {
+  pat: Ast
+  body: Ast
+  guard: Maybe Ast
+}
+
+record BoundArm {
+  body: Ast
+  guard: Maybe Ast
+}
+
+type PatKind =
+  | AnyPat
+  | CtorPat(Str, List Ast, Ast)
+
+record Sample {
+  name: Str
+  count: Int
+  pattern: Ast
+}
+
+record Classed {
+  arm: MArm
+  kind: PatKind
+}
+
+let desugar-mmatch(elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (elems)
+    | _ :: scrut-list :: rest -> desugar-mmatch-scruts(scrut-list, rest, sp, diags)
+    | _ ->
+      {
+        push-diag!(diags, sp, "E_DESUGAR_MATCH", "match requires scrutinees")
+        ParenNode(elems, sp)
+      }
+
+let desugar-mmatch-scruts(scrut-list: Ast, rest: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (scrut-list)
+    | ParenNode(ss, _) ->
+      {
+        let scruts = map-desugar(ss, diags)
+        let arms = take-m-arms(rest, ast-count(scruts), diags)
+        compile-multi(scruts, arms, ref(0), ref(0), sp)
+      }
+    | _ ->
+      {
+        push-diag!(diags, sp, "E_DESUGAR_MATCH", "match requires scrutinees")
+        ParenNode([mk-sym("mmatch", sp), scrut-list], sp)
+      }
+
+let ast-count(xs: List Ast) -> Int =
+  match (xs)
+    | [] -> 0
+    | _ :: rest -> ast-count(rest) + 1
+
+let take-m-arms(xs: List Ast, n: Int, diags: Ref (List DesugarError)) -> List MArm =
+  match (xs)
+    | node :: body :: rest -> take-m-arm(node, desugar-node(body, diags), rest, n, diags)
+    | _ -> []
+
+let take-m-arm-len(pats: List Ast, body: Ast, rest: List Ast, n: Int, guard: Maybe Ast, diags: Ref (List DesugarError)) -> List MArm =
+  if (ast-count(pats) != n) -> take-m-arm-bad(pats, rest, n, diags) | MArm(map-desugar(pats, diags), body, guard) :: take-m-arms(rest, n, diags)
+
+let take-m-arm-bad(pats: List Ast, rest: List Ast, n: Int, diags: Ref (List DesugarError)) -> List MArm {
+  push-diag!(diags, ast-span(first-or-unit(pats)), "E_DESUGAR_MATCH", String.concat("pattern has ", show(ast-count(pats)), " parts, match has ", show(n)))
+  take-m-arms(rest, n, diags)
+}
+
+let first-or-unit(xs: List Ast) -> Ast =
+  match (xs)
+    | [] -> ParenNode([], Span(0, 0, 0, 0))
+    | h :: _ -> h
+
+let open-mpat(node: Ast, diags: Ref (List DesugarError)) -> Maybe (List Ast) =
+  match (node)
+    | ParenNode(head :: pats, _) ->
+      if (is-sym(head, "mpat")) -> Some(pats) | {
+        push-diag!(diags, ast-span(node), "E_DESUGAR_MATCH", "match arm requires a pattern for each scrutinee")
+        None()
+      }
+    | _ ->
+      {
+        push-diag!(diags, ast-span(node), "E_DESUGAR_MATCH", "match arm requires a pattern for each scrutinee")
+        None()
+      }
+
+let m-guard-of(node: Ast, diags: Ref (List DesugarError)) -> Maybe Ast =
+  match (node)
+    | ParenNode(head :: _ :: g :: _, _) ->
+      if (is-sym(head, "mguard")) -> Some(desugar-node(g, diags)) | None()
+    | _ -> None()
+
+let take-m-arm(node: Ast, body: Ast, rest: List Ast, n: Int, diags: Ref (List DesugarError)) -> List MArm =
+  match (open-mpat(m-node(node), diags))
+    | None -> take-m-arms(rest, n, diags)
+    | Some(pats) -> take-m-arm-len(pats, body, rest, n, m-guard-of(node, diags), diags)
+
+let m-node(node: Ast) -> Ast =
+  match (node)
+    | ParenNode(head :: inner :: _, _) ->
+      if (is-sym(head, "mguard")) -> inner | node
+    | _ -> node
+
+let fresh-sym(n: Ref Int, sp: Span) -> Ast {
+  let i = deref(n)
+  set!(n, i + 1)
+  mk-sym(String.concat("__mm", show(i)), sp)
+}
+
+let is-lower-start(name: Str) -> Bool {
+  let b = String.byte(0, name)
+  b >= 97 && b <= 122
+}
+
+let sym-text(a: Ast) -> Str =
+  match (a)
+    | SymNode(n, _) -> n
+    | _ -> ""
+
+let classify-pat(pat: Ast, rec-id: Ref Int) -> PatKind =
+  match (pat)
+    | SymNode(n, sp) ->
+      if (n == "_" || is-lower-start(n)) -> AnyPat() | CtorPat(n, [], ParenNode([pat], sp))
+    | IntNode(v, _) -> CtorPat(String.concat("int:", show(v)), [], pat)
+    | StrNode(s, _) -> CtorPat(String.concat("str:", s), [], pat)
+    | BoolNode(v, _) -> CtorPat(String.concat("bool:", if (v) -> "true" | "false"), [], pat)
+    | ParenNode(head :: rest, _) -> classify-paren(head, rest, pat, rec-id)
+    | _ -> AnyPat()
+
+let classify-paren(head: Ast, rest: List Ast, pat: Ast, rec-id: Ref Int) -> PatKind {
+  let n = sym-text(head)
+  cond
+    | n == "recpat" -> classify-recpat(rest, pat, rec-id)
+    | n == "guard" || n == "_" || n == "" || is-lower-start(n) -> AnyPat()
+    | else -> CtorPat(n, rest, pat)
+}
+
+let classify-recpat(rest: List Ast, pat: Ast, rec-id: Ref Int) -> PatKind =
+  match (rest)
+    | name :: _ ->
+      {
+        let id = deref(rec-id)
+        set!(rec-id, id + 1)
+        CtorPat(String.concat("rec:", sym-text(name), ":", show(id)), [], pat)
+      }
+    | [] -> AnyPat()
+
+let arm-first(arm: MArm) -> Ast =
+  match (arm)
+    | MArm(pats, _, _) ->
+      match (pats)
+        | p :: _ -> p
+        | [] -> mk-sym("_", Span(0, 0, 0, 0))
+
+let class-arms(arms: List MArm, rec-id: Ref Int) -> List Classed =
+  match (arms)
+    | [] -> []
+    | arm :: rest -> Classed(arm, classify-pat(arm-first(arm), rec-id)) :: class-arms(rest, rec-id)
+
+let all-any(xs: List Classed) -> Bool =
+  match (xs)
+    | [] -> true
+    | Classed(_, kind) :: rest ->
+      match (kind)
+        | AnyPat -> all-any(rest)
+        | CtorPat(_, _, _) -> false
+
+let bind-scrut(sp: Span, scrut: Ast, v: Ast, body: Ast) -> Ast =
+  ParenNode([mk-sym("do", sp), ParenNode([mk-sym("let", sp), v, scrut], sp), body], sp)
+
+let wrap-let(name: Str, sp: Span, v: Ast, body: Ast) -> Ast =
+  ParenNode([mk-sym("let", sp), mk-sym(name, sp), v, body], sp)
+
+let bind-any(pat: Ast, v: Ast, body: Ast, guard: Maybe Ast) -> BoundArm =
+  match (pat)
+    | SymNode(n, sp) ->
+      if (n != "_" && is-lower-start(n)) -> BoundArm(wrap-let(n, sp, v, body), bind-guard(n, sp, v, guard)) | BoundArm(body, guard)
+    | _ -> BoundArm(body, guard)
+
+let bind-guard(name: Str, sp: Span, v: Ast, guard: Maybe Ast) -> Maybe Ast =
+  match (guard)
+    | None -> None()
+    | Some(g) -> Some(wrap-let(name, sp, v, g))
+
+let arm-pat(pat: Ast, guard: Maybe Ast) -> Ast =
+  match (guard)
+    | None -> pat
+    | Some(g) -> ParenNode([mk-sym("guard", ast-span(pat)), pat, g], ast-span(pat))
+
+let flatten-arms(arms: List Arm1) -> List Ast =
+  match (arms)
+    | [] -> []
+    | Arm1(pat, body, guard) :: rest -> arm-pat(pat, guard) :: body :: flatten-arms(rest)
+
+let emit-match(sp: Span, scrut: Ast, arms: List Arm1) -> Ast =
+  ParenNode(mk-sym("match", sp) :: scrut :: flatten-arms(arms), sp)
+
+let pats-tail(pats: List Ast) -> List Ast =
+  match (pats)
+    | [] -> []
+    | _ :: rest -> rest
+
+let peel-any(arms: List MArm, v: Ast) -> List MArm =
+  match (arms)
+    | [] -> []
+    | MArm(pats, body, guard) :: rest ->
+      match (pats)
+        | p :: more ->
+          match (bind-any(p, v, body, guard))
+            | BoundArm(b, g) -> MArm(more, b, g) :: peel-any(rest, v)
+        | [] -> peel-any(rest, v)
+
+let arms-as-one(arms: List MArm) -> List Arm1 =
+  match (arms)
+    | [] -> []
+    | MArm(pats, body, guard) :: rest ->
+      match (pats)
+        | p :: _ -> Arm1(p, body, guard) :: arms-as-one(rest)
+        | [] -> arms-as-one(rest)
+
+let finish-one(arms: List MArm, sp: Span) -> List Arm1 =
+  match (arms)
+    | [] -> []
+    | MArm(_, body, guard) :: rest -> Arm1(mk-sym("_", sp), body, guard) :: finish-one(rest, sp)
+
+let finish-arms(arms: List MArm, sp: Span) -> Ast =
+  match (arms)
+    | MArm(_, body, None()) :: [] -> body
+    | _ -> emit-match(sp, ParenNode([], sp), finish-one(arms, sp))
+
+let compile-multi(scruts: List Ast, arms: List MArm, fresh: Ref Int, rec-id: Ref Int, sp: Span) -> Ast =
+  match (arms)
+    | [] -> ParenNode([], sp)
+    | _ -> compile-multi-some(scruts, arms, fresh, rec-id, sp)
+
+let compile-multi-some(scruts: List Ast, arms: List MArm, fresh: Ref Int, rec-id: Ref Int, sp: Span) -> Ast =
+  match (scruts)
+    | [] -> finish-arms(arms, sp)
+    | scrut :: rest -> compile-scrut(scrut, rest, class-arms(arms, rec-id), fresh, rec-id, sp)
+
+let compile-scrut(scrut: Ast, rest: List Ast, classed: List Classed, fresh: Ref Int, rec-id: Ref Int, sp: Span) -> Ast =
+  if (all-any(classed)) -> compile-any(scrut, rest, classed, fresh, rec-id, sp) | compile-ctors(scrut, rest, classed, fresh, rec-id, sp)
+
+let classed-arms(xs: List Classed) -> List MArm =
+  match (xs)
+    | [] -> []
+    | Classed(arm, _) :: rest -> arm :: classed-arms(rest)
+
+let compile-any(scrut: Ast, rest: List Ast, classed: List Classed, fresh: Ref Int, rec-id: Ref Int, sp: Span) -> Ast {
+  let arms = classed-arms(classed)
+  let v = fresh-sym(fresh, ast-span(scrut))
+  let peeled = peel-any(arms, v)
+  let cont =
+    match (rest)
+      | [] -> finish-arms(peeled, sp)
+      | _ -> compile-multi(rest, peeled, fresh, rec-id, sp)
+  bind-scrut(sp, scrut, v, cont)
+}
+
+let sample-has(xs: List Sample, name: Str) -> Bool =
+  match (xs)
+    | [] -> false
+    | Sample(n, _, _) :: rest ->
+      if (n == name) -> true | sample-has(rest, name)
+
+let payload-count(xs: List Ast) -> Int =
+  ast-count(xs)
+
+let collect-samples(xs: List Classed, acc: List Sample) -> List Sample =
+  match (xs)
+    | [] -> reverse-samples(acc, [])
+    | Classed(_, kind) :: rest -> collect-sample(kind, rest, acc)
+
+let collect-sample(kind: PatKind, rest: List Classed, acc: List Sample) -> List Sample =
+  match (kind)
+    | AnyPat -> collect-samples(rest, acc)
+    | CtorPat(name, payloads, pattern) ->
+      if (sample-has(acc, name)) -> collect-samples(rest, acc) | collect-samples(rest, Sample(name, payload-count(payloads), pattern) :: acc)
+
+let reverse-samples(xs: List Sample, acc: List Sample) -> List Sample =
+  match (xs)
+    | [] -> acc
+    | h :: t -> reverse-samples(t, h :: acc)
+
+let fresh-vars(n: Int, fresh: Ref Int, sp: Span) -> List Ast =
+  if (n <= 0) -> [] | fresh-sym(fresh, sp) :: fresh-vars(n - 1, fresh, sp)
+
+let ctor-head(pattern: Ast, name: Str, sp: Span) -> Ast =
+  match (pattern)
+    | ParenNode(h :: _, _) -> h
+    | _ -> mk-sym(name, sp)
+
+let outer-pat(sample: Sample, vars: List Ast, sp: Span) -> Ast =
+  match (sample)
+    | Sample(name, count, pattern) ->
+      if (count == 0) -> pattern | ParenNode(ctor-head(pattern, name, sp) :: vars, sp)
+
+let wilds-for(vars: List Ast) -> List Ast =
+  match (vars)
+    | [] -> []
+    | v :: rest -> mk-sym("_", ast-span(v)) :: wilds-for(rest)
+
+let inner-of(xs: List Classed, name: Str, vars: List Ast, v: Ast) -> List MArm =
+  match (xs)
+    | [] -> []
+    | Classed(arm, kind) :: rest -> inner-cons(arm, kind, rest, name, vars, v)
+
+let inner-cons(arm: MArm, kind: PatKind, rest: List Classed, name: Str, vars: List Ast, v: Ast) -> List MArm =
+  match (kind)
+    | AnyPat -> inner-any(arm, rest, name, vars, v)
+    | CtorPat(n, payloads, _) ->
+      if (n != name) -> inner-of(rest, name, vars, v) | inner-ctor(arm, payloads, rest, name, vars, v)
+
+let inner-any(arm: MArm, rest: List Classed, name: Str, vars: List Ast, v: Ast) -> List MArm =
+  match (arm)
+    | MArm(pats, body, guard) ->
+      match (bind-any(arm-first(arm), v, body, guard))
+        | BoundArm(b, g) -> MArm(append-list(wilds-for(vars), pats-tail(pats)), b, g) :: inner-of(rest, name, vars, v)
+
+let inner-ctor(arm: MArm, payloads: List Ast, rest: List Classed, name: Str, vars: List Ast, v: Ast) -> List MArm =
+  match (arm)
+    | MArm(pats, body, guard) -> MArm(append-list(payloads, pats-tail(pats)), body, guard) :: inner-of(rest, name, vars, v)
+
+let group-covered(xs: List Classed, name: Str) -> Bool =
+  match (xs)
+    | [] -> false
+    | Classed(arm, kind) :: rest ->
+      match (arm)
+        | MArm(_, _, Some(_)) -> group-covered(rest, name)
+        | MArm(_, _, None()) -> group-covered-kind(kind, rest, name)
+
+let group-covered-kind(kind: PatKind, rest: List Classed, name: Str) -> Bool =
+  match (kind)
+    | AnyPat -> true
+    | CtorPat(n, _, _) ->
+      if (n == name) -> true | group-covered(rest, name)
+
+let ctor-branches(samples: List Sample, classed: List Classed, rest: List Ast, v: Ast, fresh: Ref Int, rec-id: Ref Int, sp: Span) -> List Arm1 =
+  match (samples)
+    | [] -> []
+    | sample :: more -> ctor-branch(sample, more, classed, rest, v, fresh, rec-id, sp)
+
+let ctor-branch(sample: Sample, more: List Sample, classed: List Classed, rest: List Ast, v: Ast, fresh: Ref Int, rec-id: Ref Int, sp: Span) -> List Arm1 =
+  match (sample)
+    | Sample(name, count, _) ->
+      {
+        let vars = fresh-vars(count, fresh, sp)
+        let inner = inner-of(classed, name, vars, v)
+        let body = compile-multi(append-list(vars, rest), inner, fresh, rec-id, sp)
+        let guard = if (group-covered(classed, name)) -> None() | Some(BoolNode(true, sp))
+        Arm1(outer-pat(sample, vars, sp), body, guard) :: ctor-branches(more, classed, rest, v, fresh, rec-id, sp)
+      }
+
+let any-classed(xs: List Classed) -> List Classed =
+  match (xs)
+    | [] -> []
+    | Classed(arm, kind) :: rest ->
+      match (kind)
+        | AnyPat -> Classed(arm, kind) :: any-classed(rest)
+        | CtorPat(_, _, _) -> any-classed(rest)
+
+let any-covered(xs: List Classed) -> Bool =
+  match (xs)
+    | [] -> false
+    | Classed(arm, _) :: rest ->
+      match (arm)
+        | MArm(_, _, None()) -> true
+        | MArm(_, _, Some(_)) -> any-covered(rest)
+
+let append-arm1(xs: List Arm1, x: Arm1) -> List Arm1 =
+  match (xs)
+    | [] -> [x]
+    | h :: t -> h :: append-arm1(t, x)
+
+let arm-rest-any(arm: MArm) -> Bool =
+  match (arm)
+    | MArm(pats, _, guard) ->
+      match (guard)
+        | Some(_) -> false
+        | None() -> pats-after-any(pats)
+
+let pats-after-any(pats: List Ast) -> Bool =
+  match (pats)
+    | [] -> true
+    | _ :: more -> more-all-any(more)
+
+let more-all-any(pats: List Ast) -> Bool =
+  match (pats)
+    | [] -> true
+    | p :: more ->
+      match (classify-pat(p, ref(0)))
+        | AnyPat -> more-all-any(more)
+        | CtorPat(_, _, _) -> false
+
+let anys-cover-rest(xs: List Classed) -> Bool =
+  match (xs)
+    | [] -> false
+    | Classed(arm, _) :: rest ->
+      if (arm-rest-any(arm)) -> true | anys-cover-rest(rest)
+
+let any-branch(classed: List Classed, rest: List Ast, v: Ast, fresh: Ref Int, rec-id: Ref Int, sp: Span, branches: List Arm1) -> List Arm1 {
+  let anys = any-classed(classed)
+  match (anys)
+    | [] -> branches
+    | _ ->
+      if (anys-cover-rest(anys)) -> any-branch-arm(anys, rest, v, fresh, rec-id, sp, branches) | branches
+}
+
+let any-branch-arm(anys: List Classed, rest: List Ast, v: Ast, fresh: Ref Int, rec-id: Ref Int, sp: Span, branches: List Arm1) -> List Arm1 {
+  let next = peel-any(classed-arms(anys), v)
+  let body =
+    match (rest)
+      | [] -> finish-arms(next, sp)
+      | _ -> compile-multi(rest, next, fresh, rec-id, sp)
+  let guard = if (any-covered(anys)) -> None() | Some(BoolNode(true, sp))
+  append-arm1(branches, Arm1(mk-sym("_", sp), body, guard))
+}
+
+let compile-ctors(scrut: Ast, rest: List Ast, classed: List Classed, fresh: Ref Int, rec-id: Ref Int, sp: Span) -> Ast {
+  let v = fresh-sym(fresh, ast-span(scrut))
+  let branches = ctor-branches(collect-samples(classed, []), classed, rest, v, fresh, rec-id, sp)
+  let with-any = any-branch(classed, rest, v, fresh, rec-id, sp, branches)
+  bind-scrut(sp, scrut, v, emit-match(sp, v, with-any))
+}
+
 
 let finish-desugar(forms: List Ast, diags: Ref (List DesugarError)) -> Result (List Ast) (List DesugarError) {
   let ds = deref(diags)

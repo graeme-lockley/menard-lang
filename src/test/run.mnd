@@ -126,7 +126,7 @@ let explain-one(path: Str, src: Str, shown: Str, original: Str, forms: List Ast,
     | Some(expr) ->
       {
         let sp = ast-span(expr)
-        if (span-origin(sp) != 0) -> report-span(shown, original, sp, "error", "E_TEST", String.concat("assertion failed: ", name)) | report-span(path, src, sp, "error", "E_TEST", String.concat("assertion failed: ", name))
+        if (sp.origin != 0) -> report-span(shown, original, sp, "error", "E_TEST", String.concat("assertion failed: ", name)) | report-span(path, src, sp, "error", "E_TEST", String.concat("assertion failed: ", name))
       }
     | None -> report-plain(String.concat("assertion failed: ", name))
 

@@ -5,21 +5,12 @@ record Pair[a, b] {
   snd: b
 }
 
-; `Tree` refers to itself in `Node`'s payload, so — like `Ast` in
-; `src/reader/ast.mnd` — it needs an empty forward declaration before its
-; real definition (the typer registers a type's name only once its whole
-; `variant`/`defrec` form has been collected, so a single self-referential
-; form can't see its own name yet).
-type Tree[a] =
-
+; A type may mention itself. The name is registered before the payloads
+; are read, so one declaration is enough.
 type Tree[a] =
   | Leaf(a)
   | Node(Tree a, Tree a)
   | Empty
-
-record Env[v] {
-
-}
 
 record Env[v] {
   parent: Maybe (Env v)

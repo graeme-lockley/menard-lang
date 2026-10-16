@@ -48,11 +48,6 @@ import std/list
 import std/string as String
 import std/map as Map
 
-; Re-export shim — see `reader/casing.mnd`'s header comment for why this
-; is needed: a `pub` signature (`pool-summary`, below) may not mention a
-; private nominal type, even one imported `pub` from elsewhere.
-pub alias Ast = Ast
-
 ; ---------------------------------------------------------------------------
 ; Small Ast helpers, restated locally per `src/`'s "no prelude import"
 ; rule (see `type/check.mnd`'s equivalent header note).

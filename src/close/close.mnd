@@ -45,8 +45,6 @@ import std/list
 import std/string as String
 import std/map as Map
 
-pub alias Ast = Ast
-
 ; ---------------------------------------------------------------------------
 ; Small Ast helpers (no prelude import — see emit/lower.mnd).
 

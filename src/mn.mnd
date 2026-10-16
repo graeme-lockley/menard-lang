@@ -189,7 +189,7 @@ let report-type-errors(paths: List Str, es: List TypeError) -> Unit =
           match (paths)
             | p :: _ -> p
             | [] -> ""
-        let p = nth-path(paths, span-origin(sp), fallback)
+        let p = nth-path(paths, sp.origin, fallback)
         let src =
           match (read-file(p))
             | Ok(s) -> s

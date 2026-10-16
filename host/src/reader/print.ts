@@ -224,6 +224,7 @@ function printExpr(a: Ast, ind: number): string {
   if (h === "cond") return printCond(a, ind);
   if (h === "when") return printWhen(a, ind);
   if (h === "match") return printMatch(a, ind);
+  if (h === "mmatch") return printMultiMatch(a, ind);
   if (h === "fn") return printFn(a, ind);
   if (h === "pub") return "pub " + printForm({ tag: "list", kind: "paren", elems: a.elems.slice(1), span: a.span }, ind);
   if (h === "let") {
@@ -274,6 +275,10 @@ function printImport(ast: Ast & { tag: "list" }): string {
   const path = printAtom(ast.elems[1]!);
   const alias = ast.elems[2];
   if (alias?.tag === "sym") return `import ${path} as ${nameText(dec.decode(alias.name))}`;
+  if (alias?.tag === "list") {
+    const names = alias.elems.map((e) => printAtom(e)).join(", ");
+    return `import ${path} (${names})`;
+  }
   return `import ${path}`;
 }
 
@@ -486,6 +491,27 @@ function printMatch(a: Ast & { tag: "list" }, ind: number): string {
   return lines.join("\n");
 }
 
+function printMultiMatch(a: Ast & { tag: "list" }, ind: number): string {
+  const scruts = a.elems[1]!;
+  const list =
+    scruts.tag === "list" ? scruts.elems.map((e) => printExpr(e, ind)).join(", ") : printExpr(scruts, ind);
+  const lines: string[] = [`match (${list})`];
+  for (let i = 2; i + 1 < a.elems.length; i += 2) {
+    lines.push(`${pad(ind + 2)}| ${printMultiArm(a.elems[i]!)} ->${arrowBody(a.elems[i + 1]!, ind + 4)}`);
+  }
+  return lines.join("\n");
+}
+
+function printMultiArm(a: Ast): string {
+  if (a.tag === "list" && txt(a.elems[0]!) === "mguard" && a.elems[1] && a.elems[2]) {
+    return `${printMultiArm(a.elems[1])} when ${printExpr(a.elems[2], 0)}`;
+  }
+  if (a.tag === "list" && txt(a.elems[0]!) === "mpat") {
+    return `(${a.elems.slice(1).map(printPat).join(", ")})`;
+  }
+  return printPat(a);
+}
+
 function printPat(a: Ast): string {
   if (a.tag !== "list") return printAtom(a);
   if (a.kind === "bracket") return `[${a.elems.map(printPat).join(", ")}]`;
@@ -502,6 +528,13 @@ function printPat(a: Ast): string {
     if (n[0]! >= "A" && n[0]! <= "Z") return n;
   }
   const h = txt(a.elems[0]!);
+  if (h === "guard" && a.elems[1] && a.elems[2]) {
+    return `${printPat(a.elems[1])} when ${printExpr(a.elems[2], 0)}`;
+  }
+  if (h === "recpat" && a.elems[1]) {
+    const fields = a.elems.slice(2).map((e) => printAtom(e)).join(", ");
+    return `${printAtom(a.elems[1])} { ${fields} }`;
+  }
   if (h) return `${h}(${a.elems.slice(1).map(printPat).join(", ")})`;
   return printExpr(a, 0);
 }

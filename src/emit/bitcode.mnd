@@ -13,11 +13,6 @@
 import "../reader/ast.mnd"
 import "./lower.mnd"
 
-; Re-export shim — see `reader/casing.mnd`'s header comment for why this
-; is needed: a `pub` signature (`emit-program-bc`, below) may not mention
-; a private nominal type, even one imported `pub` from elsewhere.
-pub alias Ast = Ast
-
 ; String globals are `pool.mnd`'s sorted literals, consumed inside
 ; `lower-program`. Nullary constructors stay the C static objects.
 ; Emit a bitcode module for a program's forms, or an error message if the

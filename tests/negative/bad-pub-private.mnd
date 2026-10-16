@@ -1,0 +1,10 @@
+; A public signature may not name a nominal this module leaves private.
+
+type Hidden =
+  | H
+
+pub let leak() -> Hidden =
+  H()
+
+let main() -> Int =
+  0

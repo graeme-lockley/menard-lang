@@ -64,11 +64,6 @@
 
 import "../reader/ast.mnd"
 
-; Re-export shim: a `pub` signature may not mention a private nominal
-; type (ADR 27), even one imported `pub` from elsewhere — see
-; src/reader/read.mnd's header comment for why.
-pub alias Ast = Ast
-
 ; ---------------------------------------------------------------------------
 ; Small Ast helpers, restated locally per src/'s "no prelude import" rule
 ; (see e.g. `close/close.mnd`'s equivalent header note).

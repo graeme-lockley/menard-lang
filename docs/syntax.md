@@ -165,13 +165,13 @@ and it can still be a name everywhere else. `defn`, `defrec`, `variant`,
 ## 2. Programs
 
 A file is a sequence of top-level declarations, each starting at indentation
-0. `pub` may prefix `let`, `record`, `type`, and `alias`. It may not prefix
-`extern` or `import`.
+0. `pub` may prefix `let`, `record`, `type`, `alias`, and a bare `import`.
+It may not prefix `extern`. A qualifier and a name list do not combine.
 
 ```
 program     = decl*
 decl        = import / extern / [pub] (alias / record / type / function)
-import      = "import" module-path ["as" Upper]
+import      = [pub] "import" module-path ( "as" Upper / "(" Upper,* ")" )
 module-path = identifier / string
 extern      = "extern" identifier "(" param,* ")" "->" type
 alias       = "alias" Upper "=" type
@@ -193,6 +193,7 @@ block from the next declaration.
 ```
 import std/list
 import "./lexer.mnd" as Lexer
+pub import std/io (IoError)
 import github:owner/repo@v1.2.0/console
 
 extern mn_exists(path: Str) -> Bool
@@ -373,7 +374,7 @@ expr        = cond / if / match / loop / while / lambda / block / return / panic
 cond        = "cond" cond-arm+
 cond-arm    = "|" test "->" expr
 if          = "if" "(" expr ")" "->" expr ["|" expr]
-match       = "match" "(" expr ")" arm+
+match       = "match" "(" expr ("," expr)* ")" arm+
 arm         = "|" test "->" expr
 test        = "else" / expr
 loop        = "loop" "(" binding,* ")" expr
@@ -520,6 +521,7 @@ call whose callee is a projection, so `s |> String.drop(n)` is
 pattern     = or-pattern
 or-pattern  = app-pattern ("|" app-pattern)*
 app-pattern = Upper "(" pattern,* ")"
+            / Upper "{" lower,* "}"
             / Upper
             / "[" pattern,* "]"
             / literal
@@ -530,13 +532,21 @@ guarded     = pattern ["when" expr]
 
 A constructor pattern uses the same parentheses as a call. A nullary
 constructor is a bare name. A record pattern is positional, in field
-declaration order: `Counts(p, f)`, `Span(s, _, _, _)`. `_` matches anything
-and binds nothing. A lowercase name binds. List patterns are `[h, t]` only
-when the list's length is fixed; the open list pattern is `h :: t`, and
-`[]` is the empty list. `::` in a pattern associates to the right, the same
-way it does in an expression. Literals are `Int`, `Str`, and `Sym`. Patterns nest.
-A `when` guard is a `Bool` expression and may use the names the pattern
-bound.
+declaration order: `Counts(p, f)`, `Span(s, _, _, _)`. The same record may
+name the fields it binds: `Span { line }`. Omitted fields are wildcards. A
+bare name binds a local of that name. There is no `field: local` rename.
+`_` matches anything and binds nothing. A lowercase name binds. List
+patterns are `[h, t]` only when the list's length is fixed; the open list
+pattern is `h :: t`, and `[]` is the empty list. `::` in a pattern
+associates to the right, the same way it does in an expression. Literals
+are `Int`, `Str`, and `Sym`. Patterns nest. A `when` guard is a `Bool`
+expression and may use the names the pattern bound.
+
+`match` takes one scrutinee or several, separated by commas. One scrutinee
+uses the pattern above. Several scrutinees require each arm's pattern to be
+a parenthesized list of the same length. No tuple value is built.
+`(Int, Str) -> Bool` stays a function type. A length mismatch is a parse
+error. Or-patterns stay on one component. `when` stays on the arm.
 
 ---
 
@@ -597,6 +607,8 @@ word has changed.
 | `if (p) -> a \| b` | `(if p a b)` |
 | `if (p) -> a` | `(if p a ())`, and a type error unless `a` is `Unit` |
 | `match (e) \| P -> a` | `(match e (P a) …)` |
+| `match (e1, e2) \| (P, Q) -> a` | nested `(match …)` grouped by the leftmost constructor; no tuple is built |
+| `Span { line }` | `(recpat Span line)`, checked as the positional record pattern |
 | `type Name = …` | `(variant Name …)` |
 | `record Name { … }` | `(defrec Name …)` |
 | `alias Name = T` | `(alias Name T)` |
@@ -604,6 +616,8 @@ word has changed.
 | `a :: b` | `(Cons a b)` |
 | `pair.fst` | `(project pair fst)`, then the field's slot |
 | `import path as Name` | `(import path Name)`; `Name.f` resolves `f` in that module |
+| `pub import path` | re-exports every public name of `path`, and a type's constructors |
+| `pub import path (A, B)` | re-exports those names, and a type's constructors |
 | `a < b < c` | `(and (< a b) (< b c))`, middle evaluated twice |
 | `a == b` | `(= a b)` |
 | `a != b` | `(not (= a b))` |

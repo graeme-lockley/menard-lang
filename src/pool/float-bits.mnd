@@ -34,18 +34,6 @@ record Parsed {
   e10: Int
 }
 
-let parsed-neg(p: Parsed) -> Bool =
-  match (p)
-    | Parsed(n, _, _) -> n
-
-let parsed-digits(p: Parsed) -> List Int =
-  match (p)
-    | Parsed(_, d, _) -> d
-
-let parsed-e10(p: Parsed) -> Int =
-  match (p)
-    | Parsed(_, _, e) -> e
-
 ; ---------------------------------------------------------------------------
 ; Base-2^30 integers, least-significant limb first. [] is zero.
 
@@ -64,14 +52,10 @@ let bi-add(xs: List Int, ys: List Int) -> List Int =
   bi-norm(bi-add-c(xs, ys, 0))
 
 let bi-add-c(xs: List Int, ys: List Int, c: Int) -> List Int =
-  match (xs)
-    | [] -> bi-add-rest(ys, c)
-    | x :: xt -> bi-add-both(x, xt, ys, c)
-
-let bi-add-both(x: Int, xt: List Int, ys: List Int, c: Int) -> List Int =
-  match (ys)
-    | [] -> bi-add-rest(x :: xt, c)
-    | y :: yt ->
+  match (xs, ys)
+    | ([], _) -> bi-add-rest(ys, c)
+    | (x :: xt, []) -> bi-add-rest(x :: xt, c)
+    | (x :: xt, y :: yt) ->
       {
         let s = x + y + c
         (s % limb-base()) :: bi-add-c(xt, yt, s / limb-base())
@@ -93,14 +77,10 @@ let bi-sub(xs: List Int, ys: List Int) -> List Int =
   bi-norm(bi-sub-c(xs, ys, 0))
 
 let bi-sub-c(xs: List Int, ys: List Int, b: Int) -> List Int =
-  match (xs)
-    | [] -> []
-    | x :: xt -> bi-sub-both(x, xt, ys, b)
-
-let bi-sub-both(x: Int, xt: List Int, ys: List Int, b: Int) -> List Int =
-  match (ys)
-    | [] -> bi-sub-borrow(x, xt, b)
-    | y :: yt -> bi-sub-digits(x, xt, y, yt, b)
+  match (xs, ys)
+    | ([], _) -> []
+    | (x :: xt, []) -> bi-sub-borrow(x, xt, b)
+    | (x :: xt, y :: yt) -> bi-sub-digits(x, xt, y, yt, b)
 
 let bi-sub-borrow(x: Int, xt: List Int, b: Int) -> List Int =
   if (b == 0) -> x :: xt | bi-sub-digits(x, xt, 0, [], 1)
@@ -123,14 +103,10 @@ let bi-cmp-norm(xs: List Int, ys: List Int) -> Int {
 }
 
 let bi-cmp-hi(xs: List Int, ys: List Int) -> Int =
-  match (xs)
-    | [] -> 0
-    | x :: xt -> bi-cmp-hi-rest(x, xt, ys)
-
-let bi-cmp-hi-rest(x: Int, xt: List Int, ys: List Int) -> Int =
-  match (ys)
-    | [] -> 0
-    | y :: yt ->
+  match (xs, ys)
+    | ([], _) -> 0
+    | (_, []) -> 0
+    | (x :: xt, y :: yt) ->
       cond
         | x < y -> -1
         | x > y -> 1
@@ -439,7 +415,7 @@ let convert-ratio(neg: Bool, num: List Int, den: List Int) -> Result Str Str {
 }
 
 let convert-parsed(p: Parsed) -> Result Str Str =
-  convert-parts(parsed-neg(p), parsed-digits(p), parsed-e10(p))
+  convert-parts(p.neg, p.digits, p.e10)
 
 let convert-parts(neg: Bool, digits: List Int, e10: Int) -> Result Str Str {
   let sig = bi-digits-msd(digits)
@@ -463,8 +439,8 @@ let convert-trimmed(neg: Bool, digits: List Int, e10: Int) -> Result Str Str =
     | Parsed(_, td, te) -> convert-scaled(neg, td, te)
 
 let convert-clean(p: Parsed) -> Result Str Str {
-  let digits = drop-leading(parsed-digits(p))
-  if (is-empty(digits)) -> Ok(signed-zero(parsed-neg(p))) | convert-trimmed(parsed-neg(p), digits, parsed-e10(p))
+  let digits = drop-leading(p.digits)
+  if (is-empty(digits)) -> Ok(signed-zero(p.neg)) | convert-trimmed(p.neg, digits, p.e10)
 }
 
 ; The 8 payload bytes of one literal. `Err` is a non-finite value or a

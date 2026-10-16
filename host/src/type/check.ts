@@ -1,5 +1,6 @@
 import type { Ast } from "../reader/ast.ts";
 import { nameEquals } from "../reader/ast.ts";
+import { declarationNames } from "../interp/modules.ts";
 import type { Diagnostic } from "../diagnostic/diagnostic.ts";
 import { diagnostic } from "../diagnostic/diagnostic.ts";
 import {
@@ -531,6 +532,15 @@ export type TypedProgram = {
   env: TypeEnv;
 };
 
+function collectPubNames(forms: Ast[]): Set<string> {
+  const names = new Set<string>();
+  for (const f of forms) {
+    if (f.tag !== "list" || f.elems.length < 2 || symStr(f.elems[0]!) !== "pub") continue;
+    for (const n of declarationNames(unwrapPubList(f))) names.add(n);
+  }
+  return names;
+}
+
 export function typecheckForms(
   forms: Ast[],
   opts: {
@@ -554,7 +564,10 @@ export function typecheckForms(
   for (const q of opts.qualified ?? []) {
     bindQualified(env, q.alias, q.bundle);
   }
+  const skipDup = new Set<Ast>();
+  registerTypeStubs(env, forms, skipDup);
   for (const f of forms) {
+    if (skipDup.has(f)) continue;
     collectDef(env, f);
     collectDefnScheme(env, f);
     collectExternScheme(env, f);
@@ -565,9 +578,7 @@ export function typecheckForms(
   for (const f of forms) {
     typecheckTop(env, f, topLocal, topSubst);
   }
-  if (opts.exports) {
-    checkPubPrivateTypes(env, forms, opts.exports);
-  }
+  checkPubPrivateTypes(env, forms, opts.exports ?? collectPubNames(forms));
   return {
     ok: env.diagnostics.length === 0,
     diagnostics: env.diagnostics,
@@ -634,19 +645,12 @@ const BUILTIN_NOMINALS = new Set([
 ]);
 
 function checkPubPrivateTypes(env: TypeEnv, forms: Ast[], exports: Set<string>): void {
-  for (const f of forms) {
+  for (const raw of forms) {
+    const f = unwrapPubList(raw);
     if (f.tag !== "list" || f.elems.length === 0) continue;
     const hn = symStr(f.elems[0]!);
     if (hn !== "defn" && hn !== "extern" && hn !== "runtime") continue;
-    const names = hn === "defn"
-      ? (() => {
-          const p = parseDefn(env, f, false);
-          return p ? [p.name] : [];
-        })()
-      : (() => {
-          const n = symStr(f.elems[1]!);
-          return n ? [n] : [];
-        })();
+    const names = declarationNames(f);
     if (!names.some((n) => exports.has(n))) continue;
     const scheme = env.values.get(names[0]!);
     if (!scheme) continue;
@@ -725,6 +729,55 @@ function collectExternScheme(env: TypeEnv, ast: Ast): void {
     params: parsed.typeParams,
     type: tFn(parsed.paramTypes, parsed.retType),
   });
+}
+
+function unwrapPubList(ast: Ast): Ast {
+  if (ast.tag === "list" && ast.kind === "paren" && symStr(ast.elems[0]!) === "pub" && ast.elems.length >= 2) {
+    return { tag: "list", kind: "paren", elems: ast.elems.slice(1), span: ast.span };
+  }
+  return ast;
+}
+
+function nominalDecl(ast: Ast): { kind: "record" | "variant"; name: string; params: string[] } | null {
+  const inner = unwrapPubList(ast);
+  if (inner.tag !== "list" || inner.kind !== "paren" || inner.elems.length < 2) return null;
+  const hn = symStr(inner.elems[0]!);
+  if (hn !== "defrec" && hn !== "variant") return null;
+  const parsed = parseTypeName(inner.elems[1]!);
+  if (!parsed.name) return null;
+  return { kind: hn === "defrec" ? "record" : "variant", name: parsed.name, params: parsed.params };
+}
+
+/** Every record and variant name is in scope before any field or payload is checked. */
+function registerTypeStubs(env: TypeEnv, forms: Ast[], skipDup: Set<Ast>): void {
+  const seen = new Set<string>();
+  for (const f of forms) {
+    const info = nominalDecl(f);
+    if (!info) continue;
+    if (seen.has(info.name)) {
+      err(env, "E_TYPE_DUPLICATE", `type ${info.name} is already defined`, f.span);
+      skipDup.add(f);
+      continue;
+    }
+    seen.add(info.name);
+    if (info.kind === "record") {
+      env.types.set(info.name, {
+        kind: "record",
+        name: info.name,
+        params: info.params,
+        fields: [],
+        span: f.span,
+      });
+    } else {
+      env.types.set(info.name, {
+        kind: "variant",
+        name: info.name,
+        params: info.params,
+        ctors: [],
+        span: f.span,
+      });
+    }
+  }
 }
 
 function collectDef(env: TypeEnv, ast: Ast): void {
@@ -1384,6 +1437,50 @@ function inferMatch(
   return result ?? freshVar(env);
 }
 
+function bindRecordPat(
+  env: TypeEnv,
+  pat: Ast & { tag: "list" },
+  scrut: Type,
+  local: Map<string, Type>,
+  subst: Subst,
+  covered: Set<string>,
+): void {
+  const nameAst = pat.elems[1];
+  const name = nameAst ? symStr(nameAst) : null;
+  if (!name || !nameAst) {
+    err(env, "E_TYPE_MISMATCH", "expected a record", pat.span);
+    return;
+  }
+  const def = env.types.get(name);
+  if (!def || def.kind !== "record") {
+    err(env, "E_TYPE_MISMATCH", `expected a record, found ${name}`, pat.span);
+    return;
+  }
+  const seen = new Set<string>();
+  const wanted = new Set<string>();
+  for (const f of pat.elems.slice(2)) {
+    const n = symStr(f);
+    if (!n) continue;
+    if (seen.has(n)) {
+      err(env, "E_TYPE_MISMATCH", `duplicate field ${n}`, f.span);
+      continue;
+    }
+    seen.add(n);
+    if (!def.fields.some((field) => field.name === n)) {
+      err(env, "E_TYPE_UNBOUND", `unknown field ${n}`, f.span);
+      continue;
+    }
+    wanted.add(n);
+  }
+  const enc = new TextEncoder();
+  const elems: Ast[] = [nameAst];
+  for (const field of def.fields) {
+    const text = wanted.has(field.name) ? field.name : "_";
+    elems.push({ tag: "sym", name: enc.encode(text), span: pat.span });
+  }
+  bindPattern(env, { tag: "list", kind: "paren", elems, span: pat.span }, scrut, local, subst, covered);
+}
+
 function bindPattern(
   env: TypeEnv,
   pat: Ast,
@@ -1433,6 +1530,16 @@ function bindPattern(
   }
   if (pat.tag === "list" && pat.elems.length >= 1) {
     const cn = symStr(pat.elems[0]!);
+    if (cn === "recpat") {
+      bindRecordPat(env, pat, scrut, local, subst, covered);
+      return;
+    }
+    if (cn === "guard" && pat.elems[1] && pat.elems[2]) {
+      bindPattern(env, pat.elems[1], scrut, local, subst, new Set());
+      const gt = infer(env, pat.elems[2], local, subst);
+      expectType(env, gt, prim("Bool"), subst, pat.elems[2].span);
+      return;
+    }
     if (cn && env.ctors.has(cn)) {
       covered.add(cn);
       const ctor = env.ctors.get(cn)!;

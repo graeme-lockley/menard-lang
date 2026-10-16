@@ -220,7 +220,7 @@ test "a leading shebang is ignored and the next line keeps its number" = {
     | Err(_) -> false
     | Ok(a) ->
       match (a)
-        | IntNode(n, sp) -> n == 42 && span-line(sp) == 2
+        | IntNode(n, sp) -> n == 42 && sp.line == 2
         | _ -> false
 }
 

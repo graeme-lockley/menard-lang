@@ -433,6 +433,11 @@ Rules:
 - **No subtyping and no row polymorphism.** A record's field set is exactly what
   it declares. `pair.fst` reads the field in declaration order. The same `.`
   selects an export of `import path as Name`. Neither form is a method call.
+- **Every `type` and `record` name in a module is registered before its fields
+  or payloads are parsed.** A record may mention itself (`Env` above). Two
+  declarations in one file may mention each other, in either order. A second
+  definition of the same name is an error. Types are erased; this changes
+  nothing in the backend.
 - Signatures on top-level `defn` are mandatory; `let` bindings and lambda
   parameters infer locally.
 - **No implicit conversions, no truthiness.** Conditions are `Bool`, always.
@@ -833,11 +838,21 @@ module's **vocabulary**: the word importers are entitled to use in their own
 signatures, and to see in their own error messages (§2.3).
 
 One rule that saves a confusing error: **a `pub` signature may not mention a
-private nominal type.** Otherwise importers get a function they cannot name a
-type for and therefore cannot call. (The alternative — an abstract type, usable
-only as an opaque value — is a coherent feature, and a v2 conversation. It is
-**not** needed for anything in §2.8.2: `Map` and `StringBuffer` are built-in
-nominal types, which the typer knows directly.)
+nominal type this module declares and does not publish.** A builtin is allowed.
+A public type imported from another module is allowed, because the importer can
+name it. A private nominal declared here is not: importers would get a function
+they cannot name a type for and therefore cannot call. (The alternative — an
+abstract type, usable only as an opaque value — is a coherent feature, and a v2
+conversation. It is **not** needed for anything in §2.8.2: `Map` and
+`StringBuffer` are built-in nominal types, which the typer knows directly.)
+
+`pub` may prefix a bare import. `pub import path` re-exports every public name
+of that module. `pub import path (A, B)` re-exports those names; a type also
+re-exports its constructors. A qualifier and a name list do not combine, and
+`pub` still may not prefix `extern`. A repeated re-export is allowed, the same
+way a repeated `pub alias` is allowed. Any other duplicate `pub` name is an
+error. A name in the list that the imported module does not publish is an
+import error.
 
 **And `extern` is confined to the seam's modules** (§2.15): `stdlib/sys.mnd`,
 `io.mnd`, `fs.mnd`, `proc.mnd`, and the runtime's own headers. That confinement

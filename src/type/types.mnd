@@ -10,13 +10,7 @@
 ; subset (§2.8.2), and "ctor" is dead code in host/src/type/check.ts (never
 ; constructed). Revisit if a later slice needs fixed-size arrays.
 
-; Forward declaration: several of Type's own constructors mention Type
-; itself (function parameter lists, List/Map/Maybe/Result/Ref element
-; types) — see reader/ast.mnd's header comment for why a self-referential
-; variant must be declared once, empty, before its real definition.
 import std/string as String
-
-type Type =
 
 pub type Type =
   | TInt
@@ -125,86 +119,31 @@ pub let t-nominal(name: Str, args: List Type, kind: Str) -> Type =
 ; typeEqual does — a variable's spelling is not part of its identity).
 
 pub let type-equal(a: Type, b: Type) -> Bool =
-  match (a)
-    | TInt ->
-      match (b)
-        | TInt -> true
-        | _ -> false
-    | TFloat ->
-      match (b)
-        | TFloat -> true
-        | _ -> false
-    | TBool ->
-      match (b)
-        | TBool -> true
-        | _ -> false
-    | TChar ->
-      match (b)
-        | TChar -> true
-        | _ -> false
-    | TStr ->
-      match (b)
-        | TStr -> true
-        | _ -> false
-    | TSym ->
-      match (b)
-        | TSym -> true
-        | _ -> false
-    | TUnit ->
-      match (b)
-        | TUnit -> true
-        | _ -> false
-    | TStringBuffer ->
-      match (b)
-        | TStringBuffer -> true
-        | _ -> false
-    | TVar(ida, _) ->
-      match (b)
-        | TVar(idb, _) -> ida == idb
-        | _ -> false
-    | TParam(na) ->
-      match (b)
-        | TParam(nb) -> na == nb
-        | _ -> false
-    | TList(ea) ->
-      match (b)
-        | TList(eb) -> type-equal(ea, eb)
-        | _ -> false
-    | TMap(ka, va) ->
-      match (b)
-        | TMap(kb, vb) -> type-equal(ka, kb) && type-equal(va, vb)
-        | _ -> false
-    | TMaybe(ea) ->
-      match (b)
-        | TMaybe(eb) -> type-equal(ea, eb)
-        | _ -> false
-    | TResult(oa, ea) ->
-      match (b)
-        | TResult(ob, eb) -> type-equal(oa, ob) && type-equal(ea, eb)
-        | _ -> false
-    | TRef(ea) ->
-      match (b)
-        | TRef(eb) -> type-equal(ea, eb)
-        | _ -> false
-    | TFn(pa, ra) ->
-      match (b)
-        | TFn(pb, rb) -> type-list-equal(pa, pb) && type-equal(ra, rb)
-        | _ -> false
-    | TNominal(na, aa, ka) ->
-      match (b)
-        | TNominal(nb, ab, kb) -> na == nb && ka == kb && type-list-equal(aa, ab)
-        | _ -> false
+  match (a, b)
+    | (TInt, TInt) -> true
+    | (TFloat, TFloat) -> true
+    | (TBool, TBool) -> true
+    | (TChar, TChar) -> true
+    | (TStr, TStr) -> true
+    | (TSym, TSym) -> true
+    | (TUnit, TUnit) -> true
+    | (TStringBuffer, TStringBuffer) -> true
+    | (TVar(ida, _), TVar(idb, _)) -> ida == idb
+    | (TParam(na), TParam(nb)) -> na == nb
+    | (TList(ea), TList(eb)) -> type-equal(ea, eb)
+    | (TMap(ka, va), TMap(kb, vb)) -> type-equal(ka, kb) && type-equal(va, vb)
+    | (TMaybe(ea), TMaybe(eb)) -> type-equal(ea, eb)
+    | (TResult(oa, ea), TResult(ob, eb)) -> type-equal(oa, ob) && type-equal(ea, eb)
+    | (TRef(ea), TRef(eb)) -> type-equal(ea, eb)
+    | (TFn(pa, ra), TFn(pb, rb)) -> type-list-equal(pa, pb) && type-equal(ra, rb)
+    | (TNominal(na, aa, ka), TNominal(nb, ab, kb)) -> na == nb && ka == kb && type-list-equal(aa, ab)
+    | (_, _) -> false
 
 pub let type-list-equal(xs: List Type, ys: List Type) -> Bool =
-  match (xs)
-    | [] ->
-      match (ys)
-        | [] -> true
-        | _ -> false
-    | x :: xrest ->
-      match (ys)
-        | [] -> false
-        | y :: yrest -> type-equal(x, y) && type-list-equal(xrest, yrest)
+  match (xs, ys)
+    | ([], []) -> true
+    | (x :: xrest, y :: yrest) -> type-equal(x, y) && type-list-equal(xrest, yrest)
+    | (_, _) -> false
 
 ; ---------------------------------------------------------------------------
 ; Diagnostic spelling — not a pretty-printer, "canonical enough to read in

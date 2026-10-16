@@ -23,6 +23,7 @@ import "../reader/ast.mnd"
 import "../reader/read.mnd"
 import "../reader/casing.mnd"
 import "../desugar/desugar.mnd"
+import "../type/check.mnd"
 import std/fs
 import std/io
 import std/list
@@ -31,9 +32,6 @@ import std/result as Result
 import std/string as String
 import std/sys
 import std/map as Map
-
-; Re-export shim — see `emit/bitcode.mnd` / `reader/casing.mnd`.
-pub alias Ast = Ast
 
 ; Zero-width on purpose. `lower.mnd` skips panic frames for a call with no
 ; source extent, so these bootstrap calls do not show up as `file:1`.
@@ -47,6 +45,15 @@ pub record Flat {
 
 ; Paths imported through `as` in the graph currently being flattened.
 let qualified-imports = ref(Map.empty())
+
+; Names each module publishes, including ones it re-exports. The global
+; export map keeps the defining path, so a re-export has to be recorded
+; on the importer itself.
+let module-export-names = ref(Map.empty())
+
+; Constructors of a published variant, so re-exporting the type publishes
+; them too.
+let variant-ctor-names = ref(Map.empty())
 
 ; `present` is false when the entry module has no `main`. `unit-ret` means
 ; that `main` is declared `-> Unit`, so the bootstrap returns 0 after calling it.
@@ -107,11 +114,11 @@ let line-search-mid(m: Map Int Int, lo: Int, hi: Int, offset: Int, mid: Int) -> 
 ; Its offsets and line are in that file, so they must not be recomputed
 ; from the buffer being stamped.
 let span-at(sp: Span, origin: Int, m: Map Int Int, n: Int) -> Span =
-  if (span-origin(sp) != 0) -> sp | {
-    let line = line-search(m, 0, n, span-start(sp))
+  if (sp.origin != 0) -> sp | {
+    let line = line-search(m, 0, n, sp.start)
     Span(
-      span-start(sp),
-      span-end(sp),
+      sp.start,
+      sp.end,
       origin,
       if (line < 1) -> 1 | line
     )
@@ -702,12 +709,21 @@ let register-one-export!(exports: Ref (Map Str Str), path: Str, name: Str, kind:
     | None ->
       {
         set!(exports, Map.set(name, path, deref(exports)))
+        note-module-export!(path, name)
         Ok(())
       }
     | Some(prev) ->
       cond
-        | kind == "alias" || shared-io-ctor(name) -> Ok(())
-        | prev == path -> Ok(())
+        | kind == "alias" || shared-io-ctor(name) ->
+          {
+            note-module-export!(path, name)
+            Ok(())
+          }
+        | prev == path ->
+          {
+            note-module-export!(path, name)
+            Ok(())
+          }
         | else -> Err(String.concat("duplicate pub export `", name, "` from ", path, " (already exported by ", prev, ")"))
 
 let register-export-names!(exports: Ref (Map Str Str), path: Str, names: List Str, kind: Str) -> Result Unit Str =
@@ -720,20 +736,96 @@ let register-form-exports!(exports: Ref (Map Str Str), path: Str, form: Ast) -> 
   match (form)
     | ParenNode(head :: rest, sp) ->
       cond
-        | is-sym(head, "pub") ->
-          {
-            let inner = ParenNode(rest, sp)
-            let kind = form-decl-kind(inner)
-            let names = gather-form-names(inner, [])
-            register-export-names!(exports, path, names, kind)
-          }
+        | is-sym(head, "pub") -> register-pub-export!(exports, path, ParenNode(rest, sp))
         | else -> Ok(())
     | _ -> Ok(())
+
+let register-pub-export!(exports: Ref (Map Str Str), path: Str, inner: Ast) -> Result Unit Str =
+  if (is-import-form(inner)) -> register-reexport!(exports, path, inner) | register-own-export!(exports, path, inner)
+
+let is-import-form(form: Ast) -> Bool =
+  match (form)
+    | ParenNode(head :: _, _) -> is-sym(head, "import")
+    | _ -> false
+
+let register-own-export!(exports: Ref (Map Str Str), path: Str, inner: Ast) -> Result Unit Str {
+  let kind = form-decl-kind(inner)
+  let names = gather-form-names(inner, [])
+  if (kind == "variant") -> remember-variant!(names)
+  register-export-names!(exports, path, names, kind)
+}
 
 let register-forms-exports!(exports: Ref (Map Str Str), path: Str, forms: List Ast) -> Result Unit Str =
   match (forms)
     | [] -> Ok(())
     | f :: rest -> Result.and-then(fn (_) = register-forms-exports!(exports, path, rest), register-form-exports!(exports, path, f))
+
+let note-module-export!(path: Str, name: Str) -> Unit {
+  let cur = module-names-of(path)
+  set!(module-export-names, Map.set(path, name :: cur, deref(module-export-names)))
+}
+
+let module-names-of(path: Str) -> List Str =
+  match (Map.lookup(path, deref(module-export-names)))
+    | Some(xs) -> xs
+    | None -> []
+
+let remember-variant!(names: List Str) -> Unit =
+  match (names)
+    | type-name :: ctors -> set!(variant-ctor-names, Map.set(type-name, ctors, deref(variant-ctor-names)))
+    | [] -> ()
+
+let variant-ctors-of(name: Str) -> List Str =
+  match (Map.lookup(name, deref(variant-ctor-names)))
+    | Some(xs) -> xs
+    | None -> []
+
+let register-reexport!(exports: Ref (Map Str Str), path: Str, form: Ast) -> Result Unit Str =
+  match (form)
+    | ParenNode(_ :: spec :: rest, sp) ->
+      match (spec-text(spec))
+        | None -> Ok(())
+        | Some(text) -> register-reexport-spec!(exports, path, resolve-import-path(path, text), rest, sp)
+    | _ -> Ok(())
+
+let register-reexport-spec!(exports: Ref (Map Str Str), path: Str, dep: Str, rest: List Ast, sp: Span) -> Result Unit Str =
+  match (reexport-requested(rest, dep))
+    | None -> Err("pub import cannot be qualified")
+    | Some(names) -> register-reexport-list!(exports, path, dep, names, sp)
+
+let reexport-requested(rest: List Ast, dep: Str) -> Maybe (List Str) =
+  match (rest)
+    | [] -> Some(module-names-of(dep))
+    | ParenNode(names, _) :: _ -> Some(sym-names(names))
+    | _ -> None()
+
+let sym-names(xs: List Ast) -> List Str =
+  match (xs)
+    | [] -> []
+    | h :: t ->
+      match (sym-str(h))
+        | Some(n) -> n :: sym-names(t)
+        | None -> sym-names(t)
+
+let name-exported-by(name: Str, dep: Str) -> Bool =
+  member(name, module-names-of(dep))
+
+let register-reexport-list!(exports: Ref (Map Str Str), path: Str, dep: Str, names: List Str, sp: Span) -> Result Unit Str =
+  match (names)
+    | [] -> Ok(())
+    | n :: rest -> Result.and-then(fn (_) = register-reexport-list!(exports, path, dep, rest, sp), register-reexport-name!(exports, path, dep, n))
+
+let register-reexport-name!(exports: Ref (Map Str Str), path: Str, dep: Str, name: Str) -> Result Unit Str =
+  if (name-exported-by(name, dep)) -> register-reexport-ok!(exports, path, name) | Err(String.concat("E_IMPORT: module does not export ", name))
+
+let register-reexport-ok!(exports: Ref (Map Str Str), path: Str, name: Str) -> Result Unit Str =
+  Result.and-then(fn (_) = register-reexport-ctors!(exports, path, variant-ctors-of(name)), register-one-export!(exports, path, name, "alias"))
+
+let register-reexport-ctors!(exports: Ref (Map Str Str), path: Str, names: List Str) -> Result Unit Str =
+  match (names)
+    | [] -> Ok(())
+    | n :: rest -> Result.and-then(fn (_) = register-reexport-ctors!(exports, path, rest), register-one-export!(exports, path, n, "alias"))
+
 
 ; ---------------------------------------------------------------------------
 ; Per-module init and the program bootstrap
@@ -876,6 +968,11 @@ let forms-with-bootstrap(forms: List Ast, inits: List Str, entry: EntryMain) -> 
     | EntryMain(sym, unit, present) ->
       if (present) -> append-asts(forms, [bootstrap-defn(inits, sym, unit)]) | forms
 
+let pub-private-ok(forms: List Ast) -> Result Unit Str =
+  match (check-pub-private-forms(forms))
+    | [] -> Ok(())
+    | TypeError(_, code, msg) :: _ -> Err(String.concat(code, ": ", msg))
+
 ; Strip imports/pub, uniquify privates, rename `main`, lift top-level
 ; expressions into this module's init.
 let uniquify-module-body(path: Str, entry-path: Str, mid: Int, forms: List Ast, exports: Ref (Map Str Str), inits: Ref (List Str), entry: Ref EntryMain) -> Result (List Ast) Str =
@@ -892,7 +989,7 @@ let uniquify-module-body(path: Str, entry-path: Str, mid: Int, forms: List Ast, 
           note-entry!(path, entry-path, body, entry)
           Ok(body)
         },
-        if (Map.has(path, deref(qualified-imports))) -> Ok(()) | register-forms-exports!(exports, path, forms)
+        if (Map.has(path, deref(qualified-imports))) -> Ok(()) | Result.and-then(fn (_) = register-forms-exports!(exports, path, forms), pub-private-ok(forms))
       )
 
 ; ---------------------------------------------------------------------------
@@ -1075,6 +1172,8 @@ let runtime-ops = ref(Map.empty())
 
 pub let flatten-module-graph(entry-path: Str, src: Str) -> Result Flat Str {
   set!(qualified-imports, Map.empty())
+  set!(module-export-names, Map.empty())
+  set!(variant-ctor-names, Map.empty())
   set!(runtime-ops, Map.empty())
   let visited = ref(Map.empty())
   let acc = ref([])
