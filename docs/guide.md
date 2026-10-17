@@ -96,13 +96,34 @@ let add-to(n: Int) -> (Int) -> Int =
 `add-to(40)` returns a function that adds forty. That returned function still
 sees `n`.
 
+Parameter types and the return type on a `fn` are present or absent
+together: write both, or write neither. When neither is written and the
+`fn` is passed as an argument, the checker uses the callee's expected
+function type, so projections and patterns see those types.
+
+```
+let join-path = fn (dir: Str, name: Str) -> Str =
+  String.concat(dir, "/", name)
+```
+
+Parameters may use the same binders as `let` and `match`: names, `_`, and
+tuple patterns.
+
+```
+let add-pair = fn ((x, y)) = x + y
+```
+
+A heap closure (an anonymous `fn`, or any function that captures a name)
+takes at most eight arguments. More than that is a compile error. Named
+top-level functions have no such limit on the direct-call path.
+
 Values are immutable. Updating a list or a map gives you a new one. The two
 exceptions are a `Ref` cell and a `StringBuffer`; those are shared, and
 changing one name is visible through the other. They come later, when a
 program needs a cell.
 
 There is no type inference at a polymorphic definition, no macros, and no
-currying. What you write is what the checker sees.
+currying. What you write on a named definition is what the checker sees.
 
 ## Pipes and the last argument
 
@@ -284,8 +305,9 @@ There are no exceptions. Absence is a `Maybe`. Failure with a reason is a
 `List.head` returns a `Maybe`: `Some` of the first element, or `None` when
 the list is empty. `Result` carries either an `Ok` value or an `Err` value.
 
-`?` unwraps either. The right-hand side runs only on `None` or `Err` (the
-error payload is discarded on that path).
+`?` unwraps either. The right-hand side runs only on `None` or `Err`. On
+`Err`, the error payload is discarded; `?` only supplies a default. There
+is no unary `r?` that rebinds or rethrows.
 
 ```
 let first-or-zero(xs: List Int) -> Int =
@@ -297,8 +319,9 @@ parsed ? 0
 `?` binds looser than `|>`, so the pipe's result is what gets unwrapped.
 
 Reach for `Maybe` when there is nothing useful to say about the missing
-case. Reach for `Result` when the caller needs to know why. Use
-`Result.to-maybe` only when a real `Maybe` is needed downstream.
+case. Reach for `Result` when the caller needs to know why. Prefer
+`parsed ? 0` when you only need a default; use `Result.to-maybe` only when
+a real `Maybe` is needed downstream.
 
 ```
 let from-maybe[a, e](err: e, m: Maybe a) -> Result a e =
