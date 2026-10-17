@@ -306,8 +306,7 @@ There are no exceptions. Absence is a `Maybe`. Failure with a reason is a
 the list is empty. `Result` carries either an `Ok` value or an `Err` value.
 
 `?` unwraps either. The right-hand side runs only on `None` or `Err`. On
-`Err`, the error payload is discarded; `?` only supplies a default. There
-is no unary `r?` that rebinds or rethrows.
+`Err`, the error payload is discarded; `?` only supplies a default.
 
 ```
 let first-or-zero(xs: List Int) -> Int =

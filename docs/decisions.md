@@ -28,6 +28,41 @@ specification. Where a name changed, the entry that changed it says so.
 
 ---
 
+## 2026-10-17 — Postfix `??` Result propagation rejected
+
+### The decision
+
+There is no postfix Result-propagation operator. Failure stays `match`,
+`Result.and-then`, or `m ? d` (default only). A prototype of postfix `e ??`
+(whitespace required; Result-only; rethrow `Err` from the enclosing
+Result-returning function) was implemented end-to-end — lex, parse, print,
+desugar, typer rewrite, host eval signal, docs, and adoption in `read.mnd` /
+`sep.mnd` — then removed in full.
+
+### Why it was turned down
+
+The form only paid off in flat multi-step Result pipelines (especially after
+adding Result-shaped `expect` for required punctuation). Most call sites were
+single-step sugar for `| Err(e) -> Err(e)`. Usage concentrated in the
+compiler; the guide already steered apps to `match` / `?`. Against that sat
+a third Result idiom next to `?`, sequence-rewrite and Ok-wrap complexity in
+the typer, and a host mid-block abort path. The net did not justify a
+language feature.
+
+### What remains
+
+`m ? d` is unchanged: unwrap `Maybe` / `Result` with a default; on `Err` the
+payload is discarded. Mechanical rethrows stay as `match` arms (or
+`and-then`). Do not revive postfix propagate, unary `r?`, or a coalesce
+spelled `??` without a new decision that overturns this one.
+
+### User documentation
+
+README, the guide, syntax, stdlib, and the specification do not describe
+postfix `??` or list it as a future option. This file is the record.
+
+---
+
 ## 2026-10-16 — Caml-style n-tuples (amends the multi-value match decision)
 
 ### The decision
@@ -231,7 +266,9 @@ Both readers lex, parse, print, and desugar the two forms. Precedence
 numbers move up one to make room for `?` under `|>`. The four map
 intrinsics are builtin schemes. A program can name `map-new` directly.
 Unary Rust-style `r?` error propagation is deliberately out of scope:
-`?` only supplies a default, never rebinds or rethrows an `Err`.
+`?` only supplies a default, never rebinds or rethrows an `Err`. A later
+postfix `??` rethrow prototype was built and rejected — see the
+2026-10-17 entry above.
 
 ---
 
