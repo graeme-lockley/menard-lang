@@ -719,23 +719,37 @@ let map-pat(xs: List Ast) -> List Str =
 
 let print-fn(rest: List Ast, ind: Int) -> Str =
   match (rest)
+    | params :: SymNode("->", _) :: ret :: body :: _ ->
+      print-fn-shaped(String.concat("fn (", String.concat(fn-params(params), String.concat(") -> ", print-type(ret)))), body, ind)
     | params :: body :: _ ->
-      {
-        let ps = fn-params(params)
-        cond
-          | is-head(body, "do") -> String.concat("fn (", String.concat(ps, String.concat(") ", print-block(body, ind))))
-          | else ->
-            {
-              let b = print-expr(body, ind + 2)
-              if (not(has-nl(b)) && not(laid-out(body))) -> String.concat("fn (", String.concat(ps, String.concat(") = ", b))) | String.concat("fn (", ps, ") =\n", pad(ind + 2), b)
-            }
-      }
+      print-fn-shaped(String.concat("fn (", String.concat(fn-params(params), ")")), body, ind)
     | _ -> "fn ()"
+
+let print-fn-shaped(head: Str, body: Ast, ind: Int) -> Str =
+  cond
+    | is-head(body, "do") -> String.concat(head, String.concat(" ", print-block(body, ind)))
+    | else ->
+      {
+        let b = print-expr(body, ind + 2)
+        if (not(has-nl(b)) && not(laid-out(body))) -> String.concat(head, String.concat(" = ", b)) | String.concat(head, " =\n", pad(ind + 2), b)
+      }
 
 let fn-params(a: Ast) -> Str =
   match (a)
-    | ParenNode(xs, _) -> join(map-atom(xs), ", ")
+    | ParenNode(xs, _) -> join(map-fn-param(xs), ", ")
     | _ -> ""
+
+let map-fn-param(xs: List Ast) -> List Str =
+  match (xs)
+    | [] -> []
+    | h :: t -> print-fn-param(h) :: map-fn-param(t)
+
+let print-fn-param(a: Ast) -> Str =
+  match (a)
+    | SymNode(_, _) -> print-atom(a)
+    | ParenNode(SymNode("tuple", _) :: _, _) -> print-pat(a)
+    | ParenNode(_, _) -> print-param(a)
+    | _ -> print-atom(a)
 
 let print-loop(rest: List Ast, ind: Int) -> Str =
   match (rest)

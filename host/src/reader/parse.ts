@@ -1125,39 +1125,87 @@ class P {
       if (!ty.ok) return ty;
       ret = ty.ast;
     }
+    if (params.annotated !== (ret !== null)) {
+      return this.err(
+        kw,
+        params.annotated
+          ? "fn with typed parameters requires -> return type"
+          : "fn return type requires typed parameters",
+      );
+    }
     const body = this.parseBody();
     if (!body.ok) return body;
-    // Annotated return type is not stored on core fn; the body is checked by inference.
-    void ret;
+    const elems: Ast[] =
+      ret !== null
+        ? [sym("fn", kw.span), params.ast, sym("->", ret.span), ret, body.ast]
+        : [sym("fn", kw.span), params.ast, body.ast];
     return {
       ok: true,
-      ast: paren([sym("fn", kw.span), params.ast, body.ast], join(kw.span, body.ast.span)),
+      ast: paren(elems, join(kw.span, body.ast.span)),
     };
   }
 
-  parseFnParams(): R {
+  /** Lambda params: all typed (with `->` on the fn) or all untyped; patterns allowed. */
+  parseFnParams(): { ok: true; ast: Ast; annotated: boolean } | { ok: false; error: ParseErr } {
     if (!this.eat("(")) return this.err(this.cur(), "expected (");
     const ps: Ast[] = [];
     const openSpan = this.toks[this.i - 1]!.span;
+    let annotated: boolean | null = null;
     while (!this.delim(")") && this.cur().kind !== "eof") {
       this.eat(",");
       if (this.delim(")")) break;
-      const n = this.cur();
-      if (n.kind !== "ident") return this.err(n, "expected a parameter");
-      this.i++;
-      const bare = n.text.endsWith(":") ? n.text.slice(0, -1) : n.text;
-      if (n.text.endsWith(":") || this.cur().text === ":") {
-        if (this.cur().text === ":") this.i++;
-        const ty = this.parseType();
-        if (!ty.ok) return ty;
-        void ty;
+      const p = this.parseFnParam();
+      if (!p.ok) return p;
+      if (annotated === null) annotated = p.annotated;
+      else if (annotated !== p.annotated) {
+        return this.err(this.cur(), "fn parameters must be all typed or all untyped");
       }
-      ps.push(sym(bare, n.span));
+      ps.push(p.ast);
       this.eat(",");
     }
     const close = this.eat(")");
     if (!close) return this.errEnd("unclosed (");
-    return { ok: true, ast: paren(ps, join(openSpan, close.span)) };
+    return {
+      ok: true,
+      ast: paren(ps, join(openSpan, close.span)),
+      annotated: annotated === true,
+    };
+  }
+
+  parseFnParam(): { ok: true; ast: Ast; annotated: boolean } | { ok: false; error: ParseErr } {
+    if (this.delim("(")) {
+      const pat = this.parseTuplePattern();
+      if (!pat.ok) return pat;
+      if (this.cur().text === ":") {
+        this.i++;
+        const ty = this.parseType();
+        if (!ty.ok) return ty;
+        return {
+          ok: true,
+          annotated: true,
+          ast: paren(
+            [sym("param", pat.ast.span), pat.ast, ty.ast],
+            join(pat.ast.span, ty.ast.span),
+          ),
+        };
+      }
+      return { ok: true, annotated: false, ast: pat.ast };
+    }
+    const n = this.cur();
+    if (n.kind !== "ident") return this.err(n, "expected a parameter");
+    this.i++;
+    const bare = n.text.endsWith(":") ? n.text.slice(0, -1) : n.text;
+    if (n.text.endsWith(":") || this.cur().text === ":") {
+      if (this.cur().text === ":") this.i++;
+      const ty = this.parseType();
+      if (!ty.ok) return ty;
+      return {
+        ok: true,
+        annotated: true,
+        ast: paren([sym(`${bare}:`, n.span), ty.ast], join(n.span, ty.ast.span)),
+      };
+    }
+    return { ok: true, annotated: false, ast: sym(bare, n.span) };
   }
 
   parseList(): R {

@@ -78,7 +78,7 @@ describe("rest parameters", () => {
       ["bad-rest-lambda.mnd", "E_TYPE_REST", "`...` is not allowed on a lambda"],
       ["bad-rest-spread.mnd", "E_TYPE_SPREAD", "spread is only valid in a rest-parameter call"],
       ["bad-rest-fixed.mnd", "E_TYPE_SPREAD", "spread in a fixed argument"],
-      ["bad-rest-wrap.mnd", "E_TYPE_MISMATCH", "expected Int, found (List Int)"],
+      ["bad-rest-wrap.mnd", "E_TYPE_MISMATCH", "expected (List Int), found Int"],
     ];
     for (const [file, code, message] of cases) {
       const diags = diagnose(readFileSync(join(dir, file)));

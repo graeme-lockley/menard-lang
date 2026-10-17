@@ -1,0 +1,7 @@
+; A capturing 3-arg heap closure lowers to mn_apply_3. Exit 41.
+
+let main() -> Int {
+  let n = 1
+  let f = fn (a, b, c) = a + b + c + n
+  f(10, 20, 10)
+}

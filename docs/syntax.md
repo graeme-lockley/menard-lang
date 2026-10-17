@@ -236,7 +236,8 @@ it may declare type parameters. Calls of it are direct. It lowers to today's
 A function value is an expression. It is a closure, including when it
 captures nothing. Calls of it are indirect. A parameter's type and the
 return type may be omitted, and are then inferred locally. They are present
-or absent together: either both are written, or neither is.
+or absent together: either both are written, or neither is. Parameters may
+use the same binders as `let` / `match` (names, `_`, and tuple patterns).
 
 ```
 let adder(n: Int) -> (Int) -> Int =
@@ -247,14 +248,20 @@ let join-path = fn (dir: Str, name: Str) -> Str =
     | dir == "" || dir == "." -> name
     | dir == "/" -> String.concat("/", name)
     | else -> String.concat(dir, "/", name)
+
+let add-pair = fn ((x, y)) = x + y
 ```
+
+When an unannotated `fn` is passed as an argument, it is checked against the
+callee's parameter `Fn` type so projections and patterns see those types.
 
 A parameter-list `let` is the same declaration at any indent. Below column 0
 it lowers to a `let` of a `fn`. A local function written `let name = fn …`
 stays a lambda, including when the parameter types are inferred. A named
 local function that captures nothing is lifted to a direct call. A function
-that captures a name stays a heap closure. A recursive local name resolves
-to that lifted function inside its own body.
+that captures a name stays a heap closure (at most eight arguments on the
+heap-closure apply path). A recursive local name resolves to that lifted
+function inside its own body.
 
 ---
 
@@ -492,7 +499,7 @@ Precedence, tightest first. Associativity is left.
 | 3 | `&&` | short-circuit |
 | 2 | `\|\|` | short-circuit |
 | 1 | `\|>` | last-argument insertion; the right-hand side is a call |
-| 0 | `?` | right-associative; unwraps a `Maybe`, and the right-hand side runs only on `None` |
+| 0 | `?` | right-associative; unwraps a `Maybe` or `Result`; the right-hand side runs only on `None` / `Err` |
 
 `a + b + c` is `(a + b) + c`. `a :: b :: c` is `a :: (b :: c)`. `a ? b ? c` is `a ? (b ? c)`. `a < b < c` is `a < b && b < c`, and `b` is
 evaluated twice. The same chaining rule applies to `==` and `!=` and to the
@@ -502,9 +509,9 @@ chains. `!=` is `not` of `==`.
 `&&` and `||` are binary and short-circuit. They are today's `and` and `or`.
 
 `|>` associates to the left and binds looser than `||` and tighter than `?`.
-`xs |> List.head() ? 0` unwraps the piped `Maybe`. The right-hand side
-is a call. Desugaring, which runs before typechecking, appends the left-hand
-value as that call's last argument:
+`xs |> List.head() ? 0` unwraps the piped `Maybe` (or `Result`). The right-hand
+side of `|>` is a call. Desugaring, which runs before typechecking, appends
+the left-hand value as that call's last argument:
 
 ```
 tokens |> List.map(I.parse) |> List.filter(fn (n) = n <= 1000)
@@ -640,7 +647,7 @@ word has changed.
 | `a && b`, `a \|\| b` | `(and a b)`, `(or a b)` |
 | `x \|> f(a)` | `(f a x)` |
 | `{k => v, ...m}` | `(map-set …)` on `(map-new)`; a spread is one `let`/`loop` merge |
-| `m ? d` | `(match m (Some mn-ques) mn-ques (None) d)` |
+| `m ? d` | left as `(? m d)`; the typer rewrites to a `Maybe` or `Result` `match` |
 | `f(a, b)` | `(f a b)` |
 | `Name(a, b)` in expression or pattern position | `(Name a b)` |
 | `[a, b]` | `(Cons a (Cons b (Nil)))` |
@@ -650,7 +657,8 @@ word has changed.
 A known top-level function is never lowered to `fn`. A nested parameter-list
 `let` is a `fn` binding. Closure conversion lifts a named function whose
 capture set is empty to a direct call. An anonymous `fn`, and any function
-that captures a name, stays a heap closure and an indirect call.
+that captures a name, stays a heap closure and an indirect call via
+`mn_apply_0`…`mn_apply_8` (more than eight arguments is a compile error).
 
 `String.concat(a, b, c)` left-folds once the callee is `std/string`'s `concat`.
 One argument is that argument. A bare `concat` from `std/list` is not folded.

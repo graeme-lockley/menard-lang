@@ -84,11 +84,10 @@ describe("desugar", () => {
     expect(spread).toContain("map-set");
   });
 
-  test("question lowers to a match whose None arm holds the default", () => {
+  test("question stays a core form for the typer to expand", () => {
     const text = desugared('Some(1) ? panic("no")');
-    expect(text).toContain("match (Some(1))");
-    expect(text).toContain('| None -> panic("no")');
-    expect(text).toContain("| Some(mn-ques) -> mn-ques");
+    expect(text).toContain('Some(1) ? panic("no")');
+    expect(text).not.toContain("mn-ques");
   });
 
   test("a bare name is not a pipe target", () => {

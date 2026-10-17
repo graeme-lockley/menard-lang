@@ -35,8 +35,8 @@
 ;
 ; - **Int-only captures / params.** Same as the prior lambda-lift slice:
 ;   every lifted parameter and capture is declared `Int`.
-; - **Apply arity 0–2.** Rewritten call sites use `mn-apply-0/1/2`.
-;   Closures with three or more arguments are out of scope.
+; - **Apply arity 0–8.** Rewritten call sites use `mn-apply-0`…`mn-apply-8`.
+;   Closures with more than eight arguments are rejected at lower.
 ; - **Shadowing / nested lets inside fn bodies** use the same naive
 ;   free-var scan as before.
 
@@ -120,9 +120,16 @@ let fn-param-names(elems: List Ast) -> List Str =
     | e :: rest -> fn-param-names-cons(e, rest)
 
 let fn-param-names-cons(e: Ast, rest: List Ast) -> List Str =
-  match (sym-str(e))
+  match (fn-param-name(e))
     | Some(n) -> n :: fn-param-names(rest)
     | None -> fn-param-names(rest)
+
+; Bare `x`, typed `(x: T)`, or (after desugar) a synthetic `__pN`.
+let fn-param-name(ast: Ast) -> Maybe Str =
+  match (ast)
+    | SymNode(n, _) -> Some(n)
+    | ParenNode(name-ast :: _, _) -> defn-param-name-sym(name-ast)
+    | _ -> None()
 
 let fn-param-elems(params-ast: Ast) -> List Ast =
   match (params-ast)
@@ -221,7 +228,7 @@ let apply-subst-paren-named(name: Str, head: Ast, args: List Ast, sp: Span, subs
     | Some(_) -> rewrite-call(name, args, sp, subst)
 
 ; `(name arg…)` for a known let-bound function. An empty capture is a
-; direct call of the lifted `defn`. A capture stays `mn-apply-0/1/2`.
+; direct call of the lifted `defn`. A capture stays `mn-apply-0`…`mn-apply-8`.
 let rewrite-call(name: Str, args: List Ast, sp: Span, subst: Map Str LiftedInfo) -> Ast =
   match (Map.lookup(name, subst))
     | None -> ParenNode(SymNode(name, sp) :: apply-subst-list(args, subst), sp)
@@ -237,6 +244,18 @@ let rewrite-apply(name: Str, args: List Ast, sp: Span, subst: Map Str LiftedInfo
     | [] -> ParenNode([SymNode("mn-apply-0", sp), SymNode(name, sp)], sp)
     | [a0] -> ParenNode([SymNode("mn-apply-1", sp), SymNode(name, sp), apply-subst-ast(a0, subst)], sp)
     | [a0, a1] -> ParenNode([SymNode("mn-apply-2", sp), SymNode(name, sp), apply-subst-ast(a0, subst), apply-subst-ast(a1, subst)], sp)
+    | [a0, a1, a2] ->
+      ParenNode([SymNode("mn-apply-3", sp), SymNode(name, sp), apply-subst-ast(a0, subst), apply-subst-ast(a1, subst), apply-subst-ast(a2, subst)], sp)
+    | [a0, a1, a2, a3] ->
+      ParenNode([SymNode("mn-apply-4", sp), SymNode(name, sp), apply-subst-ast(a0, subst), apply-subst-ast(a1, subst), apply-subst-ast(a2, subst), apply-subst-ast(a3, subst)], sp)
+    | [a0, a1, a2, a3, a4] ->
+      ParenNode([SymNode("mn-apply-5", sp), SymNode(name, sp), apply-subst-ast(a0, subst), apply-subst-ast(a1, subst), apply-subst-ast(a2, subst), apply-subst-ast(a3, subst), apply-subst-ast(a4, subst)], sp)
+    | [a0, a1, a2, a3, a4, a5] ->
+      ParenNode([SymNode("mn-apply-6", sp), SymNode(name, sp), apply-subst-ast(a0, subst), apply-subst-ast(a1, subst), apply-subst-ast(a2, subst), apply-subst-ast(a3, subst), apply-subst-ast(a4, subst), apply-subst-ast(a5, subst)], sp)
+    | [a0, a1, a2, a3, a4, a5, a6] ->
+      ParenNode([SymNode("mn-apply-7", sp), SymNode(name, sp), apply-subst-ast(a0, subst), apply-subst-ast(a1, subst), apply-subst-ast(a2, subst), apply-subst-ast(a3, subst), apply-subst-ast(a4, subst), apply-subst-ast(a5, subst), apply-subst-ast(a6, subst)], sp)
+    | [a0, a1, a2, a3, a4, a5, a6, a7] ->
+      ParenNode([SymNode("mn-apply-8", sp), SymNode(name, sp), apply-subst-ast(a0, subst), apply-subst-ast(a1, subst), apply-subst-ast(a2, subst), apply-subst-ast(a3, subst), apply-subst-ast(a4, subst), apply-subst-ast(a5, subst), apply-subst-ast(a6, subst), apply-subst-ast(a7, subst)], sp)
     | _ -> ParenNode(SymNode(name, sp) :: apply-subst-list(args, subst), sp)
 
 let str-list-empty(xs: List Str) -> Bool =

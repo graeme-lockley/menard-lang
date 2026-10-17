@@ -264,6 +264,12 @@ describe("map literals and question", () => {
     roundTrip("a ? b ? c");
   });
 
+  test("annotated and patterned fn round-trip", () => {
+    roundTrip("fn (p: Str * Int) -> Int = p.2");
+    roundTrip("fn ((x, y)) = x + y");
+    roundTrip("fn (a, (_, v)) = a + v");
+  });
+
   test("a brace around one expression stays a block", () => {
     const ast = mustRead("{ 1 }");
     expect(headOf(ast)).toBe("do");

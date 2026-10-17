@@ -279,27 +279,26 @@ derived `show`, along with equality and ordering. Prefer `print` /
 There are no exceptions. Absence is a `Maybe`. Failure with a reason is a
 `Result`.
 
-### `Maybe` and `?`
+### `Maybe`, `Result`, and `?`
 
 `List.head` returns a `Maybe`: `Some` of the first element, or `None` when
-the list is empty.
+the list is empty. `Result` carries either an `Ok` value or an `Err` value.
 
-`?` unwraps a `Maybe`. The right-hand side runs only when the value is
-`None`.
+`?` unwraps either. The right-hand side runs only on `None` or `Err` (the
+error payload is discarded on that path).
 
 ```
 let first-or-zero(xs: List Int) -> Int =
   xs |> List.head() ? 0
+
+parsed ? 0
 ```
 
 `?` binds looser than `|>`, so the pipe's result is what gets unwrapped.
 
 Reach for `Maybe` when there is nothing useful to say about the missing
-case. Reach for `Result` when the caller needs to know why.
-
-### `Result`
-
-`Result` carries either an `Ok` value or an `Err` value.
+case. Reach for `Result` when the caller needs to know why. Use
+`Result.to-maybe` only when a real `Maybe` is needed downstream.
 
 ```
 let from-maybe[a, e](err: e, m: Maybe a) -> Result a e =
@@ -310,13 +309,6 @@ let from-maybe[a, e](err: e, m: Maybe a) -> Result a e =
 
 The string calculator returns `Result Int (List Int)` so a bad input can
 report every negative, not only that something went wrong.
-
-A `Result` is not a `Maybe`. Turn it into one when you are ready to drop the
-error and supply a default:
-
-```
-Result.to-maybe(parsed) ? 0
-```
 
 `std/maybe` and `std/result` provide `map`, `and-then`, and related helpers.
 Chain with `and-then` when the next step can fail too.

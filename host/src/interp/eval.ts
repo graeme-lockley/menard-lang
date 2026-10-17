@@ -440,7 +440,8 @@ type Cont =
     }
   | { tag: "panic"; span?: Span }
   | { tag: "call"; callerPath: string; span: Span }
-  | { tag: "project"; field: string | number; span?: Span };
+  | { tag: "project"; field: string | number; span?: Span }
+  | { tag: "ques"; rhs: Ast; env: Env; loop: LoopCtx | null; span?: Span };
 
 type Step =
   | { tag: "value"; value: Value }
@@ -774,6 +775,19 @@ function beginEval(
             stack.push({ tag: "project", field: key, span: ast.span });
             return { tag: "eval", ast: ast.elems[1], env, loop };
           }
+          case Sf.Ques: {
+            if (!ast.elems[1] || !ast.elems[2] || ast.elems.length !== 3) {
+              throw new PanicError("? expects a Maybe or Result and a default", ast.span);
+            }
+            stack.push({
+              tag: "ques",
+              rhs: ast.elems[2],
+              env,
+              loop,
+              span: ast.span,
+            });
+            return { tag: "eval", ast: ast.elems[1], env, loop };
+          }
           case Sf.Tuple: {
             const elems = ast.elems.slice(1);
             if (elems.length < 2) {
@@ -894,6 +908,17 @@ function resume(c: Cont, value: Value, stack: Cont[], host: Host): Step {
   switch (c.tag) {
     case "project":
       return { tag: "value", value: projectField(value, c.field, c.span) };
+    case "ques": {
+      if (value.tag === "variant") {
+        if (value.ctor === "Some" || value.ctor === "Ok") {
+          return { tag: "value", value: value.payloads[0] ?? vUnit() };
+        }
+        if (value.ctor === "None" || value.ctor === "Err") {
+          return { tag: "eval", ast: c.rhs, env: c.env, loop: c.loop };
+        }
+      }
+      throw new PanicError("? expects a Maybe or Result", c.span);
+    }
     case "seq": {
       // Finished forms[c.i]. Binding-style (let x e) extends the sequence env.
       let e = c.env;
@@ -1125,14 +1150,35 @@ function valueToPanicMsg(v: Value): string {
 
 function evalLambda(ast: Ast & { tag: "list" }, env: Env): Value {
   const paramsAst = ast.elems[1]!;
+  let bodyAst: Ast;
+  if (
+    ast.elems.length >= 5 &&
+    ast.elems[2]?.tag === "sym" &&
+    nameEquals(ast.elems[2].name, "->")
+  ) {
+    bodyAst = ast.elems[4]!;
+  } else {
+    bodyAst = ast.elems[2]!;
+  }
   const params: string[] = [];
   if (paramsAst.tag === "list") {
-    for (const p of paramsAst.elems) params.push(symName(p));
+    for (const p of paramsAst.elems) {
+      if (p.tag === "sym") {
+        params.push(symName(p));
+        continue;
+      }
+      if (p.tag === "list" && p.elems[0]?.tag === "sym") {
+        const pn = decodeSymBytes(p.elems[0].name);
+        params.push(pn.endsWith(":") ? pn.slice(0, -1) : pn);
+        continue;
+      }
+      throw new PanicError("malformed fn parameter", p.span);
+    }
   }
   return {
     tag: "fn",
     params,
-    body: [ast.elems[2]!],
+    body: [bodyAst],
     env,
     path: evalPath,
   };

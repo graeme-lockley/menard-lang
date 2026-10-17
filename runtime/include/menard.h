@@ -286,6 +286,12 @@ MnWord mn_ctor_closure(MnWord tag_raw, MnWord arity_raw); /* constructor as Fn v
 MnWord mn_apply_0(MnWord clo);
 MnWord mn_apply_1(MnWord clo, MnWord a0);
 MnWord mn_apply_2(MnWord clo, MnWord a0, MnWord a1);
+MnWord mn_apply_3(MnWord clo, MnWord a0, MnWord a1, MnWord a2);
+MnWord mn_apply_4(MnWord clo, MnWord a0, MnWord a1, MnWord a2, MnWord a3);
+MnWord mn_apply_5(MnWord clo, MnWord a0, MnWord a1, MnWord a2, MnWord a3, MnWord a4);
+MnWord mn_apply_6(MnWord clo, MnWord a0, MnWord a1, MnWord a2, MnWord a3, MnWord a4, MnWord a5);
+MnWord mn_apply_7(MnWord clo, MnWord a0, MnWord a1, MnWord a2, MnWord a3, MnWord a4, MnWord a5, MnWord a6);
+MnWord mn_apply_8(MnWord clo, MnWord a0, MnWord a1, MnWord a2, MnWord a3, MnWord a4, MnWord a5, MnWord a6, MnWord a7);
 
 /*
  * Tier-0 I/O (`runtime/src/io.c`, Phase 3 slice G). Emitted `@main` is

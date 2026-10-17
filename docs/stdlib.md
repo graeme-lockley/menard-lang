@@ -4,7 +4,7 @@ Import a module by name: `import std/list as List`. The value a pipe feeds is th
 
 `std/basics` is in scope in every module. Everything else is an explicit import.
 
-A missing `Maybe` is `?`. A `Result` becomes a `Maybe` with `to-maybe`, then the same operator.
+A missing `Maybe` or a failed `Result` is `?` (the `Err` payload is dropped on the default path). `to-maybe` remains when a real `Maybe` is needed downstream.
 
 ## Basics
 
@@ -42,7 +42,7 @@ In scope without an import.
 | `and-then(f, r)` | Replace an `Ok` with the `Result` that `f` returns. |
 | `map2(f, ra, rb)` | Apply `f` when both are `Ok`. The error type is shared. |
 | `map-error(g, r)` | Apply `g` to an `Err`. |
-| `to-maybe(r)` | The `Ok` value, or `None`. `to-maybe(r) ? 0`. |
+| `to-maybe(r)` | The `Ok` value, or `None`. Prefer `r ? 0` when only a default is needed. |
 | `from-maybe(err, m)` | `Ok` of a `Some`, or `Err(err)`. `m \|> Result.from-maybe(err)`. |
 
 ## List
@@ -108,7 +108,7 @@ A map is persistent. Keys are orderable, and `keys` returns them in that order. 
 | `to-list(m)` | The entries, as pairs, in key order. |
 | `map(f, m)` | `f(key, value)` for each value. Keys stay. |
 | `filter(f, m)` | The entries for which `f(key, value)` is true. |
-| `fold(f, acc, m)` | `f` over the entries in key order. `f` is `(acc, key * value) -> acc`, because a function value takes at most two arguments. |
+| `fold(f, acc, m)` | `f` over the entries in key order. `f` is `(acc, key * value) -> acc`. |
 | `remove(k, m)` | `m` without `k`. |
 | `merge(overlay, base)` | `base`, then `overlay`. Overlap keeps `overlay`. `base \|> Map.merge(overlay)`. |
 

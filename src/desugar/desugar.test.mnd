@@ -109,7 +109,7 @@ test "a spread mentions map-keys once" = {
             | _ -> false
 }
 
-test "question lowers to a match and keeps the default in the None arm" = {
+test "question stays a core form for the typer to expand" = {
   match (read("Some(1) ? panic(\"no\")"))
     | Err(_) -> false
     | Ok(a) ->
@@ -120,7 +120,7 @@ test "question lowers to a match and keeps the default in the None arm" = {
             | h :: [] ->
               {
                 let text = print-form(h)
-                contains("match (Some(1))", text) && contains("None -> panic(\"no\")", text) && contains("Some(mn-ques) -> mn-ques", text)
+                contains("Some(1) ? panic(\"no\")", text) && not(contains("mn-ques", text))
               }
             | _ -> false
 }

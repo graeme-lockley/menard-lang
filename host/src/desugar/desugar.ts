@@ -143,6 +143,9 @@ function desugarNode(ast: Ast, diags: Diagnostic[]): Ast {
   }
 
   if (nameEquals(head.name, "defn")) return desugarDefn(ast, diags);
+  if (nameEquals(head.name, "fn") || nameEquals(head.name, "lambda")) {
+    return desugarFn(ast, diags);
+  }
   if (isDeclKeyword(head)) return desugarDecl(ast, diags);
   if (nameEquals(head.name, "pub")) return desugarPub(ast, diags);
   if (nameEquals(head.name, "and")) return desugarAnd(ast, diags);
@@ -273,6 +276,72 @@ function desugarDefn(ast: Ast & { tag: "list" }, diags: Diagnostic[]): Ast {
   );
 }
 
+/**
+ * `(fn (param PAT T | tuple… | name: T | name) …)` → bare/`name: T` params
+ * plus match wraps, matching `desugarDefn` / parse-time `wrapPatternParams`.
+ */
+function desugarFn(ast: Ast & { tag: "list" }, diags: Diagnostic[]): Ast {
+  const head = desugarNode(ast.elems[0]!, diags);
+  const paramsAst = ast.elems[1];
+  if (!paramsAst || paramsAst.tag !== "list") {
+    return list("paren", mapElems(ast.elems, diags), ast.span);
+  }
+  let ret: Ast | null = null;
+  let body: Ast;
+  if (
+    ast.elems.length >= 5 &&
+    ast.elems[2]?.tag === "sym" &&
+    nameEquals(ast.elems[2].name, "->")
+  ) {
+    ret = desugarNode(ast.elems[3]!, diags);
+    body = desugarNode(ast.elems[4]!, diags);
+  } else if (ast.elems[2]) {
+    body = desugarNode(ast.elems[2], diags);
+  } else {
+    return list("paren", mapElems(ast.elems, diags), ast.span);
+  }
+
+  const newParams: Ast[] = [];
+  const wraps: { name: Ast; pat: Ast }[] = [];
+  for (let i = 0; i < paramsAst.elems.length; i++) {
+    const p = paramsAst.elems[i]!;
+    if (
+      p.tag === "list" &&
+      p.elems[0]?.tag === "sym" &&
+      nameEquals(p.elems[0].name, "param") &&
+      p.elems[1] &&
+      p.elems[2]
+    ) {
+      const pname = sym(`__p${i}`, p.span);
+      newParams.push(
+        list("paren", [sym(`__p${i}:`, p.span), desugarNode(p.elems[2], diags)], p.span),
+      );
+      wraps.push({ name: pname, pat: desugarNode(p.elems[1], diags) });
+    } else if (
+      p.tag === "list" &&
+      p.elems[0]?.tag === "sym" &&
+      nameEquals(p.elems[0].name, "tuple")
+    ) {
+      const pname = sym(`__p${i}`, p.span);
+      newParams.push(pname);
+      wraps.push({ name: pname, pat: desugarNode(p, diags) });
+    } else {
+      newParams.push(desugarNode(p, diags));
+    }
+  }
+
+  for (let i = wraps.length - 1; i >= 0; i--) {
+    const w = wraps[i]!;
+    body = list("paren", [sym("match", w.pat.span), w.name, w.pat, body], w.pat.span);
+  }
+
+  const paramsOut = list("paren", newParams, paramsAst.span);
+  if (ret !== null) {
+    return list("paren", [head, paramsOut, sym("->", ret.span), ret, body], ast.span);
+  }
+  return list("paren", [head, paramsOut, body], ast.span);
+}
+
 /** A call is a parenthesized application. A bare name or a projection is not. */
 function isPipeCall(ast: Ast): ast is Ast & { tag: "list" } {
   if (ast.tag !== "list" || ast.kind !== "paren" || ast.elems.length === 0) return false;
@@ -324,27 +393,17 @@ function isMapLit(ast: Ast): boolean {
   return ast.tag === "list" && ast.kind === "paren" && ast.elems[0]?.tag === "sym" && nameEquals(ast.elems[0].name, "map-lit");
 }
 
-/** `(? lhs rhs)` → `(match lhs (Some mn-ques) mn-ques (None) rhs)`. The right arm is the only place `rhs` runs. */
+/** Keep `(? lhs rhs)`; the typer rewrites Maybe/Result to a short-circuiting match. */
 function desugarQues(ast: Ast & { tag: "list" }, diags: Diagnostic[]): Ast {
   const lhs = ast.elems[1];
   const rhs = ast.elems[2];
   if (!lhs || !rhs || ast.elems.length !== 3) {
-    pushArity(diags, ast.span, "?", "a Maybe and a default");
+    pushArity(diags, ast.span, "?", "a Maybe or Result and a default");
     return list("paren", mapElems(ast.elems, diags), ast.span);
   }
-  const left = desugarNode(lhs, diags);
-  const right = desugarNode(rhs, diags);
-  const binder = sym("mn-ques", ast.span);
   return list(
     "paren",
-    [
-      sym("match", ast.span),
-      left,
-      list("paren", [sym("Some", ast.span), binder], ast.span),
-      binder,
-      list("paren", [sym("None", ast.span)], ast.span),
-      right,
-    ],
+    [sym("?", ast.span), desugarNode(lhs, diags), desugarNode(rhs, diags)],
     ast.span,
   );
 }

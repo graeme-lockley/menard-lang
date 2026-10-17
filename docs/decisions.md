@@ -205,9 +205,13 @@ and merged by walking `map-keys`. The literal lowers to `map-new`,
 `map-set`, `map-get`, and `map-keys` before typechecking. There is no map
 pattern. `{}` is the empty map; a block still needs an expression.
 
-`m ? d` unwraps a `Maybe`. It associates to the right and binds looser than
-`|>`, so `xs |> List.head() ? 0` unwraps the piped value. It lowers to one
-`match`. `d` is the `None` arm. `with-default` stays the eager function.
+`m ? d` unwraps a `Maybe` or a `Result`. It associates to the right and binds
+looser than `|>`, so `xs |> List.head() ? 0` unwraps the piped value. The
+typer leaves `(? m d)` through desugar and rewrites it to one `match`
+(`Some`/`None`, or `Ok`/`Err(_)`). On `Err`, `d` runs and the error payload
+is discarded. There is no unary `r?` propagation. `with-default` stays the
+eager function. `to-maybe` remains for explicit erasure when a `Maybe` is
+needed downstream.
 
 ### Why this shape
 
@@ -218,14 +222,16 @@ starts with `...` or an expression followed by `=>`.
 
 `?` exists because `with-default` evaluates both arguments. The short
 circuit is the whole operator. A `match` evaluates the scrutinee once and
-leaves the default in the `None` arm. Putting `?` below `|>` makes the
-pipe's result the `Maybe`.
+leaves the default in the missing/`Err` arm. Putting `?` below `|>` makes
+the pipe's result the `Maybe` or `Result`.
 
 ### Cost
 
 Both readers lex, parse, print, and desugar the two forms. Precedence
 numbers move up one to make room for `?` under `|>`. The four map
 intrinsics are builtin schemes. A program can name `map-new` directly.
+Unary Rust-style `r?` error propagation is deliberately out of scope:
+`?` only supplies a default, never rebinds or rethrows an `Err`.
 
 ---
 

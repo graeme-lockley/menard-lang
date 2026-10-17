@@ -1574,12 +1574,28 @@ let lower-paren-head(head: Ast, rest: List Ast, sp: Span, env: Map Str Int, b: B
 let lower-apply-value(head: Ast, args: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   Result.and-then(fn (clo) = lower-apply-clo(clo, args, sp, env, b, funcs, noop, pool), lower-expr(head, env, b, funcs, noop, pool))
 
+let apply-extern-abs(n: Int, base: Int) -> Result Int Str =
+  cond
+    | n == 0 -> Ok(extern-apply-0-abs(base))
+    | n == 1 -> Ok(extern-apply-1-abs(base))
+    | n == 2 -> Ok(extern-apply-2-abs(base))
+    | n == 3 -> Ok(extern-apply-3-abs(base))
+    | n == 4 -> Ok(extern-apply-4-abs(base))
+    | n == 5 -> Ok(extern-apply-5-abs(base))
+    | n == 6 -> Ok(extern-apply-6-abs(base))
+    | n == 7 -> Ok(extern-apply-7-abs(base))
+    | n == 8 -> Ok(extern-apply-8-abs(base))
+    | else -> Err("closure application supports at most 8 arguments")
+
 let lower-apply-clo(clo: Int, args: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  match (args)
-    | [] -> Ok(emit-traced-call!(b, pool, sp, extern-apply-0-abs(str-pool-extern-base(pool)), get-words!(b, [clo])))
-    | [a0] -> Result.and-then(fn (arg) = Ok(emit-traced-call!(b, pool, sp, extern-apply-1-abs(str-pool-extern-base(pool)), get-words!(b, [clo, arg]))), lower-expr(a0, env, b, funcs, noop, pool))
-    | [a0, a1] -> Result.and-then(fn (x) = Result.and-then(fn (y) = Ok(emit-traced-call!(b, pool, sp, extern-apply-2-abs(str-pool-extern-base(pool)), get-words!(b, [clo, x, y]))), lower-expr(a1, env, b, funcs, noop, pool)), lower-expr(a0, env, b, funcs, noop, pool))
-    | _ -> Err("closure application supports at most 2 arguments currently")
+  Result.and-then(
+    fn (vs) =
+      Result.and-then(
+        fn (abs) = Ok(emit-traced-call!(b, pool, sp, abs, get-words!(b, clo :: vs))),
+        apply-extern-abs(length(args), str-pool-extern-base(pool))
+      ),
+    lower-args(args, env, b, funcs, noop, pool)
+  )
 
 let lower-named(hn: Str, rest: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   cond
@@ -2012,7 +2028,7 @@ let is-runtime-op(hn: Str) -> Bool =
   hn == "write" || hn == "mn_write" || str-in-list(hn, runtime-op-names())
 
 let runtime-op-names() -> List Str =
-  ["str-concat", "str-byte-length", "str-byte", "str-slice", "char->str", "ref", "deref", "set!", "sb-new", "sb-append!", "sb-append-byte!", "sb-take-str!", "sb-clear!", "map-new", "map-set", "map-get", "map-has", "map-size", "map-keys", "mn-env-0", "mn-env-1", "mn-env-get", "mn-closure-new", "mn-apply-0", "mn-apply-1", "mn-apply-2", "arg-count", "arg", "read-file", "write-file", "show", "mn-env-new", "mn-env-set", "compare", "sb-length", "sb-to-str", "dump", "spawn", "spawn-capture", "getenv", "exists", "rename", "isatty", "mtime", "cwd", "ensure-dir", "list-dir", "realpath", "now-ms", "remove", "is-dir", "mn_isatty", "mn_mtime", "mn_cwd", "mn_ensure_dir", "mn_list_dir", "mn_realpath", "mn_now_ms", "mn_remove", "mn_is_dir", "mn_arg_count", "mn_arg", "mn_read_file", "mn_write_file", "mn_spawn", "mn_spawn_capture", "mn_getenv", "mn_exists", "mn_rename", "f+", "f-", "f*", "f/"]
+  ["str-concat", "str-byte-length", "str-byte", "str-slice", "char->str", "ref", "deref", "set!", "sb-new", "sb-append!", "sb-append-byte!", "sb-take-str!", "sb-clear!", "map-new", "map-set", "map-get", "map-has", "map-size", "map-keys", "mn-env-0", "mn-env-1", "mn-env-get", "mn-closure-new", "mn-apply-0", "mn-apply-1", "mn-apply-2", "mn-apply-3", "mn-apply-4", "mn-apply-5", "mn-apply-6", "mn-apply-7", "mn-apply-8", "arg-count", "arg", "read-file", "write-file", "show", "mn-env-new", "mn-env-set", "compare", "sb-length", "sb-to-str", "dump", "spawn", "spawn-capture", "getenv", "exists", "rename", "isatty", "mtime", "cwd", "ensure-dir", "list-dir", "realpath", "now-ms", "remove", "is-dir", "mn_isatty", "mn_mtime", "mn_cwd", "mn_ensure_dir", "mn_list_dir", "mn_realpath", "mn_now_ms", "mn_remove", "mn_is_dir", "mn_arg_count", "mn_arg", "mn_read_file", "mn_write_file", "mn_spawn", "mn_spawn_capture", "mn_getenv", "mn_exists", "mn_rename", "f+", "f-", "f*", "f/"]
 
 ; `extern` declares the C symbol (`mn_exists`). Ambient compiler calls
 ; still use the Menard name (`exists`). Both lower to the same abs id.
@@ -2096,6 +2112,12 @@ let runtime-op-abs-named(hn: Str, ns: Int) -> Int =
     | hn == "mn-apply-0" -> extern-apply-0-abs(ns)
     | hn == "mn-apply-1" -> extern-apply-1-abs(ns)
     | hn == "mn-apply-2" -> extern-apply-2-abs(ns)
+    | hn == "mn-apply-3" -> extern-apply-3-abs(ns)
+    | hn == "mn-apply-4" -> extern-apply-4-abs(ns)
+    | hn == "mn-apply-5" -> extern-apply-5-abs(ns)
+    | hn == "mn-apply-6" -> extern-apply-6-abs(ns)
+    | hn == "mn-apply-7" -> extern-apply-7-abs(ns)
+    | hn == "mn-apply-8" -> extern-apply-8-abs(ns)
     | hn == "arg-count" -> extern-arg-count-abs(ns)
     | hn == "arg" -> extern-arg-abs(ns)
     | hn == "read-file" -> extern-read-file-abs(ns)
@@ -2124,6 +2146,12 @@ let runtime-op-arity-named(hn: Str) -> Int =
     | hn == "sb-new" || hn == "map-new" || hn == "mn-env-0" || hn == "arg-count" -> 0
     | str-in-list(hn, ["str-byte-length", "char->str", "ref", "deref", "sb-take-str!", "sb-clear!", "map-size", "map-keys", "mn-env-1", "mn-env-new", "arg", "read-file", "mn-apply-0", "show", "sb-length", "sb-to-str", "dump", "spawn", "getenv", "exists"]) -> 1
     | hn == "str-slice" || hn == "map-set" || hn == "mn-apply-2" || hn == "mn-env-set" -> 3
+    | hn == "mn-apply-3" -> 4
+    | hn == "mn-apply-4" -> 5
+    | hn == "mn-apply-5" -> 6
+    | hn == "mn-apply-6" -> 7
+    | hn == "mn-apply-7" -> 8
+    | hn == "mn-apply-8" -> 9
     | else -> 2
 
 let lower-runtime-op(hn: Str, args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
@@ -2642,33 +2670,22 @@ let lower-call-local-or-err(name: Str, arg-asts: List Ast, sp: Span, env: Map St
     | Some(slot) -> lower-apply-local(slot, name, arg-asts, sp, env, b, funcs, noop, pool)
 
 let lower-apply-local(slot: Int, name: Str, arg-asts: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  match (arg-asts)
-    | [] ->
-      {
-        let clo = emit-load!(b, slot)
-        Ok(emit-traced-call!(b, pool, sp, extern-apply-0-abs(str-pool-extern-base(pool)), [clo]))
-      }
-    | [a0] ->
+  cond
+    | length(arg-asts) > 8 ->
+      Err(String.concat("closure application supports at most 8 arguments (calling local `", name, "`)"))
+    | else ->
       Result.and-then(
-        fn (arg) {
+        fn (vs) {
+          ; `emit-load!` already yields a live word; only args go through `get!`
+          ; (same as the prior 0–2 apply paths).
           let clo = emit-load!(b, slot)
-          Ok(emit-traced-call!(b, pool, sp, extern-apply-1-abs(str-pool-extern-base(pool)), [clo, get!(b, arg)]))
-        },
-        lower-expr(a0, env, b, funcs, noop, pool)
-      )
-    | [a0, a1] ->
-      Result.and-then(
-        fn (arg0) =
           Result.and-then(
-            fn (arg1) {
-              let clo = emit-load!(b, slot)
-              Ok(emit-traced-call!(b, pool, sp, extern-apply-2-abs(str-pool-extern-base(pool)), [clo, get!(b, arg0), get!(b, arg1)]))
-            },
-            lower-expr(a1, env, b, funcs, noop, pool)
-          ),
-        lower-expr(a0, env, b, funcs, noop, pool)
+            fn (abs) = Ok(emit-traced-call!(b, pool, sp, abs, clo :: get-words!(b, vs))),
+            apply-extern-abs(length(arg-asts), str-pool-extern-base(pool))
+          )
+        },
+        lower-args(arg-asts, env, b, funcs, noop, pool)
       )
-    | _ -> Err(String.concat("closure application supports 0–2 arguments (calling local `", name, "`)"))
 
 let lower-call-with-ref(fr: FuncRef, name: Str, arg-asts: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   if (length(arg-asts) == func-ref-arity(fr)) -> Result.and-then(fn (args) = Ok(emit-traced-call!(b, pool, sp, func-ref-abs(fr), get-words!(b, args))), lower-args(arg-asts, env, b, funcs, noop, pool)) | Err(String.concat("arity mismatch calling ", name))
@@ -2984,7 +3001,7 @@ let mc-alloc-name(hn: Str) -> Bool =
   mc-alloc-body(seam-menard-name(hn))
 
 let mc-alloc-body(hn: Str) -> Bool =
-  hn == "write" || hn == "str-concat" || hn == "str-slice" || hn == "char->str" || hn == "ref" || hn == "sb-new" || hn == "sb-append!" || hn == "sb-append-byte!" || hn == "sb-take-str!" || hn == "map-new" || hn == "map-set" || hn == "map-get" || hn == "map-keys" || hn == "mn-env-0" || hn == "mn-env-1" || hn == "mn-env-new" || hn == "mn-closure-new" || hn == "mn-apply-0" || hn == "mn-apply-1" || hn == "mn-apply-2" || hn == "arg" || hn == "read-file" || hn == "write-file" || hn == "show" || hn == "spawn" || hn == "spawn-capture" || hn == "getenv" || hn == "rename" || hn == "f+" || hn == "f-" || hn == "f*" || hn == "f/" || hn == "cwd" || hn == "list-dir" || hn == "realpath"
+  hn == "write" || hn == "str-concat" || hn == "str-slice" || hn == "char->str" || hn == "ref" || hn == "sb-new" || hn == "sb-append!" || hn == "sb-append-byte!" || hn == "sb-take-str!" || hn == "map-new" || hn == "map-set" || hn == "map-get" || hn == "map-keys" || hn == "mn-env-0" || hn == "mn-env-1" || hn == "mn-env-new" || hn == "mn-closure-new" || hn == "mn-apply-0" || hn == "mn-apply-1" || hn == "mn-apply-2" || hn == "mn-apply-3" || hn == "mn-apply-4" || hn == "mn-apply-5" || hn == "mn-apply-6" || hn == "mn-apply-7" || hn == "mn-apply-8" || hn == "arg" || hn == "read-file" || hn == "write-file" || hn == "show" || hn == "spawn" || hn == "spawn-capture" || hn == "getenv" || hn == "rename" || hn == "f+" || hn == "f-" || hn == "f*" || hn == "f/" || hn == "cwd" || hn == "list-dir" || hn == "realpath"
 
 let mc-ctor-alloc(hn: Str) -> Bool =
   is-upper-name(hn) && hn != "Nil" && hn != "None"

@@ -552,13 +552,25 @@ function printPat(a: Ast): string {
   return printExpr(a, 0);
 }
 
+function printFnParam(p: Ast): string {
+  if (p.tag === "sym") return printAtom(p);
+  if (isList(p) && txt(p.elems[0]!) === "tuple") return printPat(p);
+  if (isList(p)) return printParam(p);
+  return printAtom(p);
+}
+
 function printFn(a: Ast & { tag: "list" }, ind: number): string {
-  const params = isList(a.elems[1]!) ? a.elems[1].elems.map((p) => printAtom(p)).join(", ") : "";
-  const body = a.elems[2]!;
-  if (head(body) === "do" && isList(body)) return `fn (${params}) ${printBlock(body, ind)}`;
+  const params = isList(a.elems[1]!)
+    ? a.elems[1].elems.map(printFnParam).join(", ")
+    : "";
+  const arrow = a.elems[2] && txt(a.elems[2]) === "->";
+  const ret = arrow ? printType(a.elems[3]!) : null;
+  const body = arrow ? a.elems[4]! : a.elems[2]!;
+  const headStr = ret !== null ? `fn (${params}) -> ${ret}` : `fn (${params})`;
+  if (head(body) === "do" && isList(body)) return `${headStr} ${printBlock(body, ind)}`;
   const b = printExpr(body, ind + 2);
-  if (!b.includes("\n") && !laidOut(body)) return `fn (${params}) = ${b}`;
-  return `fn (${params}) =\n${pad(ind + 2)}${b}`;
+  if (!b.includes("\n") && !laidOut(body)) return `${headStr} = ${b}`;
+  return `${headStr} =\n${pad(ind + 2)}${b}`;
 }
 
 function printLoop(a: Ast & { tag: "list" }, ind: number): string {

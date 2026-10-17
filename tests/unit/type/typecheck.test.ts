@@ -461,4 +461,43 @@ f(Nil(), Nil())`;
     expect(diagnose("(1, 2).0").some((d) => d.code === "E_PARSE" || d.code === "E_TYPE_UNBOUND")).toBe(true);
     expect(diagnose(`let f() -> Int * =\n  (1, 2)`).length).toBeGreaterThan(0);
   });
+
+  test("annotated lambda and expected-type projection", () => {
+    const annotated = `let f = fn (p: Str * Int) -> Int =
+  p.2
+f(("a", 3))`;
+    const r = run(annotated);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(3n);
+
+    const expected = `let fold(f: (Int, Str * Int) -> Int, acc: Int, p: Str * Int) -> Int =
+  f(acc, p)
+fold(fn (a, p) = a + p.2, 0, ("a", 4))`;
+    const r2 = run(expected);
+    expect(r2.ok).toBe(true);
+    if (r2.ok && r2.value.tag === "int") expect(r2.value.value).toBe(4n);
+  });
+
+  test("fn param patterns", () => {
+    const src = `let g(f: (Int * Int) -> Int) -> Int =
+  f((1, 2))
+g(fn ((x, y)) = x + y)`;
+    const r = run(src);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(3n);
+  });
+
+  test("question on Result defaults like Maybe", () => {
+    const src = `let a = Ok(7) ? 0
+let b = Err("x") ? 3
+a + b`;
+    const r = run(src);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(10n);
+  });
+
+  test("mixed fn annotations are a parse error", () => {
+    const diags = diagnose("fn (x: Int, y) -> Int = x");
+    expect(diags.some((d) => d.code === "E_PARSE")).toBe(true);
+  });
 });

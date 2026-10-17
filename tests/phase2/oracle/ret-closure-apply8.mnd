@@ -1,0 +1,7 @@
+; A capturing 8-arg heap closure lowers to mn_apply_8. Exit 41.
+
+let main() -> Int {
+  let n = 1
+  let f = fn (a, b, c, d, e, f2, g, h) = a + b + c + d + e + f2 + g + h + n
+  f(5, 5, 5, 5, 5, 5, 5, 5)
+}

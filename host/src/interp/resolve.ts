@@ -32,6 +32,7 @@ export const enum Sf {
   Project = 13,
   Char = 14,
   Tuple = 15,
+  Ques = 16,
 }
 
 const SF_BY_NAME: Record<string, Sf> = {
@@ -54,6 +55,7 @@ const SF_BY_NAME: Record<string, Sf> = {
   alias: Sf.Decl,
   project: Sf.Project,
   tuple: Sf.Tuple,
+  "?": Sf.Ques,
 };
 
 const sfCache = new WeakMap<Uint8Array, Sf>();

@@ -673,9 +673,11 @@ are sugar for a `Cons` / `Nil` chain, in expression position and in `match`
 patterns. `{k => v, …}`, `{...m, …}`, and `{}` are sugar for `map-new`,
 `map-set`, and, for a spread, one `let`/`loop` over `map-keys` and
 `map-get`. Entries apply left to right and a later entry replaces the same
-key. `m ? d` is sugar for one `match`: `d` is the `None` arm, so it runs
-only when `m` is `None`, and `m` is evaluated once. `?` associates to the
-right and binds looser than `|>`. `h :: t` is the same chain, associating to the right, in
+key. `m ? d` is a core form until typechecking: the typer rewrites it to one
+`match` on `Maybe` (`Some`/`None`) or `Result` (`Ok`/`Err(_)`). `d` runs only
+on the missing/`Err` arm (the `Err` payload is discarded), and `m` is
+evaluated once. `?` associates to the right and binds looser than `|>`.
+`h :: t` is the same chain, associating to the right, in
 expressions and in patterns. A bracket list on a `let`, `record`, or `type`
 name is a type-parameter list and is not expanded. `h :: t` is the open list
 pattern. `expr.field` lowers to a field slot. `import path as Name` binds
@@ -1118,7 +1120,7 @@ import (§2.7).
 | `std/cli` | flag and positional parsing over an argument list |
 | `std/test` | discovery, pass/fail counts, the summary line |
 
-The collection, the string, the `Maybe`, and the `Result` are the last parameter, so `|>` can fill them. A missing `Maybe` is `?`. `to-maybe(r) ? default` is the same step for a `Result`. `member` is the list predicate and `contains` is the string predicate, so the two can be imported together. `map` on lists, results, maybes, and maps is the same name in four modules; a program imports one of them, or qualifies it.
+The collection, the string, the `Maybe`, and the `Result` are the last parameter, so `|>` can fill them. A missing `Maybe` or a failed `Result` is `?` (the `Err` payload is dropped on the default path). `to-maybe` remains when a real `Maybe` is needed downstream. `member` is the list predicate and `contains` is the string predicate, so the two can be imported together. `map` on lists, results, maybes, and maps is the same name in four modules; a program imports one of them, or qualifies it.
 
 **`sort` takes no comparator.** It uses the derived canonical order — with
 `compare` if a Menard-level comparator is wanted internally, but there is no

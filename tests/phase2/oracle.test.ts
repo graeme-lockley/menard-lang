@@ -220,6 +220,18 @@ const fixtures: Array<{
     expectDis: /\bcall i64 @mn_(closure_new|apply_1)\b/,
   },
   {
+    name: "a capturing 3-arg heap closure lowers to `mn_apply_3`",
+    entry: "tests/phase2/oracle/ret-closure-apply3.mnd",
+    expectExit: 41,
+    expectDis: /\bcall i64 @mn_apply_3\b/,
+  },
+  {
+    name: "a capturing 8-arg heap closure lowers to `mn_apply_8`",
+    entry: "tests/phase2/oracle/ret-closure-apply8.mnd",
+    expectExit: 41,
+    expectDis: /\bcall i64 @mn_apply_8\b/,
+  },
+  {
     name: "a standalone top-level `println(...)` lowers to a real `mn_write_stdout` call, prepended into `main`",
     entry: "tests/phase2/oracle/println-hello.mnd",
     expectExit: 7,

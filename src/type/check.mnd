@@ -63,6 +63,26 @@ record TypeEnv {
   loop-bindings: Ref (Maybe (List Type))
 }
 
+; `?` kind remembered while inferring, consumed when rewriting to match.
+; kind: 0 = Maybe, 1 = Result.
+record QuesNote {
+  start: Int
+  end: Int
+  origin: Int
+  kind: Int
+}
+
+let ques-notes = ref([])
+
+let note-ques!(sp: Span, kind: Int) -> Unit =
+  set!(ques-notes, QuesNote(sp.start, sp.end, sp.origin, kind) :: deref(ques-notes))
+
+let find-ques-note(sp: Span, notes: List QuesNote) -> Maybe QuesNote =
+  match (notes)
+    | [] -> None()
+    | QuesNote(s, e, o, k) :: rest ->
+      if (s == sp.start && e == sp.end && o == sp.origin) -> Some(QuesNote(s, e, o, k)) | find-ques-note(sp, rest)
+
 ; Field indexes chosen while inferring `(project obj field)`, consumed when
 ; the checked forms are rewritten to `(slot obj index)` for the lowerer.
 record ProjNote {
@@ -1361,61 +1381,149 @@ let infer-set-bang(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type)
       }
 
 ; -- fn / lambda --
+; `(fn params body)` or `(fn params -> ret body)`.
 
-record LambdaAcc {
-  local: Map Str Type
-  types: List Type
+record LambdaParts {
+  params: Ast
+  body: Ast
+  ret: Maybe Ast
 }
 
-let lambda-acc-extend(local: Map Str Type, p: Ast, v: Type) -> Map Str Type =
-  match (sym-str(p))
-    | Some(n) -> Map.set(n, v, local)
-    | None -> local
+let lambda-parts(elems: List Ast) -> Maybe LambdaParts =
+  match (elems)
+    | _ :: params :: SymNode("->", _) :: ret :: body :: _ -> Some(LambdaParts(params, body, Some(ret)))
+    | _ :: params :: body :: _ -> Some(LambdaParts(params, body, None()))
+    | _ -> None()
 
-let lambda-param-list-cons(env: TypeEnv, p: Ast, rest: List Ast, local: Map Str Type) -> LambdaAcc {
-  let v =
-    fresh-var(
-      env,
-      match (sym-str(p))
-        | Some(n) -> n
-        | None -> ""
-    )
-  lambda-param-combine(lambda-acc-extend(local, p, v), v, lambda-param-list(env, rest, lambda-acc-extend(local, p, v)))
-}
+let lambda-param-elems(params: Ast) -> List Ast =
+  match (params)
+    | ParenNode(xs, _) -> xs
+    | _ -> []
 
-let lambda-param-combine(extended: Map Str Type, v: Type, tail: LambdaAcc) -> LambdaAcc =
-  match (tail)
-    | LambdaAcc(tl, tt) -> LambdaAcc(tl, v :: tt)
-
-let lambda-param-list(env: TypeEnv, pelems: List Ast, local: Map Str Type) -> LambdaAcc =
-  match (pelems)
-    | [] -> LambdaAcc(local, [])
-    | p :: rest -> lambda-param-list-cons(env, p, rest, local)
-
-let infer-lambda-acc(env: TypeEnv, params-ast: Ast, local: Map Str Type) -> LambdaAcc =
-  match (params-ast)
-    | ParenNode(pelems, _) -> lambda-param-list(env, pelems, local)
-    | _ -> LambdaAcc(local, [])
-
-let infer-lambda-build(env: TypeEnv, acc: LambdaAcc, body-ast: Ast) -> Type =
-  match (acc)
-    | LambdaAcc(loc, pts) ->
+; Bind one fn param against an optional expected type; return the param type.
+let bind-lambda-param(env: TypeEnv, p: Ast, loc: Ref (Map Str Type), expected: Maybe Type) -> Type =
+  match (p)
+    | SymNode(n, _) ->
       {
-        let body-type = infer(env, body-ast, loc)
-        t-fn(apply-subst-list(env, pts), apply-subst(env, body-type))
+        let v =
+          match (expected)
+            | Some(e) -> e
+            | None -> fresh-var(env, n)
+        set!(loc, Map.set(n, apply-subst(env, v), deref(loc)))
+        apply-subst(env, v)
       }
+    | ParenNode(SymNode("param", _) :: pat :: ty-ast :: _, _) ->
+      {
+        let ty = parse-type-expr(env, ty-ast, [])
+        let _chk =
+          match (expected)
+            | Some(e) -> expect-type(env, ty, e, ast-span(p))
+            | None -> ty
+        bind-pattern(env, pat, apply-subst(env, ty), loc, ref([]))
+        apply-subst(env, ty)
+      }
+    | ParenNode(SymNode(raw, _) :: ty-ast :: _, _) ->
+      cond
+        | String.length(raw) > 0 && String.byte(String.length(raw) - 1, raw) == 58 ->
+          {
+            let bare = String.slice(0, String.length(raw) - 1, raw)
+            let ty = parse-type-expr(env, ty-ast, [])
+            let _chk =
+              match (expected)
+                | Some(e) -> expect-type(env, ty, e, ast-span(p))
+                | None -> ty
+            set!(loc, Map.set(bare, apply-subst(env, ty), deref(loc)))
+            apply-subst(env, ty)
+          }
+        | raw == "tuple" ->
+          {
+            let factors =
+              match (p)
+                | ParenNode(_ :: rest, _) -> rest
+                | _ -> []
+            let v =
+              match (expected)
+                | Some(e) -> e
+                | None -> t-product(map-fresh-n(env, length(factors)))
+            bind-pattern(env, p, apply-subst(env, v), loc, ref([]))
+            apply-subst(env, v)
+          }
+        | else -> bind-lambda-param-bad(env, p)
+    | _ -> bind-lambda-param-bad(env, p)
 
-let infer-lambda-params(env: TypeEnv, params-ast: Ast, body-ast: Ast, local: Map Str Type) -> Type =
-  infer-lambda-build(env, infer-lambda-acc(env, params-ast, local), body-ast)
+let map-fresh-n(env: TypeEnv, n: Int) -> List Type =
+  if (n <= 0) -> [] | fresh-var-anon(env) :: map-fresh-n(env, n - 1)
+
+let bind-lambda-param-bad(env: TypeEnv, p: Ast) -> Type {
+  err!(env, "E_TYPE_FN", "invalid fn parameter", ast-span(p))
+  fresh-var-anon(env)
+}
+
+let bind-lambda-params(env: TypeEnv, pelems: List Ast, expected: List Type, loc: Ref (Map Str Type), acc: List Type) -> List Type =
+  match (pelems)
+    | [] -> rev-types(acc, [])
+    | p :: rest ->
+      match (expected)
+        | e :: erest ->
+          bind-lambda-params(env, rest, erest, loc, bind-lambda-param(env, p, loc, Some(e)) :: acc)
+        | [] ->
+          bind-lambda-params(env, rest, [], loc, bind-lambda-param(env, p, loc, None()) :: acc)
+
+let rev-types(xs: List Type, acc: List Type) -> List Type =
+  match (xs)
+    | [] -> acc
+    | h :: t -> rev-types(t, h :: acc)
+
+let infer-lambda-with(env: TypeEnv, parts: LambdaParts, local: Map Str Type, expected-params: List Type, expected-ret: Maybe Type) -> Type {
+  let loc = ref(local)
+  let pelems = lambda-param-elems(parts.params)
+  let pts = bind-lambda-params(env, pelems, expected-params, loc, [])
+  match (parts)
+    | LambdaParts(_, body, Some(ret-ast)) ->
+      {
+        let ret-ty = parse-type-expr(env, ret-ast, [])
+        let _chk =
+          match (expected-ret)
+            | Some(er) -> expect-type(env, ret-ty, er, ast-span(ret-ast))
+            | None -> ret-ty
+        expect-type(env, infer(env, body, deref(loc)), ret-ty, ast-span(body))
+        t-fn(apply-subst-list(env, pts), apply-subst(env, ret-ty))
+      }
+    | LambdaParts(_, body, None) ->
+      {
+        let body-ty = infer(env, body, deref(loc))
+        match (expected-ret)
+          | Some(er) ->
+            {
+              expect-type(env, body-ty, er, ast-span(body))
+              t-fn(apply-subst-list(env, pts), apply-subst(env, er))
+            }
+          | None -> t-fn(apply-subst-list(env, pts), apply-subst(env, body-ty))
+      }
+}
 
 let infer-lambda(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) -> Type =
-  match (elems)
-    | _ :: params-ast :: body-ast :: _ -> infer-lambda-params(env, params-ast, body-ast, local)
-    | _ ->
+  match (lambda-parts(elems))
+    | Some(parts) -> infer-lambda-with(env, parts, local, [], None())
+    | None ->
       {
         err!(env, "E_TYPE_FN", "fn requires params and body", sp)
         fresh-var-anon(env)
       }
+
+let check-lambda-against(env: TypeEnv, elems: List Ast, sp: Span, expected: Type, local: Map Str Type) -> Type =
+  match (apply-subst(env, expected))
+    | TFn(ps, ret) ->
+      match (lambda-parts(elems))
+        | Some(parts) ->
+          {
+            let pelems = lambda-param-elems(parts.params)
+            if (length(pelems) != length(ps)) ->
+              err!(env, "E_TYPE_ARITY", String.concat("function arity mismatch: expected ", show(length(ps)), ", found ", show(length(pelems))), sp)
+            infer-lambda-with(env, parts, local, ps, Some(ret))
+          }
+        | None -> infer-lambda(env, elems, sp, local)
+    | _ -> infer-lambda(env, elems, sp, local)
 
 ; -- match --
 
@@ -1805,13 +1913,51 @@ let check-show-compare(env: TypeEnv, head: Ast, arg-types: List Type, args: List
     | is-sym(head, "show") -> check-predicate-arg(env, arg-types, args, sp, is-showable, "E_TYPE_SHOWABLE", "not showable")
     | is-sym(head, "compare") -> check-predicate-arg(env, arg-types, args, sp, is-orderable, "E_TYPE_ORDERABLE", "not orderable")
 
+let is-lambda-ast(a: Ast) -> Bool =
+  match (a)
+    | ParenNode(h :: _, _) -> is-sym(h, "fn") || is-sym(h, "lambda")
+    | _ -> false
+
+let infer-app-arg(env: TypeEnv, a: Ast, expected: Maybe Type, local: Map Str Type) -> Type =
+  match (expected)
+    | Some(e) ->
+      cond
+        | is-lambda-ast(a) ->
+          match (a)
+            | ParenNode(elems, sp) -> check-lambda-against(env, elems, sp, e, local)
+            | _ -> infer(env, a, local)
+        | else -> expect-type(env, infer(env, a, local), e, ast-span(a))
+    | None -> infer(env, a, local)
+
+let infer-app-args-against(env: TypeEnv, args: List Ast, params: List Type, local: Map Str Type, acc: List Type) -> List Type =
+  match (args)
+    | [] -> rev-types(acc, [])
+    | a :: rest ->
+      match (params)
+        | p :: prest ->
+          infer-app-args-against(env, rest, prest, local, infer-app-arg(env, a, Some(p), local) :: acc)
+        | [] ->
+          infer-app-args-against(env, rest, [], local, infer-app-arg(env, a, None(), local) :: acc)
+
 let infer-app-core(env: TypeEnv, head: Ast, args: List Ast, sp: Span, local: Map Str Type) -> Type {
-  let callee = infer(env, head, local)
-  let arg-types = infer-args(env, args, local)
-  let ret = fresh-var-anon(env)
-  unify(env, callee, t-fn(arg-types, ret), sp)
-  check-show-compare(env, head, arg-types, args, sp)
-  apply-subst(env, ret)
+  let callee = apply-subst(env, infer(env, head, local))
+  match (callee)
+    | TFn(ps, ret) ->
+      {
+        if (length(args) != length(ps)) ->
+          err!(env, "E_TYPE_ARITY", String.concat("function arity mismatch: expected ", show(length(ps)), ", found ", show(length(args))), sp)
+        let arg-types = infer-app-args-against(env, args, ps, local, [])
+        check-show-compare(env, head, arg-types, args, sp)
+        apply-subst(env, ret)
+      }
+    | _ ->
+      {
+        let arg-types = infer-args(env, args, local)
+        let ret = fresh-var-anon(env)
+        unify(env, callee, t-fn(arg-types, ret), sp)
+        check-show-compare(env, head, arg-types, args, sp)
+        apply-subst(env, ret)
+      }
 }
 
 let infer-app-dispatch(env: TypeEnv, head: Ast, args: List Ast, sp: Span, local: Map Str Type) -> Type =
@@ -1977,10 +2123,51 @@ let infer-tuple(env: TypeEnv, rest: List Ast, sp: Span, local: Map Str Type) -> 
       }
     | else -> t-product(infer-args(env, rest, local))
 
+; `(? lhs rhs)` — unwrap Maybe/Result; `rhs` runs only on None/Err.
+let infer-ques(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) -> Type =
+  match (elems)
+    | [_, lhs, rhs] -> infer-ques-ok(env, lhs, rhs, sp, local)
+    | _ ->
+      {
+        err!(env, "E_TYPE_ARITY", "? expects a Maybe or Result and a default", sp)
+        fresh-var-anon(env)
+      }
+
+let infer-ques-ok(env: TypeEnv, lhs: Ast, rhs: Ast, sp: Span, local: Map Str Type) -> Type {
+  let left = apply-subst(env, infer(env, lhs, local))
+  match (left)
+    | TMaybe(elem) ->
+      {
+        note-ques!(sp, 0)
+        expect-type(env, infer(env, rhs, local), elem, ast-span(rhs))
+        apply-subst(env, elem)
+      }
+    | TResult(ok, _) ->
+      {
+        note-ques!(sp, 1)
+        expect-type(env, infer(env, rhs, local), ok, ast-span(rhs))
+        apply-subst(env, ok)
+      }
+    | TVar(_, _) ->
+      {
+        let payload = fresh-var-anon(env)
+        note-ques!(sp, 0)
+        expect-type(env, left, t-maybe(payload), ast-span(lhs))
+        expect-type(env, infer(env, rhs, local), payload, ast-span(rhs))
+        apply-subst(env, payload)
+      }
+    | _ ->
+      {
+        err!(env, "E_TYPE_MISMATCH", String.concat("expected a Maybe or Result, found ", type-show(left)), ast-span(lhs))
+        fresh-var-anon(env)
+      }
+}
+
 let infer-paren-named(env: TypeEnv, hn: Str, elems: List Ast, rest: List Ast, sp: Span, local: Map Str Type) -> Type =
   match (hn)
     | "project" -> infer-project(env, elems, sp, local)
     | "tuple" -> infer-tuple(env, rest, sp, local)
+    | "?" -> infer-ques(env, elems, sp, local)
     | "if" -> infer-if(env, elems, sp, local)
     | "let" -> infer-let(env, elems, sp, local)
     | "do" -> infer-do(env, rest, local)
@@ -2368,10 +2555,47 @@ let rewrite-project-node(elems: List Ast, sp: Span, notes: List ProjNote, env: T
     | head :: obj :: _ ->
       cond
         | is-sym(head, "project") -> rewrite-project-field(elems, obj, sp, notes, env)
+        | is-sym(head, "?") -> rewrite-ques(elems, sp, notes, env)
         | is-sym(head, "print") || is-sym(head, "println") -> rewrite-print(elems, sp, notes, env)
         | else -> ParenNode(rewrite-project-list(elems, notes, env), sp)
     | [head] ->
       if (is-sym(head, "print") || is-sym(head, "println")) -> rewrite-print(elems, sp, notes, env) | ParenNode(elems, sp)
+    | _ -> ParenNode(rewrite-project-list(elems, notes, env), sp)
+
+; Expand `(? lhs rhs)` to a Maybe or Result match using the inferred kind.
+let rewrite-ques(elems: List Ast, sp: Span, notes: List ProjNote, env: TypeEnv) -> Ast =
+  match (elems)
+    | _ :: lhs :: rhs :: [] ->
+      {
+        let left = rewrite-project-ast(lhs, notes, env)
+        let right = rewrite-project-ast(rhs, notes, env)
+        let binder = SymNode("mn-ques", sp)
+        match (find-ques-note(sp, deref(ques-notes)))
+          | Some(QuesNote(_, _, _, 1)) ->
+            ParenNode(
+              [
+                SymNode("match", sp),
+                left,
+                ParenNode([SymNode("Ok", sp), binder], sp),
+                binder,
+                ParenNode([SymNode("Err", sp), SymNode("_", sp)], sp),
+                right
+              ],
+              sp
+            )
+          | _ ->
+            ParenNode(
+              [
+                SymNode("match", sp),
+                left,
+                ParenNode([SymNode("Some", sp), binder], sp),
+                binder,
+                ParenNode([SymNode("None", sp)], sp),
+                right
+              ],
+              sp
+            )
+      }
     | _ -> ParenNode(rewrite-project-list(elems, notes, env), sp)
 
 ; Re-match to pick out the field (kept out of the `head :: obj :: _`
@@ -2481,6 +2705,7 @@ let rest-to-type(es: List RestError) -> List TypeError =
 ; packed first, so the typer sees an ordinary list parameter.
 let typecheck-collected(forms: List Ast) -> Result (List Ast) (List TypeError) {
   set!(proj-notes, [])
+  set!(ques-notes, [])
   set!(print-notes, [])
   set!(print-functions, [])
   set!(print-names, Map.empty())

@@ -117,11 +117,9 @@ let filter-onto[k, v](f: (k, v) -> Bool, m: Map k v, ks: List k, acc: Map k v) -
         | None -> filter-onto(f, m, rest, acc)
 
 ; f folded over the entries, in key order, starting at acc.
-; The entry is a pair: a function value is applied with at most two arguments.
-; @test fold(fn (a, p) = {
-;   match (p)
-;     | (_, v) -> a + v
-; }, 0, from-list([("a", 1), ("b", 2)])) => 3
+; The entry is a pair; expected types make `p.2` safe on an unannotated fn.
+; @test fold(fn (a, p) = a + p.2, 0, from-list([("a", 1), ("b", 2)])) => 3
+; @test fold(fn (a, (_, v)) = a + v, 0, from-list([("a", 1), ("b", 2)])) => 3
 pub let fold[k, v, b](f: (b, k * v) -> b, acc: b, m: Map k v) -> b =
   fold-onto(f, m, keys(m), acc)
 

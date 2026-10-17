@@ -577,9 +577,15 @@ let write-extern-decls!(m: BitSink, ma: Int) -> Unit {
   write-extern-decl!(m, func-type-idx-for-arity(1))
   write-extern-decl!(m, func-type-idx-for-arity(1))
   write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(4))
+  write-extern-decl!(m, func-type-idx-for-arity(5))
+  write-extern-decl!(m, func-type-idx-for-arity(6))
+  write-extern-decl!(m, func-type-idx-for-arity(7))
+  write-extern-decl!(m, func-type-idx-for-arity(8))
+  write-extern-decl!(m, func-type-idx-for-arity(9))
 }
 
- ; mn_char_to_str, mn_sb_clear
+ ; mn_char_to_str, mn_sb_clear, mn_apply_3..8
 
  ; mn_slot_set
 
@@ -900,6 +906,12 @@ let write-extern-vst-entries!(v: BitSink, num-strings: Int) -> Unit {
   write-record!(v, vst-code-entry, extern-map-keys-abs(num-strings) :: str-byte-ops("mn_map_keys"))
   write-record!(v, vst-code-entry, extern-char-to-str-abs(num-strings) :: str-byte-ops("mn_char_to_str"))
   write-record!(v, vst-code-entry, extern-sb-clear-abs(num-strings) :: str-byte-ops("mn_sb_clear"))
+  write-record!(v, vst-code-entry, extern-apply-3-abs(num-strings) :: str-byte-ops("mn_apply_3"))
+  write-record!(v, vst-code-entry, extern-apply-4-abs(num-strings) :: str-byte-ops("mn_apply_4"))
+  write-record!(v, vst-code-entry, extern-apply-5-abs(num-strings) :: str-byte-ops("mn_apply_5"))
+  write-record!(v, vst-code-entry, extern-apply-6-abs(num-strings) :: str-byte-ops("mn_apply_6"))
+  write-record!(v, vst-code-entry, extern-apply-7-abs(num-strings) :: str-byte-ops("mn_apply_7"))
+  write-record!(v, vst-code-entry, extern-apply-8-abs(num-strings) :: str-byte-ops("mn_apply_8"))
 }
 
 let lfunc-list-length(fs: List LFunc) -> Int =
@@ -1184,7 +1196,7 @@ let write-module-body!(m: BitSink, mod: LlvmModule, triple: Str) -> Unit {
   let ma0 = max-arity-of(fs)
   let ma1 = max-imp-arity(imps, ma0)
   let ma =
-    if (ma1 < 3) -> 3 | ma1
+    if (ma1 < 9) -> 9 | ma1
   let ns = int-list-length(str-lengths(globals))
   let nobj = pool-obj-count(objs)
   let npay = payload-type-count(objs)

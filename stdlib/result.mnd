@@ -1,5 +1,6 @@
 ; Helpers over the language Result type.
-; Turn a Result into a Maybe with to-maybe, then fill a missing value with `?`.
+; `r ? d` unwraps Ok like Maybe's `?` (the Err payload is dropped on the
+; default path). Use `to-maybe` when a real Maybe is needed downstream.
 ; @module std/result
 
 ; Apply f to an Ok value and leave Err in place.
@@ -42,8 +43,8 @@ pub let map-error[a, e, f](g: (e) -> f, r: Result a e) -> Result a f =
 ; The Ok value, or None. The error is dropped.
 ; @test to-maybe(Ok(1)) => Some(1)
 ; @test to-maybe(Err("x")) => None()
-; @test (to-maybe(Err("x")) ? 0) => 0
-; @test (to-maybe(Ok(3)) ? 0) => 3
+; @test (Ok(3) ? 0) => 3
+; @test (Err("x") ? 0) => 0
 pub let to-maybe[a, e](r: Result a e) -> Maybe a =
   match (r)
     | Ok(v) -> Some(v)

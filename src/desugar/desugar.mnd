@@ -191,6 +191,66 @@ let desugar-defn-maybe-wrap(d: Ast) -> Ast =
     | ParenNode(defn-sym :: name-ast :: rest, bsp) -> desugar-defn-body(defn-sym, name-ast, rest, bsp)
     | _ -> d
 
+; `(fn (param PAT T | tuple … | name) …)` — same synthetic `__p{i}` + match
+; wrap as `desugar-defn`, so close/eval only see bare or typed names.
+record FnParamSplit {
+  params: List Ast
+  wraps: List ParamWrap
+}
+
+let split-fn-params(params: List Ast, i: Int) -> FnParamSplit =
+  match (params)
+    | [] -> FnParamSplit([], [])
+    | p :: rest -> split-fn-param-one(p, i, rest)
+
+let split-fn-param-one(p: Ast, i: Int, rest: List Ast) -> FnParamSplit =
+  match (p)
+    | ParenNode([SymNode("param", psp), pat, ty], _) -> split-fn-param-ann(psp, pat, ty, i, rest)
+    | ParenNode(SymNode("tuple", _) :: _, psp) -> split-fn-param-tuple(p, psp, i, rest)
+    | _ -> split-fn-param-plain(p, i, rest)
+
+let split-fn-param-ann(psp: Span, pat: Ast, ty: Ast, i: Int, rest: List Ast) -> FnParamSplit =
+  match (split-fn-params(rest, i + 1))
+    | FnParamSplit(ps, ws) ->
+      FnParamSplit(
+        ParenNode([SymNode(String.concat("__p", show(i), ":"), psp), ty], psp) :: ps,
+        ParamWrap(SymNode(String.concat("__p", show(i)), psp), pat) :: ws
+      )
+
+let split-fn-param-tuple(pat: Ast, psp: Span, i: Int, rest: List Ast) -> FnParamSplit =
+  match (split-fn-params(rest, i + 1))
+    | FnParamSplit(ps, ws) ->
+      FnParamSplit(
+        SymNode(String.concat("__p", show(i)), psp) :: ps,
+        ParamWrap(SymNode(String.concat("__p", show(i)), psp), pat) :: ws
+      )
+
+let split-fn-param-plain(p: Ast, i: Int, rest: List Ast) -> FnParamSplit =
+  match (split-fn-params(rest, i + 1))
+    | FnParamSplit(ps, ws) -> FnParamSplit(p :: ps, ws)
+
+let desugar-fn-build(fn-sym: Ast, params-sp: Span, new-params: List Ast, wraps: List ParamWrap, ret: Maybe Ast, body: Ast, sp: Span) -> Ast =
+  match (ret)
+    | Some(r) ->
+      ParenNode([fn-sym, ParenNode(new-params, params-sp), mk-sym("->", sp), r, wrap-defn-body-with(wraps, body, sp)], sp)
+    | None ->
+      ParenNode([fn-sym, ParenNode(new-params, params-sp), wrap-defn-body-with(wraps, body, sp)], sp)
+
+let desugar-fn-with(fn-sym: Ast, params-ast: Ast, ret: Maybe Ast, body: Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (params-ast)
+    | ParenNode(pelems, psp) ->
+      match (split-fn-params(map-desugar(pelems, diags), 0))
+        | FnParamSplit(new-params, wraps) -> desugar-fn-build(fn-sym, psp, new-params, wraps, ret, body, sp)
+    | _ -> ParenNode([fn-sym, desugar-node(params-ast, diags), body], sp)
+
+let desugar-fn(elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
+  match (elems)
+    | fn-sym :: params-ast :: SymNode("->", _) :: ret :: [body] ->
+      desugar-fn-with(desugar-node(fn-sym, diags), params-ast, Some(desugar-node(ret, diags)), desugar-node(body, diags), sp, diags)
+    | fn-sym :: params-ast :: [body] ->
+      desugar-fn-with(desugar-node(fn-sym, diags), params-ast, None(), desugar-node(body, diags), sp, diags)
+    | _ -> ParenNode(map-desugar(elems, diags), sp)
+
 let desugar-pub(elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
   match (elems)
     | pub-kw :: kw :: name :: rest ->
@@ -227,6 +287,7 @@ let desugar-paren-head(head: Ast, elems: List Ast, sp: Span, diags: Ref (List De
 let desugar-paren-named(name: Str, elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
   cond
     | name == "defn" -> desugar-defn(elems, sp, diags)
+    | name == "fn" || name == "lambda" -> desugar-fn(elems, sp, diags)
     | name == "defrec" || name == "variant" || name == "runtime" -> desugar-decl(elems, sp, diags)
     | name == "pub" -> desugar-pub(elems, sp, diags)
     | name == "and" -> desugar-and(elems, sp, diags)
@@ -292,20 +353,15 @@ let pipe-append(call: Ast, arg: Ast) -> Ast =
     | ParenNode(elems, sp) -> ParenNode(snoc-ast(elems, arg), sp)
     | _ -> call
 
-; `(? lhs rhs)` → one match. `rhs` sits in the None arm, so a Some never runs it.
+; Keep `(? lhs rhs)`; the typer rewrites Maybe/Result to a short-circuiting match.
 
 let desugar-ques(elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
   match (elems)
     | _ :: lhs :: rhs :: [] ->
-      {
-        let left = desugar-node(lhs, diags)
-        let right = desugar-node(rhs, diags)
-        let binder = mk-sym("mn-ques", sp)
-        ParenNode([mk-sym("match", sp), left, ParenNode([mk-sym("Some", sp), binder], sp), binder, ParenNode([mk-sym("None", sp)], sp), right], sp)
-      }
+      ParenNode([mk-sym("?", sp), desugar-node(lhs, diags), desugar-node(rhs, diags)], sp)
     | _ ->
       {
-        push-diag!(diags, sp, "E_DESUGAR_ARITY", "? expects a Maybe and a default")
+        push-diag!(diags, sp, "E_DESUGAR_ARITY", "? expects a Maybe or Result and a default")
         ParenNode(map-desugar(elems, diags), sp)
       }
 

@@ -1154,6 +1154,7 @@ function infer(
       if (hn === "char") return prim("Char");
       if (hn === "project") return inferProject(env, ast, local, subst);
       if (hn === "tuple") return inferTuple(env, ast, local, subst);
+      if (hn === "?") return inferQues(env, ast, local, subst);
       if (hn === "set!") {
         // (set! r v)
         if (ast.elems.length !== 3) {
@@ -1171,6 +1172,40 @@ function infer(
       return inferApp(env, ast, local, subst);
     }
   }
+}
+
+/** `(? lhs rhs)` — unwrap Maybe/Result; `rhs` runs only on None/Err. */
+function inferQues(
+  env: TypeEnv,
+  ast: Ast & { tag: "list" },
+  local: Map<string, Type>,
+  subst: Subst,
+): Type {
+  if (ast.elems.length !== 3 || !ast.elems[1] || !ast.elems[2]) {
+    err(env, "E_TYPE_ARITY", "? expects a Maybe or Result and a default", ast.span);
+    return freshVar(env);
+  }
+  const lhs = applySubst(infer(env, ast.elems[1], local, subst), subst);
+  let payload: Type;
+  if (lhs.tag === "maybe") {
+    payload = lhs.elem;
+  } else if (lhs.tag === "result") {
+    payload = lhs.ok;
+  } else if (lhs.tag === "var") {
+    payload = freshVar(env);
+    expectType(env, lhs, tMaybe(payload), subst, ast.elems[1].span);
+  } else {
+    err(
+      env,
+      "E_TYPE_MISMATCH",
+      `expected a Maybe or Result, found ${typeShow(lhs)}`,
+      ast.elems[1].span,
+    );
+    return freshVar(env);
+  }
+  const rhs = infer(env, ast.elems[2], local, subst);
+  expectType(env, rhs, applySubst(payload, subst), subst, ast.elems[2].span);
+  return applySubst(payload, subst);
 }
 
 function inferTuple(
@@ -1445,30 +1480,138 @@ function inferNamedExpr(
   return infer(env, expr, local, subst);
 }
 
+/** `(fn params body)` or `(fn params -> ret body)`. */
+function lambdaParts(
+  ast: Ast & { tag: "list" },
+): { params: Ast; body: Ast; ret: Ast | null } | null {
+  if (ast.elems.length >= 5 && symStr(ast.elems[2]!) === "->") {
+    return { params: ast.elems[1]!, ret: ast.elems[3]!, body: ast.elems[4]! };
+  }
+  if (ast.elems.length >= 3) {
+    return { params: ast.elems[1]!, ret: null, body: ast.elems[2]! };
+  }
+  return null;
+}
+
+/** Bind one fn param; returns its type. Uses `expected` when provided. */
+function bindLambdaParam(
+  env: TypeEnv,
+  p: Ast,
+  local: Map<string, Type>,
+  subst: Subst,
+  expected: Type | null,
+): Type {
+  if (p.tag === "sym") {
+    const n = symStr(p)!;
+    const v = expected ?? freshVar(env, n);
+    local.set(n, applySubst(v, subst));
+    return applySubst(v, subst);
+  }
+  if (p.tag === "list" && symStr(p.elems[0]!) === "param" && p.elems[1] && p.elems[2]) {
+    const ty = parseTypeExpr(env, p.elems[2]!, new Set());
+    if (expected) expectType(env, ty, expected, subst, p.span);
+    bindPattern(env, p.elems[1], applySubst(ty, subst), local, subst, new Set());
+    return applySubst(ty, subst);
+  }
+  if (p.tag === "list" && p.elems[0]?.tag === "sym") {
+    const raw = symStr(p.elems[0]!)!;
+    if (raw.endsWith(":") && p.elems[1]) {
+      const bare = raw.slice(0, -1);
+      const ty = parseTypeExpr(env, p.elems[1], new Set());
+      if (expected) expectType(env, ty, expected, subst, p.span);
+      local.set(bare, applySubst(ty, subst));
+      return applySubst(ty, subst);
+    }
+    if (raw === "tuple") {
+      const v = expected ?? tProduct(p.elems.slice(1).map(() => freshVar(env)));
+      if (expected) expectType(env, v, expected, subst, p.span);
+      bindPattern(env, p, applySubst(v, subst), local, subst, new Set());
+      return applySubst(v, subst);
+    }
+  }
+  err(env, "E_TYPE_FN", "invalid fn parameter", p.span);
+  return freshVar(env);
+}
+
+function checkLambdaAgainst(
+  env: TypeEnv,
+  ast: Ast & { tag: "list" },
+  expected: Type,
+  local: Map<string, Type>,
+  subst: Subst,
+): Type {
+  const exp = applySubst(expected, subst);
+  if (exp.tag !== "fn") {
+    return inferLambda(env, ast, local, subst);
+  }
+  const parts = lambdaParts(ast);
+  if (!parts) {
+    err(env, "E_TYPE_FN", "fn requires params and body", ast.span);
+    return freshVar(env);
+  }
+  const loc = new Map(local);
+  const pts: Type[] = [];
+  const pelems = parts.params.tag === "list" ? parts.params.elems : [];
+  if (pelems.length !== exp.params.length) {
+    err(
+      env,
+      "E_TYPE_ARITY",
+      `function arity mismatch: expected ${exp.params.length}, found ${pelems.length}`,
+      ast.span,
+    );
+  }
+  for (let i = 0; i < pelems.length; i++) {
+    pts.push(bindLambdaParam(env, pelems[i]!, loc, subst, exp.params[i] ?? null));
+  }
+  if (parts.ret) {
+    const retTy = parseTypeExpr(env, parts.ret, new Set());
+    expectType(env, retTy, exp.ret, subst, parts.ret.span);
+    const body = infer(env, parts.body, loc, subst);
+    expectType(env, body, retTy, subst, parts.body.span);
+    return tFn(
+      pts.map((p) => applySubst(p, subst)),
+      applySubst(retTy, subst),
+    );
+  }
+  const body = infer(env, parts.body, loc, subst);
+  expectType(env, body, exp.ret, subst, parts.body.span);
+  return tFn(
+    pts.map((p) => applySubst(p, subst)),
+    applySubst(exp.ret, subst),
+  );
+}
+
 function inferLambda(
   env: TypeEnv,
   ast: Ast & { tag: "list" },
   local: Map<string, Type>,
   subst: Subst,
 ): Type {
-  // (fn (a b) body) — unannotated params as fresh vars
-  if (ast.elems.length < 3) {
+  const parts = lambdaParts(ast);
+  if (!parts) {
     err(env, "E_TYPE_FN", "fn requires params and body", ast.span);
     return freshVar(env);
   }
-  const paramsAst = ast.elems[1]!;
   const loc = new Map(local);
   const pts: Type[] = [];
-  if (paramsAst.tag === "list") {
-    for (const p of paramsAst.elems) {
-      const n = symStr(p);
-      const v = freshVar(env);
-      pts.push(v);
-      if (n) loc.set(n, v);
-    }
+  const pelems = parts.params.tag === "list" ? parts.params.elems : [];
+  for (const p of pelems) {
+    pts.push(bindLambdaParam(env, p, loc, subst, null));
   }
-  const body = infer(env, ast.elems[2]!, loc, subst);
-  return tFn(pts.map((p) => applySubst(p, subst)), applySubst(body, subst));
+  if (parts.ret) {
+    const retTy = parseTypeExpr(env, parts.ret, new Set());
+    const body = infer(env, parts.body, loc, subst);
+    expectType(env, body, retTy, subst, parts.body.span);
+    return tFn(
+      pts.map((p) => applySubst(p, subst)),
+      applySubst(retTy, subst),
+    );
+  }
+  const body = infer(env, parts.body, loc, subst);
+  return tFn(
+    pts.map((p) => applySubst(p, subst)),
+    applySubst(body, subst),
+  );
 }
 
 function inferMatch(
@@ -1733,11 +1876,45 @@ function inferApp(
   }
 
   const callee = infer(env, ast.elems[0]!, local, subst);
-  const args = ast.elems.slice(1).map((a) => infer(env, a, local, subst));
-  const ret = freshVar(env);
-  // unify callee with fn of arg types
-  if (!unify(env, callee, tFn(args, ret), subst, ast.span)) {
-    // arity or argument mismatch already reported
+  const calleeFn = applySubst(callee, subst);
+  const argAsts = ast.elems.slice(1);
+  const args: Type[] = [];
+  if (calleeFn.tag === "fn") {
+    for (let i = 0; i < argAsts.length; i++) {
+      const a = argAsts[i]!;
+      const expected = calleeFn.params[i];
+      if (
+        expected &&
+        a.tag === "list" &&
+        a.kind === "paren" &&
+        a.elems[0] !== undefined &&
+        (symStr(a.elems[0]) === "fn" || symStr(a.elems[0]) === "lambda")
+      ) {
+        args.push(checkLambdaAgainst(env, a, expected, local, subst));
+      } else {
+        const got = infer(env, a, local, subst);
+        if (expected) expectType(env, got, expected, subst, a.span);
+        args.push(applySubst(got, subst));
+      }
+    }
+  } else {
+    for (const a of argAsts) {
+      args.push(infer(env, a, local, subst));
+    }
+  }
+  const ret = calleeFn.tag === "fn" ? applySubst(calleeFn.ret, subst) : freshVar(env);
+  // unify callee with fn of arg types when not already a concrete Fn
+  if (calleeFn.tag !== "fn") {
+    if (!unify(env, callee, tFn(args, ret), subst, ast.span)) {
+      // arity or argument mismatch already reported
+    }
+  } else if (argAsts.length !== calleeFn.params.length) {
+    err(
+      env,
+      "E_TYPE_ARITY",
+      `function arity mismatch: expected ${calleeFn.params.length}, found ${argAsts.length}`,
+      ast.span,
+    );
   }
   if (hn === "show") {
     const a0 = applySubst(args[0] ?? freshVar(env), subst);

@@ -1795,42 +1795,122 @@ let skip-do(elems: List Ast) -> List Ast =
     | _ :: rest -> rest
     | [] -> []
 
+record FnParams {
+  ast: Ast
+  annotated: Bool
+}
+
+record FnParam {
+  ast: Ast
+  annotated: Bool
+}
+
 let parse-fn(ps: Ps) -> Result Ast ParseError {
   let kw = peek(ps)
   advance(ps)
   match (parse-fn-params(ps))
     | Err(e) -> Err(e)
-    | Ok(params) ->
-      {
-        cond
-          | (peek(ps)).kind == "op" && (peek(ps)).text == "->" ->
-            {
-              advance(ps)
-              match (parse-type(ps))
-                | Err(e) -> Err(e)
-                | Ok(_) -> parse-fn-body(ps, kw, params)
-            }
-          | else -> parse-fn-body(ps, kw, params)
-      }
+    | Ok(fp) ->
+      match (fp)
+        | FnParams(params, annotated) -> parse-fn-after-params(ps, kw, params, annotated)
 }
+
+let parse-fn-after-params(ps: Ps, kw: Tok, params: Ast, annotated: Bool) -> Result Ast ParseError =
+  cond
+    | (peek(ps)).kind == "op" && (peek(ps)).text == "->" ->
+      {
+        advance(ps)
+        match (parse-type(ps))
+          | Err(e) -> Err(e)
+          | Ok(ret) ->
+            if (annotated) -> parse-fn-body-ann(ps, kw, params, ret) | perr(kw, "fn return type requires typed parameters")
+      }
+    | annotated -> perr(kw, "fn with typed parameters requires -> return type")
+    | else -> parse-fn-body(ps, kw, params)
 
 let parse-fn-body(ps: Ps, kw: Tok, params: Ast) -> Result Ast ParseError =
   match (parse-body(ps))
     | Err(e) -> Err(e)
     | Ok(body) -> Ok(paren-at([sym-at("fn", tok-span(kw)), params, body], span-join(tok-span(kw), ast-span(body))))
 
-let parse-fn-params(ps: Ps) -> Result Ast ParseError =
+let parse-fn-body-ann(ps: Ps, kw: Tok, params: Ast, ret: Ast) -> Result Ast ParseError =
+  match (parse-body(ps))
+    | Err(e) -> Err(e)
+    | Ok(body) ->
+      Ok(
+        paren-at(
+          [sym-at("fn", tok-span(kw)), params, sym-at("->", ast-span(ret)), ret, body],
+          span-join(tok-span(kw), ast-span(body))
+        )
+      )
+
+record FnParamList {
+  elems: List Ast
+  annotated: Bool
+}
+
+let parse-fn-params(ps: Ps) -> Result FnParams ParseError =
   match (eat(ps, "("))
     | None -> perr(peek(ps), "expected (")
-    | Some(open) ->
-      match (collect-until(ps, ")", parse-fn-param))
-        | Err(e) -> Err(e)
-        | Ok(ps2) ->
+    | Some(open) -> parse-fn-params-open(ps, open)
+
+let parse-fn-params-open(ps: Ps, open: Tok) -> Result FnParams ParseError =
+  match (collect-fn-params(ps, [], None()))
+    | Err(e) -> Err(e)
+    | Ok(collected) ->
+      match (collected)
+        | FnParamList(xs, annotated) ->
           match (eat(ps, ")"))
             | None -> perr(peek(ps), "unclosed (")
-            | Some(close) -> Ok(paren-at(ps2, span-join(tok-span(open), tok-span(close))))
+            | Some(close) ->
+              Ok(FnParams(paren-at(xs, span-join(tok-span(open), tok-span(close))), annotated))
 
-let parse-fn-param(ps: Ps) -> Result Ast ParseError {
+let ann-or-false(ann: Maybe Bool) -> Bool =
+  match (ann)
+    | Some(a) -> a
+    | None -> false
+
+; Collect fn params until `)`, tracking all-typed vs all-untyped.
+let collect-fn-params(ps: Ps, acc: List Ast, ann: Maybe Bool) -> Result FnParamList ParseError =
+  cond
+    | delim(ps, ")") ->
+      Ok(FnParamList(rev(acc, []), ann-or-false(ann)))
+    | (peek(ps)).kind == "eof" -> perr(peek(ps), "unclosed (")
+    | else ->
+      {
+        if ((peek(ps)).text == ",") -> advance(ps)
+        if (delim(ps, ")")) -> collect-fn-params(ps, acc, ann) | collect-fn-params-one(ps, acc, ann)
+      }
+
+let collect-fn-params-one(ps: Ps, acc: List Ast, ann: Maybe Bool) -> Result FnParamList ParseError =
+  match (parse-fn-param(ps))
+    | Err(e) -> Err(e)
+    | Ok(fp) ->
+      match (fp)
+        | FnParam(ast, annotated) ->
+          match (ann)
+            | None -> collect-fn-params(ps, ast :: acc, Some(annotated))
+            | Some(prev) ->
+              if (prev == annotated) -> collect-fn-params(ps, ast :: acc, ann) | perr(peek(ps), "fn parameters must be all typed or all untyped")
+
+let parse-fn-param(ps: Ps) -> Result FnParam ParseError =
+  cond
+    | delim(ps, "(") -> parse-fn-tuple-param(ps)
+    | else -> parse-fn-ident-param(ps)
+
+let parse-fn-tuple-param(ps: Ps) -> Result FnParam ParseError =
+  match (parse-tuple-pattern(ps))
+    | Err(e) -> Err(e)
+    | Ok(pat) ->
+      match (eat(ps, ":"))
+        | Some(_) ->
+          match (parse-type(ps))
+            | Err(e) -> Err(e)
+            | Ok(ty) ->
+              Ok(FnParam(paren-at([sym-at("param", ast-span(pat)), pat, ty], span-join(ast-span(pat), ast-span(ty))), true))
+        | None -> Ok(FnParam(pat, false))
+
+let parse-fn-ident-param(ps: Ps) -> Result FnParam ParseError {
   let n = peek(ps)
   cond
     | n.kind != "ident" -> perr(n, "expected a parameter")
@@ -1844,9 +1924,10 @@ let parse-fn-param(ps: Ps) -> Result Ast ParseError {
               if ((peek(ps)).text == ":") -> advance(ps)
               match (parse-type(ps))
                 | Err(e) -> Err(e)
-                | Ok(_) -> Ok(sym-at(bare, tok-span(n)))
+                | Ok(ty) ->
+                  Ok(FnParam(paren-at([sym-at(String.concat(bare, ":"), tok-span(n)), ty], span-join(tok-span(n), ast-span(ty))), true))
             }
-          | else -> Ok(sym-at(bare, tok-span(n)))
+          | else -> Ok(FnParam(sym-at(bare, tok-span(n)), false))
       }
 }
 
