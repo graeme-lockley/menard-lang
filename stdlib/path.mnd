@@ -1,0 +1,293 @@
+; POSIX filesystem paths and URL-shaped strings. Pure Menard; no Windows rules.
+; Path is last so pipes work: `"/usr" |> join("bin")`.
+; @module std/path
+
+import std/list
+import std/string as String
+import std/string-buffer as Buf
+
+; Whether path begins with `/`.
+; @test is-absolute("/a") => true
+; @test is-absolute("a") => false
+; @test is-absolute("") => false
+pub let is-absolute(path: Str) -> Bool =
+  String.length(path) > 0 && String.byte(0, path) == 47
+
+; Whether path is not absolute.
+; @test is-relative("a/b") => true
+; @test is-relative("/a") => false
+pub let is-relative(path: Str) -> Bool =
+  not(is-absolute(path))
+
+; Join segment onto path. An absolute segment replaces path.
+; @test ("/usr" |> join("bin")) => "/usr/bin"
+; @test join("bin", "/usr") => "/usr/bin"
+; @test join("/etc", "/usr") => "/etc"
+; @test join("b", "a") => "a/b"
+; @test join("b", "") => "b"
+; @test join("b", ".") => "b"
+; @test join("bin", "/") => "/bin"
+; @test ("a" |> join("b") |> join("c")) => "a/b/c"
+pub let join(segment: Str, path: Str) -> Str =
+  cond
+    | is-absolute(segment) -> segment
+    | path == "" || path == "." -> segment
+    | path == "/" -> String.concat("/", segment)
+    | else -> String.concat(path, "/", segment)
+
+; last-slash-from.
+let last-slash-from(s: Str, i: Int, acc: Int) -> Int =
+  cond
+    | i < 0 -> acc
+    | String.byte(i, s) == 47 -> i
+    | else -> last-slash-from(s, i - 1, acc)
+
+; Directory portion of path. `"/a/b"` → `"/a"`; `"a"` → `"."`; `"/"` → `"/"`.
+; @test dirname("/a/b") => "/a"
+; @test dirname("a/b") => "a"
+; @test dirname("a") => "."
+; @test dirname("/") => "/"
+; @test dirname("/a") => "/"
+pub let dirname(path: Str) -> Str {
+  let n = String.length(path)
+  let slash = last-slash-from(path, n - 1, -1)
+  cond
+    | slash < 0 -> "."
+    | slash == 0 -> "/"
+    | else -> String.slice(0, slash, path)
+}
+
+; Final segment of path.
+; @test basename("/a/b.txt") => "b.txt"
+; @test basename("b.txt") => "b.txt"
+; @test basename("/") => ""
+; @test basename("/a/") => ""
+pub let basename(path: Str) -> Str {
+  let n = String.length(path)
+  let slash = last-slash-from(path, n - 1, -1)
+  if (slash < 0) -> path | String.slice(slash + 1, n - slash - 1, path)
+}
+
+; last-dot-from.
+let last-dot-from(s: Str, i: Int, stop: Int, acc: Int) -> Int =
+  cond
+    | i <= stop -> acc
+    | String.byte(i, s) == 46 -> i
+    | else -> last-dot-from(s, i - 1, stop, acc)
+
+; Extension including the dot, or `""` when there is none. Looks only in the basename.
+; @test extname("a.tar.gz") => ".gz"
+; @test extname("a") => ""
+; @test extname("/a/.hidden") => ""
+; @test extname("a.") => "."
+pub let extname(path: Str) -> Str {
+  let base = basename(path)
+  let n = String.length(base)
+  let dot = last-dot-from(base, n - 1, 0, -1)
+  if (dot <= 0) -> "" | String.slice(dot, n - dot, base)
+}
+
+; normalize-push.
+let normalize-push(acc: List Str, seg: Str) -> List Str =
+  cond
+    | seg == "." -> acc
+    | seg == ".." ->
+      match (acc)
+        | [] -> []
+        | _ :: rest -> rest
+    | else -> seg :: acc
+
+; split-segments-from.
+let split-segments-from(s: Str, i: Int, n: Int, start: Int, acc: List Str) -> List Str =
+  cond
+    | i >= n ->
+      if (start == n) -> acc | String.slice(start, n - start, s) :: acc
+    | String.byte(i, s) == 47 ->
+      split-segments-from(
+        s,
+        i + 1,
+        n,
+        i + 1,
+        if (start == i) -> acc | normalize-push(acc, String.slice(start, i - start, s))
+      )
+    | else -> split-segments-from(s, i + 1, n, start, acc)
+
+; join-segments-cons.
+let join-segments-cons(h: Str, rest: List Str, abs: Bool) -> Str =
+  match (rest)
+    | [] ->
+      if (abs) -> String.concat("/", h) | h
+    | n :: more ->
+      String.concat(if (abs) -> String.concat("/", h) | h, "/", join-segments-cons(n, more, false))
+
+; join-segments.
+let join-segments(xs: List Str, abs: Bool) -> Str =
+  match (xs)
+    | [] ->
+      if (abs) -> "/" | "."
+    | h :: rest -> join-segments-cons(h, rest, abs)
+
+; Normalize `.` / `..` (no symlink resolution).
+; @test normalize("/a/./b/../c") => "/a/c"
+; @test normalize("a/../../b") => "b"
+; @test normalize("/../../a") => "/a"
+; @test normalize("") => "."
+; @test normalize("/") => "/"
+; @test normalize("a//b") => "a/b"
+; @test normalize("/a/") => "/a"
+pub let normalize(path: Str) -> Str {
+  let abs = is-absolute(path)
+  let n = String.length(path)
+  let segs-rev = split-segments-from(path, 0, n, 0, [])
+  join-segments(reverse(segs-rev), abs)
+}
+
+; Path segments without the empty pieces from leading/trailing slashes.
+; @test split("/a/b") => ["a", "b"]
+; @test split("a/b") => ["a", "b"]
+; @test split("/") => []
+; @test split("a") => ["a"]
+pub let split(path: Str) -> List Str {
+  let n = String.length(path)
+  let segs-rev = split-segments-from(path, 0, n, 0, [])
+  reverse(segs-rev)
+}
+
+; ---------------------------------------------------------------------------
+; URL-shaped strings: scheme://host/path?query#fragment (host only; no userinfo)
+
+pub record Url {
+  scheme: Str
+  host: Str
+  path: Str
+  query: Str
+  fragment: Str
+}
+
+; Index of byte b at or after i, or -1.
+let index-of-byte(s: Str, b: Int, i: Int) -> Int =
+  cond
+    | i >= String.length(s) -> -1
+    | String.byte(i, s) == b -> i
+    | else -> index-of-byte(s, b, i + 1)
+
+; First index of `://`, or -1.
+let index-of-scheme-sep(s: Str) -> Int {
+  let n = String.length(s)
+  loop (i = 0)
+    cond
+      | i + 2 >= n -> -1
+      | String.byte(i, s) == 58 && String.byte(i + 1, s) == 47 && String.byte(i + 2, s) == 47 -> i
+      | else -> recur(i + 1)
+}
+
+; Earliest non-negative index, or -1 when both missing.
+let earliest(a: Int, b: Int) -> Int =
+  cond
+    | a < 0 -> b
+    | b < 0 -> a
+    | a < b -> a
+    | else -> b
+
+; Earliest of `/`, `?`, `#` at or after i (authority terminator), or n.
+let auth-end(s: Str, i: Int, n: Int) -> Int {
+  let slash = index-of-byte(s, 47, i)
+  let q = index-of-byte(s, 63, i)
+  let h = index-of-byte(s, 35, i)
+  let m = earliest(slash, earliest(q, h))
+  if (m < 0) -> n | m
+}
+
+; Parse a URL-shaped string. Requires `scheme://`. Missing query/fragment are `""`.
+; @test {
+;   match (parse-url("https://example.com/a/b?x=1#f"))
+;     | Some(u) -> u.scheme == "https" && u.host == "example.com" && u.path == "/a/b" && u.query == "x=1" && u.fragment == "f"
+;     | None -> false
+; } => true
+; @test {
+;   match (parse-url("http://localhost"))
+;     | Some(u) -> u.host == "localhost" && u.path == "" && u.query == "" && u.fragment == ""
+;     | None -> false
+; } => true
+; @test {
+;   match (parse-url("https://ex.com?only=q"))
+;     | Some(u) -> u.path == "" && u.query == "only=q" && u.fragment == ""
+;     | None -> false
+; } => true
+; @test {
+;   match (parse-url("https://ex.com#frag"))
+;     | Some(u) -> u.path == "" && u.query == "" && u.fragment == "frag"
+;     | None -> false
+; } => true
+; @test {
+;   match (parse-url("https://ex.com/path#frag"))
+;     | Some(u) -> u.path == "/path" && u.query == "" && u.fragment == "frag"
+;     | None -> false
+; } => true
+; @test parse-url("nope") => None()
+; @test parse-url("http:/x") => None()
+; @test parse-url("") => None()
+pub let parse-url(s: Str) -> Maybe Url {
+  let sep = index-of-scheme-sep(s)
+  if (sep < 0) -> None() |
+    {
+      let scheme = String.slice(0, sep, s)
+      let after = sep + 3
+      let n = String.length(s)
+      let end-auth = auth-end(s, after, n)
+      let host = String.slice(after, end-auth - after, s)
+      let rest = if (end-auth >= n) -> "" | String.slice(end-auth, n - end-auth, s)
+      let hash = index-of-byte(rest, 35, 0)
+      let with-frag =
+        if (hash < 0) -> (rest, "") |
+          (String.slice(0, hash, rest), String.slice(hash + 1, String.length(rest) - hash - 1, rest))
+      let before-frag = with-frag.1
+      let fragment = with-frag.2
+      let q = index-of-byte(before-frag, 63, 0)
+      let path-query =
+        if (q < 0) -> (before-frag, "") |
+          (String.slice(0, q, before-frag), String.slice(q + 1, String.length(before-frag) - q - 1, before-frag))
+      Some(Url(scheme, host, path-query.1, path-query.2, fragment))
+    }
+}
+
+; Append ?query when non-empty.
+let append-query(sb: StringBuffer, q: Str) -> Unit =
+  cond
+    | q == "" -> ()
+    | else ->
+      {
+        Buf.append!(sb, "?")
+        Buf.append!(sb, q)
+      }
+
+; Append #fragment when non-empty.
+let append-fragment(sb: StringBuffer, f: Str) -> Unit =
+  cond
+    | f == "" -> ()
+    | else ->
+      {
+        Buf.append!(sb, "#")
+        Buf.append!(sb, f)
+      }
+
+; Build a URL-shaped string from parts. Empty query/fragment omit `?` / `#`.
+; @test build-url(Url("https", "ex.com", "/a", "q=1", "f")) => "https://ex.com/a?q=1#f"
+; @test build-url(Url("http", "localhost", "", "", "")) => "http://localhost"
+; @test build-url(Url("https", "ex.com", "", "only=q", "")) => "https://ex.com?only=q"
+; @test build-url(Url("https", "ex.com", "/p", "", "frag")) => "https://ex.com/p#frag"
+; @test {
+;   match (parse-url("https://ex.com/a?b=1#z"))
+;     | Some(u) -> build-url(u) == "https://ex.com/a?b=1#z"
+;     | None -> false
+; } => true
+pub let build-url(u: Url) -> Str {
+  let sb = Buf.new()
+  Buf.append!(sb, u.scheme)
+  Buf.append!(sb, "://")
+  Buf.append!(sb, u.host)
+  Buf.append!(sb, u.path)
+  append-query(sb, u.query)
+  append-fragment(sb, u.fragment)
+  Buf.take-str!(sb)
+}

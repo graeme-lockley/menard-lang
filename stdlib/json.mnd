@@ -1,0 +1,581 @@
+; JSON encode/decode in Menard. Numbers: integer tokens that fit Int → JsonInt;
+; otherwise JsonFloat (fraction, exponent, or out-of-range integer).
+; @module std/json
+
+import std/list
+import std/map as Map
+import std/string as String
+import std/string-buffer as Buf
+
+pub type Json =
+  | JsonNull
+  | JsonBool(Bool)
+  | JsonInt(Int)
+  | JsonFloat(Float)
+  | JsonStr(Str)
+  | JsonArray(List Json)
+  | JsonObject(Map Str Json)
+
+pub type JsonError =
+  | UnexpectedEnd
+  | UnexpectedChar(Int)
+  | BadEscape
+  | BadNumber
+  | TrailingJunk
+  | Expected(Str)
+
+; Overflow ceiling for JsonInt accumulation (fits Menard Int literals).
+let int-max() -> Int =
+  1000000000000000000
+
+; ---------------------------------------------------------------------------
+; Float from decimal digits (no float-from-str intrinsic)
+
+; digit-float.
+let digit-float(d: Int) -> Float =
+  cond
+    | d == 0 -> 0.0
+    | d == 1 -> 1.0
+    | d == 2 -> 2.0
+    | d == 3 -> 3.0
+    | d == 4 -> 4.0
+    | d == 5 -> 5.0
+    | d == 6 -> 6.0
+    | d == 7 -> 7.0
+    | d == 8 -> 8.0
+    | d == 9 -> 9.0
+    | else -> 0.0
+
+; mul10.
+let mul10(f: Float) -> Float =
+  f*(f, 10.0)
+
+; div10.
+let div10(f: Float) -> Float =
+  f/(f, 10.0)
+
+; add-digit.
+let add-digit(acc: Float, d: Int) -> Float =
+  f+(mul10(acc), digit-float(d))
+
+; negate-f.
+let negate-f(f: Float, neg: Bool) -> Float =
+  if (neg) -> f-(0.0, f) | f
+
+; int-digits.
+let int-digits(n: Int, acc: List Int) -> List Int =
+  cond
+    | n == 0 ->
+      match (acc)
+        | [] -> [0]
+        | _ -> acc
+    | else -> int-digits(n / 10, (n % 10) :: acc)
+
+; float-from-digits.
+let float-from-digits(ds: List Int, acc: Float) -> Float =
+  match (ds)
+    | [] -> acc
+    | d :: rest -> float-from-digits(rest, add-digit(acc, d))
+
+; float-from-int.
+let float-from-int(n: Int) -> Float =
+  cond
+    | n < 0 -> negate-f(float-from-digits(int-digits(0 - n, []), 0.0), true)
+    | else -> float-from-digits(int-digits(n, []), 0.0)
+
+; apply-exp.
+let apply-exp(f: Float, exp: Int, neg-exp: Bool) -> Float =
+  cond
+    | exp <= 0 -> f
+    | neg-exp -> apply-exp(div10(f), exp - 1, true)
+    | else -> apply-exp(mul10(f), exp - 1, false)
+
+; ---------------------------------------------------------------------------
+; Encode
+
+; hex-digit.
+let hex-digit(n: Int) -> Str =
+  cond
+    | n < 10 -> String.from-int(n)
+    | n == 10 -> "a"
+    | n == 11 -> "b"
+    | n == 12 -> "c"
+    | n == 13 -> "d"
+    | n == 14 -> "e"
+    | else -> "f"
+
+; escape-byte.
+let escape-byte(sb: StringBuffer, b: Int) -> Unit =
+  cond
+    | b == 34 -> Buf.append!(sb, "\\\"")
+    | b == 92 -> Buf.append!(sb, "\\\\")
+    | b == 8 -> Buf.append!(sb, "\\b")
+    | b == 12 -> Buf.append!(sb, "\\f")
+    | b == 10 -> Buf.append!(sb, "\\n")
+    | b == 13 -> Buf.append!(sb, "\\r")
+    | b == 9 -> Buf.append!(sb, "\\t")
+    | b < 32 ->
+      {
+        Buf.append!(sb, "\\u00")
+        Buf.append!(sb, hex-digit(b / 16))
+        Buf.append!(sb, hex-digit(b % 16))
+      }
+    | else -> Buf.append-byte!(sb, b)
+
+; encode-str-bytes.
+let encode-str-bytes(sb: StringBuffer, s: Str, i: Int, n: Int) -> Unit =
+  if (i >= n) -> () |
+    {
+      escape-byte(sb, String.byte(i, s))
+      encode-str-bytes(sb, s, i + 1, n)
+    }
+
+; encode-string.
+let encode-string(sb: StringBuffer, s: Str) -> Unit =
+  {
+    Buf.append!(sb, "\"")
+    encode-str-bytes(sb, s, 0, String.length(s))
+    Buf.append!(sb, "\"")
+  }
+
+; encode-array.
+let encode-array(sb: StringBuffer, xs: List Json, first: Bool) -> Unit =
+  match (xs)
+    | [] -> ()
+    | h :: t ->
+      {
+        if (first) -> () | Buf.append!(sb, ",")
+        encode-into(sb, h)
+        encode-array(sb, t, false)
+      }
+
+; encode-object-keys.
+let encode-object-keys(sb: StringBuffer, keys: List Str, m: Map Str Json, first: Bool) -> Unit =
+  match (keys)
+    | [] -> ()
+    | k :: rest ->
+      {
+        if (first) -> () | Buf.append!(sb, ",")
+        encode-string(sb, k)
+        Buf.append!(sb, ":")
+        encode-into(sb, Map.lookup(k, m) ? JsonNull())
+        encode-object-keys(sb, rest, m, false)
+      }
+
+; encode-into.
+let encode-into(sb: StringBuffer, v: Json) -> Unit =
+  match (v)
+    | JsonNull -> Buf.append!(sb, "null")
+    | JsonBool(true) -> Buf.append!(sb, "true")
+    | JsonBool(false) -> Buf.append!(sb, "false")
+    | JsonInt(n) -> Buf.append!(sb, String.from-int(n))
+    | JsonFloat(f) -> Buf.append!(sb, show(f))
+    | JsonStr(s) -> encode-string(sb, s)
+    | JsonArray(xs) ->
+      {
+        Buf.append!(sb, "[")
+        encode-array(sb, xs, true)
+        Buf.append!(sb, "]")
+      }
+    | JsonObject(m) ->
+      {
+        Buf.append!(sb, "{")
+        encode-object-keys(sb, Map.keys(m), m, true)
+        Buf.append!(sb, "}")
+      }
+
+; Encode v as JSON text.
+; @test encode(JsonNull()) => "null"
+; @test encode(JsonBool(true)) => "true"
+; @test encode(JsonBool(false)) => "false"
+; @test encode(JsonInt(42)) => "42"
+; @test encode(JsonInt(-3)) => "-3"
+; @test encode(JsonInt(0)) => "0"
+; @test encode(JsonStr("hi")) => "\"hi\""
+; @test encode(JsonStr("a\"b")) => "\"a\\\"b\""
+; @test encode(JsonStr("a\\b")) => "\"a\\\\b\""
+; @test encode(JsonStr("a\nb")) => "\"a\\nb\""
+; @test encode(JsonArray([])) => "[]"
+; @test encode(JsonArray([JsonInt(1), JsonInt(2)])) => "[1,2]"
+; @test encode(JsonArray([JsonArray([JsonInt(1)]), JsonNull()])) => "[[1],null]"
+; @test encode(JsonObject(Map.empty())) => "{}"
+; @test encode(JsonObject(Map.singleton("a", JsonInt(1)))) => "{\"a\":1}"
+; @test encode(JsonFloat(1.5)) => "1.5"
+pub let encode(v: Json) -> Str {
+  let sb = Buf.new()
+  encode-into(sb, v)
+  Buf.take-str!(sb)
+}
+
+; ---------------------------------------------------------------------------
+; Decode
+
+; is-ws.
+let is-ws(b: Int) -> Bool =
+  b == 32 || b == 9 || b == 10 || b == 13
+
+; skip-ws.
+let skip-ws(s: Str, i: Int) -> Int =
+  loop (j = i)
+    cond
+      | j >= String.length(s) -> j
+      | is-ws(String.byte(j, s)) -> recur(j + 1)
+      | else -> j
+
+
+; append-utf8.
+let append-utf8(sb: StringBuffer, cp: Int) -> Result Unit JsonError =
+  cond
+    | cp < 0 || cp > 1114111 -> Err(BadEscape())
+    | cp >= 55296 && cp <= 57343 -> Err(BadEscape())
+    | cp < 128 ->
+      {
+        Buf.append-byte!(sb, cp)
+        Ok(())
+      }
+    | cp < 2048 ->
+      {
+        Buf.append-byte!(sb, 192 + cp / 64)
+        Buf.append-byte!(sb, 128 + cp % 64)
+        Ok(())
+      }
+    | cp < 65536 ->
+      {
+        Buf.append-byte!(sb, 224 + cp / 4096)
+        Buf.append-byte!(sb, 128 + (cp / 64) % 64)
+        Buf.append-byte!(sb, 128 + cp % 64)
+        Ok(())
+      }
+    | else ->
+      {
+        Buf.append-byte!(sb, 240 + cp / 262144)
+        Buf.append-byte!(sb, 128 + (cp / 4096) % 64)
+        Buf.append-byte!(sb, 128 + (cp / 64) % 64)
+        Buf.append-byte!(sb, 128 + cp % 64)
+        Ok(())
+      }
+
+; parse-hex4.
+let parse-hex4(s: Str, i: Int) -> Result (Int * Int) JsonError =
+  cond
+    | i + 3 >= String.length(s) -> Err(UnexpectedEnd())
+    | else ->
+      match (String.hex-value(String.byte(i, s)))
+        | None -> Err(BadEscape())
+        | Some(a) ->
+          match (String.hex-value(String.byte(i + 1, s)))
+            | None -> Err(BadEscape())
+            | Some(b) ->
+              match (String.hex-value(String.byte(i + 2, s)))
+                | None -> Err(BadEscape())
+                | Some(c) ->
+                  match (String.hex-value(String.byte(i + 3, s)))
+                    | None -> Err(BadEscape())
+                    | Some(d) -> Ok((a * 4096 + b * 256 + c * 16 + d, i + 4))
+
+; parse-escape.
+let parse-escape(s: Str, i: Int, sb: StringBuffer) -> Result Int JsonError =
+  cond
+    | i >= String.length(s) -> Err(UnexpectedEnd())
+    | else ->
+      {
+        let b = String.byte(i, s)
+        cond
+          | b == 34 || b == 92 || b == 47 ->
+            {
+              Buf.append-byte!(sb, b)
+              Ok(i + 1)
+            }
+          | b == 98 ->
+            {
+              Buf.append-byte!(sb, 8)
+              Ok(i + 1)
+            }
+          | b == 102 ->
+            {
+              Buf.append-byte!(sb, 12)
+              Ok(i + 1)
+            }
+          | b == 110 ->
+            {
+              Buf.append-byte!(sb, 10)
+              Ok(i + 1)
+            }
+          | b == 114 ->
+            {
+              Buf.append-byte!(sb, 13)
+              Ok(i + 1)
+            }
+          | b == 116 ->
+            {
+              Buf.append-byte!(sb, 9)
+              Ok(i + 1)
+            }
+          | b == 117 ->
+            match (parse-hex4(s, i + 1))
+              | Err(e) -> Err(e)
+              | Ok(pair) ->
+                match (append-utf8(sb, pair.1))
+                  | Err(e) -> Err(e)
+                  | Ok(_) -> Ok(pair.2)
+          | else -> Err(BadEscape())
+      }
+
+; parse-string-chars.
+let parse-string-chars(s: Str, i: Int, sb: StringBuffer) -> Result Int JsonError =
+  cond
+    | i >= String.length(s) -> Err(UnexpectedEnd())
+    | String.byte(i, s) == 34 -> Ok(i + 1)
+    | String.byte(i, s) == 92 ->
+      match (parse-escape(s, i + 1, sb))
+        | Err(e) -> Err(e)
+        | Ok(j) -> parse-string-chars(s, j, sb)
+    | String.byte(i, s) < 32 -> Err(UnexpectedChar(String.byte(i, s)))
+    | else ->
+      {
+        Buf.append-byte!(sb, String.byte(i, s))
+        parse-string-chars(s, i + 1, sb)
+      }
+
+; parse-string.
+let parse-string(s: Str, i: Int) -> Result (Str * Int) JsonError =
+  if (i >= String.length(s) || String.byte(i, s) != 34) -> Err(Expected("string")) |
+    {
+      let sb = Buf.new()
+      match (parse-string-chars(s, i + 1, sb))
+        | Err(e) -> Err(e)
+        | Ok(j) -> Ok((Buf.take-str!(sb), j))
+    }
+
+; Number scan state.
+record NumState {
+  neg: Bool
+  as-float: Bool
+  int-val: Int
+  float-val: Float
+  frac-place: Float
+  exp: Int
+  exp-neg: Bool
+  saw-digit: Bool
+  in-frac: Bool
+  in-exp: Bool
+  exp-digits: Bool
+}
+
+; num-start.
+let num-start(neg: Bool) -> NumState =
+  NumState(neg, false, 0, 0.0, 1.0, 0, false, false, false, false, false)
+
+; num-to-json.
+let num-to-json(st: NumState) -> Result Json JsonError =
+  if (not(st.saw-digit)) -> Err(BadNumber()) |
+    if (st.in-exp && not(st.exp-digits)) -> Err(BadNumber()) |
+      {
+        let f0 =
+          if (st.as-float) -> st.float-val | float-from-int(st.int-val)
+        let f1 = apply-exp(f0, st.exp, st.exp-neg)
+        let f = negate-f(f1, st.neg)
+        if (st.as-float || st.in-exp) -> Ok(JsonFloat(f)) |
+          Ok(JsonInt(if (st.neg) -> 0 - st.int-val | st.int-val))
+      }
+
+; num-push-digit.
+let num-push-digit(st: NumState, d: Int) -> Result NumState JsonError =
+  cond
+    | st.in-exp ->
+      Ok(NumState(st.neg, true, st.int-val, st.float-val, st.frac-place, st.exp * 10 + d, st.exp-neg, true, st.in-frac, true, true))
+    | st.in-frac ->
+      {
+        let place = div10(st.frac-place)
+        let fv = f+(st.float-val, f*(digit-float(d), place))
+        Ok(NumState(st.neg, true, st.int-val, fv, place, st.exp, st.exp-neg, true, true, false, false))
+      }
+    | st.as-float ->
+      Ok(NumState(st.neg, true, st.int-val, add-digit(st.float-val, d), st.frac-place, st.exp, st.exp-neg, true, false, false, false))
+    | st.int-val > (int-max() - d) / 10 ->
+      Ok(NumState(st.neg, true, 0, add-digit(float-from-int(st.int-val), d), st.frac-place, st.exp, st.exp-neg, true, false, false, false))
+    | else ->
+      Ok(NumState(st.neg, false, st.int-val * 10 + d, st.float-val, st.frac-place, st.exp, st.exp-neg, true, false, false, false))
+
+; parse-number.
+let parse-number(s: Str, i0: Int) -> Result (Json * Int) JsonError {
+  let n = String.length(s)
+  let neg = i0 < n && String.byte(i0, s) == 45
+  let i1 = if (neg) -> i0 + 1 | i0
+  if (i1 >= n) -> Err(BadNumber()) |
+    loop (i = i1, st = num-start(neg))
+      cond
+        | i >= n ->
+          match (num-to-json(st))
+            | Err(e) -> Err(e)
+            | Ok(v) -> Ok((v, i))
+        | String.is-digit-byte(String.byte(i, s)) ->
+          match (num-push-digit(st, String.byte(i, s) - 48))
+            | Err(e) -> Err(e)
+            | Ok(st2) -> recur(i + 1, st2)
+        | String.byte(i, s) == 46 && not(st.as-float) && not(st.in-frac) && st.saw-digit ->
+          recur(i + 1, NumState(st.neg, true, st.int-val, float-from-int(st.int-val), 1.0, st.exp, st.exp-neg, true, true, false, false))
+        | (String.byte(i, s) == 101 || String.byte(i, s) == 69) && st.saw-digit && not(st.in-exp) ->
+          {
+            let j = i + 1
+            cond
+              | j >= n -> Err(BadNumber())
+              | String.byte(j, s) == 45 ->
+                recur(j + 1, NumState(st.neg, true, st.int-val, if (st.as-float) -> st.float-val | float-from-int(st.int-val), st.frac-place, 0, true, true, st.in-frac, true, false))
+              | String.byte(j, s) == 43 ->
+                recur(j + 1, NumState(st.neg, true, st.int-val, if (st.as-float) -> st.float-val | float-from-int(st.int-val), st.frac-place, 0, false, true, st.in-frac, true, false))
+              | String.is-digit-byte(String.byte(j, s)) ->
+                recur(j, NumState(st.neg, true, st.int-val, if (st.as-float) -> st.float-val | float-from-int(st.int-val), st.frac-place, 0, false, true, st.in-frac, true, false))
+              | else -> Err(BadNumber())
+          }
+        | else ->
+          match (num-to-json(st))
+            | Err(e) -> Err(e)
+            | Ok(v) -> Ok((v, i))
+}
+
+; parse-literal.
+let parse-literal(s: Str, i: Int, lit: Str, value: Json) -> Result (Json * Int) JsonError {
+  let n = String.length(lit)
+  if (i + n > String.length(s)) -> Err(UnexpectedEnd()) |
+    if (String.slice(i, n, s) == lit) -> Ok((value, i + n)) | Err(Expected(lit))
+}
+
+; parse-value.
+let parse-value(s: Str, i0: Int) -> Result (Json * Int) JsonError {
+  let i = skip-ws(s, i0)
+  if (i >= String.length(s)) -> Err(UnexpectedEnd()) |
+    {
+      let b = String.byte(i, s)
+      cond
+        | b == 110 -> parse-literal(s, i, "null", JsonNull())
+        | b == 116 -> parse-literal(s, i, "true", JsonBool(true))
+        | b == 102 -> parse-literal(s, i, "false", JsonBool(false))
+        | b == 34 ->
+          match (parse-string(s, i))
+            | Err(e) -> Err(e)
+            | Ok(pair) -> Ok((JsonStr(pair.1), pair.2))
+        | b == 91 -> parse-array(s, i + 1)
+        | b == 123 -> parse-object(s, i + 1)
+        | b == 45 || String.is-digit-byte(b) -> parse-number(s, i)
+        | else -> Err(UnexpectedChar(b))
+    }
+}
+
+; parse-array.
+let parse-array(s: Str, i0: Int) -> Result (Json * Int) JsonError {
+  let i1 = skip-ws(s, i0)
+  cond
+    | i1 >= String.length(s) -> Err(UnexpectedEnd())
+    | String.byte(i1, s) == 93 -> Ok((JsonArray([]), i1 + 1))
+    | else -> parse-array-items(s, i1, [])
+}
+
+; parse-array-items.
+let parse-array-items(s: Str, i0: Int, acc: List Json) -> Result (Json * Int) JsonError =
+  match (parse-value(s, i0))
+    | Err(e) -> Err(e)
+    | Ok(pair) ->
+      {
+        let j = skip-ws(s, pair.2)
+        cond
+          | j >= String.length(s) -> Err(UnexpectedEnd())
+          | String.byte(j, s) == 44 -> parse-array-items(s, j + 1, pair.1 :: acc)
+          | String.byte(j, s) == 93 -> Ok((JsonArray(reverse(pair.1 :: acc)), j + 1))
+          | else -> Err(UnexpectedChar(String.byte(j, s)))
+      }
+
+; parse-object.
+let parse-object(s: Str, i0: Int) -> Result (Json * Int) JsonError {
+  let i1 = skip-ws(s, i0)
+  cond
+    | i1 >= String.length(s) -> Err(UnexpectedEnd())
+    | String.byte(i1, s) == 125 -> Ok((JsonObject(Map.empty()), i1 + 1))
+    | else -> parse-object-items(s, i1, Map.empty())
+}
+
+; parse-object-items.
+let parse-object-items(s: Str, i0: Int, acc: Map Str Json) -> Result (Json * Int) JsonError {
+  let i = skip-ws(s, i0)
+  match (parse-string(s, i))
+    | Err(e) -> Err(e)
+    | Ok(key-pair) ->
+      {
+        let j = skip-ws(s, key-pair.2)
+        cond
+          | j >= String.length(s) -> Err(UnexpectedEnd())
+          | String.byte(j, s) != 58 -> Err(Expected(":"))
+          | else ->
+            match (parse-value(s, j + 1))
+              | Err(e) -> Err(e)
+              | Ok(val-pair) ->
+                {
+                  let acc2 = Map.set(key-pair.1, val-pair.1, acc)
+                  let k = skip-ws(s, val-pair.2)
+                  cond
+                    | k >= String.length(s) -> Err(UnexpectedEnd())
+                    | String.byte(k, s) == 44 -> parse-object-items(s, k + 1, acc2)
+                    | String.byte(k, s) == 125 -> Ok((JsonObject(acc2), k + 1))
+                    | else -> Err(UnexpectedChar(String.byte(k, s)))
+                }
+      }
+}
+
+; Decode a complete JSON value. Trailing non-whitespace is TrailingJunk().
+; @test decode("null") => Ok(JsonNull())
+; @test decode(" true ") => Ok(JsonBool(true))
+; @test decode("false") => Ok(JsonBool(false))
+; @test decode("0") => Ok(JsonInt(0))
+; @test decode("42") => Ok(JsonInt(42))
+; @test decode("-3") => Ok(JsonInt(-3))
+; @test decode("1.5") => Ok(JsonFloat(1.5))
+; @test decode("1e2") => Ok(JsonFloat(100.0))
+; @test decode("1E-1") => Ok(JsonFloat(0.1))
+; @test decode("\"hi\"") => Ok(JsonStr("hi"))
+; @test decode("[]") => Ok(JsonArray([]))
+; @test decode("[1, 2]") => Ok(JsonArray([JsonInt(1), JsonInt(2)]))
+; @test decode("[[1],null]") => Ok(JsonArray([JsonArray([JsonInt(1)]), JsonNull()]))
+; @test decode("{}") => Ok(JsonObject(Map.empty()))
+; @test {
+;   match (decode("{\"a\":1,\"b\":true}"))
+;     | Ok(JsonObject(m)) ->
+;       Map.lookup("a", m) == Some(JsonInt(1)) && Map.lookup("b", m) == Some(JsonBool(true))
+;     | _ -> false
+; } => true
+; @test {
+;   match (decode("\"a\\\"b\""))
+;     | Ok(JsonStr(s)) -> s == "a\"b"
+;     | _ -> false
+; } => true
+; @test {
+;   match (decode("\"a\\nb\\t\""))
+;     | Ok(JsonStr(s)) -> s == "a\nb\t"
+;     | _ -> false
+; } => true
+; @test {
+;   match (decode("\"\\u0041\""))
+;     | Ok(JsonStr(s)) -> s == "A"
+;     | _ -> false
+; } => true
+; @test {
+;   match (decode(encode(JsonArray([JsonInt(1), JsonStr("x")]))))
+;     | Ok(v) -> v == JsonArray([JsonInt(1), JsonStr("x")])
+;     | Err(_) -> false
+; } => true
+; @test decode("1 2") => Err(TrailingJunk())
+; @test decode("") => Err(UnexpectedEnd())
+; @test decode("nul") => Err(UnexpectedEnd())
+; @test decode("[1,]") => Err(UnexpectedChar(93))
+; @test decode("{") => Err(UnexpectedEnd())
+; @test decode("\"hi") => Err(UnexpectedEnd())
+; @test decode("\"\\x\"") => Err(BadEscape())
+; @test decode(".") => Err(UnexpectedChar(46))
+; @test decode("-") => Err(BadNumber())
+pub let decode(s: Str) -> Result Json JsonError =
+  match (parse-value(s, 0))
+    | Err(e) -> Err(e)
+    | Ok(pair) ->
+      {
+        let j = skip-ws(s, pair.2)
+        if (j == String.length(s)) -> Ok(pair.1) | Err(TrailingJunk())
+      }

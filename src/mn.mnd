@@ -46,9 +46,11 @@ import std/cli
 import std/fs
 import std/io
 import std/list
+import std/path as Path
 import std/proc
 import std/string as String
 import std/sys
+import std/time
 
 ; Flags the driver understands. A valued flag consumes the next word.
 let mn-flags() -> List Flag =
@@ -467,38 +469,22 @@ let run-emit(path: Str, has-out: Bool, out: Str, dump-after-reader: Bool, dump-a
 let recorded-cc() -> Str =
   "/usr/bin/clang"
 
-let last-slash-at(s: Str, i: Int) -> Int =
-  cond
-    | i < 0 -> -1
-    | String.byte(i, s) == 47 -> i
-    | else -> last-slash-at(s, i - 1)
-
-let path-parent(path: Str) -> Str {
-  let slash = last-slash-at(path, String.length(path) - 1)
-  cond
-    | slash <= 0 -> "/"
-    | else -> String.slice(0, slash, path)
-}
-
-let join-dir(dir: Str, rel: Str) -> Str =
-  if (dir == "/") -> String.concat("/", rel) | String.concat(dir, "/", rel)
-
 ; `runtime` beside the working directory, or the same directory in a parent.
 ; `mn test` from `stdlib/` still links the runtime that lives at the repo root.
 let runtime-from(dir: Str) -> Str = {
-  let marker = join-dir(dir, "runtime/src/alloc.c")
+  let marker = Path.join("runtime/src/alloc.c", dir)
   cond
-    | exists(marker) -> join-dir(dir, "runtime")
+    | exists(marker) -> Path.join("runtime", dir)
     | dir == "/" -> "runtime"
     | else ->
       {
-        let up = path-parent(dir)
+        let up = Path.dirname(dir)
         if (up == dir) -> "runtime" | runtime-from(up)
       }
 }
 
 let recorded-runtime() -> Str =
-  if (exists("runtime/src/alloc.c")) -> "runtime" | runtime-from(path-parent(cwd()))
+  if (exists("runtime/src/alloc.c")) -> "runtime" | runtime-from(Path.dirname(cwd()))
 
 let chosen-cc-menard() -> Str =
   match (getenv("MENARD_CC"))
@@ -518,31 +504,19 @@ let chosen-cc(flag: Str) -> Str =
 let chosen-runtime(flag: Str) -> Str =
   if (String.length(flag) > 0) -> flag | recorded-runtime()
 
-let last-slash-from(s: Str, i: Int, last: Int, n: Int) -> Int =
-  cond
-    | i >= n -> last
-    | String.byte(i, s) == 47 -> last-slash-from(s, i + 1, i + 1, n)
-    | else -> last-slash-from(s, i + 1, last, n)
-
-let basename(s: Str) -> Str {
-  let n = String.length(s)
-  let i = last-slash-from(s, 0, 0, n)
-  String.slice(i, n - i, s)
-}
-
 let stem-of(file: Str) -> Str {
-  let b = basename(file)
+  let b = Path.basename(file)
   if (String.ends-with(".mnd", b)) -> String.slice(0, String.length(b) - 4, b) | b
 }
 
 let default-bin(file: Str) -> Str =
-  String.concat("build/", stem-of(file))
+  "build" |> Path.join(stem-of(file))
 
 let rt-src(runtime: Str, name: Str) -> Str =
-  String.concat(runtime, "/src/", name)
+  runtime |> Path.join("src") |> Path.join(name)
 
 let clang-argv(cc: Str, runtime: Str, bc: Str, link-out: Str) -> List Str =
-  [cc, "-std=c11", "-D_DEFAULT_SOURCE", "-Wall", "-Wextra", "-O2", String.concat("-I", runtime, "/include"), bc, rt-src(runtime, "alloc.c"), rt-src(runtime, "gc.c"), rt-src(runtime, "panic.c"), rt-src(runtime, "print.c"), rt-src(runtime, "shadow.c"), rt-src(runtime, "variants.c"), rt-src(runtime, "str.c"), rt-src(runtime, "map.c"), rt-src(runtime, "closure.c"), rt-src(runtime, "io.c"), rt-src(runtime, "equal.c"), "-lm", "-o", link-out]
+  [cc, "-std=c11", "-D_DEFAULT_SOURCE", "-Wall", "-Wextra", "-O2", String.concat("-I", runtime |> Path.join("include")), bc, rt-src(runtime, "alloc.c"), rt-src(runtime, "gc.c"), rt-src(runtime, "panic.c"), rt-src(runtime, "print.c"), rt-src(runtime, "shadow.c"), rt-src(runtime, "variants.c"), rt-src(runtime, "str.c"), rt-src(runtime, "map.c"), rt-src(runtime, "closure.c"), rt-src(runtime, "io.c"), rt-src(runtime, "equal.c"), "-lm", "-o", link-out]
 
 let fail-spawn(what: Str) -> Unit {
   write-line(2, String.concat("error: cannot spawn ", what))
@@ -604,8 +578,7 @@ let path-dir-end(s: Str, i: Int, n: Int) -> Int =
     | else -> path-dir-end(s, i + 1, n)
 
 let probe-dir(dir: Str, name: Str) -> Maybe Str {
-  let candidate =
-    if (String.length(dir) == 0) -> name | String.concat(dir, "/", name)
+  let candidate = Path.join(name, dir)
   if (exists(candidate)) -> Some(candidate) | None()
 }
 

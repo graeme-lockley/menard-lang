@@ -23,10 +23,12 @@ import "./cache.mnd"
 import std/fs
 import std/io
 import std/list
+import std/path as Path
 import std/proc
 import std/string as String
 import std/map as Map
 import std/string-buffer as Buf
+import std/time
 
 record Ctx {
   entry: Str
@@ -630,10 +632,10 @@ let write-if-changed(path: Str, bytes: Str) -> Bool =
     | Err(_) -> write-bytes(path, bytes)
 
 let rt(runtime: Str, name: Str) -> Str =
-  String.concat(runtime, "/src/", name)
+  Path.join(name, Path.join("src", runtime))
 
 let link-argv(cc: Str, runtime: Str, objs: List Str, out: Str) -> List Str =
-  append-strs(append-strs([cc, "-std=c11", "-D_DEFAULT_SOURCE", "-Wall", "-Wextra", "-O2", String.concat("-I", runtime, "/include")], objs), [rt(runtime, "alloc.c"), rt(runtime, "gc.c"), rt(runtime, "panic.c"), rt(runtime, "print.c"), rt(runtime, "shadow.c"), rt(runtime, "variants.c"), rt(runtime, "str.c"), rt(runtime, "map.c"), rt(runtime, "closure.c"), rt(runtime, "io.c"), rt(runtime, "equal.c"), "-lm", "-o", out])
+  append-strs(append-strs([cc, "-std=c11", "-D_DEFAULT_SOURCE", "-Wall", "-Wextra", "-O2", String.concat("-I", Path.join("include", runtime))], objs), [rt(runtime, "alloc.c"), rt(runtime, "gc.c"), rt(runtime, "panic.c"), rt(runtime, "print.c"), rt(runtime, "shadow.c"), rt(runtime, "variants.c"), rt(runtime, "str.c"), rt(runtime, "map.c"), rt(runtime, "closure.c"), rt(runtime, "io.c"), rt(runtime, "equal.c"), "-lm", "-o", out])
 
 let exit-code(st: SpawnStatus) -> Int =
   match (st)
@@ -968,7 +970,7 @@ let dep-paths(deps: List DepRec) -> List Str =
     | DepRec(_, p) :: rest -> p :: dep-paths(rest)
 
 let boot-path(abs: Str) -> Str =
-  String.concat(cache-root(), "/boot/", show(bytes-hash(abs)), ".bc")
+  String.concat(Path.join(show(bytes-hash(abs)), Path.join("boot", cache-root())), ".bc")
 
 let link-closure(abs: Str, iface: Iface, ctx: Ctx, cc: Str, runtime: Str, bin: Str) -> Result Str Str =
   match (iface)

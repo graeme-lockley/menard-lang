@@ -174,8 +174,8 @@ describe("§2.11 determinism", () => {
     if (!div.ok) expect(div.kind === "panic" ? div.message : "").toBe("division by zero");
   });
 
-  test("B: extern is confined to sys, io, fs, and proc", () => {
-    const seam = new Set(["stdlib/sys.mnd", "stdlib/io.mnd", "stdlib/fs.mnd", "stdlib/proc.mnd"].map((p) => join(ROOT, p)));
+  test("B: extern is confined to sys, io, fs, proc, and time", () => {
+    const seam = new Set(["stdlib/sys.mnd", "stdlib/io.mnd", "stdlib/fs.mnd", "stdlib/proc.mnd", "stdlib/time.mnd"].map((p) => join(ROOT, p)));
     const files: string[] = [];
     mndFiles(ROOT, files);
     const offenders: string[] = [];

@@ -138,6 +138,8 @@ Helpers over the product type `a * b`. Projection is `p.1` / `p.2`.
 | `concat(a, b)` | `a` and `b` joined. Further arguments nest to the left. |
 | `from-char(c)` | `c` encoded as UTF-8. |
 | `from-int(n)` | The decimal spelling of `n`. |
+| `is-digit-byte(b)` | Whether `b` is an ASCII digit byte (`48..57`). |
+| `hex-value(b)` | `0..15` for an ASCII hex digit byte, or `None`. |
 | `is-empty(s)` | Whether `s` has no bytes. |
 | `starts-with(prefix, s)` | Whether `s` begins with `prefix`. |
 | `ends-with(suffix, s)` | Whether `s` ends with `suffix`. |
@@ -234,10 +236,57 @@ Paths come first. These are questions and actions on the filesystem, not values 
 | `remove(path)` | Remove a file. |
 | `ensure-dir(path)` | Create a directory, including parents. |
 | `realpath(path)` | The canonical path. |
-| `mtime(path)` | The modification time. |
+| `mtime(path)` | The modification time in epoch milliseconds (`0` if missing). |
 | `cwd()` | The working directory. |
-| `now-ms()` | A clock reading, in milliseconds. |
 | `isatty(fd)` | Whether a descriptor is a terminal. |
+
+## Time
+
+`import std/time`
+
+Wall clock, durations, civil time with fixed UTC offsets (no IANA zones), and
+minimal ISO-8601. The OS clock is the only seam call (`now-ms`).
+
+| Name | |
+| --- | --- |
+| `now-ms()` | Wall-clock milliseconds since the Unix epoch. |
+| `now()` | The current `Instant`. |
+| `from-posix-ms(ms)` / `to-posix-ms(t)` | Instant ↔ epoch ms. |
+| `of-millis` / `of-seconds` / `of-minutes` / `of-hours` / `of-days` | Build a `Duration`. |
+| `duration-ms(d)` | Milliseconds in a duration. |
+| `add` / `sub` / `diff` | Combine instants and durations. |
+| `compare-instant` / `compare-duration` | Ordering. |
+| `utc()` / `fixed-offset(mins)` / `offset-minutes(o)` | Fixed offsets (east-positive). |
+| `to-datetime` / `from-datetime` | Instant ↔ civil `DateTime`. |
+| `format` / `parse` | ISO-8601 with `Z` or `±HH:MM`. |
+
+## Path
+
+`import std/path`
+
+POSIX path strings and URL-shaped strings. Pure Menard; path is last for pipes.
+
+| Function | |
+| --- | --- |
+| `is-absolute` / `is-relative` | Leading `/` or not. |
+| `join(segment, path)` | Join; absolute `segment` replaces `path`. |
+| `dirname` / `basename` / `extname` | Split components. |
+| `normalize` | Resolve `.` / `..` (no symlinks). |
+| `split` | Path segments as a list. |
+| `parse-url` / `build-url` | `scheme://host/path?query#fragment`. |
+
+## Json
+
+`import std/json`
+
+| Name | |
+| --- | --- |
+| `Json` | `JsonNull`, `JsonBool`, `JsonInt`, `JsonFloat`, `JsonStr`, `JsonArray`, `JsonObject`. |
+| `encode(v)` | JSON text. |
+| `decode(s)` | `Result Json JsonError`. |
+
+Integer tokens that fit `Int` decode as `JsonInt`; fractions, exponents, and
+out-of-range integers decode as `JsonFloat`.
 
 ## Proc
 

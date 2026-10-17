@@ -28,6 +28,50 @@ specification. Where a name changed, the entry that changed it says so.
 
 ---
 
+## 2026-10-17 — Purpose, libraries, and `std/time` seam (Build A)
+
+### The decision
+
+**Purpose.** Menard remains agreement-first (one compiler text, interpreter and
+native, `bc0 == bc1`). The product lane expands toward Go/Deno/Bun-shaped
+programs: command-line tools, network services, and libraries written in Menard
+— without abandoning the fixed point or turning Menard into a general-purpose
+systems language.
+
+**Library stack.** Runtime ABI (`mn_*`) ≠ Platform API (`stdlib/`). Apps never
+call `mn_*`. Native code must justify itself; Menard is the default. A small
+runtime does not imply a small standard library: foundational formats and
+protocols may live in `stdlib/` when implemented in Menard. Foreign C FFI is a
+separate conversion layer, not the Runtime ABI calling convention.
+
+**Seam amendment (ADR 27).** `extern` remains never `pub` and confined to seam
+modules. The allowed set is `stdlib/sys.mnd`, `io.mnd`, `fs.mnd`, `proc.mnd`,
+and **`time.mnd`**. `std/time` may declare clock `mn_*` only (`mn_now_ms` in
+Build A). Wall clock moves off `std/fs`.
+
+Concurrency stays a non-goal in the specification until a later decision; the
+architecture in `design-libraries-concurrency.md` is approved as implementation
+direction but not ratified here.
+
+### Why
+
+Purpose and layering were settled in design review; Build A implements them in
+the Platform API. Splitting the clock into `std/time` keeps filesystem metadata
+(`mtime`) distinct from reading the OS clock and matches the Menard-first
+placement rule.
+
+### What remains
+
+Enrich [runtime-abi.md](runtime-abi.md) as symbols grow. IANA time zones,
+monotonic clocks, sockets, and concurrency ratification are later builds.
+
+### User documentation
+
+[menard-spec.md](menard-spec.md) §1 and §2.8.3 / §2.15; [stdlib.md](stdlib.md);
+[runtime-abi.md](runtime-abi.md); [buildout-libraries-concurrency.md](buildout-libraries-concurrency.md).
+
+---
+
 ## 2026-10-17 — Postfix `??` Result propagation rejected
 
 ### The decision
@@ -126,7 +170,7 @@ bearing choices; everything in the specification follows from them.
 | 24 | **Tag-based precise collection, with layout kinds; no static GC field maps** | With type parameters no static map can exist; alternatives (monomorphization, dictionary passing) cost far more | Invariants become load-bearing; marking marginally slower; unboxing, `Byte` and general mutable arrays forbidden forever |
 | 25 | **Two type views: canonical and display** | Aliases must never reach emitted bytes, but flattening them wrecks diagnostics | Two representations of types to keep straight |
 | 26 | **Casing enforced: upper = type/constructor, lower = value** | Cheap, catches `Int`/`int`, makes signatures readable | A naming rule users cannot opt out of |
-| 27 | **Private by default; `pub` to export**; `extern` never exported and confined to the seam modules | Keeps the module boundary real; you can tell what is safe to change; and the `extern` confinement gives the ambient boundary a marker the compiler can check | ~50 lines of visibility checking, plus the confinement lint |
+| 27 | **Private by default; `pub` to export**; `extern` never exported and confined to the seam modules (`sys`, `io`, `fs`, `proc`, **`time`**) | Keeps the module boundary real; you can tell what is safe to change; and the `extern` confinement gives the ambient boundary a marker the compiler can check | ~50 lines of visibility checking, plus the confinement lint |
 | 28 | **The surface is four tiers, with a placement rule** | Compiler-known iff it needs per-type synthesis; runtime-backed iff it needs mutation or an opaque representation **and the compiler is a client on a hot path**; else prelude | Adding an operation means knowing which tier it belongs to |
 | 29 | **Aliases are nullary and transparent** | Parameters would make them type-level functions, i.e. the higher-kinded feature that is out | Cannot abstract over container shape with an alias |
 | 30 | **`!` marks observable mutation only; the OS boundary is marked by `extern`, not by a name** | One glyph for two ideas meant neither was reliable, and `!`-for-purity was a gesture at effects the language refuses (no propagation, no effect system) | The convention covers one special form and four functions and is still unchecked; the ambient audit moves from a naming habit to a lintable module boundary |

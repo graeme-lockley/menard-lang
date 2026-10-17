@@ -6,6 +6,7 @@ import std/console
 import std/fs
 import std/io
 import std/list
+import std/path as Path
 import std/string as String
 
 ; How many pass and fail lines a test process printed.
@@ -13,13 +14,6 @@ pub record Counts {
   passed: Int
   failed: Int
 }
-
-; Join dir and name with a slash.
-let join-path(dir: Str, name: Str) -> Str =
-  cond
-    | dir == "" || dir == "." -> name
-    | dir == "/" -> String.concat("/", name)
-    | else -> String.concat(dir, "/", name)
 
 ; Hidden names, dependencies, and build output are not test roots.
 let skip-name(name: Str) -> Bool =
@@ -59,7 +53,7 @@ let walk-names(dir: Str, names: List Str, acc: List Str) -> List Str =
   match (names)
     | [] -> acc
     | name :: rest ->
-      if (skip-name(name)) -> walk-names(dir, rest, acc) | walk-child(dir, join-path(dir, name), rest, acc)
+      if (skip-name(name)) -> walk-names(dir, rest, acc) | walk-child(dir, Path.join(name, dir), rest, acc)
 
 ; A child path: descend into directories, keep test files.
 let walk-child(dir: Str, child: Str, rest: List Str, acc: List Str) -> List Str =

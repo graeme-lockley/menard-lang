@@ -19,6 +19,7 @@ import "../reader/print.mnd"
 import "../modules/graph.mnd"
 import std/fs
 import std/io
+import std/path as Path
 import std/string as String
 import std/sys
 import std/string-buffer as Buf
@@ -65,21 +66,6 @@ let blank() -> Span =
 let quote-str(s: Str) -> Str =
   print-form(StrNode(s, blank()))
 
-let dirname-of(path: Str) -> Str {
-  let n = String.length(path)
-  let slash = last-slash(path, n - 1)
-  cond
-    | slash < 0 -> "."
-    | slash == 0 -> "/"
-    | else -> String.slice(0, slash, path)
-}
-
-let last-slash(s: Str, i: Int) -> Int =
-  cond
-    | i < 0 -> -1
-    | String.byte(i, s) == 47 -> i
-    | else -> last-slash(s, i - 1)
-
 pub let cache-root() -> Str =
   match (getenv("MENARD_CACHE"))
     | Some(s) ->
@@ -89,13 +75,13 @@ pub let cache-root() -> Str =
 let default-cache() -> Str =
   match (getenv("HOME"))
     | Some(h) ->
-      if (String.length(h) > 0) -> String.concat(h, "/.menard") | "/tmp/menard"
+      if (String.length(h) > 0) -> Path.join(".menard", h) | "/tmp/menard"
     | None -> "/tmp/menard"
 
 pub let canonical-path(path: Str) -> Str {
   let direct = realpath(path)
   if (String.length(direct) > 0) -> direct | normalize-path(
-    if (String.starts-with("/", path)) -> path | String.concat(cwd(), "/", path)
+    if (Path.is-absolute(path)) -> path | Path.join(path, cwd())
   )
 }
 
@@ -117,21 +103,21 @@ pub let object-path(abs: Str) -> Str =
   String.concat(cache-base(abs), ".bc")
 
 pub let cache-bin(abs: Str) -> Str =
-  String.concat(cache-root(), "/out/", show(bytes-hash(abs)))
+  Path.join(show(bytes-hash(abs)), Path.join("out", cache-root()))
 
 ; Generated `@test` modules. The path is the cache root, `doctest`, then the
 ; canonical absolute source path, so the original file can be recovered
 ; from the generated path.
 pub let doctest-path(abs: Str) -> Str =
-  String.concat(String.concat(cache-root(), "/doctest"), abs)
+  String.concat(Path.join("doctest", cache-root()), abs)
 
 pub let doctest-origin(path: Str) -> Str {
-  let prefix = String.concat(cache-root(), "/doctest")
+  let prefix = Path.join("doctest", cache-root())
   if (String.starts-with(prefix, path) && String.length(path) > String.length(prefix)) -> String.slice(String.length(prefix), String.length(path) - String.length(prefix), path) | ""
 }
 
 pub let ensure-parent(path: Str) -> Bool =
-  ensure-dir(dirname-of(path))
+  ensure-dir(Path.dirname(path))
 
 pub let hash-file(path: Str) -> Int =
   match (read-file(path))

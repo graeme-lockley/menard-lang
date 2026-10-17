@@ -40,12 +40,8 @@ let from-done(acc: Int, neg: Bool, seen: Bool) -> Maybe Int =
 ; Take one byte when it is a digit.
 let from-digit(n: Str, i: Int, acc: Int, neg: Bool, seen: Bool) -> Maybe Int {
   let d = String.byte(i, n)
-  if (d > 47 && d < 58) -> from-digits(n, i + 1, acc * 10 + d - 48, neg, true) | None()
+  if (String.is-digit-byte(d)) -> from-digits(n, i + 1, acc * 10 + d - 48, neg, true) | None()
 }
-
-; Whether d is an ASCII digit byte.
-let is-digit(d: Int) -> Bool =
-  d > 47 && d < 58
 
 ; The integer spelled by the digits of n from byte i, stopping at the first non-digit.
 let parse-rest(n: Str, i: Int) -> Int {
@@ -56,7 +52,7 @@ let parse-rest(n: Str, i: Int) -> Int {
         | iter >= len -> result
         | else -> {
             let d = String.byte(iter, n)
-            if (is-digit(d)) -> recur(iter + 1, result * 10 + d - 48) | result
+            if (String.is-digit-byte(d)) -> recur(iter + 1, result * 10 + d - 48) | result
           }
   }
 }

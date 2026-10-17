@@ -22,6 +22,7 @@ import std/map as Map
 import std/proc
 import std/string as String
 import std/test
+import std/time
 
 let print-verbose(lines: List Str, on: Bool, show-output: Bool) -> Unit =
   match (lines)

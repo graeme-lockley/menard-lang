@@ -26,8 +26,9 @@ That comparison shows the two executions agree. [§2.14](#214-what-the-bootstrap
 - A language for writing programs: closures, heap data, records and variants with type parameters, exhaustive matching, a standard library, and diagnostics with source spans.
 - A self-hosting compiler: the Menard compiler is written in Menard and compiles itself to LLVM bitcode. It is the only compiler. The reference interpreter runs it, and the native binary takes over from there.
 - A build tool written in the language (`mn`, §2.15): emit bitcode, invoke the C toolchain, link the runtime, produce a binary.
+- Aimed at the same *class* of programs as Go, Deno, and Bun — tools, network services, and libraries in Menard — while keeping agreement (`bc0 == bc1`) as the load-bearing claim.
 - Small on purpose. Finishability is the constraint that chose this shape. A feature that would double the backend, and that self-hosting does not need, stays out.
-- Not a general-purpose systems language. The host seam is the filesystem, the environment, and process spawning as an argument vector.
+- Not a general-purpose systems language. The host seam is a small OS / runtime ABI (`mn_*`); capability grows in the Platform API (`stdlib/`) written in Menard.
 
 ### 1.2 Success criteria
 
@@ -860,9 +861,9 @@ error. A name in the list that the imported module does not publish is an
 import error.
 
 **And `extern` is confined to the seam's modules** (§2.15): `stdlib/sys.mnd`,
-`io.mnd`, `fs.mnd`, `proc.mnd`, and the runtime's own headers. That confinement
-is the marker of the ambient boundary (§2.11.B), and it is *checkable*, where a
-naming convention would not be.
+`io.mnd`, `fs.mnd`, `proc.mnd`, `time.mnd`, and the runtime's own headers. That
+confinement is the marker of the ambient boundary (§2.11.B), and it is
+*checkable*, where a naming convention would not be.
 
 ### 2.8 The surface: four tiers
 
@@ -1109,16 +1110,23 @@ import (§2.7).
 | `std/tuple` | `map-fst`, `map-snd`, `map-both` over `a * b` |
 | `std/list` | `length`, `is-empty`, `head`, `tail`, `singleton`, `repeat`, `range`, `nth`, `append`, `reverse`, `map`, `indexed-map`, `filter`, `filter-map`, `partition`, `intersperse`, `fold`, `sum`, `product`, `minimum`, `maximum`, `zip`, `unzip`, `member`, `sort`, `sort-by`, `find`, `any`, `all`, `concat`, `flat-map`, `take`, `drop` |
 | `std/map` | `empty`, `singleton`, `set`, `lookup`, `has`, `size`, `is-empty`, `keys`, `values`, `from-list`, `to-list`, `map`, `filter`, `fold`, `remove`, `merge` |
-| `std/string` | `length`, `byte`, `slice`, `concat`, `from-char`, `from-int`, `is-empty`, `starts-with`, `ends-with`, `contains`, `drop`, `drop-right`, `left`, `right`, `repeat`, `replace`, `trim`, `trim-left`, `trim-right`, `index-of`, `index-of-from`, `split`, `split-using`, `join`, `lines`, `words` |
+| `std/string` | `length`, `byte`, `slice`, `concat`, `from-char`, `from-int`, `is-digit-byte`, `hex-value`, `is-empty`, `starts-with`, `ends-with`, `contains`, `drop`, `drop-right`, `left`, `right`, `repeat`, `replace`, `trim`, `trim-left`, `trim-right`, `index-of`, `index-of-from`, `split`, `split-using`, `join`, `lines`, `words` |
 | `std/char` | `is-digit`, `is-upper`, `is-lower`, `is-alpha`, `is-whitespace`, `to-upper`, `to-lower` |
 | `std/int` | `parse`, `from-str` |
 | `std/string-buffer` | `new`, `append!`, `append-byte!`, `length`, `clear!`, `to-str`, `take-str!`, `append-show!` |
 | `std/result` | `map`, `and-then`, `map2`, `map-error`, `to-maybe`, `from-maybe` |
 | `std/maybe` | `map`, `and-then`, `map2` |
-| `std/io`, `std/fs`, `std/proc`, `std/sys` | the host-seam wrappers (§2.15) |
+| `std/io`, `std/fs`, `std/proc`, `std/sys`, `std/time` | the host-seam wrappers (§2.15); `std/time` is clock + Menard calendar helpers |
+| `std/json` | JSON encode/decode (Menard) |
+| `std/path` | POSIX path and URL-shaped string helpers (Menard) |
 | `std/console` | `tty-color`, `paint` |
 | `std/cli` | flag and positional parsing over an argument list |
 | `std/test` | discovery, pass/fail counts, the summary line |
+
+The **Runtime ABI** (`mn_*`) and the **Platform API** (`stdlib/`) are different
+contracts. Programs depend on `std/…`. A small runtime does not imply a small
+standard library: foundational libraries live in Menard under `stdlib/` when
+expressible there. See [runtime-abi.md](runtime-abi.md).
 
 The collection, the string, the `Maybe`, and the `Result` are the last parameter, so `|>` can fill them. A missing `Maybe` or a failed `Result` is `?` (the `Err` payload is dropped on the default path). `to-maybe` remains when a real `Maybe` is needed downstream. `member` is the list predicate and `contains` is the string predicate, so the two can be imported together. `map` on lists, results, maybes, and maps is the same name in four modules; a program imports one of them, or qualifies it.
 
@@ -1392,7 +1400,7 @@ filesystem so that corpus tests are hermetic (§2.15).
 
 **This obligation is governed by a structural marker rather than a naming one.**
 Everything it applies to is an `extern`-backed wrapper confined to
-`stdlib/sys.mnd`, `io.mnd`, `fs.mnd` and `proc.mnd` (§2.15), so the boundary is
+`stdlib/sys.mnd`, `io.mnd`, `fs.mnd`, `proc.mnd` and `time.mnd` (§2.15), so the boundary is
 visible to the compiler and to a lint.
 
 **The spawning case is the clearest instance of this rule.** A child process
@@ -1693,10 +1701,11 @@ value reachable from an argument.
 
 **The OS boundary is marked by `extern`.** Every ambient operation is an
 `extern`-backed wrapper, and `extern` bindings are confined to `stdlib/sys.mnd`,
-`io.mnd`, `fs.mnd` and `proc.mnd` (§2.7). So the boundary is **structural and
-enforceable**: a module cannot reach `write(2)` without importing the module that
-declares it, and a CI lint can refuse an `extern` — or an import of those four —
-anywhere else.
+`io.mnd`, `fs.mnd`, `proc.mnd` and `time.mnd` (§2.7). So the boundary is
+**structural and enforceable**: a module cannot reach `write(2)` without
+importing the module that declares it, and a CI lint can refuse an `extern` —
+or an import of those five — anywhere else. `std/time` wraps the wall clock
+(`mn_now_ms`); filesystem metadata such as `mtime` stays on `std/fs`.
 
 One thing is given up, and it should be stated plainly: one-glyph greppability
 for "can touch the outside world". The replacement is a grep for `extern`, or

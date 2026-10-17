@@ -388,7 +388,16 @@ returns a `Maybe`.
 `std/char` is ASCII case and a few predicates, written with character
 literals: `Char.is-digit('5')`, `Char.to-upper('q')`.
 
-The functions are listed in [stdlib.md](stdlib.md).
+### Paths, JSON, and time
+
+`std/path` is pure POSIX path and URL-shaped string helpers (`join`,
+`normalize`, `parse-url`). `std/json` encodes and decodes a dedicated `Json`
+ADT. `std/time` is wall clock, durations, and civil time with fixed UTC
+offsets — the OS clock is `Time.now-ms()`; filesystem `mtime` stays on
+`std/fs`.
+
+The functions are listed in [stdlib.md](stdlib.md). The Runtime ABI catalogue
+is [runtime-abi.md](runtime-abi.md).
 
 ## Programs that touch the world
 

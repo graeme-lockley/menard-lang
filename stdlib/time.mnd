@@ -1,0 +1,427 @@
+; Wall clock, durations, civil time with fixed offsets, and minimal ISO-8601.
+; IANA zone names are out of scope. “Clock” apps are examples on this API.
+; @module std/time
+
+import std/string as String
+import std/string-buffer as Buf
+
+extern mn_now_ms() -> Int
+
+; Milliseconds since the Unix epoch (OS wall clock).
+; @test now-ms() >= 0
+pub let now-ms() -> Int =
+  mn_now_ms()
+
+; An instant on the timeline, as Unix epoch milliseconds.
+pub record Instant {
+  ms: Int
+}
+
+; A signed span of milliseconds.
+pub record Duration {
+  ms: Int
+}
+
+; Fixed offset from UTC, east-positive, in whole minutes.
+pub record Offset {
+  minutes: Int
+}
+
+; Civil date-time in a fixed offset (not an IANA zone).
+pub record DateTime {
+  year: Int
+  month: Int
+  day: Int
+  hour: Int
+  minute: Int
+  second: Int
+  millis: Int
+  offset: Offset
+}
+
+; ---------------------------------------------------------------------------
+; Instant / Duration
+
+; Instant from Unix epoch milliseconds.
+; @test to-posix-ms(from-posix-ms(0)) => 0
+; @test to-posix-ms(from-posix-ms(1000)) => 1000
+pub let from-posix-ms(ms: Int) -> Instant =
+  Instant(ms)
+
+; Unix epoch milliseconds of an instant.
+; @test to-posix-ms(from-posix-ms(99)) => 99
+pub let to-posix-ms(t: Instant) -> Int =
+  t.ms
+
+; Instant from the OS wall clock.
+; @test to-posix-ms(now()) >= 0
+pub let now() -> Instant =
+  Instant(now-ms())
+
+; Duration of n milliseconds.
+; @test duration-ms(of-millis(1500)) => 1500
+pub let of-millis(n: Int) -> Duration =
+  Duration(n)
+
+; Duration of n seconds.
+; @test duration-ms(of-seconds(2)) => 2000
+pub let of-seconds(n: Int) -> Duration =
+  Duration(n * 1000)
+
+; Duration of n minutes.
+; @test duration-ms(of-minutes(1)) => 60000
+pub let of-minutes(n: Int) -> Duration =
+  Duration(n * 60000)
+
+; Duration of n hours.
+; @test duration-ms(of-hours(1)) => 3600000
+pub let of-hours(n: Int) -> Duration =
+  Duration(n * 3600000)
+
+; Duration of n days (86400000 ms each; no DST).
+; @test duration-ms(of-days(1)) => 86400000
+pub let of-days(n: Int) -> Duration =
+  Duration(n * 86400000)
+
+; Milliseconds in a duration.
+; @test duration-ms(of-millis(7)) => 7
+pub let duration-ms(d: Duration) -> Int =
+  d.ms
+
+; t plus d.
+; @test to-posix-ms(add(from-posix-ms(1000), of-millis(500))) => 1500
+pub let add(t: Instant, d: Duration) -> Instant =
+  Instant(t.ms + d.ms)
+
+; t minus d.
+; @test to-posix-ms(sub(from-posix-ms(1000), of-millis(250))) => 750
+pub let sub(t: Instant, d: Duration) -> Instant =
+  Instant(t.ms - d.ms)
+
+; a minus b as a duration.
+; @test duration-ms(diff(from-posix-ms(1000), from-posix-ms(400))) => 600
+pub let diff(a: Instant, b: Instant) -> Duration =
+  Duration(a.ms - b.ms)
+
+; Compare instants: negative, zero, or positive.
+; @test compare-instant(from-posix-ms(1), from-posix-ms(2)) < 0 => true
+; @test compare-instant(from-posix-ms(2), from-posix-ms(2)) => 0
+; @test compare-instant(from-posix-ms(3), from-posix-ms(1)) > 0 => true
+pub let compare-instant(a: Instant, b: Instant) -> Int =
+  compare(a.ms, b.ms)
+
+; Compare durations.
+; @test compare-duration(of-millis(1), of-millis(2)) < 0 => true
+; @test compare-duration(of-millis(5), of-millis(5)) => 0
+; @test compare-duration(of-millis(9), of-millis(2)) > 0 => true
+pub let compare-duration(a: Duration, b: Duration) -> Int =
+  compare(a.ms, b.ms)
+
+; UTC offset (zero minutes).
+; @test offset-minutes(utc()) => 0
+pub let utc() -> Offset =
+  Offset(0)
+
+; Fixed offset of mins minutes east of UTC.
+; @test offset-minutes(fixed-offset(120)) => 120
+; @test offset-minutes(fixed-offset(-90)) => -90
+pub let fixed-offset(mins: Int) -> Offset =
+  Offset(mins)
+
+; Minutes east of UTC.
+; @test offset-minutes(utc()) => 0
+; @test offset-minutes(fixed-offset(45)) => 45
+pub let offset-minutes(o: Offset) -> Int =
+  o.minutes
+
+; ---------------------------------------------------------------------------
+; Calendar helpers (Howard Hinnant civil ↔ days, floor division for eras)
+
+; Floor division toward −∞.
+let floor-div(a: Int, b: Int) -> Int {
+  let q = a / b
+  let r = a % b
+  if (r == 0) -> q | if ((a < 0) != (b < 0)) -> q - 1 | q
+}
+
+; Days from civil (y, m, d) to 1970-01-01, proleptic Gregorian.
+let days-from-civil(y0: Int, m: Int, d: Int) -> Int {
+  let y1 = if (m <= 2) -> y0 - 1 | y0
+  let era = floor-div(y1, 400)
+  let yoe = y1 - era * 400
+  let mp = if (m > 2) -> m - 3 | m + 9
+  let doy = (153 * mp + 2) / 5 + d - 1
+  let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
+  era * 146097 + doe - 719468
+}
+
+; Civil (year, month, day) from days since 1970-01-01.
+let civil-from-days(z0: Int) -> Int * Int * Int {
+  let z = z0 + 719468
+  let era = floor-div(z, 146097)
+  let doe = z - era * 146097
+  let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+  let y = yoe + era * 400
+  let doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+  let mp = (5 * doy + 2) / 153
+  let d = doy - (153 * mp + 2) / 5 + 1
+  let m = if (mp < 10) -> mp + 3 | mp - 9
+  let year = if (m <= 2) -> y + 1 | y
+  (year, m, d)
+}
+
+; Non-negative remainder of a / b for b > 0 (floor-mod).
+let floor-mod(a: Int, b: Int) -> Int {
+  let r = a % b
+  if (r < 0) -> r + b | r
+}
+
+; DateTime in offset for instant t.
+; @test {
+;   let dt = to-datetime(from-posix-ms(0), utc())
+;   dt.year == 1970 && dt.month == 1 && dt.day == 1 && dt.hour == 0 && dt.minute == 0 && dt.second == 0 && dt.millis == 0
+; } => true
+; @test {
+;   let dt = to-datetime(from-posix-ms(0), fixed-offset(120))
+;   dt.hour == 2 && dt.offset.minutes == 120
+; } => true
+; @test {
+;   let dt = to-datetime(from-posix-ms(0 - 1), utc())
+;   dt.year == 1969 && dt.month == 12 && dt.day == 31 && dt.hour == 23 && dt.minute == 59 && dt.second == 59 && dt.millis == 999
+; } => true
+; @test {
+;   let dt = to-datetime(from-posix-ms(1234567890123), utc())
+;   dt.year == 2009 && dt.month == 2 && dt.day == 13 && dt.hour == 23 && dt.minute == 31 && dt.second == 30 && dt.millis == 123
+; } => true
+pub let to-datetime(t: Instant, o: Offset) -> DateTime {
+  let local = t.ms + o.minutes * 60000
+  let day-count = floor-div(local, 86400000)
+  let tod = floor-mod(local, 86400000)
+  let ymd = civil-from-days(day-count)
+  let hour = tod / 3600000
+  let rem = tod % 3600000
+  let minute = rem / 60000
+  let rem2 = rem % 60000
+  let second = rem2 / 1000
+  let millis = rem2 % 1000
+  DateTime(ymd.1, ymd.2, ymd.3, hour, minute, second, millis, o)
+}
+
+; Instant from a DateTime (interprets fields in its offset).
+; @test to-posix-ms(from-datetime(to-datetime(from-posix-ms(1234567890), utc()))) => 1234567890
+; @test to-posix-ms(from-datetime(to-datetime(from-posix-ms(0 - 86400000), utc()))) => 0 - 86400000
+; @test {
+;   let dt = DateTime(1970, 1, 1, 2, 0, 0, 0, fixed-offset(120))
+;   to-posix-ms(from-datetime(dt)) == 0
+; } => true
+; @test {
+;   let dt = DateTime(2000, 2, 29, 0, 0, 0, 0, utc())
+;   to-posix-ms(from-datetime(dt)) == 951782400000
+; } => true
+pub let from-datetime(dt: DateTime) -> Instant {
+  let day-count = days-from-civil(dt.year, dt.month, dt.day)
+  let tod = dt.hour * 3600000 + dt.minute * 60000 + dt.second * 1000 + dt.millis
+  Instant(day-count * 86400000 + tod - dt.offset.minutes * 60000)
+}
+
+; ---------------------------------------------------------------------------
+; Format / parse (minimal ISO-8601 with offset or Z)
+
+; pad2.
+let pad2(n: Int) -> Str =
+  if (n < 10) -> String.concat("0", show(n)) | show(n)
+
+; pad3.
+let pad3(n: Int) -> Str =
+  cond
+    | n < 10 -> String.concat("00", show(n))
+    | n < 100 -> String.concat("0", show(n))
+    | else -> show(n)
+
+; pad4.
+let pad4(n: Int) -> Str {
+  let s = show(n)
+  let len = String.length(s)
+  cond
+    | len >= 4 -> s
+    | len == 3 -> String.concat("0", s)
+    | len == 2 -> String.concat("00", s)
+    | len == 1 -> String.concat("000", s)
+    | else -> "0000"
+}
+
+; format-offset.
+let format-offset(o: Offset) -> Str {
+  let m = o.minutes
+  cond
+    | m == 0 -> "Z"
+    | m > 0 -> String.concat("+", pad2(m / 60), ":", pad2(m % 60))
+    | else ->
+      {
+        let am = 0 - m
+        String.concat("-", pad2(am / 60), ":", pad2(am % 60))
+      }
+}
+
+; ISO-8601 instant in the given offset: `YYYY-MM-DDTHH:MM:SS.mmmZ` or `±HH:MM`.
+; @test format(from-posix-ms(0), utc()) => "1970-01-01T00:00:00.000Z"
+; @test format(from-posix-ms(0), fixed-offset(60)) => "1970-01-01T01:00:00.000+01:00"
+; @test format(from-posix-ms(0), fixed-offset(-60)) => "1969-12-31T23:00:00.000-01:00"
+; @test format(from-posix-ms(123), utc()) => "1970-01-01T00:00:00.123Z"
+pub let format(t: Instant, o: Offset) -> Str {
+  let dt = to-datetime(t, o)
+  let sb = Buf.new()
+  Buf.append!(sb, pad4(dt.year))
+  Buf.append!(sb, "-")
+  Buf.append!(sb, pad2(dt.month))
+  Buf.append!(sb, "-")
+  Buf.append!(sb, pad2(dt.day))
+  Buf.append!(sb, "T")
+  Buf.append!(sb, pad2(dt.hour))
+  Buf.append!(sb, ":")
+  Buf.append!(sb, pad2(dt.minute))
+  Buf.append!(sb, ":")
+  Buf.append!(sb, pad2(dt.second))
+  Buf.append!(sb, ".")
+  Buf.append!(sb, pad3(dt.millis))
+  Buf.append!(sb, format-offset(dt.offset))
+  Buf.take-str!(sb)
+}
+
+; Digit value at index i, or -1.
+let digit-at(s: Str, i: Int) -> Int {
+  let b = String.byte(i, s)
+  if (String.is-digit-byte(b)) -> b - 48 | -1
+}
+
+; Parse n decimal digits starting at i into an Int, or None.
+let parse-digits(s: Str, i: Int, n: Int) -> Maybe Int =
+  parse-digits-acc(s, i, n, 0)
+
+; parse-digits-acc.
+let parse-digits-acc(s: Str, i: Int, n: Int, acc: Int) -> Maybe Int =
+  cond
+    | n == 0 -> Some(acc)
+    | i >= String.length(s) -> None()
+    | else ->
+      {
+        let d = digit-at(s, i)
+        if (d < 0) -> None() | parse-digits-acc(s, i + 1, n - 1, acc * 10 + d)
+      }
+
+; Expect byte b at i.
+let expect-byte(s: Str, i: Int, b: Int) -> Bool =
+  i < String.length(s) && String.byte(i, s) == b
+
+; Parse `±HH:MM` or `Z` at index i → (Offset * next-index) or None.
+let parse-offset-at(s: Str, i: Int) -> Maybe (Offset * Int) =
+  cond
+    | expect-byte(s, i, 90) -> Some((utc(), i + 1))
+    | expect-byte(s, i, 43) || expect-byte(s, i, 45) -> parse-offset-hm(s, i)
+    | else -> None()
+
+; parse-offset-hm.
+let parse-offset-hm(s: Str, i: Int) -> Maybe (Offset * Int) {
+  let sign = if (expect-byte(s, i, 45)) -> -1 | 1
+  match (parse-digits(s, i + 1, 2))
+    | None -> None()
+    | Some(hh) -> parse-offset-mm(s, i, sign, hh)
+}
+
+; parse-offset-mm.
+let parse-offset-mm(s: Str, i: Int, sign: Int, hh: Int) -> Maybe (Offset * Int) =
+  cond
+    | not(expect-byte(s, i + 3, 58)) -> None()
+    | else ->
+      match (parse-digits(s, i + 4, 2))
+        | None -> None()
+        | Some(mm) -> Some((fixed-offset(sign * (hh * 60 + mm)), i + 6))
+
+; Require fixed digits at i, then continue.
+let need-digits(s: Str, i: Int, n: Int) -> Maybe Int =
+  parse-digits(s, i, n)
+
+; need-byte.
+let need-byte(s: Str, i: Int, b: Int) -> Bool =
+  expect-byte(s, i, b)
+
+; Parse an ISO-8601 instant as produced by `format`, or None.
+; @test {
+;   match (parse("1970-01-01T00:00:00.000Z"))
+;     | Some(t) -> to-posix-ms(t) == 0
+;     | None -> false
+; } => true
+; @test {
+;   match (parse("1970-01-01T01:00:00.000+01:00"))
+;     | Some(t) -> to-posix-ms(t) == 0
+;     | None -> false
+; } => true
+; @test {
+;   match (parse("1969-12-31T23:00:00.000-01:00"))
+;     | Some(t) -> to-posix-ms(t) == 0
+;     | None -> false
+; } => true
+; @test {
+;   match (parse(format(from-posix-ms(1234567890123), utc())))
+;     | Some(t) -> to-posix-ms(t) == 1234567890123
+;     | None -> false
+; } => true
+; @test parse("nope") => None()
+; @test parse("1970-01-01T00:00:00.000") => None()
+; @test parse("1970-01-01T00:00:00.000Zx") => None()
+pub let parse(s: Str) -> Maybe Instant =
+  match (need-digits(s, 0, 4))
+    | None -> None()
+    | Some(year) ->
+      if (need-byte(s, 4, 45)) -> parse-after-year(s, year) | None()
+
+; parse-after-year.
+let parse-after-year(s: Str, year: Int) -> Maybe Instant =
+  match (need-digits(s, 5, 2))
+    | None -> None()
+    | Some(month) ->
+      if (need-byte(s, 7, 45)) -> parse-after-month(s, year, month) | None()
+
+; parse-after-month.
+let parse-after-month(s: Str, year: Int, month: Int) -> Maybe Instant =
+  match (need-digits(s, 8, 2))
+    | None -> None()
+    | Some(day) ->
+      if (need-byte(s, 10, 84)) -> parse-after-day(s, year, month, day) | None()
+
+; parse-after-day.
+let parse-after-day(s: Str, year: Int, month: Int, day: Int) -> Maybe Instant =
+  match (need-digits(s, 11, 2))
+    | None -> None()
+    | Some(hour) ->
+      if (need-byte(s, 13, 58)) -> parse-after-hour(s, year, month, day, hour) | None()
+
+; parse-after-hour.
+let parse-after-hour(s: Str, year: Int, month: Int, day: Int, hour: Int) -> Maybe Instant =
+  match (need-digits(s, 14, 2))
+    | None -> None()
+    | Some(minute) ->
+      if (need-byte(s, 16, 58)) -> parse-after-minute(s, year, month, day, hour, minute) | None()
+
+; parse-after-minute.
+let parse-after-minute(s: Str, year: Int, month: Int, day: Int, hour: Int, minute: Int) -> Maybe Instant =
+  match (need-digits(s, 17, 2))
+    | None -> None()
+    | Some(second) ->
+      if (need-byte(s, 19, 46)) -> parse-after-second(s, year, month, day, hour, minute, second) | None()
+
+; parse-after-second.
+let parse-after-second(s: Str, year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> Maybe Instant =
+  match (need-digits(s, 20, 3))
+    | None -> None()
+    | Some(millis) -> finish-parse(s, year, month, day, hour, minute, second, millis)
+
+; finish-parse.
+let finish-parse(s: Str, year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int, millis: Int) -> Maybe Instant =
+  match (parse-offset-at(s, 23))
+    | None -> None()
+    | Some(pair) ->
+      cond
+        | pair.2 == String.length(s) ->
+          Some(from-datetime(DateTime(year, month, day, hour, minute, second, millis, pair.1)))
+        | else -> None()

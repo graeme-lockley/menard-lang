@@ -12,6 +12,7 @@ import "../reader/ast.mnd"
 import std/fs
 import std/io
 import std/list
+import std/path as Path
 import std/string as String
 import std/string-buffer as Buf
 
@@ -520,23 +521,8 @@ let render(display: Str, from: Str, sc: Scan, named: List Named) -> Str =
         Buf.take-str!(sb)
       }
 
-let dirname-of(path: Str) -> Str {
-  let n = String.length(path)
-  let slash = last-slash(path, n - 1)
-  cond
-    | slash < 0 -> "."
-    | slash == 0 -> "/"
-    | else -> String.slice(0, slash, path)
-}
-
-let last-slash(s: Str, i: Int) -> Int =
-  cond
-    | i < 0 -> -1
-    | String.byte(i, s) == 47 -> i
-    | else -> last-slash(s, i - 1)
-
 let write-if-changed(path: Str, bytes: Str) -> Bool {
-  ensure-dir(dirname-of(path))
+  ensure-dir(Path.dirname(path))
   match (read-file(path))
     | Ok(old) ->
       if (old == bytes) -> true | match (write-file(path, bytes))
@@ -609,12 +595,6 @@ let under-cache(path: Str) -> Bool {
 let skip-name(name: Str) -> Bool =
   String.starts-with(".", name) || name == "node_modules" || name == "build" || name == "target"
 
-let join-path(dir: Str, name: Str) -> Str =
-  cond
-    | dir == "" || dir == "." -> name
-    | dir == "/" -> String.concat("/", name)
-    | else -> String.concat(dir, "/", name)
-
 let split-names(s: Str, i: Int, start: Int, n: Int, acc: List Str) -> List Str =
   cond
     | i > n -> reverse(acc)
@@ -629,7 +609,7 @@ let walk-names(dir: Str, names: List Str, failed: Ref Bool, acc: List DocCase) -
   match (names)
     | [] -> acc
     | name :: rest ->
-      if (skip-name(name)) -> walk-names(dir, rest, failed, acc) | walk-child(dir, join-path(dir, name), rest, failed, acc)
+      if (skip-name(name)) -> walk-names(dir, rest, failed, acc) | walk-child(dir, Path.join(name, dir), rest, failed, acc)
 
 let walk-child(dir: Str, child: Str, rest: List Str, failed: Ref Bool, acc: List DocCase) -> List DocCase =
   cond

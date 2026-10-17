@@ -27,6 +27,7 @@ import "../type/check.mnd"
 import std/fs
 import std/io
 import std/list
+import std/path as Path
 import std/proc
 import std/result as Result
 import std/string as String
@@ -162,79 +163,6 @@ let append-asts(xs: List Ast, ys: List Ast) -> List Ast =
     | [] -> ys
     | x :: rest -> x :: append-asts(rest, ys)
 
-let str-byte-at(s: Str, i: Int) -> Int =
-  String.byte(i, s)
-
-; Last `/` index, or -1 if none.
-let last-slash-from(s: Str, i: Int, acc: Int) -> Int =
-  cond
-    | i < 0 -> acc
-    | str-byte-at(s, i) == 47 -> i
-    | else -> last-slash-from(s, i - 1, acc)
-
-let path-dirname(path: Str) -> Str {
-  let n = String.length(path)
-  let slash = last-slash-from(path, n - 1, -1)
-  cond
-    | slash < 0 -> "."
-    | slash == 0 -> "/"
-    | else -> String.slice(0, slash, path)
-}
-
-let path-is-abs(spec: Str) -> Bool =
-  String.length(spec) > 0 && str-byte-at(spec, 0) == 47
-
-let path-join(dir: Str, spec: Str) -> Str =
-  cond
-    | path-is-abs(spec) -> spec
-    | dir == "." || dir == "" -> spec
-    | else -> String.concat(dir, "/", spec)
-
-; Normalize `.` / `..` segments (no symlink resolution).
-let normalize-push(acc: List Str, seg: Str) -> List Str =
-  cond
-    | seg == "." -> acc
-    | seg == ".." ->
-      match (acc)
-        | [] -> []
-        | _ :: rest -> rest
-    | else -> seg :: acc
-
-let split-segments-from(s: Str, i: Int, n: Int, start: Int, acc: List Str) -> List Str =
-  cond
-    | i >= n ->
-      if (start == n) -> acc | String.slice(start, n - start, s) :: acc
-    | str-byte-at(s, i) == 47 ->
-      split-segments-from(
-        s,
-        i + 1,
-        n,
-        i + 1,
-        if (start == i) -> acc | normalize-push(acc, String.slice(start, i - start, s))
-      )
-    | else -> split-segments-from(s, i + 1, n, start, acc)
-
-let join-segments(xs: List Str, abs: Bool) -> Str =
-  match (xs)
-    | [] ->
-      if (abs) -> "/" | "."
-    | h :: rest -> join-segments-cons(h, rest, abs)
-
-let join-segments-cons(h: Str, rest: List Str, abs: Bool) -> Str =
-  match (rest)
-    | [] ->
-      if (abs) -> String.concat("/", h) | h
-    | n :: more ->
-      String.concat(if (abs) -> String.concat("/", h) | h, "/", join-segments-cons(n, more, false))
-
-let path-normalize(path: Str) -> Str {
-  let abs = path-is-abs(path)
-  let n = String.length(path)
-  let segs-rev = split-segments-from(path, 0, n, 0, [])
-  let segs = reverse(segs-rev)
-  join-segments(segs, abs)
-}
-
 ; s without a leading prefix. The caller has already checked the prefix.
 let drop-prefix(s: Str, n: Int) -> Str =
   String.slice(n, String.length(s) - n, s)
@@ -250,25 +178,22 @@ let index-of-byte(s: Str, b: Int, i: Int) -> Int =
 let ensure-mnd(name: Str) -> Str =
   if (String.ends-with(".mnd", name)) -> name | String.concat(name, ".mnd")
 
-let join-dir(dir: Str, rel: Str) -> Str =
-  if (dir == "/") -> String.concat("/", rel) | String.concat(dir, "/", rel)
-
 ; `std/list` → `stdlib/list.mnd`, independent of the importing file.
 ; The working directory is tried first. Each parent is tried after that,
 ; so a command run inside `stdlib/` still finds `stdlib/list.mnd`.
 let std-path(spec: Str) -> Str = {
-  let rel = String.concat("stdlib/", ensure-mnd(drop-prefix(spec, 4)))
-  if (exists(rel)) -> rel | std-path-from(rel, path-dirname(cwd()))
+  let rel = Path.join(ensure-mnd(drop-prefix(spec, 4)), "stdlib")
+  if (exists(rel)) -> rel | std-path-from(rel, Path.dirname(cwd()))
 }
 
 let std-path-from(rel: Str, dir: Str) -> Str = {
-  let candidate = join-dir(dir, rel)
+  let candidate = Path.join(rel, dir)
   cond
     | exists(candidate) -> candidate
     | dir == "/" -> rel
     | else ->
       {
-        let up = path-dirname(dir)
+        let up = Path.dirname(dir)
         if (up == dir) -> rel | std-path-from(rel, up)
       }
 }
@@ -277,7 +202,7 @@ let std-path-from(rel: Str, dir: Str) -> Str = {
 let deps-root() -> Str =
   match (getenv("HOME"))
     | Some(h) ->
-      if (String.length(h) > 0) -> String.concat(h, "/.menard/deps") | ".menard/deps"
+      if (String.length(h) > 0) -> Path.join("deps", Path.join(".menard", h)) | ".menard/deps"
     | None -> ".menard/deps"
 
 ; `github:owner/repo@version/module` → the cached file, or spec when it
@@ -301,7 +226,7 @@ let github-cache-path(spec: Str) -> Str {
               let repo = drop-prefix(owner-repo, slash + 1)
               let version = String.slice(0, vslash, after)
               let module = drop-prefix(after, vslash + 1)
-              String.concat(deps-root(), "/", owner, "/", repo, "/", version, "/", ensure-mnd(module))
+              Path.join(ensure-mnd(module), Path.join(version, Path.join(repo, Path.join(owner, deps-root()))))
             }
       }
 }
@@ -310,7 +235,7 @@ let resolve-import-path(from-path: Str, spec: Str) -> Str =
   cond
     | String.starts-with("std/", spec) -> std-path(spec)
     | String.starts-with("github:", spec) -> github-cache-path(spec)
-    | else -> path-normalize(path-join(path-dirname(from-path), spec))
+    | else -> Path.normalize(Path.join(spec, Path.dirname(from-path)))
 
 ; True when path is inside the github dependency cache.
 let in-deps(path: Str) -> Bool =
@@ -373,11 +298,11 @@ let fetch-dep(spec: DepSpec) -> Result Unit Str =
   match (spec)
     | DepSpec(owner, repo, version) ->
       {
-        let dir = String.concat(deps-root(), "/", owner, "/", repo, "/", version)
+        let dir = Path.join(version, Path.join(repo, Path.join(owner, deps-root())))
         cond
           | ensure-dir(dir) ->
             {
-              let tgz = String.concat(dir, "/.src.tgz")
+              let tgz = Path.join(".src.tgz", dir)
               let url = String.concat("https://codeload.github.com/", owner, "/", repo, "/tar.gz/refs/tags/", version)
               match (spawn(["/usr/bin/curl", "-fsSL", "-o", tgz, url]))
                 | Err(_) -> Err(String.concat("cannot fetch ", url))
@@ -1219,7 +1144,7 @@ pub let resolve-import(from-path: Str, spec: Str) -> Str =
   resolve-import-path(from-path, spec)
 
 pub let normalize-path(path: Str) -> Str =
-  path-normalize(path)
+  Path.normalize(path)
 
 pub let module-init-forms(path: Str, forms: List Ast, inits: Ref (List Str)) -> List Ast =
   with-module-init(path, forms, inits)
@@ -1235,7 +1160,7 @@ pub let defn-return-type(forms: List Ast, name: Str) -> Maybe Str =
 ; `flatten-module-graph`, which clears it.
 
 let path-ends(path: Str, suffix: Str) -> Bool {
-  let p = if (String.length(path) > 0 && String.byte(0, path) == 47) -> path | String.concat("/", path)
+  let p = if (Path.is-absolute(path)) -> path | Path.join(path, "/")
   let n = String.length(p)
   let m = String.length(suffix)
   n >= m && String.slice(n - m, m, p) == suffix

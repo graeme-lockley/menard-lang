@@ -30,8 +30,6 @@ extern mn_list_dir(path: Str) -> Str
 
 extern mn_realpath(path: Str) -> Str
 
-extern mn_now_ms() -> Int
-
 extern mn_remove(path: Str) -> Bool
 
 extern mn_is_dir(path: Str) -> Bool
@@ -65,11 +63,6 @@ pub let list-dir(path: Str) -> Str =
 ; @test realpath(".")
 pub let realpath(path: Str) -> Str =
   mn_realpath(path)
-
-; Milliseconds since the epoch.
-; @test now-ms()
-pub let now-ms() -> Int =
-  mn_now_ms()
 
 ; Remove path. False when it is missing or cannot be removed.
 ; @test remove("no-such-file")

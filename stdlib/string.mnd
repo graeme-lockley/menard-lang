@@ -308,3 +308,27 @@ pub let words(s: Str) -> List Str =
 ; @test from-int(0) => "0"
 pub let from-int(n: Int) -> Str =
   show(n)
+
+; Whether b is an ASCII digit byte (`'0'`..`'9'` as 48..57).
+; @test is-digit-byte(48) => true
+; @test is-digit-byte(57) => true
+; @test is-digit-byte(47) => false
+; @test is-digit-byte(58) => false
+pub let is-digit-byte(b: Int) -> Bool =
+  b >= 48 && b <= 57
+
+; The 0..15 value of an ASCII hex digit byte, or None.
+; @test hex-value(48) => Some(0)
+; @test hex-value(57) => Some(9)
+; @test hex-value(65) => Some(10)
+; @test hex-value(70) => Some(15)
+; @test hex-value(97) => Some(10)
+; @test hex-value(102) => Some(15)
+; @test hex-value(71) => None()
+; @test hex-value(103) => None()
+pub let hex-value(b: Int) -> Maybe Int =
+  cond
+    | b >= 48 && b <= 57 -> Some(b - 48)
+    | b >= 65 && b <= 70 -> Some(b - 55)
+    | b >= 97 && b <= 102 -> Some(b - 87)
+    | else -> None()

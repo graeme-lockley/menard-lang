@@ -18,6 +18,7 @@ const seam = new Set([
   join(ROOT, "stdlib/io.mnd"),
   join(ROOT, "stdlib/fs.mnd"),
   join(ROOT, "stdlib/proc.mnd"),
+  join(ROOT, "stdlib/time.mnd"),
 ]);
 
 function codeOf(file: string): string {
@@ -31,7 +32,7 @@ function codeOf(file: string): string {
 }
 
 describe("extern seam", () => {
-  test("extern appears only in sys, io, fs, and proc", () => {
+  test("extern appears only in sys, io, fs, proc, and time", () => {
     const files: string[] = [];
     mndFiles(ROOT, files);
     const offenders: string[] = [];

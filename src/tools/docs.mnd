@@ -10,6 +10,7 @@
 import std/fs
 import std/io
 import std/list
+import std/path as Path
 import std/string as String
 import std/sys
 
@@ -128,10 +129,6 @@ let scan-file(path: Str) -> Scan =
 let lib-name(name: Str) -> Bool =
   String.ends-with(".mnd", name) && not(String.ends-with(".test.mnd", name))
 
-; Join dir and name.
-let join-path(dir: Str, name: Str) -> Str =
-  if (dir == "" || dir == ".") -> name | String.concat(dir, "/", name)
-
 ; Scan each library file in dir.
 let scan-names(dir: Str, names: List Str, acc: Scan) -> Scan =
   match (names)
@@ -140,7 +137,7 @@ let scan-names(dir: Str, names: List Str, acc: Scan) -> Scan =
       cond
         | lib-name(name) ->
           {
-            let one = scan-file(join-path(dir, name))
+            let one = scan-file(Path.join(name, dir))
             match (one)
               | Scan(text, ok) ->
                 match (acc)

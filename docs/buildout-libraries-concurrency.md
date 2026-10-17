@@ -45,7 +45,7 @@ From the design — treat as non-negotiable while planning:
 - **Fixed point** (`bc0 == bc1`) stays about compiler emission — not concurrent
   interleavings.
 - Seam modules that declare `extern` stay confined (`sys` / `io` / `fs` /
-  `proc`, plus future socket modules as decided).
+  `proc` / `time`, plus future socket modules as decided).
 
 ---
 
@@ -78,16 +78,19 @@ touching concurrency.
    - Document naming, error mapping (`IoError`, spawn errors), and “no `pub`
      extern” as the standing contract.
    - Fill gaps only when Menard cannot express the capability.
-2. **Expand `stdlib/` in Menard**
-   - **Time** — clock / duration / formatting as needed by tools and later HTTP.
-   - **JSON** — encode/decode in Menard first (native only if justified later).
-   - **Paths** — join/split/normalise filesystem paths; parse/build URL-shaped
-     strings (scheme, host, path, query) as needed by tools and later HTTP.
-     Prefer pure Menard over `mn_*` unless the OS must be consulted.
+2. **Expand `stdlib/` in Menard** (one deliverable; Menard-first; `mn_*` only for OS)
+   - **`std/time`** — time, time zones, POSIX timestamps; duration / formatting
+     as needed by tools and later HTTP. (“Clock” apps are examples on this API.)
+   - **`std/json`** — encode/decode in one module; dedicated value ADT with
+     numbers as both `Int` and `Float`. Native only if justified later.
+   - **`std/path`** — pure `\|>`-friendly join/split/normalise for **POSIX**
+     filesystem paths; parse/build URL-shaped strings (scheme, host, path,
+     query) as needed. No Windows path rules in A.
 3. **Docs**
+   - Runtime ABI inventory under `docs/` (enrich over time).
    - Update [stdlib.md](stdlib.md) (and guide as needed) for new modules.
-   - Optional: short ratification entry in [decisions.md](decisions.md) for
-     purpose + library philosophy (design says ratify now).
+   - Ratify purpose + library philosophy in [decisions.md](decisions.md) /
+     [menard-spec.md](menard-spec.md) **in this build**.
 
 ### Out of scope
 
@@ -99,37 +102,39 @@ touching concurrency.
 
 ### Done when
 
-- [ ] Runtime ABI inventory written (even if informal under `docs/` or
-      `runtime/`) and wrappers match it.
-- [ ] **Time**, **JSON**, and **paths** land in `stdlib/` with tests (`@test` /
-      corpus as appropriate).
-- [ ] `stdlib.md` lists the new Platform API surface.
-- [ ] No new public `extern`; seam confinement preserved.
-- [ ] Bootstrap / corpus still green; `bc0 == bc1` unaffected.
+- [x] Runtime ABI inventory written under `docs/` and wrappers match it.
+- [x] `std/time`, `std/json`, and `std/path` land together with `@test`
+      coverage (corpus only for any new `mn_*`).
+- [x] `stdlib.md` lists the new Platform API surface.
+- [x] Purpose + library philosophy ratified in `decisions.md` / spec as needed.
+- [x] No new public `extern`; seam confinement preserved.
+- [x] Bootstrap / corpus still green; `bc0 == bc1` unaffected.
 
 ### Results / outputs (feeds later builds)
 
 | Output | Used by |
 |---|---|
-| Documented `mn_*` + Platform wrappers | B (FFI boundary clarity), C–F (I/O wrappers) |
-| `std/time`, `std/json`, `std/path` (names TBD) | F (HTTP URLs/paths), apps, tooling |
+| Documented `mn_*` + Platform wrappers (`docs/`) | B (FFI boundary clarity), C–F (I/O wrappers) |
+| `std/time`, `std/json`, `std/path` | F (HTTP URLs/paths), apps, tooling |
 | Habit: Menard-first stdlib growth | All later builds |
-| Optional ADR: purpose + libraries ratified | Spec sync later |
+| ADR: purpose + libraries ratified (in A) | Spec sync in A |
 
-### Open questions (drive planning)
+### Decisions (Stage A planning)
 
-1. Exact module names: `std/time` vs `std/clock`? `std/path` vs `std/url` vs
-   one module for both filesystem paths and URLs?
-2. JSON as `std/json` only, or split encode/decode modules?
-3. JSON value type: dedicated ADT, or `Map`/`List`/`Str`/`Int`/`Float`/`Bool`
-   product — and how are numbers represented (Int vs Float)?
-4. Which time primitives are `mn_*` (e.g. monotonic clock) vs pure Menard?
-5. Path/URL API shape: mutable builder, pure functions, or both? Windows vs
-   POSIX path rules in v1?
-6. Do we ratify purpose/libraries into `decisions.md` / `menard-spec.md` in this
-   build or a tiny docs-only commit beforehand?
-7. Priority if A is sliced: paths vs time vs JSON — which first?
-8. Any existing compiler/driver pain that should force ordering inside A?
+| # | Decision |
+|---|---|
+| 1 | **Modules:** `std/time`, `std/json`, `std/path`. “Clock” is not a std module name. |
+| 1A | **Time zones v1:** UTC + fixed offsets only; no IANA database. |
+| 2 | **JSON:** single module `std/json` (encode and decode together). |
+| 2C | **Clock seam:** `mn_now_ms` lives in `std/time` only; removed from `std/fs`; call sites updated. |
+| 3 | **JSON values:** dedicated ADT; numbers as both `Int` and `Float` (integer token fitting `Int` → `JsonInt`, else `JsonFloat`). |
+| 4 | **Time / seams:** maximise Menard. `mn_*` only for OS contact. |
+| 5 | **Path/URL API:** pure `\|>` functions; **POSIX only** in v1. |
+| 6 | **Ratification:** purpose + library philosophy in `decisions.md` / `menard-spec.md` **as part of Build A**. |
+| 7 | **Delivery:** one deliverable — time, JSON, and paths together. |
+| 8 | **Ordering:** plan and implement the three libraries together. |
+| 9 | **Runtime ABI inventory:** under `docs/` ([runtime-abi.md](runtime-abi.md)). |
+| 10 | **Tests:** `@test` first; corpus only for `mn_*`. |
 
 ---
 
@@ -611,8 +616,8 @@ callbacks). **C → D is mandatory.**
 
 ## Suggested planning order
 
-1. Plan and schedule **Build A** immediately (ratify docs if desired, then time +
-   JSON).
+1. Plan and schedule **Build A** immediately (ratify purpose/libraries; ship
+   `std/time` + `std/json` + `std/path` as one deliverable).
 2. Slot **Build B** when FFI bandwidth exists (parallel to A tail, or after A).
 3. Do **not** staff D/E/F until **Build C** has a written mechanism choice and
    passing acceptance criteria.
@@ -629,4 +634,5 @@ callbacks). **C → D is mandatory.**
 | [stdlib.md](stdlib.md) | Current Platform API catalogue |
 | [decisions.md](decisions.md) | Ratification / ADRs |
 | [menard-spec.md](menard-spec.md) | Normative language (update only after ADR) |
+| [runtime-abi.md](runtime-abi.md) | Seam `mn_*` inventory (Build A) |
 | [runtime/README.md](../runtime/README.md) | C runtime layout |
