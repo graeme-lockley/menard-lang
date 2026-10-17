@@ -1,0 +1,632 @@
+# Buildout: libraries and concurrency
+
+**Status:** planning — break the architecture into shippable builds.  
+**Architecture:** [design-libraries-concurrency.md](design-libraries-concurrency.md)  
+(Do not reopen that design here; answer open questions with plans and code.)
+
+This document turns the design’s two initiatives and nine implementation phases
+into **six builds** for planning. Builds **A–B** grow the Platform API without
+concurrency. Builds **C–F** are the concurrency track; **C is a hard gate**.
+
+```
+purpose → library philosophy → concurrency model → runtime
+              │                        │
+         Builds A, B              Builds C → D → E → F
+         (start now)              (after C succeeds)
+```
+
+---
+
+## Recommended shape (overview)
+
+| Build | Name | Design phases | Concurrency? |
+|---|---|---|---|
+| **A** | Platform foundation | 1–2 | No |
+| **B** | FFI proving ground | 3 | No |
+| **C** | Suspension experiment | 4 | Gate |
+| **D** | Task runtime + public `Task.*` | 5–6 | After C |
+| **E** | Mailbox + Actor | 7 | After D |
+| **F** | Network, cleanup, supervision | 8–9 | After E |
+
+**Rule:** do not start D until C’s acceptance criteria pass on **both** native and
+the TypeScript interpreter. A and B must not wait on C.
+
+---
+
+## Cross-cutting constraints (every build)
+
+From the design — treat as non-negotiable while planning:
+
+- **Runtime ABI** (`mn_*`) ≠ **Platform API** (`stdlib/`); apps never call `mn_*`.
+- **Runtime ABI ≠ foreign C FFI ABI** (name the inequality; full FFI ABI is a
+  later/separate spec).
+- **Menard is the default; native must justify** (correctness of dual-hosted
+  meaning, or measured hot path).
+- **Fixed point** (`bc0 == bc1`) stays about compiler emission — not concurrent
+  interleavings.
+- Seam modules that declare `extern` stay confined (`sys` / `io` / `fs` /
+  `proc`, plus future socket modules as decided).
+
+---
+
+## Build A — Platform foundation
+
+**Maps to design:** §3.12 phases 1–2; §1–2 ratification stance.
+
+### Depends on
+
+| Input | Source |
+|---|---|
+| Architecture for purpose + libraries | [design §1–2](design-libraries-concurrency.md) |
+| Current seam + stdlib | `stdlib/`, `runtime/`, [stdlib.md](stdlib.md) |
+| Existing dual host (C + TS interpreter) | repo as of today |
+
+**Does not depend on:** suspension, tasks, actors, or Build C+.
+
+### Goal
+
+Make the Platform API the place capability grows: catalogue and tidy the Runtime
+ABI, wrap it in `stdlib`, and add foundational Menard libraries — **time**,
+**JSON**, and **paths** (filesystem paths and URL-shaped strings) — without
+touching concurrency.
+
+### Scope (planning targets)
+
+1. **Formalise `mn_*`**
+   - Inventory current `extern` / runtime symbols vs wrappers in `std/sys`,
+     `io`, `fs`, `proc`.
+   - Document naming, error mapping (`IoError`, spawn errors), and “no `pub`
+     extern” as the standing contract.
+   - Fill gaps only when Menard cannot express the capability.
+2. **Expand `stdlib/` in Menard**
+   - **Time** — clock / duration / formatting as needed by tools and later HTTP.
+   - **JSON** — encode/decode in Menard first (native only if justified later).
+   - **Paths** — join/split/normalise filesystem paths; parse/build URL-shaped
+     strings (scheme, host, path, query) as needed by tools and later HTTP.
+     Prefer pure Menard over `mn_*` unless the OS must be consulted.
+3. **Docs**
+   - Update [stdlib.md](stdlib.md) (and guide as needed) for new modules.
+   - Optional: short ratification entry in [decisions.md](decisions.md) for
+     purpose + library philosophy (design says ratify now).
+
+### Out of scope
+
+- `Task` / `Mailbox` / `Actor`
+- TCP/HTTP (sockets are Build F)
+- FFI to third-party C (that is Build B)
+- Changing GC or introducing park points
+- New integer / float width types (see Build B — not required for A)
+
+### Done when
+
+- [ ] Runtime ABI inventory written (even if informal under `docs/` or
+      `runtime/`) and wrappers match it.
+- [ ] **Time**, **JSON**, and **paths** land in `stdlib/` with tests (`@test` /
+      corpus as appropriate).
+- [ ] `stdlib.md` lists the new Platform API surface.
+- [ ] No new public `extern`; seam confinement preserved.
+- [ ] Bootstrap / corpus still green; `bc0 == bc1` unaffected.
+
+### Results / outputs (feeds later builds)
+
+| Output | Used by |
+|---|---|
+| Documented `mn_*` + Platform wrappers | B (FFI boundary clarity), C–F (I/O wrappers) |
+| `std/time`, `std/json`, `std/path` (names TBD) | F (HTTP URLs/paths), apps, tooling |
+| Habit: Menard-first stdlib growth | All later builds |
+| Optional ADR: purpose + libraries ratified | Spec sync later |
+
+### Open questions (drive planning)
+
+1. Exact module names: `std/time` vs `std/clock`? `std/path` vs `std/url` vs
+   one module for both filesystem paths and URLs?
+2. JSON as `std/json` only, or split encode/decode modules?
+3. JSON value type: dedicated ADT, or `Map`/`List`/`Str`/`Int`/`Float`/`Bool`
+   product — and how are numbers represented (Int vs Float)?
+4. Which time primitives are `mn_*` (e.g. monotonic clock) vs pure Menard?
+5. Path/URL API shape: mutable builder, pure functions, or both? Windows vs
+   POSIX path rules in v1?
+6. Do we ratify purpose/libraries into `decisions.md` / `menard-spec.md` in this
+   build or a tiny docs-only commit beforehand?
+7. Priority if A is sliced: paths vs time vs JSON — which first?
+8. Any existing compiler/driver pain that should force ordering inside A?
+
+---
+
+## Build B — FFI proving ground
+
+**Maps to design:** §3.12 phase 3; §2.2 Runtime ABI ≠ C FFI ABI.
+
+### Depends on
+
+| Input | From |
+|---|---|
+| Clear Runtime ABI vs Platform API | **Build A** |
+| Dual-hosted linking story | Existing runtime / `mn` driver |
+| Design rule: tagged Menard values ≠ raw C layout | design §2.2 |
+
+**Does not depend on:** Build C (concurrency).
+
+**Soft dependency:** A’s ABI inventory makes B cleaner; if B must start early,
+at least document the inequality and conversion boundary first.
+
+### Goal
+
+Prove that Menard can call **foreign** C (e.g. SQLite) through an explicit
+conversion layer, without treating `mn_*` as the general FFI calling convention.
+
+### Language types vs FFI (standing recommendation)
+
+**Do not add `Byte`, `Int16`, `Int32`, `Int64`, `Float32`, `Float64`, … as Menard
+types for FFI.** That would reopen settled decisions (one `Int`, no `Byte`,
+boxed `Float`) and multiply the dual-host agreement surface.
+
+FFI assists by **converting at the boundary**, not by growing the core type
+system:
+
+| Menard | Typical C side (in the bridge) |
+|---|---|
+| `Int` | `int32_t` / `int64_t` / `size_t` with explicit range checks |
+| `Float` | `double` (and narrow to `float` only in the bridge if a lib demands it) |
+| `Str` | `const char*` + length, or owned buffer copy |
+| `Char` | already a scalar — map to Unicode code point / `uint32_t` as needed |
+| `Bool` / `Unit` | C bool / void |
+
+Wide C integers that do not fit Menard `Int` (63-bit tagged) need an explicit
+policy in the bridge (truncate with check, `Result` error, or multi-word blob as
+`Str`/bytes) — **not** a new language integer type in Build B.
+
+Revisit new widths only as a **separate language ADR** if FFI proves unbearable
+without them; that is outside this buildout’s default path.
+
+### Scope (planning targets)
+
+1. Pick one proving-ground library (**SQLite** recommended by design).
+2. Define a minimal FFI bridge using **existing** Menard types ↔ C layouts
+   (table above); ownership/free rules documented.
+3. Ship as an **external** Menard library or clearly marked experimental module
+   (SQLite stays out of `std/` per design §2.4).
+4. Tests that run where the native lib is available; document skip/hermetic
+   policy.
+
+### Out of scope
+
+- General package manager / lockfile
+- Making SQLite part of `stdlib/`
+- Full FFI specification for all C types
+- **New Menard numeric / byte types** (see above)
+- Concurrent access to the DB (no tasks yet)
+
+### Done when
+
+- [ ] One real foreign library callable from Menard on the native path.
+- [ ] Interpreter story defined (unsupported, stub, or host binding) without
+      lying about agreement.
+- [ ] Written note: conversions are explicit; `stdlib` does not poke tagged
+      words by hand.
+- [ ] No leakage of SQLite (or similar) into the Runtime ABI as if it were
+      `mn_*`.
+
+### Results / outputs (feeds later builds)
+
+| Output | Used by |
+|---|---|
+| FFI conversion patterns | Future native hot paths; optional later DB actors (E/F) |
+| Proof that Platform can grow outside `mn_*` | Confidence for A-style growth |
+| Constraints on callbacks into Menard | **Build C/D** (single-mutator: no foreign thread runs Menard heap code) |
+
+### Open questions (drive planning)
+
+1. SQLite vs another lib for the first FFI (crypto, zlib, …)?
+2. Where does the binding live: `github:`-shaped tree, `vendor/`, or
+   `examples/ffi-sqlite/`?
+3. Who owns buffers returned from C (copy into `Str` vs borrow)?
+4. How does the interpreter behave: hard error, optional native addon, or
+   tests native-only?
+5. Are C callbacks into Menard in scope for B, or explicitly deferred until
+   single-mutator rules are tested in C/D?
+6. Build/link story: pkg-config, bundled amalgamation, or system lib only?
+7. What is the smallest API surface for “proving ground” (open/exec/close)?
+8. Overflow policy when C `int64_t` / `uint64_t` does not fit Menard `Int`?
+9. Confirm: no new core types in B — or escalate a language ADR if blocked?
+
+---
+
+## Build C — Suspension experiment (hard gate)
+
+**Maps to design:** §3.12 phase 4; §3.5 / §3.5.1; §3.0 invariants 1–2, 5.
+
+### Depends on
+
+| Input | From |
+|---|---|
+| Dual hosts + GC + shadow stack | Existing runtime / interpreter |
+| Shared `Ref` allowed (no `Sendable`) | design §3.7 |
+| Single-mutator + GC-visibility invariants | design §3.0 |
+| Optional: stable Platform I/O for the experiment harness | **Build A** (nice-to-have, not required) |
+
+**Does not depend on:** Build B (FFI).  
+**Blocks:** Builds D, E, F.
+
+### Goal
+
+Prove that Menard can suspend and resume computations on **both** hosts, with
+GC correctness and shared mutable state, **before** designing public Task APIs.
+
+### Scope (planning targets)
+
+Implement the **minimum** machinery needed for the experiment only (may be
+feature-flagged / internal):
+
+1. Create multiple lightweight tasks.
+2. Suspend inside a **nested** call.
+3. Run another task while the first is suspended.
+4. **GC** while suspended.
+5. Resume; locals and shared `Ref` / `StringBuffer` still correct.
+6. One task **terminates** while another is waiting to join it.
+7. Same program (or twin) on TypeScript interpreter with matching
+   **observable** behaviour (not identical scheduler internals).
+
+Document the chosen suspension representation (stackful vs state machine vs
+continuations) and why it works on both hosts.
+
+### Out of scope
+
+- Public `Task.spawn` / `join` Platform API (that is D)
+- Mailboxes / actors
+- TCP/HTTP
+- Final atomic-wait API spelling (guarantee may be stubbed for the experiment)
+- Fairness / yield policy beyond what the experiment needs
+
+### Done when
+
+- [ ] All §3.5.1 bullets pass natively under GC stress where applicable
+      (`MENARD_GC_STRESS` / heap verify as appropriate).
+- [ ] Interpreter passes the equivalent scenario.
+- [ ] Short write-up: mechanism choice, known limitations, what D can rely on.
+- [ ] Explicit list of **temporary** internal APIs that must not ship as Platform
+      API yet.
+
+### Results / outputs (feeds later builds)
+
+| Output | Used by |
+|---|---|
+| Proven suspend/resume + GC story on both hosts | **D** (scheduler) |
+| Mechanism decision (or shortlist with winner) | **D** |
+| Evidence shared `Ref` across park works | **D**, **E** (mailboxes) |
+| Confidence to implement cancel later | **D**, **F** |
+
+### Open questions (drive planning)
+
+1. Stackful coroutines vs compiler state machines vs explicit frames — which
+   candidate do we try first for **both** hosts?
+2. Where does experiment code live (`tests/`, `runtime/fixtures/`, branch flag)?
+3. How much of the future scheduler is embedded in C vs kept disposable?
+4. What is the interpreter’s execution representation if JS cannot pause a
+   sync stack?
+5. Must join-while-exit be true “join” or is a test harness wait enough for C?
+6. How do we golden-test without requiring identical interleavings?
+7. Does C need parkable `read-file`, or can suspension be a synthetic
+   `mn_task_suspend_for_test`?
+8. Failure policy: if native works but interpreter cannot match, is C failed
+   or is interpreter deferred (design says both must work)?
+
+---
+
+## Build D — Task runtime + public `Task.*`
+
+**Maps to design:** §3.12 phases 5–6; §3.0; §3.3.2; §3.10.1.
+
+### Depends on
+
+| Input | From |
+|---|---|
+| Proven suspension + GC + shared `Ref` | **Build C** (required) |
+| No public wake; internal scheduler vs Platform API | design §3.3.2 |
+| Cancel-aware wait semantics (design intent) | design §3.10.1 |
+| Single-mutator / no lost-wakeup **guarantees** | design §3.0 |
+
+**Does not depend on:** Build E (actors) or F (TCP).  
+**Blocks:** E, F.
+
+### Goal
+
+Turn the experiment into a real cooperative single-mutator scheduler and a
+public `std/task` (or equivalent) API: spawn, join, scope, yield — **not** raw
+park/wake.
+
+### Scope (planning targets)
+
+1. **Internal runtime:** create / atomic-wait *guarantee* / resume / cancel;
+   runnable queue; document that wake is not Platform API.
+2. **Public Platform API:** `Task.spawn`, `Task.join`, `Task.scope` (structured
+   lifetimes), `Task.yield`; catalogue **which** operations may suspend.
+3. **Cancellation:** defined outcomes for join (and stubs for future
+   receive/I/O cancel).
+4. Tests: multi-task, shared `Ref`, cancel of a parked join, yield fairness
+   smoke.
+5. Dual-host semantic agreement tests (ordering guarantees as specified).
+
+### Out of scope
+
+- `Mailbox` / `Actor` (Build E)
+- Parkable TCP/HTTP (Build F)
+- Bounded mailboxes / supervision trees (Build F)
+- Exposing `Task.wake` publicly
+
+### Done when
+
+- [ ] Public Task API usable from Menard on native + interpreter.
+- [ ] Atomic-wait **guarantee** held by tests (mechanism may be internal).
+- [ ] No public park/wake.
+- [ ] Suspend-point catalogue started (even if incomplete).
+- [ ] Cancel + scope behaviour specified and tested for join at minimum.
+- [ ] Design §3.0 invariants 1–4 demonstrably respected in tests.
+
+### Results / outputs (feeds later builds)
+
+| Output | Used by |
+|---|---|
+| `std/task` + internal scheduler | **E** (actor = task + mailbox), **F** |
+| Cancel hooks | **E**, **F** (receive / accept cancel) |
+| Suspend catalogue | **F** (document I/O) |
+| Single-mutator discipline | **E**, **F**, future FFI callbacks |
+
+### Open questions (drive planning)
+
+1. Module path: `std/task` only, or `std/task` + internal `runtime` decls?
+2. Exact `Task.scope` / spawn-into-scope signatures?
+3. Atomic-wait mechanism: wait token vs condition registration vs other
+   (still unspecified in design — pick in D)?
+4. Cancel representation: `Result` error, dedicated `Cancelled` variant, panic?
+5. Does `Task.join` return `Result a Cancelled` or always `a` with panic on
+   cancel?
+6. Priorities / fairness beyond cooperative yield — any in D or defer?
+7. How are task IDs exposed (`TaskId` opaque) for debugging without public wake?
+8. Interpreter performance budget acceptable for D?
+
+---
+
+## Build E — Mailbox + Actor
+
+**Maps to design:** §3.12 phase 7; §3.3.3; §3.6–3.8; §3.10.2.
+
+### Depends on
+
+| Input | From |
+|---|---|
+| Public tasks + cancel + atomic wait | **Build D** (required) |
+| Shared `Ref` for queue storage | design §3.7; proven in **C** |
+| Actors as abstraction, not isolation | design §3.6 |
+| `Actor.call` ergonomics intent | design §3.8 |
+
+**Does not depend on:** Build F (can unit-test actors without TCP).  
+**Blocks:** F’s “actorful” server patterns (F can still do bare tasks + TCP).
+
+### Goal
+
+Implement message queues and actors **in Menard** on the task runtime: identity,
+serialised receive loop, send/call, lifecycle by convention.
+
+### Scope (planning targets)
+
+1. **`std/mailbox`:** `Ref`-backed queue (two-list or similar); receive uses
+   runtime atomic wait; cancel-aware receive.
+2. **`std/actor`:** spawn (task + mailbox loop), send, call (hide reply-Pid
+   plumbing if possible), self/Pid.
+3. Document: not an isolation boundary; shared `Ref` across tasks allowed.
+4. Example: UserManager-style service in `examples/`.
+5. Initial lifecycle rules: death, message-after-death, panic visibility
+   (may be minimal but written down).
+
+### Out of scope
+
+- Bounded mailbox / backpressure (Build F / phase 9 — may stub)
+- Full supervision trees (Build F)
+- HTTP (Build F)
+- Native mailbox optimisation unless D/E profiling demands it
+
+### Done when
+
+- [ ] Mailbox send/receive correct under concurrent senders (cooperative).
+- [ ] No lost wakeup in mailbox tests.
+- [ ] Actor example + tests for put/get/search-style protocol.
+- [ ] `Actor.call` usable without forcing every protocol to expose reply Pids
+      (or documented interim shape).
+- [ ] Lifecycle behaviour documented even if v1 is simple.
+
+### Results / outputs (feeds later builds)
+
+| Output | Used by |
+|---|---|
+| `std/mailbox`, `std/actor` | **F** (HTTP gateway → domain actors) |
+| Example service patterns | Apps / guide |
+| Lifecycle hooks sufficient for supervision | **F** |
+
+### Open questions (drive planning)
+
+1. One module or two (`std/mailbox` vs fold into `std/actor`)?
+2. Queue representation: cons-list, two-list, or ring in Menard?
+3. `Pid a` typing: phantom message type only, or richer protocols now?
+4. Interim vs final `Actor.call` (reply Pid in message vs typed request/response)?
+5. Message-after-death: drop, error to sender, or dead-letter process?
+6. Panic in actor: kill actor only, or escalate to scope?
+7. Are named actor registries in E or deferred to F?
+8. Must mailboxes support multiple waiters or only classic single consumer?
+
+---
+
+## Build F — Network, resource cleanup, supervision
+
+**Maps to design:** §3.12 phases 8–9; §3.4; §3.10.1a; §3.10.2 overload.
+
+### Depends on
+
+| Input | From |
+|---|---|
+| Parkable / cancel-aware task waits | **Build D** (required) |
+| Preferably actors for domain services | **Build E** (strongly recommended) |
+| JSON (and ideally time) | **Build A** |
+| Resource lifetime requirement | design §3.10.1a |
+| Sync-looking I/O model | design §3.4 |
+| FFI single-mutator callback rules if using C libs | **Build B** (if applicable) |
+
+**Does not unlock further architecture builds** in this plan — this is the
+capstone of the concurrency initiative (further work is product).
+
+### Goal
+
+Ship cancel-aware **sockets** at the Runtime ABI / thin Platform wrapper, then
+implement **HTTP, HTTPS, and REST-style client/server in Menard** on top — not
+as a large C HTTP stack. Harden mailboxes (bounds/backpressure) and basic
+supervision so long-running services are credible.
+
+### Layering (correct reading of the design)
+
+```
+REST / HTTP client & server     ← Menard (stdlib and/or Menard libraries)
+        │
+HTTPS (TLS record + HTTP)       ← Menard over TLS stream  (TLS itself: see Qs)
+        │
+TCP / UDP sockets               ← mn_* seam + thin std wrappers (parkable)
+        │
+OS
+```
+
+- **Native / C:** socket primitives (and possibly a TLS backend via `mn_*` or
+  FFI) — irreducible OS contact and park/completion.
+- **Menard:** HTTP/1.x (and REST conventions), routing, codecs (JSON from A),
+  client and server APIs, HTTPS as HTTP-over-TLS from Menard’s point of view.
+
+This matches “small OS interface; everything possible in Menard.”
+
+### Scope (planning targets)
+
+1. **Sockets (native seam + `std` wrappers):** listen/accept/connect/read/write/
+   close; parkable; cancel-aware; completions via scheduler (no worker-thread
+   Menard).
+2. **Resource cleanup:** `with-connection`-style (or equivalent) so cancel
+   still closes FDs.
+3. **HTTP client + server in Menard** on sockets (foundational → prefer
+   `stdlib` / adjacent std modules; decide naming in planning).
+4. **HTTPS / REST in Menard** — REST as conventions over HTTP; HTTPS needs a
+   TLS byte-stream under HTTP (native/FFI TLS engine vs pure Menard — open).
+5. **Suspend catalogue** updated for all new I/O.
+6. **Supervision / backpressure:** bounded mailboxes; minimal supervisor or
+   documented patterns; load test smoke for UserManager-under-load class bugs.
+
+### Out of scope
+
+- Shared-heap multicore
+- Full web framework / ORM (Menard libraries later)
+- Implementing HTTP framing in C
+- Process-control sprawl (signals, etc. — still refused)
+
+### Done when
+
+- [ ] Accept/connect loops + per-connection tasks work under cancel/shutdown.
+- [ ] Resource cleanup verified on cancel paths.
+- [ ] Menard HTTP **server** and **client** minimal path (HTTP/1.1 subset).
+- [ ] REST-style example (e.g. JSON resource over HTTP) in Menard.
+- [ ] HTTPS path defined: works, or explicitly deferred with a written decision.
+- [ ] Example: HTTP ↔ actor UserManager (or equivalent).
+- [ ] Bounded mailbox or explicit “unbounded v1 + documented risk” decision
+      recorded if bounds slip.
+- [ ] Dual-host: native required; interpreter may be partial but must not claim
+      false agreement.
+
+### Results / outputs
+
+| Output | Used by |
+|---|---|
+| Socket Platform API + Menard HTTP(S)/REST | Applications in Go/Deno/Bun domain |
+| Cleanup patterns | All future OS resources |
+| Supervision/backpressure | Production services |
+| Feedback into design/spec ratification of concurrency | `decisions.md` / spec when ready |
+
+### Open questions (drive planning)
+
+1. Socket module naming and seam confinement (`std/net` vs `std/tcp`)?
+2. HTTP in `std/http` now, or thin sockets in std and HTTP as `github:` first?
+3. TLS for HTTPS: `mn_*` to a system lib (BoringSSL/OpenSSL), FFI (Build B
+   pattern), or defer HTTPS to a follow-on build?
+4. REST: just examples/conventions, or a small `std/rest` helper module?
+5. Resource cleanup: language `defer`-like form vs library `with-*` only?
+6. Interpreter: full parkable sockets or native-only networking for v1?
+7. Bounded mailbox default size / overflow policy (block, drop, error)?
+8. Supervisor API minimal shape (parent link vs explicit `supervise`)?
+9. HTTP/1.1 subset: smallest useful surface (request line + headers + body)?
+10. How does shutdown drain in-flight connection tasks?
+11. Load/soak test harness: in-repo or manual for v1?
+12. UDP in F or later?
+
+---
+
+## Dependency diagram
+
+```
+                    ┌─────────────┐
+                    │  Design doc │
+                    └──────┬──────┘
+                           │
+              ┌────────────┴────────────┐
+              ▼                         ▼
+        ┌──────────┐              ┌──────────┐
+        │ Build A  │─────────────▶│ Build B  │
+        │ Platform │   (ABI clear)│   FFI    │
+        └────┬─────┘              └────┬─────┘
+             │                         │
+             │         ┌───────────────┘
+             │         │ (callback rules only)
+             ▼         ▼
+        ┌──────────────────┐
+        │     Build C      │  ← HARD GATE
+        │   Suspension     │
+        └────────┬─────────┘
+                 │
+                 ▼
+        ┌──────────────────┐
+        │     Build D      │
+        │  Task runtime    │
+        └────────┬─────────┘
+                 │
+                 ▼
+        ┌──────────────────┐
+        │     Build E      │
+        │ Mailbox + Actor  │
+        └────────┬─────────┘
+                 │
+                 ▼
+        ┌──────────────────┐
+        │     Build F      │
+        │ Net + cleanup +  │
+        │  supervision     │
+        └──────────────────┘
+```
+
+A → C is optional (harness convenience). B → C/D is informational (FFI
+callbacks). **C → D is mandatory.**
+
+---
+
+## Suggested planning order
+
+1. Plan and schedule **Build A** immediately (ratify docs if desired, then time +
+   JSON).
+2. Slot **Build B** when FFI bandwidth exists (parallel to A tail, or after A).
+3. Do **not** staff D/E/F until **Build C** has a written mechanism choice and
+   passing acceptance criteria.
+4. After C: D then E then F in sequence (E may overlap late D only if Task API
+   is stable enough for mailbox prototypes).
+
+---
+
+## Related documents
+
+| Document | Role |
+|---|---|
+| [design-libraries-concurrency.md](design-libraries-concurrency.md) | Architecture (source of truth) |
+| [stdlib.md](stdlib.md) | Current Platform API catalogue |
+| [decisions.md](decisions.md) | Ratification / ADRs |
+| [menard-spec.md](menard-spec.md) | Normative language (update only after ADR) |
+| [runtime/README.md](../runtime/README.md) | C runtime layout |

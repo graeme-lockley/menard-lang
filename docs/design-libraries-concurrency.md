@@ -979,6 +979,7 @@ building the Platform API.**
 
 | Document | Role |
 |---|---|
+| [buildout-libraries-concurrency.md](buildout-libraries-concurrency.md) | Planning: six builds, dependencies, open questions |
 | [menard-spec.md](menard-spec.md) | Normative language (unchanged until ratification) |
 | [decisions.md](decisions.md) | History and standing ADRs |
 | [stdlib.md](stdlib.md) | Current standard library surface |
