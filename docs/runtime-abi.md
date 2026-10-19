@@ -3,11 +3,17 @@
 **Status:** informal inventory for Build A — enrich as the seam grows.  
 **Contracts:** Runtime ABI ≠ Platform API; Runtime ABI ≠ foreign C FFI ABI.
 See [design-libraries-concurrency.md](design-libraries-concurrency.md) §2.2 and
-[decisions.md](decisions.md) (purpose + library philosophy ratification).
+[decisions.md](decisions.md) (purpose + library philosophy; Build B FFI).
 
 Apps and ordinary `stdlib/` modules never call `mn_*` directly. Seam modules
 declare private `extern mn_*` and publish `pub let` wrappers. `extern` is never
 `pub`.
+
+**Foreign FFI** (Build B) uses a separate conversion layer: modules under a
+`/ffi/` path may declare non-`mn_*` `extern` symbols; those must not be added
+to this catalogue. Example: [examples/ffi/sqlite/](../examples/ffi/sqlite/)
+(`sql_*` → libsqlite3). Conversions touch tagged words only in the bridge
+(e.g. `sql_ffi.c`), not in Menard source.
 
 ## Seam modules (may declare `extern`)
 

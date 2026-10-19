@@ -141,6 +141,8 @@ touching concurrency.
 ## Build B — FFI proving ground
 
 **Maps to design:** §3.12 phase 3; §2.2 Runtime ABI ≠ C FFI ABI.
+**Follow-on (link into `./mn`, packages):** [design-ffi.md](design-ffi.md)
+(iterate after the concurrency track).
 
 ### Depends on
 
@@ -157,8 +159,12 @@ at least document the inequality and conversion boundary first.
 
 ### Goal
 
-Prove that Menard can call **foreign** C (e.g. SQLite) through an explicit
+Prove that Menard can call **foreign** native code through an explicit
 conversion layer, without treating `mn_*` as the general FFI calling convention.
+**Chosen proving ground:** SQLite
+([examples/ffi/sqlite/](../examples/ffi/sqlite/)) — cross-platform, no TCC /
+`.app` baggage (EventKit Reminders was tried and rejected for product use;
+use an external CLI such as remindctl if you need Reminders).
 
 ### Language types vs FFI (standing recommendation)
 
@@ -184,15 +190,17 @@ policy in the bridge (truncate with check, `Result` error, or multi-word blob as
 Revisit new widths only as a **separate language ADR** if FFI proves unbearable
 without them; that is outside this buildout’s default path.
 
-### Scope (planning targets)
+### Scope (ships)
 
-1. Pick one proving-ground library (**SQLite** recommended by design).
-2. Define a minimal FFI bridge using **existing** Menard types ↔ C layouts
-   (table above); ownership/free rules documented.
-3. Ship as an **external** Menard library or clearly marked experimental module
-   (SQLite stays out of `std/` per design §2.4).
-4. Tests that run where the native lib is available; document skip/hermetic
-   policy.
+1. Proving-ground library: **SQLite** (open / exec / query / close).
+2. Minimal FFI bridge: pure C ABI (`sql_bridge`) + `MnWord` conversion
+   (`sql_ffi`); ownership = copy into `Str`, free C buffers in the bridge.
+3. External tree: [`examples/ffi/sqlite/`](../examples/ffi/sqlite/)
+   (stays out of `stdlib/`).
+4. `/ffi/` modules may declare non-`mn_*` `extern`; seam stays `mn_*`-only.
+5. Emit declares FFI prototypes (open path); `sqlite-native` links
+   `libsqlite3` (not global `RUNTIME_LIB_SRCS`).
+6. Tests: native smoke via `./build/sqlite demo`; interpreter unbound.
 
 ### Out of scope
 
@@ -200,17 +208,17 @@ without them; that is outside this buildout’s default path.
 - Making SQLite part of `stdlib/`
 - Full FFI specification for all C types
 - **New Menard numeric / byte types** (see above)
-- Concurrent access to the DB (no tasks yet)
+- Concurrent access; C→Menard callbacks (deferred to C/D)
+- In-process EventKit / Reminders (use an external helper CLI if needed)
 
 ### Done when
 
-- [ ] One real foreign library callable from Menard on the native path.
-- [ ] Interpreter story defined (unsupported, stub, or host binding) without
-      lying about agreement.
-- [ ] Written note: conversions are explicit; `stdlib` does not poke tagged
+- [x] One real foreign library callable from Menard on the native path.
+- [x] Interpreter story defined (unsupported / unbound) without lying about
+      agreement.
+- [x] Written note: conversions are explicit; `stdlib` does not poke tagged
       words by hand.
-- [ ] No leakage of SQLite (or similar) into the Runtime ABI as if it were
-      `mn_*`.
+- [x] No leakage of SQLite into the Runtime ABI as if it were `mn_*`.
 
 ### Results / outputs (feeds later builds)
 
@@ -220,20 +228,18 @@ without them; that is outside this buildout’s default path.
 | Proof that Platform can grow outside `mn_*` | Confidence for A-style growth |
 | Constraints on callbacks into Menard | **Build C/D** (single-mutator: no foreign thread runs Menard heap code) |
 
-### Open questions (drive planning)
+### Decisions (Stage B)
 
-1. SQLite vs another lib for the first FFI (crypto, zlib, …)?
-2. Where does the binding live: `github:`-shaped tree, `vendor/`, or
-   `examples/ffi-sqlite/`?
-3. Who owns buffers returned from C (copy into `Str` vs borrow)?
-4. How does the interpreter behave: hard error, optional native addon, or
-   tests native-only?
-5. Are C callbacks into Menard in scope for B, or explicitly deferred until
-   single-mutator rules are tested in C/D?
-6. Build/link story: pkg-config, bundled amalgamation, or system lib only?
-7. What is the smallest API surface for “proving ground” (open/exec/close)?
-8. Overflow policy when C `int64_t` / `uint64_t` does not fit Menard `Int`?
-9. Confirm: no new core types in B — or escalate a language ADR if blocked?
+| # | Decision |
+|---|---|
+| 1 | Proving ground: **SQLite** (cross-platform; replaces EventKit Reminders). |
+| 2 | Live under `examples/ffi/sqlite/`. |
+| 3 | Buffer ownership: copy into `Str`; free in bridge. |
+| 4 | Interpreter: hard unbound error; native-only. |
+| 5 | C→Menard callbacks deferred until C/D. |
+| 6 | Link: system `libsqlite3`; dedicated `sqlite-native` Makefile target. |
+| 7 | API: open / close / exec / query (JSON rows). |
+| 8 | No new core types; SQL text and paths are `Str`. |
 
 ---
 

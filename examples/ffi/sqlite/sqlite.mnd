@@ -1,0 +1,78 @@
+; SQLite API — foreign lib via sql_* (not mn_*).
+; Native-only; the interpreter leaves sql_* unbound.
+
+import std/json
+import std/list
+import std/map as Map
+import std/string as String
+
+pub type SqlError =
+  | SqlErr(Str)
+  | SqlBadState
+  | SqlBadJson
+
+extern sql_open(path: Str) -> Result Unit Int
+extern sql_close() -> Result Unit Int
+extern sql_exec(sql: Str) -> Result Unit Int
+extern sql_query(sql: Str) -> Result Str Int
+extern sql_errmsg() -> Str
+
+let decode-err(code: Int) -> SqlError =
+  cond
+    | code == 2 -> SqlBadState()
+    | else -> SqlErr(sql_errmsg())
+
+let map-unit(r: Result Unit Int) -> Result Unit SqlError =
+  match (r)
+    | Ok(u) -> Ok(u)
+    | Err(c) -> Err(decode-err(c))
+
+let map-json-str(r: Result Str Int) -> Result Str SqlError =
+  match (r)
+    | Ok(s) -> Ok(s)
+    | Err(c) -> Err(decode-err(c))
+
+; One query row: column name → JSON value (Map Str Json).
+
+let parse-row(v: Json) -> Result (Map Str Json) SqlError =
+  match (v)
+    | JsonObject(m) -> Ok(m)
+    | _ -> Err(SqlBadJson())
+
+let parse-rows(v: Json) -> Result (List (Map Str Json)) SqlError =
+  match (v)
+    | JsonArray(xs) ->
+      loop (rest = xs, acc = [])
+        match (rest)
+          | [] -> Ok(reverse(acc))
+          | h :: t ->
+            match (parse-row(h))
+              | Err(e) -> Err(e)
+              | Ok(row) -> recur(t, row :: acc)
+    | _ -> Err(SqlBadJson())
+
+let decode-rows(s: Str) -> Result (List (Map Str Json)) SqlError =
+  match (decode(s))
+    | Err(_) -> Err(SqlBadJson())
+    | Ok(v) -> parse-rows(v)
+
+pub let open(path: Str) -> Result Unit SqlError =
+  map-unit(sql_open(path))
+
+pub let close() -> Result Unit SqlError =
+  map-unit(sql_close())
+
+pub let exec(sql: Str) -> Result Unit SqlError =
+  map-unit(sql_exec(sql))
+
+; Raw JSON array of row objects.
+pub let query-json(sql: Str) -> Result Str SqlError =
+  map-json-str(sql_query(sql))
+
+pub let query(sql: Str) -> Result (List (Map Str Json)) SqlError =
+  match (query-json(sql))
+    | Err(e) -> Err(e)
+    | Ok(s) -> decode-rows(s)
+
+pub let errmsg() -> Str =
+  sql_errmsg()

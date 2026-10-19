@@ -860,10 +860,14 @@ way a repeated `pub alias` is allowed. Any other duplicate `pub` name is an
 error. A name in the list that the imported module does not publish is an
 import error.
 
-**And `extern` is confined to the seam's modules** (§2.15): `stdlib/sys.mnd`,
-`io.mnd`, `fs.mnd`, `proc.mnd`, `time.mnd`, and the runtime's own headers. That
-confinement is the marker of the ambient boundary (§2.11.B), and it is
-*checkable*, where a naming convention would not be.
+**And `extern` is confined** (§2.15): either to the seam's modules
+(`stdlib/sys.mnd`, `io.mnd`, `fs.mnd`, `proc.mnd`, `time.mnd`) declaring **`mn_*`
+only** (Runtime ABI), or to **FFI modules** whose path contains `/ffi/` and is
+not under `stdlib/`, declaring **non-`mn_*` only** (foreign link symbols). The
+runtime's own headers stay internal. That confinement is the marker of the
+ambient vs foreign boundary (§2.11.B), and it is *checkable*, where a naming
+convention would not be. Foreign calls convert at an explicit bridge; they are
+not the Runtime ABI calling convention.
 
 ### 2.8 The surface: four tiers
 
@@ -1700,12 +1704,13 @@ Neither `panic` nor `exit` carries `!`: the program stopping is not mutation of 
 value reachable from an argument.
 
 **The OS boundary is marked by `extern`.** Every ambient operation is an
-`extern`-backed wrapper, and `extern` bindings are confined to `stdlib/sys.mnd`,
-`io.mnd`, `fs.mnd`, `proc.mnd` and `time.mnd` (§2.7). So the boundary is
-**structural and enforceable**: a module cannot reach `write(2)` without
-importing the module that declares it, and a CI lint can refuse an `extern` —
-or an import of those five — anywhere else. `std/time` wraps the wall clock
-(`mn_now_ms`); filesystem metadata such as `mtime` stays on `std/fs`.
+`extern`-backed wrapper. Seam `extern` bindings are confined to `stdlib/sys.mnd`,
+`io.mnd`, `fs.mnd`, `proc.mnd` and `time.mnd` and declare **`mn_*` only** (§2.7).
+Foreign FFI may declare non-`mn_*` `extern` only in modules whose path contains
+`/ffi/` (not under `stdlib/`). So the boundary is **structural and enforceable**:
+a module cannot reach `write(2)` without importing a seam module, and a CI lint
+can refuse a misplaced `extern`. `std/time` wraps the wall clock (`mn_now_ms`);
+filesystem metadata such as `mtime` stays on `std/fs`.
 
 One thing is given up, and it should be stated plainly: one-glyph greppability
 for "can touch the outside world". The replacement is a grep for `extern`, or

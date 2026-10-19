@@ -28,6 +28,73 @@ specification. Where a name changed, the entry that changed it says so.
 
 ---
 
+## 2026-10-17 — FFI proving ground: SQLite (not EventKit)
+
+### The decision
+
+Build B’s foreign-library example is **SQLite** under
+`examples/ffi/sqlite/` (`make sqlite-native`), not in-process EventKit
+Reminders. Reminders/TCC needs a helper `.app` or an external CLI (e.g.
+remindctl); that is product integration, not an FFI proof. `./mn` stays free
+of libsqlite3 — only the dedicated link target pulls it in.
+
+Amends the Build B proving-ground choice in the FFI modules ADR below.
+
+### Why
+
+EventKit proved the `/ffi/` + open-emit path but collapsed under macOS privacy
+and EventKit API footguns. SQLite exercises the same conversion boundary on
+every host without a special binary identity.
+
+### User documentation
+
+[buildout-libraries-concurrency.md](buildout-libraries-concurrency.md) Build B;
+[examples/ffi/sqlite/README.md](../examples/ffi/sqlite/README.md).
+
+---
+
+## 2026-10-17 — FFI modules and Runtime ABI ≠ foreign FFI (Build B)
+
+### The decision
+
+**Foreign FFI** is a conversion layer outside the Runtime ABI. Apps and
+`stdlib/` never treat `mn_*` as “call any C.” Proving ground: **SQLite** under
+`examples/ffi/sqlite/` (open / exec / query / close).
+
+**Where `extern` may live (amends ADR 27):**
+
+| Module class | Path rule | Allowed `extern` symbols |
+|---|---|---|
+| Seam | `stdlib/{sys,io,fs,proc,time}` | `mn_*` only (Runtime ABI) |
+| FFI | path contains `/ffi/`, not under `stdlib/` | non-`mn_*` only (foreign link symbols) |
+| Everywhere else | — | no `extern` |
+
+`extern` remains never `pub`. Emit declares FFI symbols as LLVM prototypes
+(same `MnWord` calling convention as seam) without adding them to the Runtime
+ABI catalogue. Link extras (`.c`, system libs) stay out of the global
+runtime object list — e.g. a dedicated `sqlite-native` target.
+
+**No new Menard numeric / byte types** for FFI; convert at the bridge
+(`Int`/`Str`/…). C→Menard callbacks are out of scope until the single-mutator
+story (Builds C/D).
+
+Interpreter: foreign symbols stay unbound (hard error); dual-host agreement is
+not claimed for FFI.
+
+### Why
+
+Build A clarified Runtime ABI vs Platform API. Build B proves Platform capability
+can grow via an external conversion bridge without expanding `mn_*` or
+`stdlib/`. Designating `/ffi/` keeps confinement checkable.
+
+### User documentation
+
+[runtime-abi.md](runtime-abi.md); [buildout-libraries-concurrency.md](buildout-libraries-concurrency.md);
+[examples/ffi/sqlite/README.md](../examples/ffi/sqlite/README.md);
+[menard-spec.md](menard-spec.md) §2.7 / §2.15 (seam + FFI confinement).
+
+---
+
 ## 2026-10-17 — Purpose, libraries, and `std/time` seam (Build A)
 
 ### The decision
@@ -44,10 +111,11 @@ runtime does not imply a small standard library: foundational formats and
 protocols may live in `stdlib/` when implemented in Menard. Foreign C FFI is a
 separate conversion layer, not the Runtime ABI calling convention.
 
-**Seam amendment (ADR 27).** `extern` remains never `pub` and confined to seam
-modules. The allowed set is `stdlib/sys.mnd`, `io.mnd`, `fs.mnd`, `proc.mnd`,
-and **`time.mnd`**. `std/time` may declare clock `mn_*` only (`mn_now_ms` in
-Build A). Wall clock moves off `std/fs`.
+**Seam amendment (ADR 27).** `extern` remains never `pub`. Seam modules
+(`stdlib/sys`, `io`, `fs`, `proc`, **`time`**) declare `mn_*` only. Build B
+adds `/ffi/` modules for non-`mn_*` foreign symbols (see the Build B entry
+above). `std/time` may declare clock `mn_*` only (`mn_now_ms` in Build A).
+Wall clock moves off `std/fs`.
 
 Concurrency stays a non-goal in the specification until a later decision; the
 architecture in `design-libraries-concurrency.md` is approved as implementation
@@ -170,7 +238,7 @@ bearing choices; everything in the specification follows from them.
 | 24 | **Tag-based precise collection, with layout kinds; no static GC field maps** | With type parameters no static map can exist; alternatives (monomorphization, dictionary passing) cost far more | Invariants become load-bearing; marking marginally slower; unboxing, `Byte` and general mutable arrays forbidden forever |
 | 25 | **Two type views: canonical and display** | Aliases must never reach emitted bytes, but flattening them wrecks diagnostics | Two representations of types to keep straight |
 | 26 | **Casing enforced: upper = type/constructor, lower = value** | Cheap, catches `Int`/`int`, makes signatures readable | A naming rule users cannot opt out of |
-| 27 | **Private by default; `pub` to export**; `extern` never exported and confined to the seam modules (`sys`, `io`, `fs`, `proc`, **`time`**) | Keeps the module boundary real; you can tell what is safe to change; and the `extern` confinement gives the ambient boundary a marker the compiler can check | ~50 lines of visibility checking, plus the confinement lint |
+| 27 | **Private by default; `pub` to export**; `extern` never exported; confined to seam modules (`sys`, `io`, `fs`, `proc`, `time`) for `mn_*`, or to `/ffi/` modules for non-`mn_*` foreign symbols | Keeps the module boundary real; Runtime ABI ≠ foreign FFI; checkable ambient vs FFI markers | ~50 lines of visibility checking, plus the confinement lint; open emit for FFI prototypes |
 | 28 | **The surface is four tiers, with a placement rule** | Compiler-known iff it needs per-type synthesis; runtime-backed iff it needs mutation or an opaque representation **and the compiler is a client on a hot path**; else prelude | Adding an operation means knowing which tier it belongs to |
 | 29 | **Aliases are nullary and transparent** | Parameters would make them type-level functions, i.e. the higher-kinded feature that is out | Cannot abstract over container shape with an alias |
 | 30 | **`!` marks observable mutation only; the OS boundary is marked by `extern`, not by a name** | One glyph for two ideas meant neither was reliable, and `!`-for-purity was a gesture at effects the language refuses (no propagation, no effect system) | The convention covers one special form and four functions and is still unchecked; the ambient audit moves from a naming habit to a lintable module boundary |

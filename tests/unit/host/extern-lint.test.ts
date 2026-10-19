@@ -31,16 +31,51 @@ function codeOf(file: string): string {
     .join("\n");
 }
 
+function isFfiPath(file: string): boolean {
+  const rel = file.slice(ROOT.length + 1).replaceAll("\\", "/");
+  return rel.includes("/ffi/") && !rel.startsWith("stdlib/");
+}
+
+function externNames(text: string): string[] {
+  const names: string[] = [];
+  for (const m of text.matchAll(/\bextern\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/g)) {
+    names.push(m[1]!);
+  }
+  return names;
+}
+
 describe("extern seam", () => {
-  test("extern appears only in sys, io, fs, proc, and time", () => {
+  test("extern appears only in seam modules or /ffi/ trees", () => {
     const files: string[] = [];
     mndFiles(ROOT, files);
     const offenders: string[] = [];
     for (const file of files) {
-      if (seam.has(file)) continue;
+      if (seam.has(file) || isFfiPath(file)) continue;
       const text = codeOf(file);
-      if (/\(extern(\s|\))/.test(text) || /\(pub\s+extern(\s|\))/.test(text)) {
+      // Top-level surface form only (ignore docs / sexpr mentions of the keyword).
+      if (/^\s*extern\s+[A-Za-z_]/m.test(text)) {
         offenders.push(file.slice(ROOT.length + 1));
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  test("seam modules declare only mn_*; /ffi/ modules never declare mn_*", () => {
+    const files: string[] = [];
+    mndFiles(ROOT, files);
+    const offenders: string[] = [];
+    for (const file of files) {
+      const text = codeOf(file);
+      const names = externNames(text);
+      if (names.length === 0) continue;
+      if (seam.has(file)) {
+        for (const n of names) {
+          if (!n.startsWith("mn_")) offenders.push(`${file.slice(ROOT.length + 1)}: ${n}`);
+        }
+      } else if (isFfiPath(file)) {
+        for (const n of names) {
+          if (n.startsWith("mn_")) offenders.push(`${file.slice(ROOT.length + 1)}: ${n}`);
+        }
       }
     }
     expect(offenders).toEqual([]);

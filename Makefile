@@ -25,7 +25,25 @@ BUILD_DIR := build
 
 .DEFAULT_GOAL := mn
 
-.PHONY: mn bootstrap test typecheck ci memory-checks native-test runtime-smoke runtime-sb-gc runtime-clean hello-native ret-native check-fixed-point
+.PHONY: mn bootstrap test typecheck ci memory-checks native-test runtime-smoke runtime-sb-gc runtime-clean hello-native ret-native sqlite-native check-fixed-point
+
+# Build B FFI proving ground: SQLite (cross-platform).
+# Dedicated link target — does not bake libsqlite3 into ./mn.
+SQLITE_DIR := examples/ffi/sqlite
+SQLITE_BRIDGE := $(SQLITE_DIR)/bridge
+SQLITE_LIBS := $(shell pkg-config --libs sqlite3 2>/dev/null || echo -lsqlite3)
+SQLITE_CFLAGS := $(shell pkg-config --cflags sqlite3 2>/dev/null)
+sqlite-native:
+	@mkdir -p $(BUILD_DIR)
+	bun run host/src/cli/menard.ts run src/mn.mnd -- emit $(SQLITE_DIR)/demo.mnd $(BUILD_DIR)/sqlite.bc
+	$(CC) $(CFLAGS) $(SQLITE_CFLAGS) \
+		-I$(RUNTIME_DIR)/include -I$(SQLITE_BRIDGE) \
+		$(BUILD_DIR)/sqlite.bc \
+		$(SQLITE_BRIDGE)/sql_ffi.c $(SQLITE_BRIDGE)/sql_bridge.c \
+		$(RUNTIME_LIB_SRCS) \
+		-o $(BUILD_DIR)/sqlite $(LDLIBS) $(SQLITE_LIBS)
+	@echo "built $(BUILD_DIR)/sqlite"
+	@echo "  try:  $(BUILD_DIR)/sqlite demo"
 
 # Full fixed-point gate: stage0 emit, stage1/stage2 link, bc0 == bc1,
 # stage1 == stage2, and the installed driver artifact. Plain `make` only

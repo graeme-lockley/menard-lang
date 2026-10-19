@@ -53,9 +53,23 @@ export function isSeamModule(path: string): boolean {
   return SEAM_SUFFIXES.some((s) => p === s || p.endsWith(s));
 }
 
+/** FFI modules: path contains `/ffi/` and is not under `stdlib/`. */
+export function isFfiModule(path: string): boolean {
+  const p = path.startsWith("/") ? path : "/" + path;
+  if (p.includes("/stdlib/")) return false;
+  return p.includes("/ffi/");
+}
+
 export function isRuntimeModule(path: string): boolean {
   const p = path.startsWith("/") ? path : "/" + path;
   return RUNTIME_SUFFIXES.some((s) => p.endsWith(s));
+}
+
+function externSymbolName(form: Ast): string | null {
+  if (form.tag !== "list" || form.elems.length < 2) return null;
+  const name = form.elems[1]!;
+  if (name.tag !== "sym") return null;
+  return new TextDecoder().decode(name.name);
 }
 
 export type PreparedModule = {
@@ -244,17 +258,46 @@ export function loadModuleGraph(
       if (pub.exported) {
         for (const n of declarationNames(pub.form)) exports.add(n);
       }
-      if (isExtern(pub.form) && !isSeamModule(path)) {
-        diagnostics.push(
-          diagnostic({
-            severity: "error",
-            category: "semantic",
-            code: "E_EXTERN_SEAM",
-            message:
-              "extern is confined to stdlib seam modules (sys, io, fs, proc, time)",
-            span: pub.form.span,
-          }),
-        );
+      if (isExtern(pub.form)) {
+        const sym = externSymbolName(pub.form);
+        if (isSeamModule(path)) {
+          if (sym !== null && !sym.startsWith("mn_")) {
+            diagnostics.push(
+              diagnostic({
+                severity: "error",
+                category: "semantic",
+                code: "E_EXTERN_FFI_PREFIX",
+                message:
+                  "seam modules may only declare extern mn_* (Runtime ABI)",
+                span: pub.form.span,
+              }),
+            );
+          }
+        } else if (isFfiModule(path)) {
+          if (sym !== null && sym.startsWith("mn_")) {
+            diagnostics.push(
+              diagnostic({
+                severity: "error",
+                category: "semantic",
+                code: "E_EXTERN_FFI_PREFIX",
+                message:
+                  "FFI modules must not declare mn_* (keep Runtime ABI in the seam)",
+                span: pub.form.span,
+              }),
+            );
+          }
+        } else {
+          diagnostics.push(
+            diagnostic({
+              severity: "error",
+              category: "semantic",
+              code: "E_EXTERN_SEAM",
+              message:
+                "extern is confined to seam modules (sys, io, fs, proc, time) or /ffi/ modules",
+              span: pub.form.span,
+            }),
+          );
+        }
       }
       if (isRuntime(pub.form) && !isRuntimeModule(path)) {
         diagnostics.push(

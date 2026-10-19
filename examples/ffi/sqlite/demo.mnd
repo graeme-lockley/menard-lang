@@ -1,0 +1,123 @@
+; CLI for the SQLite FFI proving ground.
+;   make sqlite-native
+;   ./build/sqlite demo
+;   ./build/sqlite exec <db-path> <sql>
+;   ./build/sqlite query <db-path> <sql>
+;
+; Works on any host with libsqlite3. Interpreter: sql_* unbound.
+
+import "./sqlite.mnd"
+import std/json
+import std/list
+import std/map as Map
+import std/sys
+
+let show-err(e: SqlError) -> Str =
+  match (e)
+    | SqlBadState -> "no database open"
+    | SqlBadJson -> "bad json from bridge"
+    | SqlErr(msg) ->
+      if (msg == "") -> "sqlite error" | msg
+
+let fail(e: SqlError) -> Int {
+  println(show-err(e))
+  1
+}
+
+let usage() -> Int {
+  println("usage:")
+  println("  sqlite demo")
+  println("  sqlite exec <db-path> <sql>")
+  println("  sqlite query <db-path> <sql>")
+  println("")
+  println("db-path may be a file or :memory:")
+  1
+}
+
+let show-cell(v: Json) -> Str =
+  match (v)
+    | JsonNull -> "null"
+    | JsonBool(b) -> if (b) -> "true" | "false"
+    | JsonInt(n) -> show(n)
+    | JsonFloat(f) -> show(f)
+    | JsonStr(s) -> s
+    | JsonArray(_) -> "<array>"
+    | JsonObject(_) -> "<object>"
+
+let show-row(row: Map Str Json) -> Unit {
+  let keys = Map.keys(row)
+  loop (rest = keys)
+    match (rest)
+      | [] ->
+        {
+          println("")
+          ()
+        }
+      | k :: t ->
+        {
+          match (Map.lookup(k, row))
+            | None -> ()
+            | Some(v) ->
+              println("  ", k, "=", show-cell(v))
+          recur(t)
+        }
+}
+
+let with-db(path: Str, body: () -> Int) -> Int =
+  match (open(path))
+    | Err(e) -> fail(e)
+    | Ok(_) ->
+      {
+        let code = body()
+        match (close())
+          | Err(e) ->
+            {
+              println(show-err(e))
+              1
+            }
+          | Ok(_) -> code
+      }
+
+let cmd-demo() -> Int =
+  with-db(":memory:", fn () = {
+    match (exec("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT NOT NULL);"))
+      | Err(e) -> fail(e)
+      | Ok(_) ->
+        match (exec("INSERT INTO notes (body) VALUES ('hello'), ('sqlite'), ('ffi');"))
+          | Err(e) -> fail(e)
+          | Ok(_) ->
+            match (query("SELECT id, body FROM notes ORDER BY id;"))
+              | Err(e) -> fail(e)
+              | Ok(rows) ->
+                {
+                  map(show-row, rows)
+                  println("(", show(length(rows)), " rows)")
+                  0
+                }
+  })
+
+let cmd-exec(path: Str, sql: Str) -> Int =
+  with-db(path, fn () =
+    match (exec(sql))
+      | Err(e) -> fail(e)
+      | Ok(_) -> 0)
+
+let cmd-query(path: Str, sql: Str) -> Int =
+  with-db(path, fn () =
+    match (query-json(sql))
+      | Err(e) -> fail(e)
+      | Ok(raw) ->
+        {
+          println(raw)
+          0
+        })
+
+let main() -> Int =
+  match (arg-count())
+    | 0 -> usage()
+    | n ->
+      cond
+        | arg(0) == "demo" && n == 1 -> cmd-demo()
+        | arg(0) == "exec" && n == 3 -> cmd-exec(arg(1), arg(2))
+        | arg(0) == "query" && n == 3 -> cmd-query(arg(1), arg(2))
+        | else -> usage()

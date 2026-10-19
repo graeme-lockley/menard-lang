@@ -3299,6 +3299,43 @@ let imp-count(imps: List Imp) -> Int =
     | [] -> 0
     | _ :: rest -> 1 + imp-count(rest)
 
+; Foreign FFI `extern` (non-`mn_*`): declare as LLVM prototypes after the
+; fixed Runtime ABI table. Seam `mn_*` stay on that table via is-runtime-op.
+let is-mn-extern-name(n: Str) -> Bool =
+  String.length(n) >= 3 && String.slice(0, 3, n) == "mn_"
+
+let extern-imp-from-arrow(name: Str, rest: List Ast) -> Maybe Imp =
+  match (find-arrow(rest))
+    | None -> None()
+    | Some(split) -> Some(Imp(name, name, param-arity-of(params-of(arrow-split-before(split)))))
+
+let extern-imp-named(name: Str, rest: List Ast) -> Maybe Imp =
+  if (is-mn-extern-name(name)) -> None() | extern-imp-from-arrow(name, rest)
+
+let extern-imp-of-extern(name-part: Ast, rest: List Ast) -> Maybe Imp =
+  match (defn-name-of(name-part))
+    | None -> None()
+    | Some(name) -> extern-imp-named(name, rest)
+
+let extern-imp-of(form: Ast) -> Maybe Imp =
+  match (unwrap-pub(form))
+    | ParenNode(head :: name-part :: rest, _) ->
+      if (is-sym(head, "extern")) -> extern-imp-of-extern(name-part, rest) | None()
+    | _ -> None()
+
+let collect-ffi-imps(forms: List Ast) -> List Imp =
+  match (forms)
+    | [] -> []
+    | f :: rest ->
+      match (extern-imp-of(f))
+        | Some(imp) -> imp :: collect-ffi-imps(rest)
+        | None -> collect-ffi-imps(rest)
+
+let append-imps(xs: List Imp, ys: List Imp) -> List Imp =
+  match (xs)
+    | [] -> ys
+    | x :: rest -> x :: append-imps(rest, ys)
+
 ; Locals keep the abs ids `build-func-refs` assigned. An import whose
 ; Menard name is also a local function stays local; its declaration is
 ; still emitted so the id sequence matches the bitcode writer.
@@ -3359,12 +3396,13 @@ let lower-program-build(word-lds: List LDefn, all-lds: List LDefn, forms: List A
     if (any-module-init(word-lds)) -> drop-top-value-lets(forms) | forms
   let extra = collect-non-defn-tops(forms2)
   let word-lds2 = replace-main-body(word-lds, extra)
+  let all-imps = append-imps(collect-ffi-imps(forms2), imports)
   let specs =
     match (ctor-info(forms2, seeds))
       | CtorTable(s, _) -> s
   match (attach-static-pool(add-slot-strs(slots, collect-str-pool(forms2, paths)), forms2, specs, seed-arities(seeds, Map.empty())))
     | Err(msg) -> Err(msg)
-    | Ok(pool) -> lower-program-pooled(word-lds2, triple, pool, imports, slots, all-lds)
+    | Ok(pool) -> lower-program-pooled(word-lds2, triple, pool, all-imps, slots, all-lds)
 }
 
 let lower-program-pooled(word-lds2: List LDefn, triple: Str, pool: StrPool, imports: List Imp, slots: List Str, all-lds: List LDefn) -> Result Str Str {

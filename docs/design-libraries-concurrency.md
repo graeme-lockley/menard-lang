@@ -816,7 +816,7 @@ not feed nondeterminism into emission paths (§2.11.B spirit).
 |---|---|---|
 | 1 | Formalise `mn_*` | Stable Runtime ABI + Platform API wrappers |
 | 2 | Expand standard library | Files, processes, time, JSON (and related) in Menard |
-| 3 | FFI proving ground | e.g. SQLite; keep Runtime ABI ≠ C FFI ABI (§2.2) |
+| 3 | FFI proving ground | e.g. SQLite; keep Runtime ABI ≠ C FFI ABI (§2.2). Follow-on link/package design: [design-ffi.md](design-ffi.md) |
 | 4 | **Prove suspension/resumption** | §3.5.1 — native **and** TypeScript interpreter **and** GC; shared `Ref` |
 | 5 | Internal task scheduler | Atomic-wait *guarantee*; cancel; **no public wake**; single mutator |
 | 6 | Public `Task.*` | `spawn` / `join` / `scope` / `yield` (shared `Ref` OK) |

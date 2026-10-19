@@ -55,7 +55,7 @@ describe("modules", () => {
     expect(diags.some((d) => d.code === "E_IMPORT_MISSING")).toBe(true);
   });
 
-  test("extern outside seam modules is an error", () => {
+  test("extern outside seam and /ffi/ modules is an error", () => {
     const host = hostWith({
       "/user.mnd": `extern mn_foo(x: Int) -> Int\n`,
     });
@@ -63,6 +63,28 @@ describe("modules", () => {
     if (!src.ok) return;
     const diags = diagnose(src.bytes, { path: "/user.mnd", host });
     expect(diags.some((d) => d.code === "E_EXTERN_SEAM")).toBe(true);
+  });
+
+  test("extern is allowed in /ffi/ module with non-mn_* symbol", () => {
+    const host = hostWith({
+      "/examples/ffi/bridge.mnd": `extern rem_ping() -> Int\n\npub let ping() -> Int =\n  rem_ping()\n`,
+      "/main.mnd": `import "./examples/ffi/bridge.mnd"\n0\n`,
+    });
+    const src = host.readFile("/main.mnd");
+    if (!src.ok) return;
+    const diags = diagnose(src.bytes, { path: "/main.mnd", host });
+    expect(diags.some((d) => d.code === "E_EXTERN_SEAM")).toBe(false);
+    expect(diags.some((d) => d.code === "E_EXTERN_FFI_PREFIX")).toBe(false);
+  });
+
+  test("FFI module must not declare mn_*", () => {
+    const host = hostWith({
+      "/examples/ffi/bad.mnd": `extern mn_exists(path: Str) -> Bool\n`,
+    });
+    const src = host.readFile("/examples/ffi/bad.mnd");
+    if (!src.ok) return;
+    const diags = diagnose(src.bytes, { path: "/examples/ffi/bad.mnd", host });
+    expect(diags.some((d) => d.code === "E_EXTERN_FFI_PREFIX")).toBe(true);
   });
 
   test("extern is allowed in seam module path", () => {

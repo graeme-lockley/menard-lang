@@ -174,15 +174,16 @@ describe("§2.11 determinism", () => {
     if (!div.ok) expect(div.kind === "panic" ? div.message : "").toBe("division by zero");
   });
 
-  test("B: extern is confined to sys, io, fs, proc, and time", () => {
+  test("B: extern is confined to seam modules or /ffi/ trees", () => {
     const seam = new Set(["stdlib/sys.mnd", "stdlib/io.mnd", "stdlib/fs.mnd", "stdlib/proc.mnd", "stdlib/time.mnd"].map((p) => join(ROOT, p)));
     const files: string[] = [];
     mndFiles(ROOT, files);
     const offenders: string[] = [];
     for (const file of files) {
-      if (seam.has(file)) continue;
+      const rel = file.slice(ROOT.length + 1).replaceAll("\\", "/");
+      if (seam.has(file) || (rel.includes("/ffi/") && !rel.startsWith("stdlib/"))) continue;
       const text = codeOf(file);
-      if (/\(extern(\s|\))/.test(text) || /\(pub\s+extern(\s|\))/.test(text)) offenders.push(file);
+      if (/^\s*extern\s+[A-Za-z_]/m.test(text)) offenders.push(file);
     }
     expect(offenders).toEqual([]);
   });
