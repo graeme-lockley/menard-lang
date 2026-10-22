@@ -583,9 +583,15 @@ let write-extern-decls!(m: BitSink, ma: Int) -> Unit {
   write-extern-decl!(m, func-type-idx-for-arity(7))
   write-extern-decl!(m, func-type-idx-for-arity(8))
   write-extern-decl!(m, func-type-idx-for-arity(9))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(0))
+  write-extern-decl!(m, func-type-idx-for-arity(0))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
 }
 
- ; mn_char_to_str, mn_sb_clear, mn_apply_3..8
+ ; mn_char_to_str, mn_sb_clear, mn_apply_3..8, mn_task_*
 
  ; mn_slot_set
 
@@ -912,6 +918,12 @@ let write-extern-vst-entries!(v: BitSink, num-strings: Int) -> Unit {
   write-record!(v, vst-code-entry, extern-apply-6-abs(num-strings) :: str-byte-ops("mn_apply_6"))
   write-record!(v, vst-code-entry, extern-apply-7-abs(num-strings) :: str-byte-ops("mn_apply_7"))
   write-record!(v, vst-code-entry, extern-apply-8-abs(num-strings) :: str-byte-ops("mn_apply_8"))
+  write-record!(v, vst-code-entry, extern-task-spawn-abs(num-strings) :: str-byte-ops("mn_task_spawn"))
+  write-record!(v, vst-code-entry, extern-task-self-abs(num-strings) :: str-byte-ops("mn_task_self"))
+  write-record!(v, vst-code-entry, extern-task-suspend-for-test-abs(num-strings) :: str-byte-ops("mn_task_suspend_for_test"))
+  write-record!(v, vst-code-entry, extern-task-resume-abs(num-strings) :: str-byte-ops("mn_task_resume"))
+  write-record!(v, vst-code-entry, extern-task-join-abs(num-strings) :: str-byte-ops("mn_task_join"))
+  write-record!(v, vst-code-entry, extern-task-cancel-abs(num-strings) :: str-byte-ops("mn_task_cancel"))
 }
 
 let lfunc-list-length(fs: List LFunc) -> Int =

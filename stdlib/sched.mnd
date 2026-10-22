@@ -1,0 +1,52 @@
+; Internal cooperative scheduler seam (Build C).
+; Not Platform API — do not import from applications. Build D will add std/task.
+; @module std/sched
+
+extern mn_task_spawn(thunk: () -> Int) -> Int
+
+extern mn_task_self() -> Int
+
+extern mn_task_suspend_for_test() -> Unit
+
+extern mn_task_resume(id: Int) -> Unit
+
+extern mn_task_join(id: Int) -> Int
+
+extern mn_task_cancel(id: Int) -> Unit
+
+; Spawn a zero-argument thunk as a cooperative task. Returns an opaque id.
+; @test join(spawn(fn () = 41)) => 41
+pub let spawn(thunk: () -> Int) -> Int =
+  mn_task_spawn(thunk)
+
+; The id of the task currently running Menard code.
+; @test self() >= 1
+pub let self() -> Int =
+  mn_task_self()
+
+; Park the current task. Another task or join may resume it.
+; @test join(spawn(park-then)) => 7
+pub let suspend-for-test() -> Unit =
+  mn_task_suspend_for_test()
+
+; Return 7 after one synthetic park (used by suspend-for-test's @test).
+; @test join(spawn(park-then)) => 7
+pub let park-then() -> Int {
+  mn_task_suspend_for_test()
+  7
+}
+
+; Enqueue a suspended task so the scheduler can run it again.
+; @test resume(self())
+pub let resume(id: Int) -> Unit =
+  mn_task_resume(id)
+
+; Wait until the task finishes; returns its Int result. Main only in Build C.
+; @test join(spawn(fn () = 3)) => 3
+pub let join(id: Int) -> Int =
+  mn_task_join(id)
+
+; Mark a task cancelled (stub semantics for Build C).
+; @test cancel(spawn(fn () = 0))
+pub let cancel(id: Int) -> Unit =
+  mn_task_cancel(id)

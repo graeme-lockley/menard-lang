@@ -328,6 +328,17 @@ MnWord mn_now_ms(void);                        /* → Int */
 MnWord mn_remove(MnWord path_str);             /* → Bool */
 MnWord mn_is_dir(MnWord path_str);             /* → Bool */
 
+/*
+ * Internal task runtime (Build C) — not Platform API.
+ * Seam module: stdlib/sched.mnd. Do not expose as pub Task.* until Build D.
+ */
+MnWord mn_task_spawn(MnWord closure0);         /* → Int task id */
+MnWord mn_task_self(void);                     /* → Int */
+MnWord mn_task_suspend_for_test(void);         /* → Unit; park current fiber */
+MnWord mn_task_resume(MnWord id_tagged);       /* → Unit; enqueue suspended */
+MnWord mn_task_join(MnWord id_tagged);         /* → result; main only in C */
+MnWord mn_task_cancel(MnWord id_tagged);       /* → Unit; stub */
+
 #ifdef __cplusplus
 }
 #endif

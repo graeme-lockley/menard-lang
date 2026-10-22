@@ -175,7 +175,7 @@ describe("§2.11 determinism", () => {
   });
 
   test("B: extern is confined to seam modules or /ffi/ trees", () => {
-    const seam = new Set(["stdlib/sys.mnd", "stdlib/io.mnd", "stdlib/fs.mnd", "stdlib/proc.mnd", "stdlib/time.mnd"].map((p) => join(ROOT, p)));
+    const seam = new Set(["stdlib/sys.mnd", "stdlib/io.mnd", "stdlib/fs.mnd", "stdlib/proc.mnd", "stdlib/time.mnd", "stdlib/sched.mnd"].map((p) => join(ROOT, p)));
     const files: string[] = [];
     mndFiles(ROOT, files);
     const offenders: string[] = [];

@@ -24,12 +24,27 @@ to this catalogue. Example: [examples/ffi/sqlite/](../examples/ffi/sqlite/)
 | `stdlib/fs.mnd` | Filesystem predicates and path OS ops |
 | `stdlib/proc.mnd` | Argv-vector spawn |
 | `stdlib/time.mnd` | Wall clock only (`mn_now_ms`) |
+| `stdlib/sched.mnd` | **Internal** task runtime (Build C) — not Platform API |
 
 Confinement is enforced by the host module loader (`E_EXTERN_SEAM`) and by lint
 tests. Compiler/runtime-internal symbols (strings, maps, GC, apply, floats, …)
 live in [`runtime/include/menard.h`](../runtime/include/menard.h) and are linked
 from [`src/emit/bc-writer.mnd`](../src/emit/bc-writer.mnd); they are not this
 Platform seam catalogue.
+
+### Internal task runtime (Build C — not Platform API)
+
+See [build-c-suspension.md](build-c-suspension.md). Do not wrap as public
+`Task.*` until Build D.
+
+| Symbol | Seam wrapper (`std/sched`) | Notes |
+|---|---|---|
+| `mn_task_spawn` | `Sched.spawn` | Thunk closure; returns task id |
+| `mn_task_self` | `Sched.self` | Current task id |
+| `mn_task_suspend_for_test` | `Sched.suspend-for-test` | Synthetic park |
+| `mn_task_resume` | `Sched.resume` | Internal enqueue — not public wake |
+| `mn_task_join` | `Sched.join` | Main only in C |
+| `mn_task_cancel` | `Sched.cancel` | Stub |
 
 ## App-facing seam symbols
 

@@ -51,6 +51,7 @@ const RUNTIME_LIB_SRCS = [
   "runtime/src/closure.c",
   "runtime/src/io.c",
   "runtime/src/equal.c",
+  "runtime/src/task.c",
 ].map((rel) => join(ROOT, rel));
 const RUNTIME_INCLUDE = join(ROOT, "runtime/include");
 

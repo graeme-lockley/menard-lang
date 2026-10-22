@@ -1,0 +1,39 @@
+; Build C §3.5.1 acceptance: nested suspend, shared Ref, join-while-exit.
+; Observable agreement on native + interpreter (not identical interleavings).
+import std/sched as Sched
+
+let deep(counter: Ref Int, peer: Ref Int) -> Int {
+  let local_a = 100
+  ; Nested park — peer should run and mutate counter while we are suspended.
+  Sched.suspend-for-test()
+  let local_b = deref(counter)
+  local_a + local_b
+}
+
+let worker-a(counter: Ref Int, peer: Ref Int) -> Int {
+  set!(counter, 1)
+  let r = deep(counter, peer)
+  r
+}
+
+let worker-b(counter: Ref Int, peer: Ref Int) -> Int {
+  ; Resume A, then mutate the shared cell before A continues past park.
+  Sched.resume(deref(peer))
+  set!(counter, deref(counter) + 40)
+  2
+}
+
+let main() -> Int {
+  let counter = ref(0)
+  let peer = ref(0)
+  let ta = Sched.spawn(fn () = worker-a(counter, peer))
+  set!(peer, ta)
+  let tb = Sched.spawn(fn () = worker-b(counter, peer))
+  let ra = Sched.join(ta)
+  let rb = Sched.join(tb)
+  ; local_a(100) + counter after B's update (1+40=41) => 141; rb = 2
+  println(ra)
+  println(rb)
+  println(deref(counter))
+  0
+}

@@ -23,7 +23,7 @@ purpose → library philosophy → concurrency model → runtime
 |---|---|---|---|
 | **A** | Platform foundation | 1–2 | No |
 | **B** | FFI proving ground | 3 | No |
-| **C** | Suspension experiment | 4 | Gate |
+| **C** | Suspension hard gate | 4 | Gate |
 | **D** | Task runtime + public `Task.*` | 5–6 | After C |
 | **E** | Mailbox + Actor | 7 | After D |
 | **F** | Network, cleanup, supervision | 8–9 | After E |
@@ -243,9 +243,10 @@ without them; that is outside this buildout’s default path.
 
 ---
 
-## Build C — Suspension experiment (hard gate)
+## Build C — Suspension hard gate (production)
 
-**Maps to design:** §3.12 phase 4; §3.5 / §3.5.1; §3.0 invariants 1–2, 5.
+**Maps to design:** §3.12 phase 4; §3.5 / §3.5.1; §3.0 invariants 1–2, 5.  
+**Mechanism write-up:** [build-c-suspension.md](build-c-suspension.md).
 
 ### Depends on
 
@@ -261,13 +262,12 @@ without them; that is outside this buildout’s default path.
 
 ### Goal
 
-Prove that Menard can suspend and resume computations on **both** hosts, with
-GC correctness and shared mutable state, **before** designing public Task APIs.
+Ship production suspend/resume on **both** hosts, with GC correctness and shared
+mutable state, **before** public Task APIs (hard gate for D — not throwaway code).
 
 ### Scope (planning targets)
 
-Implement the **minimum** machinery needed for the experiment only (may be
-feature-flagged / internal):
+Implement the D-shaped scheduler + dual-host park (internal / not Platform API):
 
 1. Create multiple lightweight tasks.
 2. Suspend inside a **nested** call.
@@ -291,36 +291,35 @@ continuations) and why it works on both hosts.
 
 ### Done when
 
-- [ ] All §3.5.1 bullets pass natively under GC stress where applicable
+- [x] All §3.5.1 bullets pass natively under GC stress where applicable
       (`MENARD_GC_STRESS` / heap verify as appropriate).
-- [ ] Interpreter passes the equivalent scenario.
-- [ ] Short write-up: mechanism choice, known limitations, what D can rely on.
-- [ ] Explicit list of **temporary** internal APIs that must not ship as Platform
-      API yet.
+- [x] Interpreter passes the equivalent scenario.
+- [x] Short write-up: mechanism choice, known limitations, what D can rely on
+      ([build-c-suspension.md](build-c-suspension.md)).
+- [x] Explicit list of **temporary** internal APIs that must not ship as Platform
+      API yet (same write-up).
 
 ### Results / outputs (feeds later builds)
 
 | Output | Used by |
 |---|---|
 | Proven suspend/resume + GC story on both hosts | **D** (scheduler) |
-| Mechanism decision (or shortlist with winner) | **D** |
+| Mechanism: per-task roots; native fibers + interpreter Cont[] | **D** |
 | Evidence shared `Ref` across park works | **D**, **E** (mailboxes) |
-| Confidence to implement cancel later | **D**, **F** |
+| D-shaped `mn_task_*` + `std/sched` (internal) | **D** |
 
-### Open questions (drive planning)
+### Decisions (Stage C)
 
-1. Stackful coroutines vs compiler state machines vs explicit frames — which
-   candidate do we try first for **both** hosts?
-2. Where does experiment code live (`tests/`, `runtime/fixtures/`, branch flag)?
-3. How much of the future scheduler is embedded in C vs kept disposable?
-4. What is the interpreter’s execution representation if JS cannot pause a
-   sync stack?
-5. Must join-while-exit be true “join” or is a test harness wait enough for C?
-6. How do we golden-test without requiring identical interleavings?
-7. Does C need parkable `read-file`, or can suspension be a synthetic
-   `mn_task_suspend_for_test`?
-8. Failure policy: if native works but interpreter cannot match, is C failed
-   or is interpreter deferred (design says both must work)?
+| # | Decision |
+|---|---|
+| 1 | Dual mechanism, unified observables: native task-local fibers (`ucontext`); interpreter `Cont[]`. |
+| 2 | Per-task shadow stacks; GC visits all tasks + `mn_task_visit_roots`. |
+| 3 | D-shaped scheduler skeleton in `runtime/src/task.c` + `host/src/interp/task.ts` (not disposable). |
+| 4 | Acceptance suite under `tests/suspend/`. |
+| 5 | Synthetic `mn_task_suspend_for_test` (no parkable I/O in C). |
+| 6 | Join is real `mn_task_join` (main only in C); auto-resume if join would deadlock. |
+| 7 | Both hosts must pass; golden on observables only. |
+| 8 | Internal seam `std/sched` — not Platform API until D. |
 
 ---
 
@@ -591,8 +590,8 @@ This matches “small OS interface; everything possible in Menard.”
              │         │ (callback rules only)
              ▼         ▼
         ┌──────────────────┐
-        │     Build C      │  ← HARD GATE
-        │   Suspension     │
+        │     Build C      │  ← HARD GATE (production)
+        │  Suspension      │
         └────────┬─────────┘
                  │
                  ▼
@@ -641,4 +640,5 @@ callbacks). **C → D is mandatory.**
 | [decisions.md](decisions.md) | Ratification / ADRs |
 | [menard-spec.md](menard-spec.md) | Normative language (update only after ADR) |
 | [runtime-abi.md](runtime-abi.md) | Seam `mn_*` inventory (Build A) |
+| [build-c-suspension.md](build-c-suspension.md) | Build C mechanism + temporary APIs |
 | [runtime/README.md](../runtime/README.md) | C runtime layout |

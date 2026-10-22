@@ -57,6 +57,18 @@ typedef void (*mn_root_visit_fn)(MnWord *slot, void *ctx);
 void mn_shadow_visit(mn_root_visit_fn fn, void *ctx);
 void mn_slots_visit(mn_root_visit_fn fn, void *ctx);
 
+/* Per-task shadow stacks (Build C). Opaque to most of the runtime. */
+typedef struct MnShadow MnShadow;
+MnShadow *mn_shadow_active(void);
+void mn_shadow_set_active(MnShadow *s);
+MnShadow *mn_shadow_new(void);
+void mn_shadow_free(MnShadow *s);
+void mn_shadow_register(MnShadow *s);
+void mn_shadow_unregister(MnShadow *s);
+
+/* Task GC roots: closure, result, and any park payload. */
+void mn_task_visit_roots(mn_root_visit_fn fn, void *ctx);
+
 int mn_gc_stress(void);
 int mn_gc_verify(void);
 void mn_gc_note_exit(void);

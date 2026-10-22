@@ -419,6 +419,7 @@ static void verify_heap(void) {
   mn_old_clear_marks();
   work_n = 0;
   mn_shadow_visit(verify_root, NULL);
+  mn_task_visit_roots(verify_root, NULL);
   mn_slots_visit(verify_root, NULL);
   size_t i = 0;
   while (i < work_n) {
@@ -434,6 +435,7 @@ static void minor_collect(void) {
   copied_objs = 0;
   work_n = 0;
   mn_shadow_visit(visit_root, NULL);
+  mn_task_visit_roots(visit_root, NULL);
   mn_slots_visit(visit_root, NULL);
   for (size_t i = 0; i < remembered_n; i++) {
     void *obj = remembered[i];
@@ -502,6 +504,7 @@ static void major_collect(void) {
   mn_old_clear_marks();
   work_n = 0;
   mn_shadow_visit(major_root, NULL);
+  mn_task_visit_roots(major_root, NULL);
   mn_slots_visit(major_root, NULL);
   size_t i = 0;
   while (i < work_n) {

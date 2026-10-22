@@ -516,7 +516,7 @@ let rt-src(runtime: Str, name: Str) -> Str =
   runtime |> Path.join("src") |> Path.join(name)
 
 let clang-argv(cc: Str, runtime: Str, bc: Str, link-out: Str) -> List Str =
-  [cc, "-std=c11", "-D_DEFAULT_SOURCE", "-Wall", "-Wextra", "-O2", String.concat("-I", runtime |> Path.join("include")), bc, rt-src(runtime, "alloc.c"), rt-src(runtime, "gc.c"), rt-src(runtime, "panic.c"), rt-src(runtime, "print.c"), rt-src(runtime, "shadow.c"), rt-src(runtime, "variants.c"), rt-src(runtime, "str.c"), rt-src(runtime, "map.c"), rt-src(runtime, "closure.c"), rt-src(runtime, "io.c"), rt-src(runtime, "equal.c"), "-lm", "-o", link-out]
+  [cc, "-std=c11", "-D_DEFAULT_SOURCE", "-Wall", "-Wextra", "-O2", String.concat("-I", runtime |> Path.join("include")), bc, rt-src(runtime, "alloc.c"), rt-src(runtime, "gc.c"), rt-src(runtime, "panic.c"), rt-src(runtime, "print.c"), rt-src(runtime, "shadow.c"), rt-src(runtime, "variants.c"), rt-src(runtime, "str.c"), rt-src(runtime, "map.c"), rt-src(runtime, "closure.c"), rt-src(runtime, "io.c"), rt-src(runtime, "equal.c"), rt-src(runtime, "task.c"), "-lm", "-o", link-out]
 
 let fail-spawn(what: Str) -> Unit {
   write-line(2, String.concat("error: cannot spawn ", what))

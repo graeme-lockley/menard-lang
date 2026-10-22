@@ -35,11 +35,13 @@ const SEAM_SUFFIXES = [
   "/stdlib/fs.mnd",
   "/stdlib/proc.mnd",
   "/stdlib/time.mnd",
+  "/stdlib/sched.mnd",
   "/sys.mnd",
   "/io.mnd",
   "/fs.mnd",
   "/proc.mnd",
   "/time.mnd",
+  "/sched.mnd",
 ];
 
 const RUNTIME_SUFFIXES = [
@@ -293,7 +295,7 @@ export function loadModuleGraph(
               category: "semantic",
               code: "E_EXTERN_SEAM",
               message:
-                "extern is confined to seam modules (sys, io, fs, proc, time) or /ffi/ modules",
+                "extern is confined to seam modules (sys, io, fs, proc, time, sched) or /ffi/ modules",
               span: pub.form.span,
             }),
           );

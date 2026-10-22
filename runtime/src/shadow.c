@@ -1,12 +1,9 @@
 /*
- * Shadow stack (spec §4.4).
+ * Shadow stack (spec §4.4) — per-task GC roots.
  *
- * Each entry is the address of a word the collector updates in place.
- * `mn_root_push` writes the empty word, then records the address.
- * `mn_root_keep` allocates a stable cell, pushes it, and stores the
- * word; the returned tagged index survives later pushes and collections.
- * `mn_root_pop` / `mn_root_restore` drop entries. Cells the stack owns
- * go back to a freelist so a loop does not leak C heap.
+ * Each task owns a RootEnt stack. The mutator pushes/pops on the active
+ * task's stack. The collector visits every live task's roots (plus
+ * module slots). Cell freelists are process-global.
  */
 #include "gc_internal.h"
 
@@ -23,9 +20,14 @@ typedef struct CellChunk {
   MnWord cells[1024];
 } CellChunk;
 
-static RootEnt *stack = NULL;
-static int depth = 0;
-static int cap = 0;
+struct MnShadow {
+  RootEnt *stack;
+  int depth;
+  int cap;
+};
+
+static MnShadow bootstrap;
+static MnShadow *active = &bootstrap;
 
 static CellChunk *chunks = NULL;
 static int chunk_used = 1024; /* force the first fresh_cell to allocate */
@@ -33,14 +35,94 @@ static MnWord **freelist = NULL;
 static int free_n = 0;
 static int free_cap = 0;
 
-static void grow_stack(void) {
-  int ncap = cap == 0 ? 4096 : cap * 2;
-  RootEnt *n = (RootEnt *)realloc(stack, (size_t)ncap * sizeof(RootEnt));
+/* All shadows the collector must visit (registered by task.c). */
+static MnShadow **all_shadows = NULL;
+static int all_shadow_n = 0;
+static int all_shadow_cap = 0;
+
+MnShadow *mn_shadow_active(void) { return active; }
+
+void mn_shadow_set_active(MnShadow *s) {
+  if (s == NULL) {
+    mn_panic("mn_shadow_set_active: null");
+  }
+  active = s;
+}
+
+MnShadow *mn_shadow_new(void) {
+  MnShadow *s = (MnShadow *)calloc(1, sizeof(MnShadow));
+  if (s == NULL) {
+    mn_panic("mn_shadow_new: oom");
+  }
+  return s;
+}
+
+void mn_shadow_free(MnShadow *s) {
+  if (s == NULL || s == &bootstrap) {
+    return;
+  }
+  /* Drop owned cells back to the freelist. */
+  while (s->depth > 0) {
+    s->depth--;
+    if (s->stack[s->depth].owned) {
+      if (free_n == free_cap) {
+        int ncap = free_cap == 0 ? 256 : free_cap * 2;
+        MnWord **n = (MnWord **)realloc(freelist, (size_t)ncap * sizeof(MnWord *));
+        if (n == NULL) {
+          mn_panic("mn_shadow_free: freelist oom");
+        }
+        freelist = n;
+        free_cap = ncap;
+      }
+      freelist[free_n++] = s->stack[s->depth].ptr;
+    }
+  }
+  free(s->stack);
+  free(s);
+}
+
+void mn_shadow_register(MnShadow *s) {
+  if (s == NULL) {
+    return;
+  }
+  for (int i = 0; i < all_shadow_n; i++) {
+    if (all_shadows[i] == s) {
+      return;
+    }
+  }
+  if (all_shadow_n == all_shadow_cap) {
+    int ncap = all_shadow_cap == 0 ? 8 : all_shadow_cap * 2;
+    MnShadow **n = (MnShadow **)realloc(all_shadows, (size_t)ncap * sizeof(MnShadow *));
+    if (n == NULL) {
+      mn_panic("mn_shadow_register: oom");
+    }
+    all_shadows = n;
+    all_shadow_cap = ncap;
+  }
+  all_shadows[all_shadow_n++] = s;
+}
+
+void mn_shadow_unregister(MnShadow *s) {
+  if (s == NULL) {
+    return;
+  }
+  for (int i = 0; i < all_shadow_n; i++) {
+    if (all_shadows[i] == s) {
+      all_shadows[i] = all_shadows[all_shadow_n - 1];
+      all_shadow_n--;
+      return;
+    }
+  }
+}
+
+static void grow_stack(MnShadow *sh) {
+  int ncap = sh->cap == 0 ? 4096 : sh->cap * 2;
+  RootEnt *n = (RootEnt *)realloc(sh->stack, (size_t)ncap * sizeof(RootEnt));
   if (n == NULL) {
     mn_panic("mn_root_push: shadow stack oom");
   }
-  stack = n;
-  cap = ncap;
+  sh->stack = n;
+  sh->cap = ncap;
 }
 
 static MnWord *fresh_cell(void) {
@@ -76,22 +158,24 @@ void mn_root_push(void *slot) {
   if (slot == NULL) {
     mn_panic("mn_root_push: null slot");
   }
-  if (depth == cap) {
-    grow_stack();
+  MnShadow *sh = active;
+  if (sh->depth == sh->cap) {
+    grow_stack(sh);
   }
   *(MnWord *)slot = MN_EMPTY;
-  stack[depth].ptr = (MnWord *)slot;
-  stack[depth].owned = 0;
-  depth++;
+  sh->stack[sh->depth].ptr = (MnWord *)slot;
+  sh->stack[sh->depth].owned = 0;
+  sh->depth++;
 }
 
 void mn_root_pop(void) {
-  if (depth <= 0) {
+  MnShadow *sh = active;
+  if (sh->depth <= 0) {
     mn_panic("mn_root_pop: shadow stack underflow");
   }
-  depth--;
-  if (stack[depth].owned) {
-    recycle_cell(stack[depth].ptr);
+  sh->depth--;
+  if (sh->stack[sh->depth].owned) {
+    recycle_cell(sh->stack[sh->depth].ptr);
   }
 }
 
@@ -101,28 +185,31 @@ MnWord mn_root_push_word(MnWord slot_bits) {
 }
 
 MnWord mn_root_keep(MnWord value) {
+  MnShadow *sh = active;
   MnWord *cell = fresh_cell();
   mn_root_push(cell);
-  stack[depth - 1].owned = 1;
+  sh->stack[sh->depth - 1].owned = 1;
   *cell = value;
-  return mn_int_to_word((int64_t)(depth - 1));
+  return mn_int_to_word((int64_t)(sh->depth - 1));
 }
 
 MnWord mn_root_get(MnWord index_tagged) {
+  MnShadow *sh = active;
   int64_t i = mn_word_to_int(index_tagged);
-  if (i < 0 || i >= (int64_t)depth) {
+  if (i < 0 || i >= (int64_t)sh->depth) {
     mn_panic("mn_root_get: index out of range");
   }
-  return *stack[i].ptr;
+  return *sh->stack[i].ptr;
 }
 
-MnWord mn_root_save(void) { return mn_int_to_word((int64_t)depth); }
+MnWord mn_root_save(void) { return mn_int_to_word((int64_t)active->depth); }
 
 static void restore_to(int d) {
-  if (d < 0 || d > depth) {
+  MnShadow *sh = active;
+  if (d < 0 || d > sh->depth) {
     mn_panic("mn_root_restore: bad depth");
   }
-  while (depth > d) {
+  while (sh->depth > d) {
     mn_root_pop();
   }
 }
@@ -136,9 +223,23 @@ void mn_shadow_push(void *slot) { mn_root_push(slot); }
 
 void mn_shadow_pop(void) { mn_root_pop(); }
 
+static void visit_one(MnShadow *sh, mn_root_visit_fn fn, void *ctx) {
+  if (sh == NULL) {
+    return;
+  }
+  for (int i = 0; i < sh->depth; i++) {
+    fn(sh->stack[i].ptr, ctx);
+  }
+}
+
 void mn_shadow_visit(mn_root_visit_fn fn, void *ctx) {
-  for (int i = 0; i < depth; i++) {
-    fn(stack[i].ptr, ctx);
+  /* Always visit the active stack (covers bootstrap / main before any
+   * task registration) and every registered task shadow. */
+  visit_one(active, fn, ctx);
+  for (int i = 0; i < all_shadow_n; i++) {
+    if (all_shadows[i] != active) {
+      visit_one(all_shadows[i], fn, ctx);
+    }
   }
 }
 

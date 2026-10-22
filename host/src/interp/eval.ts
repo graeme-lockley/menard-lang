@@ -32,6 +32,18 @@ import { ExitSignal, type IoError, type SpawnError, type SpawnStatus } from "../
 import { showValue, equalValue, compareValue, dumpValue } from "./derive.ts";
 import { decodeSymBytes, specialFormOf, Sf } from "./resolve.ts";
 import { accelFor, getAccel, runAccel, setAccel } from "./accel.ts";
+import {
+  TaskPark,
+  taskSetDrivers,
+  taskSetActiveStack,
+  taskSpawn,
+  taskSelf,
+  taskSuspendForTest,
+  taskResume,
+  taskJoin,
+  taskCancel,
+  taskEnsureMain,
+} from "./task.ts";
 
 export type PanicFrame = { path: string; span: Span };
 
@@ -79,6 +91,7 @@ export function evalProgram(
 ): EvalResult {
   const env = emptyEnv();
   installBuiltins(env);
+  taskEnsureMain();
   if (opts.importBindings) {
     for (const [k, v] of opts.importBindings) {
       envSet(env, k, v);
@@ -247,6 +260,12 @@ const EXTERN_BUILTIN: Record<string, string> = {
   mn_is_dir: "is-dir",
   mn_spawn: "spawn",
   mn_spawn_capture: "spawn-capture",
+  mn_task_spawn: "mn_task_spawn",
+  mn_task_self: "mn_task_self",
+  mn_task_suspend_for_test: "mn_task_suspend_for_test",
+  mn_task_resume: "mn_task_resume",
+  mn_task_join: "mn_task_join",
+  mn_task_cancel: "mn_task_cancel",
 };
 
 function defineTop(ast: Ast, env: Env): void {
@@ -537,46 +556,99 @@ function drive(
   stack: Cont[],
   host: Host,
 ): Value {
+  return driveLoop(start, startEnv, startLoop, stack, host, null);
+}
+
+/** Resume a parked Cont stack with `resumeValue` as the value of the park point. */
+function continueDrive(
+  stackUnknown: unknown[],
+  resumeValue: Value,
+  host: Host,
+): Value {
+  const stack = stackUnknown as Cont[];
+  return driveLoop(null, emptyEnv(), null, stack, host, resumeValue);
+}
+
+function driveLoop(
+  start: Ast | null,
+  startEnv: Env,
+  startLoop: LoopCtx | null,
+  stack: Cont[],
+  host: Host,
+  initialResult: Value | null,
+): Value {
   let pending: Ast | null = start;
   let env = startEnv;
   let loop = startLoop;
-  let result: Value = vUnit();
+  let result: Value = initialResult ?? vUnit();
+  const prevStack = null;
+  taskSetActiveStack(stack);
 
   try {
-  for (;;) {
-    if (pending !== null) {
-      const ast = pending;
-      pending = null;
-      const step = beginEval(ast, env, loop, stack, host);
-      if (step.tag === "value") {
-        result = step.value;
-      } else {
-        pending = step.ast;
-        env = step.env;
-        loop = step.loop;
-        continue;
+    /* If resuming after park, skip beginEval and feed result into Conts. */
+    if (start === null && initialResult !== null) {
+      for (;;) {
+        if (stack.length === 0) return result;
+        const c = stack.pop()!;
+        const next = resume(c, result, stack, host);
+        if (next.tag === "value") {
+          result = next.value;
+          continue;
+        }
+        pending = next.ast;
+        env = next.env;
+        loop = next.loop;
+        break;
       }
     }
 
     for (;;) {
-      if (stack.length === 0) return result;
-      const c = stack.pop()!;
-      const next = resume(c, result, stack, host);
-      if (next.tag === "value") {
-        result = next.value;
-        continue;
+      if (pending !== null) {
+        const ast = pending;
+        pending = null;
+        const step = beginEval(ast, env, loop, stack, host);
+        if (step.tag === "value") {
+          result = step.value;
+        } else {
+          pending = step.ast;
+          env = step.env;
+          loop = step.loop;
+          continue;
+        }
       }
-      pending = next.ast;
-      env = next.env;
-      loop = next.loop;
-      break;
+
+      for (;;) {
+        if (stack.length === 0) return result;
+        const c = stack.pop()!;
+        const next = resume(c, result, stack, host);
+        if (next.tag === "value") {
+          result = next.value;
+          continue;
+        }
+        pending = next.ast;
+        env = next.env;
+        loop = next.loop;
+        break;
+      }
     }
-  }
   } catch (err) {
+    if (err instanceof TaskPark) throw err;
     if (err instanceof PanicError) notePanic(err);
     throw err;
+  } finally {
+    taskSetActiveStack(prevStack);
   }
 }
+
+taskSetDrivers({
+  continueDrive,
+  applyThunk: (fn, host) => {
+    if (fn.tag !== "fn") {
+      throw new PanicError("mn_task_spawn: expected function");
+    }
+    return applyFn(fn, [], host);
+  },
+});
 
 /** Pure operations only. A nested call made entirely of these, plus literals
  * and variables, finishes in one interpreter step. Anything impure or
@@ -1323,6 +1395,8 @@ function installBuiltins(env: Env): void {
     "getenv", "exists", "rename",
     "isatty", "mtime", "cwd", "ensure-dir", "list-dir", "realpath", "now-ms", "remove", "is-dir",
     "spawn", "spawn-capture",
+    "mn_task_spawn", "mn_task_self", "mn_task_suspend_for_test",
+    "mn_task_resume", "mn_task_join", "mn_task_cancel",
     "NotFound", "Permission", "Exists", "IsADirectory", "NotADirectory",
     "InvalidPath", "TooLarge", "Other", "Unsupported",
     "NotExecutable", "InvalidArgument", "TooManyArguments",
@@ -1698,6 +1772,27 @@ function applyBuiltin(
       };
     case "Other":
       return vVariant("Other", [args[0]!]);
+    case "mn_task_spawn":
+      return taskSpawn(args[0]!);
+    case "mn_task_self":
+      return taskSelf();
+    case "mn_task_suspend_for_test":
+      return taskSuspendForTest();
+    case "mn_task_resume": {
+      const id = args[0]!;
+      if (id.tag !== "int") throw new PanicError("mn_task_resume: expected Int", span);
+      return taskResume(id.value, host);
+    }
+    case "mn_task_join": {
+      const id = args[0]!;
+      if (id.tag !== "int") throw new PanicError("mn_task_join: expected Int", span);
+      return taskJoin(id.value, host);
+    }
+    case "mn_task_cancel": {
+      const id = args[0]!;
+      if (id.tag !== "int") throw new PanicError("mn_task_cancel: expected Int", span);
+      return taskCancel(id.value);
+    }
     default:
       throw new PanicError(`unknown builtin ${name}`, span);
   }
