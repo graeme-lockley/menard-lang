@@ -36,7 +36,7 @@ BUILD_DIR := build
 
 .DEFAULT_GOAL := mn
 
-.PHONY: mn bootstrap test typecheck ci memory-checks native-test runtime-smoke runtime-sb-gc runtime-clean hello-native ret-native sqlite-native check-fixed-point
+.PHONY: mn bootstrap test typecheck backlog-check ci memory-checks native-test runtime-smoke runtime-sb-gc runtime-clean hello-native ret-native sqlite-native check-fixed-point
 
 # Build B FFI proving ground: SQLite (cross-platform).
 # Dedicated link target — does not bake libsqlite3 into ./mn.
@@ -78,7 +78,12 @@ test:
 typecheck:
 	cd host && bunx tsc --noEmit -p tsconfig.json
 
-ci: typecheck test
+# The review is the specification; the backlog is the status table. This
+# refuses a missing, duplicate or malformed row.
+backlog-check:
+	bun run tools/backlog-check.ts
+
+ci: typecheck test backlog-check
 
 # Non-functional collector checks: StringBuffer reclaim, and a bounded
 # live set on the stress program. Separate from `test` on purpose.

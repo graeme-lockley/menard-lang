@@ -44,6 +44,7 @@ make                 # compile src/mn.mnd → ./mn
 make test            # host unit, corpus, fuzz, semantic, and negative tests
 make memory-checks   # collector bound and StringBuffer reclaim
 make typecheck       # tsc --noEmit
+make backlog-check   # review items and backlog rows agree
 make native-test     # ./mn test
 make bootstrap       # interpreter, stage0, stage1, stage2, and the fixed point
 ```
@@ -70,6 +71,10 @@ bun run host/src/cli/menard.ts run path/to/file.mnd
 
 Exit codes: `0` ok, `1` a program error or panic, `2` usage or an I/O fault.
 
+## Work tracking
+
+Live status is [docs/backlog.md](docs/backlog.md): one row per review item, with phase, priority, dependencies, the GitHub issue, and the PR. The [Build F review](docs/reviews/2026-10-24-build-f.md) is the specification and the acceptance criteria; it is a point-in-time document and is deliberately not the tracker. Phase 0 is open as GitHub issues linked from the backlog. `make backlog-check` refuses a missing, duplicate or malformed row.
+
 ## Layout
 
 | Path | What it is |
@@ -79,6 +84,8 @@ Exit codes: `0` ok, `1` a program error or panic, `2` usage or an I/O fault.
 | [docs/syntax.md](docs/syntax.md) | Syntax, and how the surface lowers |
 | [docs/menard-spec.md](docs/menard-spec.md) | The specification |
 | [docs/decisions.md](docs/decisions.md) | Why the language is shaped this way |
+| [docs/backlog.md](docs/backlog.md) | Live work queue and status for every review item |
+| [docs/reviews/2026-10-24-build-f.md](docs/reviews/2026-10-24-build-f.md) | The Build F review: specification and acceptance criteria |
 | `stdlib/` | The library, in Menard |
 | `src/` | The compiler, in Menard |
 | `runtime/` | The C runtime: nursery collector, shadow stack, strings, maps |
