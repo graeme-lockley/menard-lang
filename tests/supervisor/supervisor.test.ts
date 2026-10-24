@@ -45,6 +45,16 @@ function runNative(fixture: string): { status: number | null; stdout: string; st
 
 describe("Build F supervisor", () => {
   test.skipIf(!Bun.which("clang"))(
+    "native: Actor.Pid and Sup.Pid are one type",
+    () => {
+      const r = runNative("tests/supervisor/pid.mnd");
+      expect(r.stderr).toBe("");
+      expect(r.status).toBe(2);
+    },
+    { timeout: 180_000 },
+  );
+
+  test.skipIf(!Bun.which("clang"))(
     "native: start-children / restart / stop",
     () => {
       const r = runNative("tests/supervisor/basic.mnd");

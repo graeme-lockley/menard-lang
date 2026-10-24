@@ -51,6 +51,35 @@ not a prerequisite for publishing the source.
 
 ---
 
+## 2026-10-24 — Canonical type identity across imports
+
+### The decision
+
+A type's identity is its defining module plus its declared name. Import
+spellings, aliases and `pub import` reexports are views of that one identity;
+none creates a new nominal type.
+
+`Actor.Pid`, an unqualified `Pid` exposed by a bare/`pub import`, and the
+canonical `(std/actor, Pid)` identity all unify. An aliased import that does not
+also expose the name unqualified does not make `Pid` visible.
+
+### Why
+
+Alias-prefixed nominal types (`__import_Actor_Pid`) made the same declared type
+compare unequal depending on how it was imported. That broke supervisor and
+any API that exposed a type through a reexport. Canonical IDs are carried by
+`TNominal`, `TypeDef`, constructors, interfaces and bindings; display names are
+kept only for diagnostics.
+
+### Consequences
+
+Existing code that used unqualified type names from aliased imports has been
+migrated to the qualified spelling (`Task.Task`, `Task.Cancelled`,
+`Actor.Pid`). The separate-compilation interface ABI was bumped; stale caches
+must be rebuilt with `--clean`.
+
+---
+
 ## 2026-10-24 — Aliased imports qualify types and constructors
 
 ### The decision
