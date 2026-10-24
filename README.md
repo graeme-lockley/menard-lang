@@ -75,6 +75,10 @@ Exit codes: `0` ok, `1` a program error or panic, `2` usage or an I/O fault.
 
 Live status is [docs/backlog.md](docs/backlog.md): one row per review item, with phase, priority, dependencies, the GitHub issue, and the PR. The [Build F review](docs/reviews/2026-10-24-build-f.md) is the specification and the acceptance criteria; it is a point-in-time document and is deliberately not the tracker. Phase 0 is open as GitHub issues linked from the backlog. `make backlog-check` refuses a missing, duplicate or malformed row.
 
+## Licence
+
+Menard is released under the [MIT Licence](LICENSE).
+
 ## Layout
 
 | Path | What it is |
