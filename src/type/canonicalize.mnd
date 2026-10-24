@@ -185,3 +185,147 @@ pub let canonicalize-ctors(forms: List Ast, bindings: Map Str Str) -> List Ast =
     | [] -> []
     | f :: rest ->
       if (is-binding-form(f)) -> f :: canonicalize-ctors(rest, bindings) | canonicalize-ctor-form(f, bindings) :: canonicalize-ctors(rest, bindings)
+
+; -- declaration canonicalization ------------------------------------------
+
+record DeclState {
+  bindings: List Ast
+  out: List Ast
+}
+
+record CtorRenamed {
+  ast: Ast
+  source: Str
+  id: Str
+}
+
+record CtorList {
+  bindings: List Ast
+  ctors: List Ast
+}
+
+let binding(visible: Str, canonical: Str, kind: Str) -> Ast =
+  ParenNode([SymNode(kind, Span(0, 0, 0, 1)), StrNode(visible, Span(0, 0, 0, 1)), StrNode(canonical, Span(0, 0, 0, 1))], Span(0, 0, 0, 1))
+
+let type-id-of(ids: Map Str Str, name: Str) -> Str =
+  match (Map.lookup(name, ids))
+    | Some(id) -> id
+    | None -> name
+
+let ctor-id-of(ids: Map Str Str, owner: Str, name: Str) -> Str =
+  match (Map.lookup(name, ids))
+    | Some(id) -> id
+    | None -> String.concat(owner, String.concat(".", name))
+
+let add-binding(bindings: List Ast, form: Ast) -> List Ast =
+  append-asts(bindings, [form])
+
+let rename-name(ast: Ast, id: Str) -> Ast =
+  match (ast)
+    | SymNode(_, sp) -> SymNode(id, sp)
+    | ParenNode(head :: rest, sp) -> ParenNode(rename-name(head, id) :: rest, sp)
+    | _ -> ast
+
+let rename-ctor-head(ast: Ast, owner: Str, ctor-ids: Map Str Str) -> Maybe CtorRenamed =
+  match (ast)
+    | ParenNode(head :: payloads, sp) ->
+      match (sym-str(head))
+        | Some(name) ->
+          {
+            let id = ctor-id-of(ctor-ids, owner, name)
+            Some(CtorRenamed(ParenNode(rename-name(head, id) :: payloads, sp), name, id))
+          }
+        | None -> None()
+    | _ -> None()
+
+let rename-ctor-list(ctors: List Ast, owner: Str, ctor-ids: Map Str Str, bindings: List Ast, acc: List Ast) -> CtorList =
+  match (ctors)
+    | [] -> CtorList(bindings, reverse-ast-list(acc, []))
+    | c :: rest ->
+      match (rename-ctor-head(c, owner, ctor-ids))
+        | None -> rename-ctor-list(rest, owner, ctor-ids, bindings, c :: acc)
+        | Some(r) ->
+          match (r)
+            | CtorRenamed(renamed, source, id) -> rename-ctor-list(rest, owner, ctor-ids, add-binding(bindings, binding(source, id, "ctor-binding")), renamed :: acc)
+
+let reverse-ast-list(xs: List Ast, acc: List Ast) -> List Ast =
+  match (xs)
+    | [] -> acc
+    | x :: rest -> reverse-ast-list(rest, x :: acc)
+
+let decl-named(kind: Str, name-ast: Ast, rest: List Ast, sp: Span, type-ids: Map Str Str, ctor-ids: Map Str Str, state: Ref DeclState) -> Ast =
+  match (sym-str(name-ast))
+    | None -> ParenNode(SymNode(kind, sp) :: name-ast :: rest, sp)
+    | Some(name) ->
+      {
+        let owner = type-id-of(type-ids, name)
+        let tb = binding(name, owner, "type-binding")
+        match (deref(state))
+          | DeclState(bindings, out) -> set!(state, DeclState(add-binding(bindings, tb), out))
+        cond
+          | kind == "record" || kind == "defrec" ->
+            {
+              let ctor = ctor-id-of(ctor-ids, owner, name)
+              match (deref(state))
+                | DeclState(bindings, out) -> set!(state, DeclState(add-binding(bindings, binding(name, ctor, "ctor-binding")), out))
+              ParenNode(append-asts([SymNode(kind, sp), rename-name(name-ast, owner)], rest), sp)
+            }
+          | kind == "type" || kind == "variant" ->
+            {
+              let bindings2 = match (deref(state))
+                | DeclState(bindings, _) -> bindings
+              let pair = rename-ctor-list(rest, owner, ctor-ids, bindings2, [])
+              match (pair)
+                | CtorList(bindings3, ctors) -> {
+                    match (deref(state))
+                      | DeclState(_, out) -> set!(state, DeclState(bindings3, out))
+                    ParenNode(append-asts([SymNode(kind, sp), rename-name(name-ast, owner)], ctors), sp)
+                  }
+            }
+          | kind == "alias" ->
+            ParenNode(append-asts([SymNode(kind, sp), rename-name(name-ast, owner)], rest), sp)
+          | else -> ParenNode(append-asts([SymNode(kind, sp), rename-name(name-ast, owner)], rest), sp)
+      }
+
+let decl-form(ast: Ast, type-ids: Map Str Str, ctor-ids: Map Str Str, state: Ref DeclState) -> Ast =
+  match (ast)
+    | ParenNode(elems, sp) ->
+      match (elems)
+        | head :: rest ->
+          match (sym-str(head))
+            | Some(hn) ->
+              match (hn)
+                | "pub" ->
+                  match (rest)
+                    | inner :: [] -> ParenNode([head, decl-form(inner, type-ids, ctor-ids, state)], sp)
+                    | _ -> ast
+                | "record" -> decl-named-rest("record", rest, sp, type-ids, ctor-ids, state)
+                | "defrec" -> decl-named-rest("defrec", rest, sp, type-ids, ctor-ids, state)
+                | "type" -> decl-named-rest("type", rest, sp, type-ids, ctor-ids, state)
+                | "variant" -> decl-named-rest("variant", rest, sp, type-ids, ctor-ids, state)
+                | "alias" -> decl-named-rest("alias", rest, sp, type-ids, ctor-ids, state)
+                | _ -> ast
+            | None -> ast
+        | [] -> ast
+    | _ -> ast
+
+let decl-named-rest(kind: Str, rest: List Ast, sp: Span, type-ids: Map Str Str, ctor-ids: Map Str Str, state: Ref DeclState) -> Ast =
+  match (rest)
+    | name :: more -> decl-named(kind, name, more, sp, type-ids, ctor-ids, state)
+    | [] -> ParenNode([SymNode(kind, sp)], sp)
+
+pub let canonicalize-declarations(forms: List Ast, type-ids: Map Str Str, ctor-ids: Map Str Str) -> List Ast {
+  let state = ref(DeclState([], []))
+  let out = canonicalize-decl-list(forms, type-ids, ctor-ids, state)
+  match (deref(state))
+    | DeclState(bindings, _) -> append-asts(bindings, out)
+}
+
+let canonicalize-decl-list(forms: List Ast, type-ids: Map Str Str, ctor-ids: Map Str Str, state: Ref DeclState) -> List Ast =
+  match (forms)
+    | [] -> []
+    | f :: rest ->
+      {
+        let renamed = decl-form(f, type-ids, ctor-ids, state)
+        renamed :: canonicalize-decl-list(rest, type-ids, ctor-ids, state)
+      }

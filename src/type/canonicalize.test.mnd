@@ -101,3 +101,38 @@ test "binding forms are untouched" = {
   has(ts, "type-binding(\"Foo\", \"m#Foo\")") && has(cs, "ctor-binding(\"A\", \"m#A\")")
 }
 
+
+let declaration-source() -> List Ast =
+  forms-of("record R {
+  a: Foo
+}
+
+type V =
+  | A(Foo)
+  | B
+
+alias X = Foo
+
+let f(v: Foo) -> Foo = A(v)
+")
+
+let declaration-types() -> Map Str Str =
+  Map.set("X", "m#X", Map.set("V", "m#V", Map.set("R", "m#R", Map.set("Foo", "m#Foo", Map.empty()))))
+
+let declaration-ctors() -> Map Str Str =
+  Map.set("B", "m#V.B", Map.set("A", "m#V.A", Map.set("R", "m#R.R", Map.empty())))
+
+test "declarations and constructors are canonicalized" = {
+  let decls = canonicalize-declarations(declaration-source(), declaration-types(), declaration-ctors())
+  let out = printed(canonicalize-ctors(canonicalize-types(decls, declaration-types()), declaration-ctors()))
+  has(out, "type-binding(\"R\", \"m#R\")") &&
+    has(out, "ctor-binding(\"R\", \"m#R.R\")") &&
+    has(out, "type-binding(\"V\", \"m#V\")") &&
+    has(out, "ctor-binding(\"A\", \"m#V.A\")") &&
+    has(out, "record m#R") &&
+    has(out, "| m#V.A(m#Foo)") &&
+    has(out, "| m#V.B") &&
+    has(out, "alias m#X = m#Foo") &&
+    has(out, "f(v: m#Foo) -> m#Foo") &&
+    has(out, "m#V.A(v)")
+}
