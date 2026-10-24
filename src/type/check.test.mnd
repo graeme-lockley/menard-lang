@@ -7,6 +7,7 @@ import "../reader/read.mnd"
 import "../desugar/desugar.mnd"
 import "../test/paths.mnd"
 import "./check.mnd"
+import "./types.mnd"
 import std/io
 
 let read-forms(path: Str) -> Maybe (List Ast) =
@@ -74,3 +75,10 @@ test "a rest parameter is packed to a list before typing" =
       match (typecheck-forms(forms))
         | Ok(out) -> count-defns(out) == 3
         | Err(_) -> false
+
+test "nominal identity compares the canonical id, not the display name" = {
+  let a = TNominal("module-a::T", "T", [], "variant")
+  let b = TNominal("module-b::T", "T", [], "variant")
+  let c = TNominal("module-a::T", "Alias.T", [], "variant")
+  type-equal(a, b) == false && type-equal(a, c) && type-show(c) == "Alias.T"
+}

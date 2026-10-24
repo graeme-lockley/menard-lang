@@ -307,7 +307,7 @@ let apply-subst(env: TypeEnv, t: Type) -> Type =
     | TResult(o, e) -> t-result(apply-subst(env, o), apply-subst(env, e))
     | TRef(e) -> t-ref(apply-subst(env, e))
     | TFn(ps, r) -> t-fn(apply-subst-list(env, ps), apply-subst(env, r))
-    | TNominal(n, a, k) -> TNominal(n, apply-subst-list(env, a), k)
+    | TNominal(id, n, a, k) -> TNominal(id, n, apply-subst-list(env, a), k)
     | TProduct(elems) -> t-product(apply-subst-list(env, elems))
     | _ -> t
 
@@ -333,7 +333,7 @@ let occurs-in(env: TypeEnv, id: Int, t: Type) -> Bool =
     | TMap(k, v) -> occurs(env, id, k) || occurs(env, id, v)
     | TResult(o, e) -> occurs(env, id, o) || occurs(env, id, e)
     | TFn(ps, r) -> occurs-list(env, id, ps) || occurs(env, id, r)
-    | TNominal(_, a, _) -> occurs-list(env, id, a)
+    | TNominal(_, _, a, _) -> occurs-list(env, id, a)
     | TProduct(elems) -> occurs-list(env, id, elems)
     | _ -> false
 
@@ -380,7 +380,7 @@ let unify-structural(env: TypeEnv, ta: Type, tb: Type, span: Span) -> Bool =
     | TMap(ka, va) -> unify-map(env, ka, va, tb, span)
     | TResult(oa, ea) -> unify-result(env, oa, ea, tb, span)
     | TFn(pa, ra) -> unify-fn(env, pa, ra, tb, span)
-    | TNominal(na, aa, ka) -> unify-nominal(env, na, aa, ka, tb, span)
+    | TNominal(ia, na, aa, ka) -> unify-nominal(env, ia, na, aa, ka, tb, span)
     | TProduct(ea) -> unify-product(env, ea, tb, span)
     | _ -> unify-mismatch(env, ta, tb, span)
 
@@ -441,14 +441,14 @@ let unify-list-pairwise(env: TypeEnv, xs: List Type, ys: List Type, span: Span) 
         | y :: yrest ->
           if (unify(env, x, y, span)) -> unify-list-pairwise(env, xrest, yrest, span) | false
 
-let unify-nominal(env: TypeEnv, na: Str, aa: List Type, ka: Str, tb: Type, span: Span) -> Bool =
+let unify-nominal(env: TypeEnv, ia: Str, na: Str, aa: List Type, ka: Str, tb: Type, span: Span) -> Bool =
   match (tb)
-    | TNominal(nb, ab, kb) -> unify-nominal-same(env, na, aa, ka, nb, ab, kb, span)
-    | _ -> unify-mismatch(env, TNominal(na, aa, ka), tb, span)
+    | TNominal(ib, nb, ab, kb) -> unify-nominal-same(env, ia, na, aa, ka, ib, nb, ab, kb, span)
+    | _ -> unify-mismatch(env, TNominal(ia, na, aa, ka), tb, span)
 
-let unify-nominal-same(env: TypeEnv, na: Str, aa: List Type, ka: Str, nb: Str, ab: List Type, kb: Str, span: Span) -> Bool =
+let unify-nominal-same(env: TypeEnv, ia: Str, na: Str, aa: List Type, ka: Str, ib: Str, nb: Str, ab: List Type, kb: Str, span: Span) -> Bool =
   cond
-    | na == nb ->
+    | ia == ib ->
       cond
         | length(aa) == length(ab) -> unify-list-pairwise(env, aa, ab, span)
         | else ->
@@ -456,7 +456,7 @@ let unify-nominal-same(env: TypeEnv, na: Str, aa: List Type, ka: Str, nb: Str, a
             err!(env, "E_TYPE_MISMATCH", String.concat("type argument count mismatch for ", na), span)
             false
           }
-    | else -> unify-mismatch(env, TNominal(na, aa, ka), TNominal(nb, ab, kb), span)
+    | else -> unify-mismatch(env, TNominal(ia, na, aa, ka), TNominal(ib, nb, ab, kb), span)
 
 ; Structural, elementwise — tuples have no declared name to compare, unlike
 ; `unify-nominal-same`.
@@ -501,7 +501,7 @@ let replace-params(t: Type, m: Map Str Type) -> Type =
     | TResult(o, e) -> t-result(replace-params(o, m), replace-params(e, m))
     | TRef(e) -> t-ref(replace-params(e, m))
     | TFn(ps, r) -> t-fn(replace-params-list(ps, m), replace-params(r, m))
-    | TNominal(n, a, k) -> TNominal(n, replace-params-list(a, m), k)
+    | TNominal(id, n, a, k) -> TNominal(id, n, replace-params-list(a, m), k)
     | TProduct(elems) -> t-product(replace-params-list(elems, m))
     | _ -> t
 
@@ -1804,7 +1804,7 @@ let bind-pattern-ctor(env: TypeEnv, pelems: List Ast, psp: Span, scrut: Type, lo
 
 let nominal-type-name-of(t: Type) -> Maybe Str =
   match (t)
-    | TNominal(n, _, _) -> Some(n)
+    | TNominal(_, n, _, _) -> Some(n)
     | TMaybe(_) -> Some("Maybe")
     | TResult(_, _) -> Some("Result")
     | TList(_) -> Some("List")
@@ -2079,7 +2079,7 @@ let infer-project-nominal(env: TypeEnv, name: Str, args: List Type, kind: Str, f
 ; Select a field once the receiver's type is known.
 let infer-project-typed(env: TypeEnv, obj-ty: Type, field: Str, field-ast: Ast, sp: Span) -> Type =
   match (obj-ty)
-    | TNominal(name, args, kind) -> infer-project-nominal(env, name, args, kind, field, field-ast, sp)
+    | TNominal(_, name, args, kind) -> infer-project-nominal(env, name, args, kind, field, field-ast, sp)
     | _ ->
       {
         err!(env, "E_TYPE_MISMATCH", String.concat("expected a record, found ", type-show(obj-ty)), ast-span(field-ast))
@@ -2443,7 +2443,7 @@ let print-type-ast(t: Type) -> Ast =
     | TResult(a, b) -> print-call("Result", [print-type-ast(a), print-type-ast(b)])
     | TMap(a, b) -> print-call("Map", [print-type-ast(a), print-type-ast(b)])
     | TProduct(ts) -> print-call("product", map(print-type-ast, ts))
-    | TNominal(n, args, _) ->
+    | TNominal(_, n, args, _) ->
       if (args == []) -> print-sym(n) | print-call(n, map(print-type-ast, args))
     | _ -> print-sym(type-show(t))
 
@@ -2576,7 +2576,7 @@ let print-format-body(env: TypeEnv, t: Type) -> Ast =
       print-call("match", print-sym("v") :: print-ctor-arms(env, [VariantCtor("None", []), VariantCtor("Some", [e])], Map.empty()))
     | TResult(a, b) ->
       print-call("match", print-sym("v") :: print-ctor-arms(env, [VariantCtor("Ok", [a]), VariantCtor("Err", [b])], Map.empty()))
-    | TNominal(n, args, _) -> print-nominal-body(env, n, args)
+    | TNominal(_, n, args, _) -> print-nominal-body(env, n, args)
     | TMap(k, v) -> print-map-body(env, t, k, v)
     | TProduct(ts) -> print-product-body(env, ts)
     | TParam(_) | TVar(_, _) ->
@@ -2634,7 +2634,7 @@ let is-print-formattable(t: Type) -> Bool =
     | TList(_) -> true
     | TMaybe(_) -> true
     | TResult(_, _) -> true
-    | TNominal(_, _, _) -> true
+    | TNominal(_, _, _, _) -> true
     | TMap(_, _) -> true
     | TProduct(_) -> true
     | _ -> false

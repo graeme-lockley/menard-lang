@@ -29,10 +29,10 @@ pub type Type =
   | TResult(Type, Type)
   | TRef(Type)
   | TFn(List Type, Type)
-  | TNominal(Str, List Type, Str)
+  | TNominal(Str, Str, List Type, Str)
   | TProduct(List Type)
 
- ; name, type args, kind ("record" | "variant")
+ ; canonical id, display name, type args, kind ("record" | "variant")
 
 ; A declared name's own scheme: how many type parameters it binds, plus the
 ; (possibly parameter-mentioning) type itself. Instantiated with fresh
@@ -113,7 +113,11 @@ pub let t-fn(params: List Type, ret: Type) -> Type =
   TFn(params, ret)
 
 pub let t-nominal(name: Str, args: List Type, kind: Str) -> Type =
-  TNominal(name, args, kind)
+  TNominal(name, name, args, kind)
+
+; Explicit canonical identity; `display` is only for diagnostics.
+pub let t-nominal-id(id: Str, display: Str, args: List Type, kind: Str) -> Type =
+  TNominal(id, display, args, kind)
 
 ; Caml-style n-tuple (n>=2), structural like `TList`/`TMap` — no declared
 ; name, so it is unified elementwise rather than looked up by name.
@@ -142,7 +146,7 @@ pub let type-equal(a: Type, b: Type) -> Bool =
     | (TResult(oa, ea), TResult(ob, eb)) -> type-equal(oa, ob) && type-equal(ea, eb)
     | (TRef(ea), TRef(eb)) -> type-equal(ea, eb)
     | (TFn(pa, ra), TFn(pb, rb)) -> type-list-equal(pa, pb) && type-equal(ra, rb)
-    | (TNominal(na, aa, ka), TNominal(nb, ab, kb)) -> na == nb && ka == kb && type-list-equal(aa, ab)
+    | (TNominal(ia, _, aa, ka), TNominal(ib, _, ab, kb)) -> ia == ib && ka == kb && type-list-equal(aa, ab)
     | (TProduct(xs), TProduct(ys)) -> type-list-equal(xs, ys)
     | (_, _) -> false
 
@@ -175,7 +179,7 @@ pub let type-show(t: Type) -> Str =
     | TResult(ok, err) -> String.concat("(Result ", type-show(ok), " ", type-show(err), ")")
     | TRef(elem) -> String.concat("(Ref ", type-show(elem), ")")
     | TFn(params, ret) -> String.concat("(Fn ", type-show-list(params), " -> ", type-show(ret), ")")
-    | TNominal(name, args, _) -> type-show-nominal(name, args)
+    | TNominal(_, display, args, _) -> type-show-nominal(display, args)
     | TProduct(elems) -> type-show-product(elems)
 
 let type-show-nominal(name: Str, args: List Type) -> Str =
@@ -217,7 +221,7 @@ pub let is-showable(t: Type) -> Bool =
     | TMaybe(elem) -> is-showable(elem)
     | TMap(k, v) -> is-showable(k) && is-showable(v)
     | TResult(ok, err) -> is-showable(ok) && is-showable(err)
-    | TNominal(_, args, _) -> type-list-all-showable(args)
+    | TNominal(_, _, args, _) -> type-list-all-showable(args)
     | TProduct(elems) -> type-list-all-showable(elems)
     | _ -> true
 
@@ -244,7 +248,7 @@ pub let is-orderable(t: Type) -> Bool =
     | TMaybe(elem) -> is-orderable(elem)
     | TMap(k, v) -> is-orderable(k) && is-orderable(v)
     | TResult(ok, err) -> is-orderable(ok) && is-orderable(err)
-    | TNominal(_, args, _) -> type-list-all-orderable(args)
+    | TNominal(_, _, args, _) -> type-list-all-orderable(args)
     | TProduct(elems) -> type-list-all-orderable(elems)
 
 let type-list-all-orderable(xs: List Type) -> Bool =

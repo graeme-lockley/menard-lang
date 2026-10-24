@@ -440,7 +440,11 @@ function unify(env: TypeEnv, a: Type, b: Type, s: Subst, span: Span): boolean {
     }
     return true;
   }
-  if (ta.tag === "nominal" && tb.tag === "nominal" && ta.name === tb.name) {
+  if (
+    ta.tag === "nominal" &&
+    tb.tag === "nominal" &&
+    (ta.id ?? ta.name) === (tb.id ?? tb.name)
+  ) {
     if (ta.args.length !== tb.args.length) {
       err(env, "E_TYPE_MISMATCH", `type argument count mismatch for ${ta.name}`, span);
       return false;

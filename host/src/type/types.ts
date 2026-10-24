@@ -13,7 +13,7 @@ export type Type =
   | { tag: "arr"; elem: Type; n: number | null }
   | { tag: "fn"; params: Type[]; ret: Type }
   | { tag: "product"; elems: Type[] }
-  | { tag: "nominal"; name: string; args: Type[]; kind: "record" | "variant" | "alias" }
+  | { tag: "nominal"; id?: string; name: string; args: Type[]; kind: "record" | "variant" | "alias" }
   | { tag: "ctor"; typeName: string; ctor: string; payloads: Type[] }; // for patterns / values
 
 export function prim(
@@ -87,7 +87,7 @@ export function typeEqual(a: Type, b: Type): boolean {
     case "nominal":
       return (
         b.tag === "nominal" &&
-        a.name === b.name &&
+        (a.id ?? a.name) === (b.id ?? b.name) &&
         a.kind === b.kind &&
         a.args.length === b.args.length &&
         a.args.every((t, i) => typeEqual(t, b.args[i]!))
