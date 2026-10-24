@@ -36,7 +36,7 @@ Allocation comes from a copying nursery. A minor collection traces the shadow st
 
 Shadow stacks are **per-task** (`shadow.c`); the collector visits every live
 task’s roots and `mn_task_visit_roots` (closures / results). See
-[`docs/build-c-suspension.md`](../docs/build-c-suspension.md).
+[`docs/design/builds/c-suspension.md`](../docs/design/builds/c-suspension.md).
 
 ## Toolchain
 

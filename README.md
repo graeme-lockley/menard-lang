@@ -79,12 +79,14 @@ Live status is [docs/backlog.md](docs/backlog.md): one row per review item, with
 
 | Path | What it is |
 | --- | --- |
+| [docs/README.md](docs/README.md) | Map of the documentation |
 | [docs/guide.md](docs/guide.md) | The language, in reading order |
 | [docs/stdlib.md](docs/stdlib.md) | The standard library |
 | [docs/syntax.md](docs/syntax.md) | Syntax, and how the surface lowers |
 | [docs/menard-spec.md](docs/menard-spec.md) | The specification |
 | [docs/decisions.md](docs/decisions.md) | Why the language is shaped this way |
 | [docs/backlog.md](docs/backlog.md) | Live work queue and status for every review item |
+| [docs/design/](docs/design/) | Finished libraries/concurrency design and Builds A–F |
 | [docs/reviews/2026-10-24-build-f.md](docs/reviews/2026-10-24-build-f.md) | The Build F review: specification and acceptance criteria |
 | `stdlib/` | The library, in Menard |
 | `src/` | The compiler, in Menard |

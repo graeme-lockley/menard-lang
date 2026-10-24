@@ -346,7 +346,7 @@ points.
 
 Mailboxes and actors on the task runtime (Menard queues + wait cells). Not an
 isolation boundary — shared `Ref` across tasks is allowed. See
-[build-e-actors.md](build-e-actors.md).
+[build-e-actors.md](design/builds/e-actors.md).
 
 | Name | |
 | --- | --- |
@@ -371,7 +371,7 @@ isolation boundary — shared `Ref` across tasks is allowed. See
 
 `import std/supervisor as Supervisor`
 
-OTP-lite helpers (Build F). See [build-f-network.md](build-f-network.md).
+OTP-lite helpers (Build F). See [build-f-network.md](design/builds/f-network.md).
 
 | Name | |
 | --- | --- |

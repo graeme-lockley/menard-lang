@@ -37,7 +37,7 @@ remaining cleanups); parkable **`std/net`** (TCP+UDP) and **OpenSSL** TLS via
 `mn_*`; Menard **`std/http`** + **`std/rest`**; bounded actor mailboxes
 (block-on-full, default 1024); **`std/supervisor`** one-for-one helpers.
 Networking is **native-only** (interpreter unbound). Details:
-[build-f-network.md](build-f-network.md).
+[build-f-network.md](design/builds/f-network.md).
 
 ### Why
 
@@ -67,7 +67,7 @@ every host without a special binary identity.
 
 ### User documentation
 
-[buildout-libraries-concurrency.md](buildout-libraries-concurrency.md) Build B;
+[buildout-libraries-concurrency.md](design/buildout-libraries-concurrency.md) Build B;
 [examples/ffi/sqlite/README.md](../examples/ffi/sqlite/README.md).
 
 ---
@@ -108,7 +108,7 @@ can grow via an external conversion bridge without expanding `mn_*` or
 
 ### User documentation
 
-[runtime-abi.md](runtime-abi.md); [buildout-libraries-concurrency.md](buildout-libraries-concurrency.md);
+[runtime-abi.md](runtime-abi.md); [buildout-libraries-concurrency.md](design/buildout-libraries-concurrency.md);
 [examples/ffi/sqlite/README.md](../examples/ffi/sqlite/README.md);
 [menard-spec.md](menard-spec.md) §2.7 / §2.15 (seam + FFI confinement).
 
@@ -137,7 +137,7 @@ above). `std/time` may declare clock `mn_*` only (`mn_now_ms` in Build A).
 Wall clock moves off `std/fs`.
 
 Concurrency stays a non-goal in the specification until a later decision; the
-architecture in `design-libraries-concurrency.md` is approved as implementation
+architecture in `design/libraries-concurrency.md` is approved as implementation
 direction but not ratified here.
 
 ### Why
@@ -155,7 +155,7 @@ monotonic clocks, sockets, and concurrency ratification are later builds.
 ### User documentation
 
 [menard-spec.md](menard-spec.md) §1 and §2.8.3 / §2.15; [stdlib.md](stdlib.md);
-[runtime-abi.md](runtime-abi.md); [buildout-libraries-concurrency.md](buildout-libraries-concurrency.md).
+[runtime-abi.md](runtime-abi.md); [buildout-libraries-concurrency.md](design/buildout-libraries-concurrency.md).
 
 ---
 

@@ -2,7 +2,7 @@
 
 **Status:** informal inventory for Build A — enrich as the seam grows.  
 **Contracts:** Runtime ABI ≠ Platform API; Runtime ABI ≠ foreign C FFI ABI.
-See [design-libraries-concurrency.md](design-libraries-concurrency.md) §2.2 and
+See [design-libraries-concurrency.md](design/libraries-concurrency.md) §2.2 and
 [decisions.md](decisions.md) (purpose + library philosophy; Build B FFI).
 
 Apps and ordinary `stdlib/` modules never call `mn_*` directly. Seam modules
@@ -35,7 +35,7 @@ Platform seam catalogue.
 
 ### Internal task runtime (Build D — not Platform API)
 
-See [build-d-tasks.md](build-d-tasks.md) and [build-c-suspension.md](build-c-suspension.md).
+See [build-d-tasks.md](design/builds/d-tasks.md) and [build-c-suspension.md](design/builds/c-suspension.md).
 Public façade: `stdlib/task.mnd` (no `extern`; wraps `std/sched`).
 
 | Symbol | Seam wrapper (`std/sched`) | Notes |
@@ -58,7 +58,7 @@ Public façade: `stdlib/task.mnd` (no `extern`; wraps `std/sched`).
 
 ### Network + TLS (Build F)
 
-See [build-f-network.md](build-f-network.md). Platform façade: `stdlib/net.mnd`.
+See [build-f-network.md](design/builds/f-network.md). Platform façade: `stdlib/net.mnd`.
 Native only — interpreter stubs throw unbound.
 
 | Symbol | Notes |
