@@ -1,0 +1,5 @@
+import "./q.mnd" as Q
+
+let f(x: Q.T) -> Int = Q.get(x)
+
+let main() -> Int = f(Q.A(7))

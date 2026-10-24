@@ -251,3 +251,21 @@ test "a hash that is not the first two bytes is an error" = {
     | Err(_) -> true
     | Ok(_) -> false
 }
+
+test "qualified type names keep their dot" = {
+  match (read-all("let f(x: Q.T) -> List Q.T = []\n"))
+    | Ok(forms) -> String.contains("Q.T", print-form-all(forms)) && String.contains("List Q.T", print-form-all(forms))
+    | Err(_) -> false
+}
+
+test "qualified map types parse" = {
+  match (read-all("let f(x: Map Q.K Q.V) -> Q.V = x\n"))
+    | Ok(forms) -> String.contains("Map Q.K Q.V", print-form-all(forms))
+    | Err(_) -> false
+}
+
+test "a qualified type needs a name" = {
+  match (read-all("let f(x: Q.) -> Int = 0\n"))
+    | Ok(_) -> false
+    | Err(_) -> true
+}

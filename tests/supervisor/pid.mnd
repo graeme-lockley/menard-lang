@@ -1,0 +1,13 @@
+import std/actor as Actor
+import std/supervisor as Sup
+
+let same(p: Sup.Pid Int) -> Actor.Pid Int = p
+let take(p: Sup.Pid Int) -> Int = Actor.id(same(p))
+
+let main() -> Int {
+  let p = Sup.restart-child(Sup.ChildSpec(fn () = Actor.spawn(fn (_) = ()), Sup.Permanent()))
+  let n = take(p)
+  Actor.cancel(p)
+  let _ = Actor.join(p)
+  n
+}

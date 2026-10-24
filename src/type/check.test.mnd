@@ -3,6 +3,7 @@
 ; matching the pipeline contract in src/type/check.mnd. CLI dump flags
 ; stay in tests/phase2/typecheck.test.ts.
 
+import "../reader/ast.mnd"
 import "../reader/read.mnd"
 import "../desugar/desugar.mnd"
 import "../test/paths.mnd"

@@ -1,0 +1,6 @@
+import std/json as Json
+
+let main() -> Int {
+  println(show(JsonFloat(1.5)))
+  0
+}

@@ -1,0 +1,6 @@
+pub type T =
+  | A(Int)
+
+pub let get(x: T) -> Int =
+  match (x)
+    | A(n) -> n

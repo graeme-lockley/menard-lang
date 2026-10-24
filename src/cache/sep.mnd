@@ -10,6 +10,7 @@
 import "../reader/ast.mnd"
 import "../reader/read.mnd"
 import "../reader/casing.mnd"
+import "../reader/print.mnd"
 import "../desugar/desugar.mnd"
 import "../type/check.mnd"
 import "../type/canonicalize.mnd"
@@ -241,6 +242,23 @@ record CanonicalModule {
   bindings: List Ast
   public: List Ast
 }
+
+let reexport-bindings(from: Str, forms: List Ast, done: Map Str Iface, acc: List Ast) -> List Ast =
+  match (forms)
+    | [] -> acc
+    | form :: rest ->
+      cond
+        | not(is-pub(form)) -> reexport-bindings(from, rest, done, acc)
+        | else ->
+          match (module-import-alias(form))
+            | Some(_) -> reexport-bindings(from, rest, done, acc)
+            | None ->
+              match (import-specs([form]))
+                | [] -> reexport-bindings(from, rest, done, acc)
+                | spec :: _ ->
+                  match (Map.lookup(canonical-path(resolve-import(from, spec)), done))
+                    | Some(Iface(_, _, _, _, _, _, _, bindings, _)) -> reexport-bindings(from, rest, done, append-asts(acc, bindings))
+                    | None -> reexport-bindings(from, rest, done, acc)
 
 let canonicalize-module(forms: List Ast, abs: Str, import-bindings: List Ast) -> CanonicalModule {
   let own-all = append-asts(own-type-bindings(forms, abs, []), own-ctor-bindings(forms, abs, []))
@@ -719,6 +737,19 @@ let qualify-binding-form(form: Ast, prefix: Str) -> Ast =
         | _ -> form
     | _ -> form
 
+let dotted-binding-form(form: Ast, alias-name: Str) -> Ast =
+  match (form)
+    | ParenNode(head :: visible :: canonical :: [], sp) ->
+      match (visible)
+        | StrNode(v, _) -> ParenNode([head, StrNode(String.concat(alias-name, String.concat(".", v)), blank()), canonical], sp)
+        | _ -> form
+    | _ -> form
+
+let dotted-bindings(forms: List Ast, alias-name: Str) -> List Ast =
+  match (forms)
+    | [] -> []
+    | f :: rest -> dotted-binding-form(f, alias-name) :: dotted-bindings(rest, alias-name)
+
 let qualify-bindings(forms: List Ast, prefix: Str) -> List Ast =
   match (forms)
     | [] -> []
@@ -743,7 +774,7 @@ let alias-surfaces(from: Str, forms: List Ast, done: Map Str Iface, acc: Surface
                         let prefix = import-alias-prefix(name)
                         let values = value-stubs(stubs)
                         let renamed = rename-module-forms(values, qualified-renames(values, prefix, Map.empty()))
-                        alias-surfaces(from, rest, done, Surface(append-fns(qualified-fns(fns, prefix), af), ac, append-asts(ab, qualify-bindings(bindings, prefix)), append-asts(as, renamed)))
+                        alias-surfaces(from, rest, done, Surface(append-fns(qualified-fns(fns, prefix), af), ac, append-asts(ab, append-asts(qualify-bindings(bindings, prefix), dotted-bindings(bindings, name))), append-asts(as, renamed)))
                       }
             | [] -> alias-surfaces(from, rest, done, acc)
 
@@ -895,7 +926,8 @@ let compile-forms-open(abs: Str, src: Str, display: Str, forms: List Ast, direct
           {
             let exported = collect-exports(canonical, abs, [], [], [])
             let body0 = prepare-body(strip-module-forms(canonical), for-test)
-            match (compile-checked(abs, src, display, body0, exported, direct, fns, ctors, all-bindings, public-bindings, stubs, for-test, ctx, started))
+            let public2 = append-asts(public-bindings, reexport-bindings(abs, forms, done, []))
+            match (compile-checked(abs, src, display, body0, exported, direct, fns, ctors, all-bindings, public2, stubs, for-test, ctx, started))
               | Ok(iface) ->
                 {
                   note-compiling(abs, ctx, since(started))
@@ -928,6 +960,21 @@ let drop-let-forms(xs: List Ast, acc: List Ast) -> List Ast =
     | f :: rest ->
       if (is-let-form(f)) -> drop-let-forms(rest, acc) | drop-let-forms(rest, f :: acc)
 
+let form-text(ast: Ast) -> Str =
+  print-form(ast)
+
+let form-in-list(ast: Ast, forms: List Ast) -> Bool =
+  match (forms)
+    | [] -> false
+    | f :: rest ->
+      if (form-text(ast) == form-text(f)) -> true | form-in-list(ast, rest)
+
+let drop-type-stubs(checked: List Ast, stubs: List Ast, acc: List Ast) -> List Ast =
+  match (checked)
+    | [] -> reverse(acc)
+    | f :: rest ->
+      if (form-in-list(f, stubs)) -> drop-type-stubs(rest, stubs, acc) | drop-type-stubs(rest, stubs, f :: acc)
+
 let compile-checked(abs: Str, src: Str, display: Str, body: List Ast, exported: Export, direct: List DepRec, fns: List FnRec, ctors: List CtorRec, bindings: List Ast, stored-bindings: List Ast, stubs: List Ast, for-test: Bool, ctx: Ctx, started: Int) -> Result Iface Str {
   let types = drop-let-forms(stubs, [])
   let body1 = append-asts(lets-only(stubs, []), body)
@@ -939,7 +986,7 @@ let compile-checked(abs: Str, src: Str, display: Str, body: List Ast, exported: 
         report-types(abs, src, es)
         Err("")
       }
-    | Ok(checked) -> compile-lower(abs, src, display, drop-n(length(types), checked), exported, direct, fns, ctors, stored-bindings, for-test, ctx, started)
+    | Ok(checked) -> compile-lower(abs, src, display, drop-type-stubs(checked, stubs, []), exported, direct, fns, ctors, stored-bindings, for-test, ctx, started)
 }
 
 let compile-lower(abs: Str, src: Str, display: Str, body: List Ast, exported: Export, direct: List DepRec, fns: List FnRec, ctors: List CtorRec, bindings: List Ast, for-test: Bool, ctx: Ctx, started: Int) -> Result Iface Str {

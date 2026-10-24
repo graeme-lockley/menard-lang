@@ -2091,7 +2091,20 @@ let parse-type-atom(ps: Ps) -> Result Ast ParseError {
     | t.kind == "ident" ->
       {
         advance(ps)
-        Ok(sym-at(t.text, tok-span(t)))
+        cond
+          | delim(ps, ".") ->
+            {
+              advance(ps)
+              let field = peek(ps)
+              cond
+                | field.kind != "ident" -> perr(field, "expected a type name")
+                | else ->
+                  {
+                    advance(ps)
+                    Ok(sym-at(String.concat(t.text, String.concat(".", field.text)), span-join(tok-span(t), tok-span(field))))
+                  }
+            }
+          | else -> Ok(sym-at(t.text, tok-span(t)))
       }
     | t.kind == "punct" && t.text == "(" -> parse-type-arrow(ps)
     | else -> perr(t, "expected a type")
