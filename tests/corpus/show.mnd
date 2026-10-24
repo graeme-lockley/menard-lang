@@ -1,0 +1,34 @@
+; The canonical text of every composite, plus product printing.
+; This is the LANG-01 regression: native `show` used to print `#<obj>` for
+; built-in composites, and `println` of a product used to abort.
+import std/map as Map
+
+type C =
+  | Red
+  | Rgb(Int, Int, Int)
+
+record Box[a] {
+  value: a
+}
+
+let main() -> Int {
+  println(show([1, 2]))
+  println(show(Some(1)))
+  println(show(Ok(1)))
+  println(show((1, 2)))
+  println(show(Map.set(1, 10, Map.empty())))
+  println(show(Map.set("a", Some(1), Map.empty())))
+  println(show([Box(1)]))
+  println(show((Some(1), [true])))
+  println(show(Box([1, 2])))
+  println(show([Some(1)]))
+  println(show(Box(None())))
+  println(show(Red()))
+  println(show(Rgb(1, 2, 3)))
+  println(show(true))
+  println(show(()))
+  println(show("x"))
+  println((1, 2))
+  println((true, (1, 2)))
+  0
+}

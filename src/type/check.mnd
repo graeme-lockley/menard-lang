@@ -104,6 +104,26 @@ let print-notes = ref([])
 let print-functions = ref([])
 let print-names = ref(Map.empty())
 
+; Types of `show` arguments, so the rewrite can route composites through the
+; type-directed printer instead of the runtime's scalar-only `mn_show`.
+record ShowNote {
+  start: Int
+  end: Int
+  origin: Int
+  type: Type
+}
+
+let show-notes = ref([])
+
+let note-show!(sp: Span, t: Type) -> Unit =
+  set!(show-notes, ShowNote(sp.start, sp.end, sp.origin, t) :: deref(show-notes))
+
+let find-show-note(sp: Span, notes: List ShowNote) -> Maybe Type =
+  match (notes)
+    | [] -> None()
+    | ShowNote(start, end, origin, t) :: rest ->
+      if (start == sp.start && end == sp.end && origin == sp.origin) -> Some(t) | find-show-note(sp, rest)
+
 ; Remember which slot a project form selected.
 let note-project!(sp: Span, index: Int) -> Unit =
   set!(proj-notes, ProjNote(sp.start, sp.end, sp.origin, index) :: deref(proj-notes))
@@ -1919,7 +1939,11 @@ let check-predicate-arg(env: TypeEnv, arg-types: List Type, args: List Ast, sp: 
 
 let check-show-compare(env: TypeEnv, head: Ast, arg-types: List Type, args: List Ast, sp: Span) -> Unit =
   cond
-    | is-sym(head, "show") -> check-predicate-arg(env, arg-types, args, sp, is-showable, "E_TYPE_SHOWABLE", "not showable")
+    | is-sym(head, "show") ->
+      {
+        note-show!(sp, first-type-or-fresh(arg-types, env))
+        check-predicate-arg(env, arg-types, args, sp, is-showable, "E_TYPE_SHOWABLE", "not showable")
+      }
     | is-sym(head, "compare") -> check-predicate-arg(env, arg-types, args, sp, is-orderable, "E_TYPE_ORDERABLE", "not orderable")
 
 let is-lambda-ast(a: Ast) -> Bool =
@@ -2412,6 +2436,7 @@ let print-type-ast(t: Type) -> Ast =
     | TMaybe(e) -> print-call("Maybe", [print-type-ast(e)])
     | TResult(a, b) -> print-call("Result", [print-type-ast(a), print-type-ast(b)])
     | TMap(a, b) -> print-call("Map", [print-type-ast(a), print-type-ast(b)])
+    | TProduct(ts) -> print-call("product", map(print-type-ast, ts))
     | TNominal(n, args, _) ->
       if (args == []) -> print-sym(n) | print-call(n, map(print-type-ast, args))
     | _ -> print-sym(type-show(t))
@@ -2453,8 +2478,27 @@ let print-pattern(name: Str, ts: List Type, i: Int) -> List Ast =
     | [] -> []
     | _ :: rest -> print-sym(String.concat("p", show(i))) :: print-pattern(name, rest, i + 1)
 
+; A private constructor is renamed to __mN_Name by module flattening. The
+; derived show strips that prefix; the type-directed printer must too.
+let source-name-digits(n: Str, i: Int, len: Int) -> Str =
+  cond
+    | i >= len -> n
+    | else ->
+      {
+        let b = String.byte(i, n)
+        cond
+          | b >= 48 && b <= 57 -> source-name-digits(n, i + 1, len)
+          | b == 95 -> String.slice(i + 1, len - (i + 1), n)
+          | else -> n
+      }
+
+let source-ctor-name(n: Str) -> Str {
+  let len = String.length(n)
+  if (len >= 4 && String.byte(0, n) == 95 && String.byte(1, n) == 95 && String.byte(2, n) == 109) -> source-name-digits(n, 3, len) | n
+}
+
 let print-ctor-body(env: TypeEnv, name: Str, ts: List Type) -> Ast =
-  print-concat(print-str(String.concat("(", name)), print-concat(print-payloads(env, ts, 0), print-str(")")))
+  print-concat(print-str(String.concat("(", source-ctor-name(name))), print-concat(print-payloads(env, ts, 0), print-str(")")))
 
 let print-ctor-arms(env: TypeEnv, cs: List VariantCtor, params: Map Str Type) -> List Ast =
   match (cs)
@@ -2501,6 +2545,22 @@ let print-list-body(env: TypeEnv, t: Type, elem: Type) -> Ast {
   print-concat(print-str("["), print-concat(print-call(name, [print-sym("v")]), print-str("]")))
 }
 
+let print-int(n: Int) -> Ast =
+  IntNode(n, Span(0, 0, 0, 1))
+
+let print-product-part(env: TypeEnv, t: Type, i: Int) -> Ast =
+  print-format(env, t, print-call("slot", [print-sym("v"), print-int(i)]))
+
+let print-product-parts(env: TypeEnv, ts: List Type, i: Int) -> Ast =
+  match (ts)
+    | [] -> print-str("")
+    | [t] -> print-product-part(env, t, i)
+    | t :: rest ->
+      print-concat(print-product-part(env, t, i), print-concat(print-str(", "), print-product-parts(env, rest, i + 1)))
+
+let print-product-body(env: TypeEnv, ts: List Type) -> Ast =
+  print-concat(print-str("("), print-concat(print-product-parts(env, ts, 0), print-str(")")))
+
 let print-format-body(env: TypeEnv, t: Type) -> Ast =
   match (t)
     | TBool -> print-call("if", [print-sym("v"), print-str("true"), print-str("false")])
@@ -2512,6 +2572,7 @@ let print-format-body(env: TypeEnv, t: Type) -> Ast =
       print-call("match", print-sym("v") :: print-ctor-arms(env, [VariantCtor("Ok", [a]), VariantCtor("Err", [b])], Map.empty()))
     | TNominal(n, args, _) -> print-nominal-body(env, n, args)
     | TMap(k, v) -> print-map-body(env, t, k, v)
+    | TProduct(ts) -> print-product-body(env, ts)
     | TParam(_) | TVar(_, _) ->
       print-error("print: cannot format an unresolved type parameter")
     | TInt | TFloat | TChar | TStr -> print-call("show", [print-sym("v")])
@@ -2560,12 +2621,39 @@ let rewrite-project-list(elems: List Ast, notes: List ProjNote, env: TypeEnv) ->
     | e :: rest -> rewrite-project-ast(e, notes, env) :: rewrite-project-list(rest, notes, env)
 
 ; A project node becomes a slot read when its index is known.
+let is-print-formattable(t: Type) -> Bool =
+  match (t)
+    | TBool -> true
+    | TUnit -> true
+    | TList(_) -> true
+    | TMaybe(_) -> true
+    | TResult(_, _) -> true
+    | TNominal(_, _, _) -> true
+    | TMap(_, _) -> true
+    | TProduct(_) -> true
+    | _ -> false
+
+let rewrite-show(elems: List Ast, sp: Span, notes: List ProjNote, env: TypeEnv) -> Ast =
+  match (elems)
+    | _ :: arg :: _ ->
+      match (find-show-note(sp, deref(show-notes)))
+        | None -> ParenNode(elems, sp)
+        | Some(t) ->
+          {
+            let resolved = apply-subst(env, t)
+            if (is-print-formattable(resolved)) ->
+              print-format(env, resolved, rewrite-project-ast(arg, notes, env)) |
+              ParenNode(elems, sp)
+          }
+    | _ -> ParenNode(elems, sp)
+
 let rewrite-project-node(elems: List Ast, sp: Span, notes: List ProjNote, env: TypeEnv) -> Ast =
   match (elems)
     | head :: obj :: _ ->
       cond
         | is-sym(head, "project") -> rewrite-project-field(elems, obj, sp, notes, env)
         | is-sym(head, "?") -> rewrite-ques(elems, sp, notes, env)
+        | is-sym(head, "show") -> rewrite-show(elems, sp, notes, env)
         | is-sym(head, "print") || is-sym(head, "println") -> rewrite-print(elems, sp, notes, env)
         | else -> ParenNode(rewrite-project-list(elems, notes, env), sp)
     | [head] ->
@@ -2719,6 +2807,7 @@ let typecheck-collected(forms: List Ast) -> Result (List Ast) (List TypeError) {
   set!(print-notes, [])
   set!(print-functions, [])
   set!(print-names, Map.empty())
+  set!(show-notes, [])
   let env = empty-env()
   let skip = ref([])
   register-stubs(env, forms, ref([]), skip)

@@ -14,13 +14,13 @@
 
 | Phase | Theme | Items | Ready | In progress | Done |
 | --- | --- | ---: | ---: | ---: | ---: |
-| 0 | Truth, trust and the unsafe edges | 18 | 18 | 0 | 0 |
+| 0 | Truth, trust and the unsafe edges | 18 | 17 | 1 | 0 |
 | 1 | Daily loop and language decisions | 18 | 0 | 0 | 0 |
 | 2 | Standard library | 12 | 0 | 0 | 0 |
 | 3 | Operational concurrency | 8 | 0 | 0 | 0 |
 | 4 | Project and ecosystem | 17 | 0 | 0 | 0 |
 | 5 | Later | 9 | 0 | 0 | 0 |
-| **Total** | | **82** | **18** | **0** | **0** |
+| **Total** | | **82** | **17** | **1** | **0** |
 
 Priority mix: P0 = 24, P1 = 34, P2 = 19, P3 = 5.
 
@@ -30,7 +30,7 @@ Rows are ordered by phase, then priority, then area, then ID.
 
 | ID | Title | Area | Priority | Phase | Status | Blocked by | Issue | PR |
 | --- | --- | --- | --- | ---: | --- | --- | --- | --- |
-| [LANG-01](reviews/2026-10-24-build-f.md#lang-01) | `show` must be human-readable and correct for every showable type | Language | P0 | 0 | ready | LANG-07, LANG-02, LANG-10 (text half) | [#12](https://github.com/graeme-lockley/menard-lang/issues/12) | — |
+| [LANG-01](reviews/2026-10-24-build-f.md#lang-01) | `show` must be human-readable and correct for every showable type | Language | P0 | 0 | in-progress | LANG-07, LANG-02, LANG-10 (text half) | [#12](https://github.com/graeme-lockley/menard-lang/issues/12) | [#32](https://github.com/graeme-lockley/menard-lang/pull/32) |
 | [LANG-02](reviews/2026-10-24-build-f.md#lang-02) | Canonical `Float` text: shortest round-trip, implemented in C first | Language | P0 | 0 | ready | — | [#13](https://github.com/graeme-lockley/menard-lang/issues/13) | — |
 | [LANG-03](reviews/2026-10-24-build-f.md#lang-03) | Make `Float` orderable with one consistent total order | Language | P0 | 0 | ready | LANG-02, LIB-01 | [#14](https://github.com/graeme-lockley/menard-lang/issues/14) | — |
 | [LANG-04](reviews/2026-10-24-build-f.md#lang-04) | The host typer still crashes on a qualified-import constructor, and still duplicates some diagnostics | Language | P0 | 0 | ready | — | [#15](https://github.com/graeme-lockley/menard-lang/issues/15) | — |
