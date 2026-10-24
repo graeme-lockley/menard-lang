@@ -82,6 +82,11 @@ pub let type-def-with-id(td: TypeDef, id: Str) -> TypeDef =
     | RecordDef(_, name, params, fields) -> RecordDef(id, name, params, fields)
     | VariantDef(_, name, params, ctors) -> VariantDef(id, name, params, ctors)
 
+pub let type-def-with-id-name(td: TypeDef, id: Str, name: Str) -> TypeDef =
+  match (td)
+    | RecordDef(_, _, params, fields) -> RecordDef(id, name, params, fields)
+    | VariantDef(_, _, params, ctors) -> VariantDef(id, name, params, ctors)
+
 pub let ctor-owner-id(c: CtorInfo) -> Str =
   match (c)
     | CtorInfo(type-id, _, _, _) -> type-id

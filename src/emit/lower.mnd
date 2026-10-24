@@ -399,9 +399,9 @@ let is-raw-upper-name(n: Str) -> Bool =
   }
 
 ; `__m12_Foo` → `Foo`; otherwise identity.
-let strip-uniq-prefix(n: Str) -> Str {
+pub let strip-uniq-prefix(n: Str) -> Str {
   let len = String.length(n)
-  if (len >= 4 && String.byte(0, n) == 95 && String.byte(1, n) == 95 && String.byte(2, n) == 109) -> strip-uniq-prefix-digits(n, 3, len) | n
+  if (len >= 4 && String.byte(0, n) == 95 && String.byte(1, n) == 95 && (String.byte(2, n) == 109 || String.byte(2, n) == 99)) -> strip-uniq-prefix-digits(n, 3, len) | n
 }
 
 let strip-uniq-prefix-digits(n: Str, i: Int, len: Int) -> Str =
@@ -416,7 +416,7 @@ let strip-uniq-prefix-digits(n: Str, i: Int, len: Int) -> Str =
           | else -> n
       }
 
-let is-upper-type-name(n: Str) -> Bool =
+pub let is-upper-type-name(n: Str) -> Bool =
   is-raw-upper-name(strip-uniq-prefix(n))
 
 let is-heap-type(ast: Ast) -> Bool =

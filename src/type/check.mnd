@@ -58,6 +58,7 @@ pub record TypeEnv {
   ctors: Ref (Map Str CtorInfo)
   aliases: Ref (Map Str Type)
   type-bindings: Ref (Map Str Str)
+  type-display: Ref (Map Str Str)
   ctor-bindings: Ref (Map Str Str)
   next-var: Ref Int
   diags: Ref (List TypeError)
@@ -149,8 +150,10 @@ let value-get(env: TypeEnv, name: Str) -> Maybe Scheme =
 let value-set(env: TypeEnv, name: Str, s: Scheme) -> Unit =
   set!(env.values, Map.set(name, s, deref(env.values)))
 
-pub let type-bind!(env: TypeEnv, spelling: Str, id: Str) -> Unit =
+pub let type-bind!(env: TypeEnv, spelling: Str, id: Str) -> Unit {
   set!(env.type-bindings, Map.set(spelling, id, deref(env.type-bindings)))
+  set!(env.type-display, Map.set(id, spelling, deref(env.type-display)))
+}
 
 pub let type-resolve(env: TypeEnv, spelling: Str) -> Str =
   match (Map.lookup(spelling, deref(env.type-bindings)))
@@ -171,8 +174,10 @@ pub let type-get(env: TypeEnv, spelling: Str) -> Maybe TypeDef =
 pub let type-set(env: TypeEnv, td: TypeDef) -> Unit {
   let name = type-def-name(td)
   let id = type-resolve(env, name)
-  type-bind!(env, name, id)
-  set!(env.types, Map.set(id, type-def-with-id(td, id), deref(env.types)))
+  let display = match (Map.lookup(id, deref(env.type-display)))
+    | Some(source) -> source
+    | None -> name
+  set!(env.types, Map.set(id, type-def-with-id-name(td, id, display), deref(env.types)))
 }
 
 pub let ctor-get(env: TypeEnv, name: Str) -> Maybe CtorInfo =
@@ -311,7 +316,7 @@ let install-builtins(env: TypeEnv) -> Unit {
 }
 
 pub let empty-env() -> TypeEnv {
-  let env = TypeEnv(ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(0), ref([]), ref(Map.empty()), ref(None()))
+  let env = TypeEnv(ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(0), ref([]), ref(Map.empty()), ref(None()))
   install-builtins(env)
   env
 }
@@ -2525,9 +2530,20 @@ let source-name-digits(n: Str, i: Int, len: Int) -> Str =
           | else -> n
       }
 
+let source-to-underscore(n: Str, i: Int, len: Int) -> Str =
+  cond
+    | i >= len -> n
+    | String.byte(i, n) == 95 -> String.slice(i + 1, len - (i + 1), n)
+    | else -> source-to-underscore(n, i + 1, len)
+
+let source-import-name(n: Str) -> Str {
+  let len = String.length(n)
+  if (len >= 9 && String.byte(0, n) == 95 && String.byte(1, n) == 95 && String.byte(2, n) == 105 && String.byte(3, n) == 109 && String.byte(4, n) == 112 && String.byte(5, n) == 111 && String.byte(6, n) == 114 && String.byte(7, n) == 116 && String.byte(8, n) == 95) -> source-to-underscore(n, 9, len) | n
+}
+
 let source-ctor-name(n: Str) -> Str {
   let len = String.length(n)
-  if (len >= 4 && String.byte(0, n) == 95 && String.byte(1, n) == 95 && String.byte(2, n) == 109) -> source-name-digits(n, 3, len) | n
+  if (len >= 4 && String.byte(0, n) == 95 && String.byte(1, n) == 95 && (String.byte(2, n) == 109 || String.byte(2, n) == 99)) -> source-name-digits(n, 3, len) | source-import-name(n)
 }
 
 let print-ctor-body(env: TypeEnv, name: Str, ts: List Type) -> Ast =

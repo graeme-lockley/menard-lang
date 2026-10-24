@@ -122,3 +122,15 @@ test "a constructor spelling resolves through its canonical binding" = {
     | Some(c) -> ctor-owner-id(c) == "module-a#T" && ctor-owner-name(c) == "T"
     | None -> false
 }
+
+test "a canonical type id keeps its source display name" = {
+  let env = empty-env()
+  type-bind!(env, "Pid", "__m7_Pid")
+  type-set(env, RecordDef("__m7_Pid", "__m7_Pid", [], []))
+  match (type-get(env, "Pid"))
+    | Some(td) ->
+      type-def-id(td) == "__m7_Pid" &&
+        type-def-name(td) == "Pid" &&
+        type-show(t-nominal-id("__m7_Pid", "Pid", [], "record")) == "Pid"
+    | None -> false
+}

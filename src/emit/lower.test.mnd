@@ -1,0 +1,8 @@
+import "../reader/ast.mnd"
+import "./lower.mnd"
+
+test "canonical module ids strip to upper type names" =
+  strip-uniq-prefix("__m7_Foo") == "Foo" &&
+    strip-uniq-prefix("__c7_A") == "A" &&
+    is-upper-type-name("__m7_Foo") &&
+    is-upper-type-name("__c7_A")
