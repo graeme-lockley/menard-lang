@@ -80,8 +80,6 @@ export type PreparedModule = {
   path: string;
   forms: Ast[];
   exports: Set<string>;
-  /** Exported constructor names (variant and record) for unqualified use. */
-  ctors: Set<string>;
   imports: { path: string; alias?: string }[];
 };
 
@@ -536,42 +534,16 @@ export function loadModuleGraph(
   const modules = new Map<string, PreparedModule>();
   for (const p of order) {
     const m = raw.get(p)!;
-    const ctors = new Set<string>();
-    for (const [typeName, names] of ctorsByType.get(p) ?? []) {
-      if (!m.exports.has(typeName)) continue;
-      for (const c of names) if (m.exports.has(c)) ctors.add(c);
-    }
-    for (const name of recordNames(m.forms)) if (m.exports.has(name)) ctors.add(name);
     modules.set(p, {
       path: p,
       forms: m.forms,
       exports: m.exports,
-      ctors,
       imports: m.imports.map((i) => ({ path: i.path, alias: i.alias })),
     });
   }
 
   if (diagnostics.length > 0) return { ok: false, diagnostics };
   return { ok: true, graph: { order, modules } };
-}
-
-function recordNames(forms: Ast[]): string[] {
-  const out: string[] = [];
-  for (const form of forms) {
-    if (form.tag !== "list" || form.elems.length < 2) continue;
-    const h = form.elems[0]!;
-    if (h.tag !== "sym") continue;
-    if (!nameEquals(h.name, "defrec") && !nameEquals(h.name, "record")) continue;
-    const namePart = form.elems[1]!;
-    const name =
-      namePart.tag === "sym"
-        ? decodeBytes(namePart.name)
-        : namePart.tag === "list" && namePart.elems[0]?.tag === "sym"
-          ? decodeBytes(namePart.elems[0].name)
-          : null;
-    if (name) out.push(name);
-  }
-  return out;
 }
 
 function variantCtors(forms: Ast[]): Map<string, string[]> {

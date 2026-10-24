@@ -51,32 +51,29 @@ not a prerequisite for publishing the source.
 
 ---
 
-## 2026-10-24 — Aliased imports keep constructors unqualified
+## 2026-10-24 — Aliased imports qualify types and constructors
 
 ### The decision
 
-An `import … as Alias` binds the module's values under the alias, but the
-types it declares and their constructors stay in unqualified scope, exactly
-as for a bare import. `import std/json as Json` permits both
-`Json.encode` and `JsonFloat(1.5)`.
+An `import … as Alias` binds every export under the alias: values, types and
+constructors. With `import std/json as Json`, write `Json.encode`,
+`Json.Json`, and `Json.JsonFloat(1.5)`. Unqualified `JsonFloat(1.5)` is not in
+scope; a bare `import std/json` is how names are merged.
 
 ### Why
 
-Constructors are type-level names. Module flattening already merges a type's
-constructors for matching; the host typer was the only place that treated a
-constructor as absent when the import was aliased, and it crashed on
-`instantiate(undefined)` rather than reporting anything. Keeping the
-constructor unqualified makes the typechecker, the interpreter and the native
-build agree, and matches the way variant and record constructors are
-registered.
+§2.7 defines the qualified form as binding a name to the module's exports
+instead of merging them. Constructors and types are exports. Keeping only
+values qualified was an implementation shortcut in the host typer, not the
+language rule; it made `JsonFloat` resolve without the alias and diverged from
+the specification.
 
 ### Rejected
 
-Rejecting the constructor with `E_TYPE_UNBOUND` was the alternative. It would
-have required threading alias provenance through the flattened type
-environment and would have made `JsonFloat` fail in one host only. The type
-is already in scope; only the value binding was missing, so the host now
-synthesises the constructor scheme.
+Making constructors unqualified through `as` was rejected: it contradicts
+§2.7, collides names across modules, and makes the import form meaningless for
+types. Qualified constructor access is the rule; the host and the native
+flatteners must implement it.
 
 ---
 
