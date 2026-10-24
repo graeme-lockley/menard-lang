@@ -2,6 +2,7 @@
 ; `mn test` compiles every module again.
 
 import "./cache.mnd"
+import "../reader/ast.mnd"
 import "../reader/print.mnd"
 import "../reader/read.mnd"
 import std/io
