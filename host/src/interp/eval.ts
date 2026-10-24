@@ -42,6 +42,10 @@ import {
   taskResume,
   taskJoin,
   taskCancel,
+  taskYield,
+  taskWaitNew,
+  taskWait,
+  taskNotify,
   taskEnsureMain,
 } from "./task.ts";
 
@@ -266,6 +270,10 @@ const EXTERN_BUILTIN: Record<string, string> = {
   mn_task_resume: "mn_task_resume",
   mn_task_join: "mn_task_join",
   mn_task_cancel: "mn_task_cancel",
+  mn_task_yield: "mn_task_yield",
+  mn_task_wait_new: "mn_task_wait_new",
+  mn_task_wait: "mn_task_wait",
+  mn_task_notify: "mn_task_notify",
 };
 
 function defineTop(ast: Ast, env: Env): void {
@@ -297,7 +305,15 @@ function defineTop(ast: Ast, env: Env): void {
   if (nameEquals(hn.name, "extern")) {
     // The declared name is the C symbol (`mn_exists`). The interpreter
     // already has the operation under the Menard name (`exists`).
-    const name = symName(ast.elems[1]!);
+    // Polymorphic externs use `(name [a b…])` like defn.
+    const namePart = ast.elems[1]!;
+    const name =
+      namePart.tag === "sym"
+        ? symName(namePart)
+        : namePart.tag === "list" && namePart.elems[0]?.tag === "sym"
+          ? symName(namePart.elems[0])
+          : "";
+    if (!name) throw new PanicError("malformed extern", ast.span);
     const builtin = EXTERN_BUILTIN[name] ?? name;
     const existing = envGet(env, builtin);
     if (!existing) {
@@ -1397,6 +1413,7 @@ function installBuiltins(env: Env): void {
     "spawn", "spawn-capture",
     "mn_task_spawn", "mn_task_self", "mn_task_suspend_for_test",
     "mn_task_resume", "mn_task_join", "mn_task_cancel",
+    "mn_task_yield", "mn_task_wait_new", "mn_task_wait", "mn_task_notify",
     "NotFound", "Permission", "Exists", "IsADirectory", "NotADirectory",
     "InvalidPath", "TooLarge", "Other", "Unsupported",
     "NotExecutable", "InvalidArgument", "TooManyArguments",
@@ -1791,7 +1808,21 @@ function applyBuiltin(
     case "mn_task_cancel": {
       const id = args[0]!;
       if (id.tag !== "int") throw new PanicError("mn_task_cancel: expected Int", span);
-      return taskCancel(id.value);
+      return taskCancel(id.value, host);
+    }
+    case "mn_task_yield":
+      return taskYield(host);
+    case "mn_task_wait_new":
+      return taskWaitNew();
+    case "mn_task_wait": {
+      const id = args[0]!;
+      if (id.tag !== "int") throw new PanicError("mn_task_wait: expected Int", span);
+      return taskWait(id.value, host);
+    }
+    case "mn_task_notify": {
+      const id = args[0]!;
+      if (id.tag !== "int") throw new PanicError("mn_task_notify: expected Int", span);
+      return taskNotify(id.value, host);
     }
     default:
       throw new PanicError(`unknown builtin ${name}`, span);

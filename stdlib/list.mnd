@@ -101,6 +101,40 @@ let indexed-from[a, b](f: (Int, a) -> b, i: Int, xs: List a) -> List b =
     | [] -> []
     | h :: t -> f(i, h) :: indexed-from(f, i + 1, t)
 
+; Call f on each element for its side effects. Returns unit.
+; @test {
+;   let c = ref(0)
+;   for-each(fn (n) = set!(c, deref(c) + n), [1, 2, 3])
+;   deref(c)
+; } => 6
+; @test for-each(fn (_) = (), [])
+pub let for-each[a](f: (a) -> Unit, xs: List a) -> Unit =
+  match (xs)
+    | [] -> ()
+    | h :: t -> {
+        f(h)
+        for-each(f, t)
+      }
+
+; Call f on each index and element, starting at zero. Returns unit.
+; @test {
+;   let c = ref(0)
+;   for-each-indexed(fn (i, n) = set!(c, deref(c) + i + n), [10, 20])
+;   deref(c)
+; } => 31
+; @test for-each-indexed(fn (_, _) = (), [])
+pub let for-each-indexed[a](f: (Int, a) -> Unit, xs: List a) -> Unit =
+  for-each-from(f, 0, xs)
+
+; for-each-indexed from index i.
+let for-each-from[a](f: (Int, a) -> Unit, i: Int, xs: List a) -> Unit =
+  match (xs)
+    | [] -> ()
+    | h :: t -> {
+        f(i, h)
+        for-each-from(f, i + 1, t)
+      }
+
 ; Elements for which f returns true, in order.
 ; @test filter(fn (n) = n > 1, [1, 2, 3]) => [2, 3]
 pub let filter[a](f: (a) -> Bool, xs: List a) -> List a =

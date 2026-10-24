@@ -51,7 +51,13 @@ function consChain(elems: Ast[], span: Ast["span"]): Ast {
 }
 
 function isDeclKeyword(ast: Ast): boolean {
-  return isSym(ast, "defn") || isSym(ast, "defrec") || isSym(ast, "variant") || isSym(ast, "runtime");
+  return (
+    isSym(ast, "defn") ||
+    isSym(ast, "defrec") ||
+    isSym(ast, "variant") ||
+    isSym(ast, "runtime") ||
+    isSym(ast, "extern")
+  );
 }
 
 /**

@@ -63,6 +63,8 @@ In scope without an import.
 | `reverse(xs)` | Last to first. |
 | `map(f, xs)` | `f` on each element. `xs \|> List.map(f)`. |
 | `indexed-map(f, xs)` | `f` on each index and element, from zero. |
+| `for-each(f, xs)` | Call `f` on each element for side effects. |
+| `for-each-indexed(f, xs)` | Call `f` on each index and element, from zero. |
 | `filter(f, xs)` | The elements for which `f` is true. |
 | `filter-map(f, xs)` | The `Some` values of `f`. |
 | `partition(f, xs)` | A product of the elements that pass and the elements that do not. |
@@ -312,6 +314,30 @@ A child is an argument vector. There is no shell string.
 | `arg-count()` | How many arguments the program received. |
 | `arg(i)` | Argument `i`. |
 | `getenv(name)` | An environment variable, or `None`. |
+
+## Task
+
+`import std/task as Task`
+
+Cooperative single-mutator tasks. There is no public park/wake — suspension
+happens inside join, yield, and (later) mailbox receive / parkable I/O.
+
+| Name | |
+| --- | --- |
+| `Cancelled` | Unit error from a cancelled join. |
+| `Task a` | Opaque handle (`Tid` constructor); phantom result type `a`. |
+| `Scope` | `Ref (List Int)` of child ids for structured lifetimes. |
+| `spawn(thunk)` | Start a zero-argument thunk; returns `Task a`. |
+| `spawn-in(scope, thunk)` | Spawn and register the child on `scope`. |
+| `join(t)` | `Result a Cancelled` — wait until done or cancelled. |
+| `yield()` | Cooperative yield (may suspend). |
+| `cancel(t)` | Request cancellation. |
+| `scope(body)` | Run `body(scope)`; on exit cancel and join children. |
+| `id(t)` | Debug task id (`Int`); not a wake handle. |
+| `self()` | Current task id. |
+
+**Suspend points (v1):** `join`, `yield`, and `scope` exit (via join). Other
+Platform ops must not hide scheduling points.
 
 ## Console
 

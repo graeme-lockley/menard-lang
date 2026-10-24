@@ -329,15 +329,19 @@ MnWord mn_remove(MnWord path_str);             /* → Bool */
 MnWord mn_is_dir(MnWord path_str);             /* → Bool */
 
 /*
- * Internal task runtime (Build C) — not Platform API.
- * Seam module: stdlib/sched.mnd. Do not expose as pub Task.* until Build D.
+ * Internal task runtime (Build D) — Runtime ABI, not Platform API.
+ * Platform façade: stdlib/task.mnd. Harness / wait cells: stdlib/sched.mnd.
  */
 MnWord mn_task_spawn(MnWord closure0);         /* → Int task id */
 MnWord mn_task_self(void);                     /* → Int */
-MnWord mn_task_suspend_for_test(void);         /* → Unit; park current fiber */
-MnWord mn_task_resume(MnWord id_tagged);       /* → Unit; enqueue suspended */
-MnWord mn_task_join(MnWord id_tagged);         /* → result; main only in C */
-MnWord mn_task_cancel(MnWord id_tagged);       /* → Unit; stub */
+MnWord mn_task_suspend_for_test(void);         /* → Unit; synthetic park */
+MnWord mn_task_resume(MnWord id_tagged);       /* → Unit; internal enqueue */
+MnWord mn_task_join(MnWord id_tagged);         /* → Result a Unit (Err = cancelled) */
+MnWord mn_task_cancel(MnWord id_tagged);       /* → Unit */
+MnWord mn_task_yield(void);                    /* → Unit; cooperative */
+MnWord mn_task_wait_new(void);                 /* → Int wait-cell id */
+MnWord mn_task_wait(MnWord cell_tagged);       /* → Unit; atomic wait */
+MnWord mn_task_notify(MnWord cell_tagged);     /* → Unit; atomic notify */
 
 #ifdef __cplusplus
 }

@@ -1,7 +1,7 @@
 # Build C — Suspension hard gate
 
 **Status:** done (acceptance green on native + interpreter).  
-**Blocks:** Build D (public `Task.*`).  
+**Unblocked:** Build D — see [build-d-tasks.md](build-d-tasks.md).  
 **Architecture:** [design-libraries-concurrency.md](design-libraries-concurrency.md) §3.5 / §3.5.1.
 
 This is a **production hard gate**, not a throwaway prototype. “Experiment” in older

@@ -30,6 +30,7 @@ Short programs. Each one that defines `main` prints a result and exits 0. Run on
 | `mod-main.mnd`, `mod-util.mnd` | Two modules compiled into one binary |
 | `host-seam.mnd` | `exists`, `getenv`, `spawn`, `rename`. Run it from the repo root |
 | `heap-churn.mnd` | A long list, a large map, a growing buffer, and nested closures |
+| `task-sieve.mnd` | Concurrent sieve of Eratosthenes with `Task.spawn` / `join` / `yield` |
 | `ffi/sqlite/` | Build B FFI proving ground: SQLite (`make sqlite-native`) |
 
 `make check-fixed-point` builds `examples/loop-sum.mnd` twice, once with the installed `./mn` and once with stage1, and compares the binaries.

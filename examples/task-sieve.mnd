@@ -1,0 +1,44 @@
+; Concurrent sieve of Eratosthenes — the classic CSP / Concurrent Haskell demo.
+; Each prime heads a filter task that drops its multiples; what remains feeds
+; the next stage. Menard uses cooperative Task.spawn / join (no channels).
+;
+; Run: `./mn run examples/task-sieve.mnd`
+;      `./mn inter examples/task-sieve.mnd`
+
+import std/list as List
+import std/string as String
+import std/task as Task
+pub import std/task (Cancelled)
+
+let unwrap(r: Result (List Int) Cancelled) -> List Int =
+  match (r)
+    | Ok(xs) -> xs
+    | Err(_) -> {
+        println("unexpected cancel")
+        []
+      }
+
+; One sieve stage: head is prime; a child task filters its multiples.
+let sieve(xs: List Int) -> List Int =
+  match (xs)
+    | [] -> []
+    | p :: rest -> {
+        let filtered =
+          Task.spawn(fn () = {
+            Task.yield()
+            List.filter(fn (x) = x % p != 0, rest)
+          })
+        p :: sieve(unwrap(Task.join(filtered)))
+      }
+
+let main() -> Int {
+  let n = 1000
+  let primes = sieve(List.range(2, n))
+  print("primes <= ")
+  print(n)
+  print(": ")
+  println(String.join(" ", List.map(String.from-int, primes)))
+  print("count: ")
+  println(List.length(primes))
+  0
+}

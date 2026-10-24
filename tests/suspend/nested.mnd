@@ -23,14 +23,19 @@ let worker-b(counter: Ref Int, peer: Ref Int) -> Int {
   2
 }
 
+let unwrap(r: Result Int Unit) -> Int =
+  match (r)
+    | Ok(n) -> n
+    | Err(_) -> -1
+
 let main() -> Int {
   let counter = ref(0)
   let peer = ref(0)
   let ta = Sched.spawn(fn () = worker-a(counter, peer))
   set!(peer, ta)
   let tb = Sched.spawn(fn () = worker-b(counter, peer))
-  let ra = Sched.join(ta)
-  let rb = Sched.join(tb)
+  let ra = unwrap(Sched.join(ta))
+  let rb = unwrap(Sched.join(tb))
   ; local_a(100) + counter after B's update (1+40=41) => 141; rb = 2
   println(ra)
   println(rb)

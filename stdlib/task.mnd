@@ -1,0 +1,86 @@
+; Public cooperative tasks (Build D). No park/wake — use join/yield/scope.
+; Suspend points: join, yield, and scope exit (cancel+join children).
+; Seam calls go through internal std/sched (this module is not a seam).
+; @module std/task
+
+import std/sched as Sched
+
+pub type Cancelled =
+  | Cancelled
+
+; Phantom result type; ctor name is not `Task` so `import std/task as Task` works.
+pub type Task[a] =
+  | Tid(Int)
+
+; Scope is a ref to child task ids.
+pub alias Scope = Ref (List Int)
+
+; Opaque task id for debugging (not a wake handle).
+; @test id(spawn(fn () = 0)) >= 1
+pub let id[a](t: Task a) -> Int =
+  match (t)
+    | Tid(n) -> n
+
+; Spawn a zero-argument thunk. Shared Ref captures are allowed.
+; @test join(spawn(fn () = 41)) => Ok(41)
+pub let spawn[a](thunk: () -> a) -> Task a =
+  Tid(Sched.spawn(thunk))
+
+; Spawn into a scope so exit cancels/joins the child.
+; @test {
+;   let s = ref([])
+;   join(spawn-in(s, fn () = 5))
+; } => Ok(5)
+pub let spawn-in[a](scope: Scope, thunk: () -> a) -> Task a {
+  let t = spawn(thunk)
+  let n = id(t)
+  let tail = deref(scope)
+  set!(scope, n :: tail)
+  t
+}
+
+; Wait for completion. Err(Cancelled) if the task was cancelled.
+; @test join(spawn(fn () = 3)) => Ok(3)
+pub let join[a](t: Task a) -> Result a Cancelled =
+  match (Sched.join(id(t)))
+    | Ok(v) -> Ok(v)
+    | Err(_) -> Err(Cancelled())
+
+; Cooperative yield for long CPU work.
+; @test yield()
+pub let yield() -> Unit =
+  Sched.yield()
+
+; Request cancellation. Parked joiners unblock with Err(Cancelled).
+; @test join(spawn(fn () = 0)) => Ok(0)
+pub let cancel[a](t: Task a) -> Unit =
+  Sched.cancel(id(t))
+
+; Cancel then join each child. Persist the list tail in a Ref before each
+; join so nursery collection cannot invalidate the recursive spine.
+let join-drain(ids: List Int) -> Unit {
+  let cell = ref(ids)
+  loop ()
+    match (deref(cell))
+      | [] -> ()
+      | n :: rest -> {
+          set!(cell, rest)
+          Sched.cancel(n)
+          let _ = Sched.join(n)
+          recur()
+        }
+}
+
+; Run body with a scope. On exit, cancel unfinished children and join all.
+; @test scope(fn (_) = 3) => 3
+pub let scope[r](body: (Scope) -> r) -> r {
+  let s = ref([])
+  let result = body(s)
+  join-drain(deref(s))
+  result
+}
+
+; Current task id (debug).
+; @test self() >= 1
+pub let self() -> Int =
+  Sched.self()

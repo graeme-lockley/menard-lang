@@ -24,7 +24,7 @@ to this catalogue. Example: [examples/ffi/sqlite/](../examples/ffi/sqlite/)
 | `stdlib/fs.mnd` | Filesystem predicates and path OS ops |
 | `stdlib/proc.mnd` | Argv-vector spawn |
 | `stdlib/time.mnd` | Wall clock only (`mn_now_ms`) |
-| `stdlib/sched.mnd` | **Internal** task runtime (Build C) — not Platform API |
+| `stdlib/sched.mnd` | **Internal** task runtime (Build D) — not Platform API; prefer `std/task` |
 
 Confinement is enforced by the host module loader (`E_EXTERN_SEAM`) and by lint
 tests. Compiler/runtime-internal symbols (strings, maps, GC, apply, floats, …)
@@ -32,19 +32,23 @@ live in [`runtime/include/menard.h`](../runtime/include/menard.h) and are linked
 from [`src/emit/bc-writer.mnd`](../src/emit/bc-writer.mnd); they are not this
 Platform seam catalogue.
 
-### Internal task runtime (Build C — not Platform API)
+### Internal task runtime (Build D — not Platform API)
 
-See [build-c-suspension.md](build-c-suspension.md). Do not wrap as public
-`Task.*` until Build D.
+See [build-d-tasks.md](build-d-tasks.md) and [build-c-suspension.md](build-c-suspension.md).
+Public façade: `stdlib/task.mnd` (no `extern`; wraps `std/sched`).
 
 | Symbol | Seam wrapper (`std/sched`) | Notes |
 |---|---|---|
 | `mn_task_spawn` | `Sched.spawn` | Thunk closure; returns task id |
 | `mn_task_self` | `Sched.self` | Current task id |
-| `mn_task_suspend_for_test` | `Sched.suspend-for-test` | Synthetic park |
+| `mn_task_suspend_for_test` | `Sched.suspend-for-test` | Synthetic park (harness) |
 | `mn_task_resume` | `Sched.resume` | Internal enqueue — not public wake |
-| `mn_task_join` | `Sched.join` | Main only in C |
-| `mn_task_cancel` | `Sched.cancel` | Stub |
+| `mn_task_join` | `Sched.join` | → `Result a Unit` (`Err` = cancelled) |
+| `mn_task_cancel` | `Sched.cancel` | Cooperative cancel |
+| `mn_task_yield` | `Sched.yield` | Cooperative yield |
+| `mn_task_wait_new` | `Sched.wait-new` | Wait-cell id |
+| `mn_task_wait` | `Sched.wait` | Atomic wait on cell |
+| `mn_task_notify` | `Sched.notify` | Atomic notify (sticky) |
 
 ## App-facing seam symbols
 

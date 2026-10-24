@@ -1,0 +1,31 @@
+; Build D: wait-cell atomic-wait guarantee (notify-before-wait).
+import std/sched as Sched
+
+let wait-on(cell: Int) -> Int {
+  Sched.wait(cell)
+  7
+}
+
+let unwrap(r: Result Int Unit) -> Int =
+  match (r)
+    | Ok(n) -> n
+    | Err(_) -> -1
+
+let main() -> Int {
+  ; Notify before wait — must not lose the wakeup.
+  let cell = Sched.wait-new()
+  Sched.notify(cell)
+  let t = Sched.spawn(fn () = wait-on(cell))
+  println(unwrap(Sched.join(t)))
+
+  ; Notify after wait — peer wakes the waiter.
+  let cell2 = Sched.wait-new()
+  let waiter = Sched.spawn(fn () = wait-on(cell2))
+  let notifier = Sched.spawn(fn () = {
+    Sched.notify(cell2)
+    1
+  })
+  println(unwrap(Sched.join(waiter)))
+  println(unwrap(Sched.join(notifier)))
+  0
+}

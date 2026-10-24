@@ -1,8 +1,8 @@
-; Internal cooperative scheduler seam (Build C).
-; Not Platform API — do not import from applications. Build D will add std/task.
+; Internal cooperative scheduler seam (Build D).
+; Not Platform API — do not import from applications. Use std/task.
 ; @module std/sched
 
-extern mn_task_spawn(thunk: () -> Int) -> Int
+extern mn_task_spawn[a](thunk: () -> a) -> Int
 
 extern mn_task_self() -> Int
 
@@ -10,13 +10,21 @@ extern mn_task_suspend_for_test() -> Unit
 
 extern mn_task_resume(id: Int) -> Unit
 
-extern mn_task_join(id: Int) -> Int
+extern mn_task_join[a](id: Int) -> Result a Unit
 
 extern mn_task_cancel(id: Int) -> Unit
 
+extern mn_task_yield() -> Unit
+
+extern mn_task_wait_new() -> Int
+
+extern mn_task_wait(cell: Int) -> Unit
+
+extern mn_task_notify(cell: Int) -> Unit
+
 ; Spawn a zero-argument thunk as a cooperative task. Returns an opaque id.
-; @test join(spawn(fn () = 41)) => 41
-pub let spawn(thunk: () -> Int) -> Int =
+; @test join(spawn(fn () = 41)) => Ok(41)
+pub let spawn[a](thunk: () -> a) -> Int =
   mn_task_spawn(thunk)
 
 ; The id of the task currently running Menard code.
@@ -25,12 +33,12 @@ pub let self() -> Int =
   mn_task_self()
 
 ; Park the current task. Another task or join may resume it.
-; @test join(spawn(park-then)) => 7
+; @test join(spawn(park-then)) => Ok(7)
 pub let suspend-for-test() -> Unit =
   mn_task_suspend_for_test()
 
 ; Return 7 after one synthetic park (used by suspend-for-test's @test).
-; @test join(spawn(park-then)) => 7
+; @test join(spawn(park-then)) => Ok(7)
 pub let park-then() -> Int {
   mn_task_suspend_for_test()
   7
@@ -41,12 +49,36 @@ pub let park-then() -> Int {
 pub let resume(id: Int) -> Unit =
   mn_task_resume(id)
 
-; Wait until the task finishes; returns its Int result. Main only in Build C.
-; @test join(spawn(fn () = 3)) => 3
-pub let join(id: Int) -> Int =
+; Wait until the task finishes; Ok(result) or Err(()) if cancelled.
+; @test join(spawn(fn () = 3)) => Ok(3)
+pub let join[a](id: Int) -> Result a Unit =
   mn_task_join(id)
 
-; Mark a task cancelled (stub semantics for Build C).
+; Mark a task cancelled.
 ; @test cancel(spawn(fn () = 0))
 pub let cancel(id: Int) -> Unit =
   mn_task_cancel(id)
+
+; Cooperative yield — re-enqueue the current task and run others.
+; @test yield()
+pub let yield() -> Unit =
+  mn_task_yield()
+
+; Allocate a wait cell (internal atomic-wait protocol for Build E).
+; @test wait-new() >= 1
+pub let wait-new() -> Int =
+  mn_task_wait_new()
+
+; Park until the cell is notified (or return immediately if already notified).
+; @test {
+;   let c = wait-new()
+;   notify(c)
+;   wait(c)
+; }
+pub let wait(cell: Int) -> Unit =
+  mn_task_wait(cell)
+
+; Notify a wait cell; wakes at most one waiter. Sticky if no waiter yet.
+; @test notify(wait-new())
+pub let notify(cell: Int) -> Unit =
+  mn_task_notify(cell)

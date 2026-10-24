@@ -86,7 +86,7 @@ let cons-chain(elems: List Ast, sp: Span) -> Ast =
 
 let is-decl-keyword(ast: Ast) -> Bool =
   match (ast)
-    | SymNode(n, _) -> n == "defn" || n == "defrec" || n == "variant" || n == "runtime"
+    | SymNode(n, _) -> n == "defn" || n == "defrec" || n == "variant" || n == "runtime" || n == "extern"
     | _ -> false
 
 ; `(name [params…])` — the bracket list is type parameters.
@@ -288,7 +288,7 @@ let desugar-paren-named(name: Str, elems: List Ast, sp: Span, diags: Ref (List D
   cond
     | name == "defn" -> desugar-defn(elems, sp, diags)
     | name == "fn" || name == "lambda" -> desugar-fn(elems, sp, diags)
-    | name == "defrec" || name == "variant" || name == "runtime" -> desugar-decl(elems, sp, diags)
+    | name == "defrec" || name == "variant" || name == "runtime" || name == "extern" -> desugar-decl(elems, sp, diags)
     | name == "pub" -> desugar-pub(elems, sp, diags)
     | name == "and" -> desugar-and(elems, sp, diags)
     | name == "or" -> desugar-or(elems, sp, diags)

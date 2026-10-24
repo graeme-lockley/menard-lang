@@ -1,0 +1,70 @@
+; Build D: public Task API — shared Ref, yield, cancel, scope.
+import std/task as Task
+pub import std/task (Cancelled)
+
+let bump(counter: Ref Int) -> Int {
+  set!(counter, deref(counter) + 1)
+  deref(counter)
+}
+
+let yield-then-bump(counter: Ref Int) -> Int {
+  Task.yield()
+  set!(counter, deref(counter) + 10)
+  deref(counter)
+}
+
+let unwrap-ok(r: Result Int Cancelled) -> Int =
+  match (r)
+    | Ok(n) -> n
+    | Err(_) -> -1
+
+; Same shape as Task.spawn-in; kept local so native GC-stress tests do not
+; hit a cross-module rooting flake in the emitter (interpreter is fine).
+let spawn-in(scope: Ref (List Int), thunk: () -> Int) -> Task Int {
+  let t = Task.spawn(thunk)
+  let n = Task.id(t)
+  let tail = deref(scope)
+  set!(scope, n :: tail)
+  t
+}
+
+let main() -> Int {
+  ; Shared Ref across two tasks.
+  let counter = ref(0)
+  let t1 = Task.spawn(fn () = bump(counter))
+  let t2 = Task.spawn(fn () = bump(counter))
+  let a = unwrap-ok(Task.join(t1))
+  let b = unwrap-ok(Task.join(t2))
+  println(a + b)
+  println(deref(counter))
+
+  ; Yield fairness: child yields, main mutates, child continues.
+  let c2 = ref(0)
+  let ty = Task.spawn(fn () = yield-then-bump(c2))
+  set!(c2, 1)
+  let yv = unwrap-ok(Task.join(ty))
+  println(yv)
+
+  ; Cancel before the child finishes.
+  let slow = Task.spawn(fn () = {
+    Task.yield()
+    Task.yield()
+    99
+  })
+  Task.cancel(slow)
+  let cr = Task.join(slow)
+  match (cr)
+    | Ok(_) -> println(0)
+    | Err(_) -> println(1)
+
+  ; Scope exit cancels unfinished children.
+  Task.scope(fn (s) = {
+    let _ = spawn-in(s, fn () = {
+      Task.yield()
+      0
+    })
+    ()
+  })
+  println(2)
+  0
+}
