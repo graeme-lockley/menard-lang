@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { diagnose } from "../../host/src/interp/index.ts";
 import { formatDiagnostics } from "../../host/src/diagnostic/index.ts";
+import { createLiveHost } from "../../host/src/host/index.ts";
 
 /** Byte-compared formatted diagnostics (Phase 1 acceptance). */
 describe("negative diagnostics", () => {
@@ -40,4 +43,21 @@ let f(c: Color) -> Int =
     expect(diags[0]!.code).toBe("E_PARSE");
     expect(diags[0]!.category).toBe("syntax");
   });
+});
+
+test("an unknown type annotation is reported once", () => {
+  const path = join(import.meta.dir, "bad-int64.mnd");
+  const source = new Uint8Array(readFileSync(path));
+  const diags = diagnose(source, { path });
+  expect(diags.filter((d) => d.code === "E_TYPE_UNKNOWN")).toHaveLength(1);
+});
+
+test("no negative fixture throws with a live host", () => {
+  for (const name of readdirSync(import.meta.dir).filter((n) => n.endsWith(".mnd"))) {
+    const path = join(import.meta.dir, name);
+    const source = new Uint8Array(readFileSync(path));
+    expect(() =>
+      diagnose(source, { path, host: createLiveHost({ realFs: true, argv: [] }) }),
+    ).not.toThrow();
+  }
 });

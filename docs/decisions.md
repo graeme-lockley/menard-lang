@@ -28,6 +28,35 @@ specification. Where a name changed, the entry that changed it says so.
 
 ---
 
+## 2026-10-24 — Aliased imports keep constructors unqualified
+
+### The decision
+
+An `import … as Alias` binds the module's values under the alias, but the
+types it declares and their constructors stay in unqualified scope, exactly
+as for a bare import. `import std/json as Json` permits both
+`Json.encode` and `JsonFloat(1.5)`.
+
+### Why
+
+Constructors are type-level names. Module flattening already merges a type's
+constructors for matching; the host typer was the only place that treated a
+constructor as absent when the import was aliased, and it crashed on
+`instantiate(undefined)` rather than reporting anything. Keeping the
+constructor unqualified makes the typechecker, the interpreter and the native
+build agree, and matches the way variant and record constructors are
+registered.
+
+### Rejected
+
+Rejecting the constructor with `E_TYPE_UNBOUND` was the alternative. It would
+have required threading alias provenance through the flattened type
+environment and would have made `JsonFloat` fail in one host only. The type
+is already in scope; only the value binding was missing, so the host now
+synthesises the constructor scheme.
+
+---
+
 ## 2026-10-24 — Build F: defer, net, HTTP, OpenSSL, bounded mailboxes
 
 ### The decision

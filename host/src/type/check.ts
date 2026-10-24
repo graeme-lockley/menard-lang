@@ -201,6 +201,19 @@ function installBuiltins(env: TypeEnv): void {
 }
 
 function err(env: TypeEnv, code: string, message: string, span: Span, notes?: Diagnostic["notes"]): void {
+  // A type annotation can be visited twice (scheme collection and body
+  // checking). Report the same code/message/span once.
+  if (
+    env.diagnostics.some(
+      (d) =>
+        d.code === code &&
+        d.message === message &&
+        d.span.start === span.start &&
+        d.span.end === span.end,
+    )
+  ) {
+    return;
+  }
   env.diagnostics.push(
     diagnostic({
       severity: "error",
@@ -445,6 +458,15 @@ function unify(env: TypeEnv, a: Type, b: Type, s: Subst, span: Span): boolean {
     span,
   );
   return false;
+}
+
+function ctorScheme(env: TypeEnv, ctor: { typeName: string; payloads: Type[]; params: string[] }): Scheme {
+  const args: Type[] = ctor.params.map((p) => ({ tag: "param", name: p }));
+  const kind = env.types.get(ctor.typeName)?.kind === "record" ? "record" : "variant";
+  return {
+    params: ctor.params,
+    type: tFn(ctor.payloads, { tag: "nominal", name: ctor.typeName, args, kind }),
+  };
 }
 
 function instantiate(env: TypeEnv, scheme: Scheme): Type {
@@ -1111,9 +1133,12 @@ function infer(
       if (n === "_") return freshVar(env);
       if (local.has(n)) return applySubst(local.get(n)!, subst);
       if (env.values.has(n)) return instantiate(env, env.values.get(n)!);
-      // nullary ctor?
+      // An aliased import merges the type and its constructors for
+      // matching. Synthesise the constructor's scheme when the import
+      // bundle did not also carry the value binding.
       if (env.ctors.has(n)) {
-        return instantiate(env, env.values.get(n)!);
+        const scheme = env.values.get(n) ?? ctorScheme(env, env.ctors.get(n)!);
+        return instantiate(env, scheme);
       }
       err(env, "E_TYPE_UNBOUND", `unbound variable ${n}`, ast.span);
       return freshVar(env);

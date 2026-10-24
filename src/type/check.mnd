@@ -167,8 +167,14 @@ let alias-set(env: TypeEnv, name: Str, t: Type) -> Unit =
 
 ; The one true mutating primitive in this file, named the way
 ; desugar.mnd's `push-diag!` is: it is the diagnostic accumulator.
+let diag-exists(diags: List TypeError, code: Str, message: Str, span: Span) -> Bool =
+  match (diags)
+    | [] -> false
+    | TypeError(s, c, m) :: rest ->
+      if (s.start == span.start && s.end == span.end && s.origin == span.origin && c == code && m == message) -> true | diag-exists(rest, code, message, span)
+
 let err!(env: TypeEnv, code: Str, message: Str, span: Span) -> Unit =
-  set!(env.diags, TypeError(span, code, message) :: deref(env.diags))
+  if (diag-exists(deref(env.diags), code, message, span)) -> () | set!(env.diags, TypeError(span, code, message) :: deref(env.diags))
 
 let fresh-var(env: TypeEnv, name: Str) -> Type {
   let id = deref(env.next-var)
