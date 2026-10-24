@@ -136,3 +136,9 @@ test "declarations and constructors are canonicalized" = {
     has(out, "f(v: __m8_Foo) -> __m8_Foo") &&
     has(out, "__c7_A(v)")
 }
+
+test "public record keeps the type id" = {
+  let forms = forms-of("pub record Box[a] {\n  value: a\n}\n")
+  let out = printed(canonicalize-declarations(forms, Map.set("Box", "__m7_Box", Map.empty()), Map.set("Box", "__c7_Box", Map.empty())))
+  has(out, "record __m7_Box")
+}

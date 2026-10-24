@@ -12,6 +12,7 @@ import "../reader/read.mnd"
 import "../reader/casing.mnd"
 import "../desugar/desugar.mnd"
 import "../type/check.mnd"
+import "../type/canonicalize.mnd"
 import "../close/close.mnd"
 import "../root/root.mnd"
 import "../derive/derive.mnd"
@@ -49,6 +50,11 @@ let sym-str(ast: Ast) -> Maybe Str =
   match (ast)
     | SymNode(n, _) -> Some(n)
     | _ -> None()
+
+let is-sym(ast: Ast, name: Str) -> Bool =
+  match (ast)
+    | SymNode(n, _) -> n == name
+    | _ -> false
 
 let ctx-entry(c: Ctx) -> Str =
   match (c)
@@ -126,6 +132,15 @@ let ctor-binding-form(visible: Str, id: Str) -> Ast =
 let canonical-type-id(abs: Str, name: Str) -> Str =
   String.concat(abs, String.concat("#", name))
 
+let module-canon-prefix(abs: Str, tag: Str) -> Str =
+  String.concat(tag, String.concat(show(bytes-hash(abs)), "_"))
+
+let canonical-own-type-id(abs: Str, name: Str) -> Str =
+  String.concat(module-canon-prefix(abs, "__m"), name)
+
+let canonical-own-ctor-id(abs: Str, name: Str) -> Str =
+  String.concat(module-canon-prefix(abs, "__c"), name)
+
 let reverse-asts(xs: List Ast, acc: List Ast) -> List Ast =
   match (xs)
     | [] -> acc
@@ -139,11 +154,23 @@ let own-type-binding(form: Ast, abs: Str) -> Maybe Ast =
           match (kind)
             | "defrec" ->
               match (bare-name(name-part))
-                | Some(name) -> Some(type-binding-form(name, canonical-type-id(abs, name)))
+                | Some(name) -> Some(type-binding-form(name, canonical-own-type-id(abs, name)))
+                | None -> None()
+            | "record" ->
+              match (bare-name(name-part))
+                | Some(name) -> Some(type-binding-form(name, canonical-own-type-id(abs, name)))
                 | None -> None()
             | "variant" ->
               match (bare-name(name-part))
-                | Some(name) -> Some(type-binding-form(name, canonical-type-id(abs, name)))
+                | Some(name) -> Some(type-binding-form(name, canonical-own-type-id(abs, name)))
+                | None -> None()
+            | "type" ->
+              match (bare-name(name-part))
+                | Some(name) -> Some(type-binding-form(name, canonical-own-type-id(abs, name)))
+                | None -> None()
+            | "alias" ->
+              match (bare-name(name-part))
+                | Some(name) -> Some(type-binding-form(name, canonical-own-type-id(abs, name)))
                 | None -> None()
             | _ -> None()
         | None -> None()
@@ -160,12 +187,73 @@ let own-type-bindings(forms: List Ast, abs: Str, acc: List Ast) -> List Ast =
 let own-ctor-binding-list(names: List Str, abs: Str, acc: List Ast) -> List Ast =
   match (names)
     | [] -> acc
-    | n :: rest -> own-ctor-binding-list(rest, abs, ctor-binding-form(n, canonical-type-id(abs, n)) :: acc)
+    | n :: rest -> own-ctor-binding-list(rest, abs, ctor-binding-form(n, canonical-own-ctor-id(abs, n)) :: acc)
 
 let own-ctor-bindings(forms: List Ast, abs: Str, acc: List Ast) -> List Ast =
   match (forms)
     | [] -> reverse-asts(acc, [])
     | form :: rest -> own-ctor-bindings(rest, abs, own-ctor-binding-list(ctor-names-of(form, []), abs, acc))
+
+let public-own-bindings(forms: List Ast, abs: Str, acc: List Ast) -> List Ast =
+  match (forms)
+    | [] -> reverse-asts(acc, [])
+    | form :: rest ->
+      cond
+        | is-pub(form) ->
+          {
+            let with-type = match (own-type-binding(form, abs))
+              | Some(b) -> b :: acc
+              | None -> acc
+            public-own-bindings(rest, abs, own-ctor-binding-list(ctor-names-of(form, []), abs, with-type))
+          }
+        | else -> public-own-bindings(rest, abs, acc)
+
+let binding-map-of(forms: List Ast, kind: Str, acc: Map Str Str) -> Map Str Str =
+  match (forms)
+    | [] -> acc
+    | form :: rest ->
+      match (form)
+        | ParenNode(head :: visible :: canonical :: [], _) ->
+          cond
+            | is-sym(head, kind) ->
+              match (visible)
+                | StrNode(v, _) ->
+                  match (canonical)
+                    | StrNode(id, _) -> binding-map-of(rest, kind, Map.set(v, id, acc))
+                    | _ -> binding-map-of(rest, kind, acc)
+                | _ -> binding-map-of(rest, kind, acc)
+            | else -> binding-map-of(rest, kind, acc)
+        | _ -> binding-map-of(rest, kind, acc)
+
+let is-binding-ast(ast: Ast) -> Bool =
+  match (ast)
+    | ParenNode(head :: _ :: _ :: [], _) -> is-sym(head, "type-binding") || is-sym(head, "ctor-binding")
+    | _ -> false
+
+let drop-binding-asts(forms: List Ast, acc: List Ast) -> List Ast =
+  match (forms)
+    | [] -> reverse(acc)
+    | f :: rest ->
+      if (is-binding-ast(f)) -> drop-binding-asts(rest, acc) | drop-binding-asts(rest, f :: acc)
+
+record CanonicalModule {
+  forms: List Ast
+  bindings: List Ast
+  public: List Ast
+}
+
+let canonicalize-module(forms: List Ast, abs: Str, import-bindings: List Ast) -> CanonicalModule {
+  let own-all = append-asts(own-type-bindings(forms, abs, []), own-ctor-bindings(forms, abs, []))
+  let own-public = public-own-bindings(forms, abs, [])
+  let all-bindings = append-asts(import-bindings, own-all)
+  let type-ids = binding-map-of(all-bindings, "type-binding", Map.empty())
+  let ctor-ids = binding-map-of(all-bindings, "ctor-binding", Map.empty())
+  let raw = canonicalize-declarations(forms, type-ids, ctor-ids)
+  let decls = drop-binding-asts(raw, [])
+  let typed = canonicalize-types(decls, type-ids)
+  let canonical = canonicalize-ctors(typed, ctor-ids)
+  CanonicalModule(canonical, all-bindings, own-public)
+}
 
 let int-node(n: Int) -> Ast =
   IntNode(n, blank())
@@ -417,6 +505,14 @@ let kind-of(form: Ast) -> Str =
 let is-pub(form: Ast) -> Bool =
   is-head(form, "pub")
 
+let canonical-record-ctor-name(name: Str) -> Str {
+  let len = String.length(name)
+  cond
+    | len >= 4 && String.byte(0, name) == 95 && String.byte(1, name) == 95 && String.byte(2, name) == 109 ->
+      String.concat("__c", String.slice(3, len - 3, name))
+    | else -> name
+}
+
 let ctor-names-of(form: Ast, acc: List Str) -> List Str =
   match (unwrap-pub(form))
     | ParenNode(h :: rest, _) ->
@@ -431,7 +527,7 @@ let ctor-names-of(form: Ast, acc: List Str) -> List Str =
               match (rest)
                 | name :: _ ->
                   match (bare-name(name))
-                    | Some(dn) -> dn :: acc
+                    | Some(dn) -> canonical-record-ctor-name(dn) :: acc
                     | None -> acc
                 | [] -> acc
             | else -> acc
@@ -519,7 +615,7 @@ let surface-add(iface: Iface, acc: Surface) -> Surface =
   match (iface)
     | Iface(_, _, _, _, _, fns, ctors, bindings, stubs) ->
       match (acc)
-        | Surface(af, ac, ab, as) -> Surface(surface-add-fns(fns, af), append-ctors(ctors, ac), append-asts(ab, bindings), append-asts(as, stubs))
+        | Surface(af, ac, ab, as) -> Surface(surface-add-fns(fns, af), append-ctors(ctors, ac), ab, append-asts(as, stubs))
 
 let append-ctors(xs: List CtorRec, ys: List CtorRec) -> List CtorRec =
   match (xs)
@@ -615,6 +711,19 @@ let stub-name-shadowed(stub: Ast, names: Map Str Str) -> Bool =
         | None -> false
     | _ -> false
 
+let qualify-binding-form(form: Ast, prefix: Str) -> Ast =
+  match (form)
+    | ParenNode(head :: visible :: canonical :: [], sp) ->
+      match (visible)
+        | StrNode(v, _) -> ParenNode([head, StrNode(String.concat(prefix, v), blank()), canonical], sp)
+        | _ -> form
+    | _ -> form
+
+let qualify-bindings(forms: List Ast, prefix: Str) -> List Ast =
+  match (forms)
+    | [] -> []
+    | f :: rest -> qualify-binding-form(f, prefix) :: qualify-bindings(rest, prefix)
+
 ; Alias values use the dependency's own interface, never a transitive namesake.
 let alias-surfaces(from: Str, forms: List Ast, done: Map Str Iface, acc: Surface) -> Surface =
   match (forms)
@@ -634,7 +743,7 @@ let alias-surfaces(from: Str, forms: List Ast, done: Map Str Iface, acc: Surface
                         let prefix = import-alias-prefix(name)
                         let values = value-stubs(stubs)
                         let renamed = rename-module-forms(values, qualified-renames(values, prefix, Map.empty()))
-                        alias-surfaces(from, rest, done, Surface(append-fns(qualified-fns(fns, prefix), af), ac, append-asts(ab, bindings), append-asts(as, renamed)))
+                        alias-surfaces(from, rest, done, Surface(append-fns(qualified-fns(fns, prefix), af), ac, append-asts(ab, qualify-bindings(bindings, prefix)), append-asts(as, renamed)))
                       }
             | [] -> alias-surfaces(from, rest, done, acc)
 
@@ -777,20 +886,23 @@ let compile-forms(abs: Str, src: Str, display: Str, forms: List Ast, direct: Lis
 let compile-forms-open(abs: Str, src: Str, display: Str, forms: List Ast, direct: List DepRec, ctx: Ctx) -> Result Iface Str {
   let started = now-ms()
   let for-test = suite-member(ctx, abs) || ctx-for-test(ctx) && abs == ctx-entry(ctx)
-  let exported = collect-exports(forms, abs, [], [], [])
-  let body0 = prepare-body(strip-module-forms(forms), for-test)
   let done = deref(ctx-done(ctx))
   let surface = alias-surfaces(abs, forms, done, direct-surfaces(bare-import-paths(abs, forms), done, surface-of(direct, done)))
-  let own = append-asts(own-type-bindings(forms, abs, []), own-ctor-bindings(forms, abs, []))
   match (surface)
     | Surface(fns, ctors, bindings, stubs) ->
-      match (compile-checked(abs, src, display, body0, exported, direct, fns, ctors, bindings, own, stubs, for-test, ctx, started))
-        | Ok(iface) ->
+      match (canonicalize-module(forms, abs, bindings))
+        | CanonicalModule(canonical, all-bindings, public-bindings) ->
           {
-            note-compiling(abs, ctx, since(started))
-            Ok(iface)
+            let exported = collect-exports(canonical, abs, [], [], [])
+            let body0 = prepare-body(strip-module-forms(canonical), for-test)
+            match (compile-checked(abs, src, display, body0, exported, direct, fns, ctors, all-bindings, public-bindings, stubs, for-test, ctx, started))
+              | Ok(iface) ->
+                {
+                  note-compiling(abs, ctx, since(started))
+                  Ok(iface)
+                }
+              | Err(e) -> Err(e)
           }
-        | Err(e) -> Err(e)
 }
 
 ; A `(pub let stdin 0)` is a value, not a type. It has to stay in the
@@ -816,10 +928,10 @@ let drop-let-forms(xs: List Ast, acc: List Ast) -> List Ast =
     | f :: rest ->
       if (is-let-form(f)) -> drop-let-forms(rest, acc) | drop-let-forms(rest, f :: acc)
 
-let compile-checked(abs: Str, src: Str, display: Str, body: List Ast, exported: Export, direct: List DepRec, fns: List FnRec, ctors: List CtorRec, bindings: List Ast, own-bindings: List Ast, stubs: List Ast, for-test: Bool, ctx: Ctx, started: Int) -> Result Iface Str {
+let compile-checked(abs: Str, src: Str, display: Str, body: List Ast, exported: Export, direct: List DepRec, fns: List FnRec, ctors: List CtorRec, bindings: List Ast, stored-bindings: List Ast, stubs: List Ast, for-test: Bool, ctx: Ctx, started: Int) -> Result Iface Str {
   let types = drop-let-forms(stubs, [])
   let body1 = append-asts(lets-only(stubs, []), body)
-  let all_types = append-asts(bindings, append-asts(own-bindings, types))
+  let all_types = append-asts(bindings, types)
   match (typecheck-forms(append-asts(all_types, body1)))
     | Err(es) ->
       {
@@ -827,7 +939,7 @@ let compile-checked(abs: Str, src: Str, display: Str, body: List Ast, exported: 
         report-types(abs, src, es)
         Err("")
       }
-    | Ok(checked) -> compile-lower(abs, src, display, drop-n(length(types), checked), exported, direct, fns, ctors, own-bindings, for-test, ctx, started)
+    | Ok(checked) -> compile-lower(abs, src, display, drop-n(length(types), checked), exported, direct, fns, ctors, stored-bindings, for-test, ctx, started)
 }
 
 let compile-lower(abs: Str, src: Str, display: Str, body: List Ast, exported: Export, direct: List DepRec, fns: List FnRec, ctors: List CtorRec, bindings: List Ast, for-test: Bool, ctx: Ctx, started: Int) -> Result Iface Str {

@@ -24,8 +24,8 @@ import std/string as String
 import std/sys
 import std/string-buffer as Buf
 
-; Version 6 carries canonical type bindings; version 5 invalidated objects whose print formatters use Cons/Nil list syntax.
-let iface-version = 6
+; Version 7 stores canonical declarations and signatures; version 6 carried source-spelled bindings; version 5 invalidated objects whose print formatters use Cons/Nil list syntax.
+let iface-version = 8
 
 pub record DepRec {
   hash: Int

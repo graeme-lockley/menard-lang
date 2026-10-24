@@ -3318,6 +3318,31 @@ let note-variant-ctors(ctors: List Ast, acc: Map Str CtorSpec, tag-ref: Ref Int,
     | [] -> acc
     | c :: rest -> note-variant-ctors(rest, note-one-variant(c, acc, tag-ref, local), tag-ref, local)
 
+let record-ctor-alias(name: Str) -> Str {
+  let len = String.length(name)
+  cond
+    | len >= 4 && String.byte(0, name) == 95 && String.byte(1, name) == 95 && String.byte(2, name) == 109 ->
+      String.concat("__c", String.slice(3, len - 3, name))
+    | else -> name
+}
+
+let note-record-alias(acc: Map Str CtorSpec, name: Str, arity: Int, local: Ref (List CtorSeed)) -> Map Str CtorSpec {
+  let alias-name = record-ctor-alias(name)
+  cond
+    | alias-name == name -> acc
+    | else ->
+      match (Map.lookup(alias-name, acc))
+        | Some(_) -> acc
+        | None ->
+          match (Map.lookup(name, acc))
+            | Some(CtorSpec(tag, ar)) ->
+              {
+                set!(local, CtorSeed(alias-name, tag, ar) :: deref(local))
+                Map.set(alias-name, CtorSpec(tag, ar), acc)
+              }
+            | None -> acc
+}
+
 let note-defrec(rest: List Ast, acc: Map Str CtorSpec, tag-ref: Ref Int, local: Ref (List CtorSeed)) -> Map Str CtorSpec =
   match (rest)
     | name-part :: fields ->
@@ -3326,7 +3351,11 @@ let note-defrec(rest: List Ast, acc: Map Str CtorSpec, tag-ref: Ref Int, local: 
         | Some(name) ->
           match (builtin-ctor-tag-of(name))
             | Some(_) -> acc
-            | None -> note-ctor(acc, name, length(fields), tag-ref, local)
+            | None ->
+              {
+                let acc2 = note-ctor(acc, name, length(fields), tag-ref, local)
+                note-record-alias(acc2, name, length(fields), local)
+              }
     | [] -> acc
 
 let note-ctor-named(hn: Str, rest: List Ast, acc: Map Str CtorSpec, tag-ref: Ref Int, local: Ref (List CtorSeed)) -> Map Str CtorSpec =

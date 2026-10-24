@@ -160,6 +160,11 @@ pub let type-resolve(env: TypeEnv, spelling: Str) -> Str =
     | Some(id) -> id
     | None -> spelling
 
+let type-source-display(env: TypeEnv, id: Str, fallback: Str) -> Str =
+  match (Map.lookup(id, deref(env.type-display)))
+    | Some(source) -> source
+    | None -> fallback
+
 pub let ctor-bind!(env: TypeEnv, spelling: Str, id: Str) -> Unit =
   set!(env.ctor-bindings, Map.set(spelling, id, deref(env.ctor-bindings)))
 
@@ -858,9 +863,10 @@ let collect-defrec-fields(env: TypeEnv, np: NameParams, fields: List Ast) -> Uni
   let rfields = parse-record-fields(env, fields, params)
   let ftypes = record-field-types(rfields)
   type-set(env, RecordDef(name, name, params, rfields))
-  let canonical = ctor-resolve(env, name)
-  ctor-bind!(env, name, canonical)
-  ctor-set(env, canonical, CtorInfo(id, name, ftypes, params))
+  let display = type-source-display(env, id, name)
+  let canonical = ctor-resolve(env, display)
+  ctor-bind!(env, display, canonical)
+  ctor-set(env, canonical, CtorInfo(id, display, ftypes, params))
   value-set(env, canonical, Scheme(params, t-fn(ftypes, t-nominal-id(id, name, params-to-types(params), "record"))))
 }
 
@@ -932,8 +938,9 @@ let collect-variant-ctors(env: TypeEnv, np: NameParams, ctor-asts: List Ast) -> 
   let name = name-params-name(np)
   let params = name-params-params(np)
   let id = type-resolve(env, name)
+  let display = type-source-display(env, id, name)
   type-set(env, VariantDef(name, name, params, []))
-  let vctors = collect-variant-ctor-list(env, id, name, params, ctor-asts)
+  let vctors = collect-variant-ctor-list(env, id, display, params, ctor-asts)
   type-set(env, VariantDef(name, name, params, vctors))
 }
 
@@ -1781,9 +1788,14 @@ let bind-record-named(env: TypeEnv, name-ast: Ast, fields: List Ast, psp: Span, 
   match (sym-str(name-ast))
     | None -> err!(env, "E_TYPE_MISMATCH", "expected a record", psp)
     | Some(name) ->
-      match (type-get(env, name))
-        | Some(RecordDef(_, _, _, rfields)) -> bind-record-fields(env, name-ast, fields, rfields, psp, scrut, loc, covered)
-        | _ -> err!(env, "E_TYPE_MISMATCH", String.concat("expected a record, found ", name), psp)
+      {
+        let owner = match (ctor-get(env, name))
+          | Some(c) -> ctor-owner-id(c)
+          | None -> name
+        match (type-get(env, owner))
+          | Some(RecordDef(_, _, _, rfields)) -> bind-record-fields(env, name-ast, fields, rfields, psp, scrut, loc, covered)
+          | _ -> err!(env, "E_TYPE_MISMATCH", String.concat("expected a record, found ", source-ctor-name(name)), psp)
+      }
 
 let bind-record-fields(env: TypeEnv, name-ast: Ast, fields: List Ast, rfields: List RecordField, psp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
   match (wanted-fields(env, fields, rfields, []))
@@ -1845,7 +1857,7 @@ let nominal-type-name-of(t: Type) -> Maybe Str =
 let check-ctor-covered(env: TypeEnv, c: VariantCtor, covered: List Str, sp: Span) -> Unit =
   match (c)
     | VariantCtor(name, _) ->
-      if (member(name, covered)) -> () | err!(env, "E_TYPE_EXHAUSTIVE", String.concat("non-exhaustive match: missing ", name), sp)
+      if (member(name, covered)) -> () | err!(env, "E_TYPE_EXHAUSTIVE", String.concat("non-exhaustive match: missing ", source-ctor-name(name)), sp)
 
 let check-ctors-covered(env: TypeEnv, ctors: List VariantCtor, covered: List Str, sp: Span) -> Unit =
   match (ctors)
@@ -2405,7 +2417,7 @@ let register-stub-np(env: TypeEnv, kind: Str, np: NameParams, sp: Span, seen: Re
 }
 
 let note-duplicate-type(env: TypeEnv, name: Str, sp: Span, skip: Ref (List Span)) -> Unit {
-  err!(env, "E_TYPE_DUPLICATE", String.concat("type ", name, " is already defined"), sp)
+  err!(env, "E_TYPE_DUPLICATE", String.concat("type ", type-source-display(env, name, name), " is already defined"), sp)
   set!(skip, sp :: deref(skip))
 }
 

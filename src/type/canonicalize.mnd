@@ -25,6 +25,12 @@ let sym-str(ast: Ast) -> Maybe Str =
     | SymNode(n, _) -> Some(n)
     | _ -> None()
 
+let bare-name(ast: Ast) -> Maybe Str =
+  match (ast)
+    | SymNode(n, _) -> Some(n)
+    | ParenNode(head :: _, _) -> sym-str(head)
+    | _ -> None()
+
 let is-sym-name(ast: Ast, name: Str) -> Bool =
   match (ast)
     | SymNode(n, _) -> n == name
@@ -116,7 +122,13 @@ let canonicalize-decl-form(ast: Ast, bindings: Map Str Str) -> Ast =
           match (sym-str(head))
             | Some(hn) ->
               match (hn)
-                | "pub" -> ParenNode(head :: map(fn (e) = canonicalize-decl-form(e, bindings), rest), sp)
+                | "pub" ->
+                  match (rest)
+                    | _ :: _ ->
+                      match (canonicalize-decl-form(ParenNode(rest, sp), bindings))
+                        | ParenNode(elems, esp) -> ParenNode(SymNode("pub", ast-span(head)) :: elems, esp)
+                        | _ -> ast
+                    | [] -> ast
                 | "defn" -> ParenNode(canonicalize-signature-elems(elems, bindings), sp)
                 | "let" -> ParenNode(canonicalize-signature-elems(elems, bindings), sp)
                 | "extern" -> ParenNode(canonicalize-signature-elems(elems, bindings), sp)
@@ -171,7 +183,13 @@ let canonicalize-ctor-form(ast: Ast, bindings: Map Str Str) -> Ast =
   match (ast)
     | ParenNode(head :: rest, sp) ->
       match (sym-str(head))
-        | Some("pub") -> ParenNode(head :: map(fn (e) = canonicalize-ctor-form(e, bindings), rest), sp)
+        | Some("pub") ->
+          match (rest)
+            | _ :: _ ->
+              match (canonicalize-ctor-form(ParenNode(rest, sp), bindings))
+                | ParenNode(elems, esp) -> ParenNode(SymNode("pub", ast-span(head)) :: elems, esp)
+                | _ -> ast
+            | [] -> ast
         | Some("defn") | Some("let") ->
           match (rest)
             | name :: more -> ParenNode(head :: name :: map(fn (e) = canonicalize-ctor-ast(e, bindings), more), sp)
@@ -254,7 +272,7 @@ let reverse-ast-list(xs: List Ast, acc: List Ast) -> List Ast =
     | x :: rest -> reverse-ast-list(rest, x :: acc)
 
 let decl-named(kind: Str, name-ast: Ast, rest: List Ast, sp: Span, type-ids: Map Str Str, ctor-ids: Map Str Str, state: Ref DeclState) -> Ast =
-  match (sym-str(name-ast))
+  match (bare-name(name-ast))
     | None -> ParenNode(SymNode(kind, sp) :: name-ast :: rest, sp)
     | Some(name) ->
       {
@@ -297,8 +315,11 @@ let decl-form(ast: Ast, type-ids: Map Str Str, ctor-ids: Map Str Str, state: Ref
               match (hn)
                 | "pub" ->
                   match (rest)
-                    | inner :: [] -> ParenNode([head, decl-form(inner, type-ids, ctor-ids, state)], sp)
-                    | _ -> ast
+                    | _ :: _ ->
+                      match (decl-form(ParenNode(rest, sp), type-ids, ctor-ids, state))
+                        | ParenNode(elems, esp) -> ParenNode(SymNode("pub", ast-span(head)) :: elems, esp)
+                        | _ -> ast
+                    | [] -> ast
                 | "record" -> decl-named-rest("record", rest, sp, type-ids, ctor-ids, state)
                 | "defrec" -> decl-named-rest("defrec", rest, sp, type-ids, ctor-ids, state)
                 | "type" -> decl-named-rest("type", rest, sp, type-ids, ctor-ids, state)
