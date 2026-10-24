@@ -320,7 +320,7 @@ A child is an argument vector. There is no shell string.
 `import std/task as Task`
 
 Cooperative single-mutator tasks. There is no public park/wake — suspension
-happens inside join, yield, and (later) mailbox receive / parkable I/O.
+happens inside join, yield, mailbox receive, and (later) parkable I/O.
 
 | Name | |
 | --- | --- |
@@ -336,8 +336,36 @@ happens inside join, yield, and (later) mailbox receive / parkable I/O.
 | `id(t)` | Debug task id (`Int`); not a wake handle. |
 | `self()` | Current task id. |
 
-**Suspend points (v1):** `join`, `yield`, and `scope` exit (via join). Other
-Platform ops must not hide scheduling points.
+**Suspend points (v1):** `join`, `yield`, `scope` exit (via join), and
+`Actor` receive/call (see below). Other Platform ops must not hide scheduling
+points.
+
+## Actor
+
+`import std/actor as Actor`
+
+Mailboxes and actors on the task runtime (Menard queues + wait cells). Not an
+isolation boundary — shared `Ref` across tasks is allowed. See
+[build-e-actors.md](build-e-actors.md).
+
+| Name | |
+| --- | --- |
+| `ActorError` | `ActorCancelled` \| `ActorDead`. |
+| `Mailbox a` | Two-list queue + wait cell; multi-waiter. |
+| `mailbox-new()` | Empty live mailbox. |
+| `send(mb, msg)` | Non-suspending enqueue; `Err(ActorDead)` if closed. |
+| `receive(mb)` | Dequeue or wait; `Err` on cancel/death (no lost message on cancel). |
+| `close(mb)` | Mark dead; wake waiters. |
+| `Pid a` | Actor identity (mailbox + task id + nursery scope). |
+| `spawn` / `spawn-in` | Task + mailbox; body runs the receive loop. |
+| `cast(pid, msg)` | Send to an actor. |
+| `Ask[req, res]` | Envelope for typed request/response. |
+| `call(pid, req)` | Reply mailbox + park; protocols need no reply Pid fields. |
+| `serve` / `serve-state` | Request/response server helpers (and `*-in` for scopes). |
+| `cancel` / `join` / `id` | Lifecycle; cancel escalates the nursery. |
+| `register` / `whereis` | Process-local name → Pid (honor-system typing). |
+
+**Suspend points:** `receive`, `call`.
 
 ## Console
 

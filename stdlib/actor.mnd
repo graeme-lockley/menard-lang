@@ -1,0 +1,350 @@
+; Mailbox + Actor (Build E). Pure Menard on std/task + std/sched wait cells.
+; Not an isolation boundary — shared Ref across tasks is allowed.
+; @module std/actor
+
+import std/sched as Sched
+import std/task as Tsk
+pub import std/task (Cancelled)
+import std/list as List
+
+pub type ActorError =
+  | ActorCancelled
+  | ActorDead
+
+pub record Mailbox[a] {
+  front: Ref (List a)
+  back: Ref (List a)
+  cell: Int
+  alive: Ref Bool
+}
+
+; Empty live mailbox.
+; @test {
+;   let mb = mailbox-new()
+;   let _ = send(mb, 1)
+;   receive(mb)
+; } => Ok(1)
+pub let mailbox-new[a]() -> Mailbox a =
+  Mailbox(ref([]), ref([]), Sched.wait-new(), ref(true))
+
+; Push onto the two-list back spine.
+let mb-enqueue[a](mb: Mailbox a, msg: a) -> Unit =
+  match (mb)
+    | Mailbox(_, back, _, _) ->
+      set!(back, msg :: deref(back))
+
+; Pop from the front, rotating the back list when needed.
+let try-dequeue[a](mb: Mailbox a) -> Maybe a =
+  match (mb)
+    | Mailbox(front, back, _, _) ->
+      match (deref(front))
+        | h :: t -> {
+            set!(front, t)
+            Some(h)
+          }
+        | [] ->
+          match (List.reverse(deref(back)))
+            | [] -> {
+                set!(back, [])
+                None()
+              }
+            | h :: t -> {
+                set!(front, t)
+                set!(back, [])
+                Some(h)
+              }
+
+; Whether the mailbox still accepts messages.
+let is-alive[a](mb: Mailbox a) -> Bool =
+  match (mb)
+    | Mailbox(_, _, _, alive) -> deref(alive)
+
+; Wait-cell id for this mailbox.
+let mb-cell[a](mb: Mailbox a) -> Int =
+  match (mb)
+    | Mailbox(_, _, cell, _) -> cell
+
+; Non-suspending send. Err(ActorDead) if the mailbox was closed.
+; @test {
+;   let mb = mailbox-new()
+;   close(mb)
+;   send(mb, 1)
+; } => Err(ActorDead())
+pub let send[a](mb: Mailbox a, msg: a) -> Result Unit ActorError {
+  if (not(is-alive(mb))) -> Err(ActorDead()) | {
+    mb-enqueue(mb, msg)
+    Sched.notify(mb-cell(mb))
+    Ok(())
+  }
+}
+
+; Suspend until a message arrives, or ActorCancelled / ActorDead.
+; Cancel does not dequeue; the message stays in the queue.
+; @test {
+;   let mb = mailbox-new()
+;   let _ = send(mb, 7)
+;   receive(mb)
+; } => Ok(7)
+pub let receive[a](mb: Mailbox a) -> Result a ActorError {
+  loop ()
+    match (try-dequeue(mb))
+      | Some(msg) -> Ok(msg)
+      | None ->
+        if (not(is-alive(mb))) -> Err(ActorDead()) | {
+          match (Sched.wait(mb-cell(mb)))
+            | Err(_) -> Err(ActorCancelled())
+            | Ok(_) -> recur()
+        }
+}
+
+; Mark dead and poke waiters so receivers observe ActorDead.
+; @test {
+;   let mb = mailbox-new()
+;   close(mb)
+;   receive(mb)
+; } => Err(ActorDead())
+pub let close[a](mb: Mailbox a) -> Unit =
+  match (mb)
+    | Mailbox(_, _, cell, alive) -> {
+        set!(alive, false)
+        loop (n = 0)
+          if (n >= 64) -> () | {
+            Sched.notify(cell)
+            recur(n + 1)
+          }
+      }
+
+; task-id is the cooperative task id; scope is the nursery for escalate (or empty).
+pub record Pid[a] {
+  mb: Mailbox a
+  task-id: Int
+  scope: Ref (List Int)
+}
+
+; Mailbox of a Pid.
+let pid-mb[a](pid: Pid a) -> Mailbox a =
+  match (pid)
+    | Pid(mb, _, _) -> mb
+
+; Cooperative task id of a Pid.
+let pid-task-id[a](pid: Pid a) -> Int =
+  match (pid)
+    | Pid(_, tid, _) -> tid
+
+; Nursery scope ref held by a Pid.
+let pid-scope[a](pid: Pid a) -> Ref (List Int) =
+  match (pid)
+    | Pid(_, _, s) -> s
+
+; Cancel every task id registered on a scope (nursery escalate).
+; @test escalate(ref([]))
+pub let escalate(scope: Ref (List Int)) -> Unit =
+  List.for-each(fn (id) = Sched.cancel(id), deref(scope))
+
+; Close the mailbox; escalate the nursery when failed.
+let finish-actor[a](mb: Mailbox a, scope: Ref (List Int), failed: Bool) -> Unit {
+  close(mb)
+  if (failed) -> escalate(scope) | ()
+}
+
+; Spawn a receive-loop body. Serialisation is the body's responsibility.
+; @test {
+;   let p = spawn(fn (_) = ())
+;   join(p)
+; } => Ok(())
+pub let spawn[a](body: (Mailbox a) -> Unit) -> Pid a {
+  let mb = mailbox-new()
+  let scope = ref([])
+  let t = Tsk.spawn(fn () = {
+    body(mb)
+    finish-actor(mb, scope, false)
+  })
+  Pid(mb, Tsk.id(t), scope)
+}
+
+; Spawn into a scope so failure can escalate (cancel siblings).
+; @test {
+;   let s = ref([])
+;   let p = spawn-in(s, fn (_) = ())
+;   join(p)
+; } => Ok(())
+pub let spawn-in[a](scope: Ref (List Int), body: (Mailbox a) -> Unit) -> Pid a {
+  let mb = mailbox-new()
+  let t = Tsk.spawn(fn () = {
+    body(mb)
+    finish-actor(mb, scope, false)
+  })
+  let tid = Tsk.id(t)
+  let tail = deref(scope)
+  set!(scope, tid :: tail)
+  Pid(mb, tid, scope)
+}
+
+; Send to an actor's mailbox.
+; @test {
+;   let p = spawn(fn (mb) = {
+;     let _ = receive(mb)
+;     ()
+;   })
+;   let r = cast(p, 1)
+;   let _ = join(p)
+;   r
+; } => Ok(())
+pub let cast[a](pid: Pid a, msg: a) -> Result Unit ActorError =
+  send(pid-mb(pid), msg)
+
+; Cancel the actor task; close the mailbox and escalate the nursery.
+; @test {
+;   let p = spawn(fn (mb) = {
+;     let _ = receive(mb)
+;     ()
+;   })
+;   cancel(p)
+;   join(p)
+; } => Err(Cancelled())
+pub let cancel[a](pid: Pid a) -> Unit {
+  Sched.cancel(pid-task-id(pid))
+  finish-actor(pid-mb(pid), pid-scope(pid), true)
+}
+
+; Wait for the actor task to finish.
+; @test {
+;   let p = spawn(fn (_) = ())
+;   join(p)
+; } => Ok(())
+pub let join[a](pid: Pid a) -> Result Unit Cancelled =
+  match (Sched.join(pid-task-id(pid)))
+    | Ok(v) -> Ok(v)
+    | Err(_) -> Err(Cancelled())
+
+; Debug task id of a Pid (not a wake handle).
+; @test id(spawn(fn (_) = ())) >= 1
+pub let id[a](pid: Pid a) -> Int =
+  pid-task-id(pid)
+
+pub type Ask[req, res] =
+  | Ask(req, Mailbox (Result res ActorError))
+
+; Typed request/response; protocols need no reply Pid fields.
+; @test {
+;   let p = serve(fn (n) = n + 1)
+;   let r = call(p, 40)
+;   cancel(p)
+;   let _ = join(p)
+;   r
+; } => Ok(41)
+pub let call[req, res](pid: Pid (Ask req res), req: req) -> Result res ActorError {
+  let reply = mailbox-new()
+  match (cast(pid, Ask(req, reply)))
+    | Err(e) -> Err(e)
+    | Ok(_) ->
+      match (receive(reply))
+        | Err(e) -> Err(e)
+        | Ok(r) -> r
+}
+
+; Receive loop for a request/response server.
+let serve-loop[req, res](mb: Mailbox (Ask req res), scope: Ref (List Int), handle: req -> res) -> Unit {
+  loop ()
+    match (receive(mb))
+      | Err(ActorCancelled()) -> finish-actor(mb, scope, true)
+      | Err(ActorDead()) -> ()
+      | Ok(Ask(req, reply)) -> {
+          let out = handle(req)
+          let _ = send(reply, Ok(out))
+          recur()
+        }
+}
+
+; Stateless request/response server.
+; @test {
+;   let p = serve(fn (n) = n * 2)
+;   let r = call(p, 21)
+;   cancel(p)
+;   let _ = join(p)
+;   r
+; } => Ok(42)
+pub let serve[req, res](handle: req -> res) -> Pid (Ask req res) {
+  let mb = mailbox-new()
+  let scope = ref([])
+  let t = Tsk.spawn(fn () = serve-loop(mb, scope, handle))
+  Pid(mb, Tsk.id(t), scope)
+}
+
+; Stateless server registered on a Task scope nursery.
+; @test {
+;   let s = ref([])
+;   let p = serve-in(s, fn (n) = n)
+;   let r = call(p, 3)
+;   cancel(p)
+;   let _ = join(p)
+;   r
+; } => Ok(3)
+pub let serve-in[req, res](scope: Ref (List Int), handle: req -> res) -> Pid (Ask req res) =
+  spawn-in(scope, fn (mb) = serve-loop(mb, scope, handle))
+
+; Stateful receive loop for serve-state.
+let serve-state-loop[req, res, s](mb: Mailbox (Ask req res), scope: Ref (List Int), init: s, step: (s, req) -> (s * res)) -> Unit {
+  loop (st = init)
+    match (receive(mb))
+      | Err(ActorCancelled()) -> finish-actor(mb, scope, true)
+      | Err(ActorDead()) -> ()
+      | Ok(Ask(req, reply)) -> {
+          let pair = step(st, req)
+          match (pair)
+            | (st2, out) -> {
+                let _ = send(reply, Ok(out))
+                recur(st2)
+              }
+        }
+}
+
+; Stateful request/response server.
+; @test {
+;   let p = serve-state(0, fn (st, n) = (st + n, st + n))
+;   let r = call(p, 5)
+;   cancel(p)
+;   let _ = join(p)
+;   r
+; } => Ok(5)
+pub let serve-state[req, res, s](init: s, step: (s, req) -> (s * res)) -> Pid (Ask req res) {
+  let mb = mailbox-new()
+  let scope = ref([])
+  let t = Tsk.spawn(fn () = serve-state-loop(mb, scope, init, step))
+  Pid(mb, Tsk.id(t), scope)
+}
+
+; Stateful server registered on a Task scope nursery.
+; @test {
+;   let s = ref([])
+;   let p = serve-state-in(s, 0, fn (st, n) = (st + 1, n))
+;   let r = call(p, 9)
+;   cancel(p)
+;   let _ = join(p)
+;   r
+; } => Ok(9)
+pub let serve-state-in[req, res, s](scope: Ref (List Int), init: s, step: (s, req) -> (s * res)) -> Pid (Ask req res) =
+  spawn-in(scope, fn (mb) = serve-state-loop(mb, scope, init, step))
+
+; Bind a name to a Pid in the process dictionary (last write wins).
+; @test {
+;   let p = spawn(fn (_) = ())
+;   register("docs-actor", p)
+;   let _ = join(p)
+; }
+pub let register[a](name: Str, pid: Pid a) -> Unit =
+  Sched.dict-set(name, pid)
+
+; Look up a Pid by name (honor-system typing).
+; @test {
+;   let p = spawn(fn (_) = ())
+;   register("docs-whereis", p)
+;   let ok =
+;     match (whereis("docs-whereis"))
+;       | Some(q) -> id(q) == id(p)
+;       | None -> false
+;   let _ = join(p)
+;   ok
+; } => true
+pub let whereis[a](name: Str) -> Maybe (Pid a) =
+  Sched.dict-get(name)

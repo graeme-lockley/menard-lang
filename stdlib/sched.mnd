@@ -18,9 +18,15 @@ extern mn_task_yield() -> Unit
 
 extern mn_task_wait_new() -> Int
 
-extern mn_task_wait(cell: Int) -> Unit
+; Ok(()) when notified; Err(()) when cancelled while waiting (soft resume).
+extern mn_task_wait(cell: Int) -> Result Unit Unit
 
 extern mn_task_notify(cell: Int) -> Unit
+
+; Type-erased process dictionary (Build E registry). Honor-system get typing.
+extern mn_task_dict_set[a](key: Str, value: a) -> Unit
+
+extern mn_task_dict_get[a](key: Str) -> Maybe a
 
 ; Spawn a zero-argument thunk as a cooperative task. Returns an opaque id.
 ; @test join(spawn(fn () = 41)) => Ok(41)
@@ -69,16 +75,30 @@ pub let yield() -> Unit =
 pub let wait-new() -> Int =
   mn_task_wait_new()
 
-; Park until the cell is notified (or return immediately if already notified).
+; Park until notified (Ok) or cancelled while waiting (Err).
+; Multi-waiter FIFO; notify wakes at most one. Sticky if no waiter yet.
 ; @test {
 ;   let c = wait-new()
 ;   notify(c)
 ;   wait(c)
-; }
-pub let wait(cell: Int) -> Unit =
+; } => Ok(())
+pub let wait(cell: Int) -> Result Unit Unit =
   mn_task_wait(cell)
 
 ; Notify a wait cell; wakes at most one waiter. Sticky if no waiter yet.
 ; @test notify(wait-new())
 pub let notify(cell: Int) -> Unit =
   mn_task_notify(cell)
+
+; Process dictionary set (last write wins). Used by std/actor registry.
+; @test dict-set("docs-dict", 1)
+pub let dict-set[a](key: Str, value: a) -> Unit =
+  mn_task_dict_set(key, value)
+
+; Process dictionary get. Caller chooses the type parameter (honor system).
+; @test {
+;   dict-set("docs-dict-get", 3)
+;   dict-get("docs-dict-get")
+; } => Some(3)
+pub let dict-get[a](key: Str) -> Maybe a =
+  mn_task_dict_get(key)

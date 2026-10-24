@@ -1,7 +1,10 @@
 /**
- * Cooperative task runtime for the TypeScript interpreter (Build D).
+ * Cooperative task runtime for the TypeScript interpreter (Build D/E).
  * Stackless: each task owns a Cont[] (or a thunk to start). Mirrors
  * runtime/src/task.c observables — Runtime ABI, not Platform API.
+ *
+ * Wait cells: multi-waiter FIFO; notify wakes ≤1; cancel of a waiter
+ * soft-resumes so mn_task_wait returns Err(Unit).
  */
 import type { Host } from "../host/host.ts";
 import type { Value } from "./value.ts";
@@ -19,7 +22,8 @@ export type TaskStatus =
 export type InterpWaitCell = {
   id: number;
   notified: boolean;
-  waiter: InterpTask | null;
+  waitersHead: InterpTask | null;
+  waitersTail: InterpTask | null;
 };
 
 export type InterpTask = {
@@ -29,12 +33,13 @@ export type InterpTask = {
   result: Value;
   /** Saved continuation stack when suspended (opaque Cont[] from eval). */
   stack: unknown[] | null;
-  /** Value to feed into resume after park (Unit from suspend). */
+  /** Value to feed into resume after park (Unit from suspend; Result from wait). */
   resumeValue: Value | null;
   isMain: boolean;
   cancelRequested: boolean;
   doneCell: InterpWaitCell;
   waitingOn: InterpWaitCell | null;
+  waitNext: InterpTask | null;
   joinWaiter: InterpTask | null;
 };
 
@@ -51,6 +56,8 @@ let all: InterpTask[] = [];
 let allCells: InterpWaitCell[] = [];
 let current: InterpTask | null = null;
 let runnable: InterpTask[] = [];
+/** Type-erased process dictionary (Build E registry). */
+let processDict = new Map<string, Value>();
 
 /** Set by eval.drive while running so suspend can capture the Cont stack. */
 let activeStack: unknown[] | null = null;
@@ -76,13 +83,42 @@ export function taskSetActiveStack(stack: unknown[] | null): void {
 }
 
 function allocCell(): InterpWaitCell {
-  const c: InterpWaitCell = { id: nextCellId++, notified: false, waiter: null };
+  const c: InterpWaitCell = {
+    id: nextCellId++,
+    notified: false,
+    waitersHead: null,
+    waitersTail: null,
+  };
   allCells.push(c);
   return c;
 }
 
 function findCell(id: number): InterpWaitCell | null {
   return allCells.find((c) => c.id === id) ?? null;
+}
+
+function waiterEnqueue(c: InterpWaitCell, t: InterpTask): void {
+  t.waitNext = null;
+  if (c.waitersTail === null) {
+    c.waitersHead = c.waitersTail = t;
+  } else {
+    c.waitersTail.waitNext = t;
+    c.waitersTail = t;
+  }
+}
+
+function waiterUnlink(c: InterpWaitCell, t: InterpTask): void {
+  let prev: InterpTask | null = null;
+  for (let p = c.waitersHead; p !== null; p = p.waitNext) {
+    if (p === t) {
+      if (prev === null) c.waitersHead = t.waitNext;
+      else prev.waitNext = t.waitNext;
+      if (c.waitersTail === t) c.waitersTail = prev;
+      t.waitNext = null;
+      return;
+    }
+    prev = p;
+  }
 }
 
 export function taskEnsureMain(): InterpTask {
@@ -98,6 +134,7 @@ export function taskEnsureMain(): InterpTask {
     cancelRequested: false,
     doneCell: allocCell(),
     waitingOn: null,
+    waitNext: null,
     joinWaiter: null,
   };
   all.push(t);
@@ -137,20 +174,29 @@ function isTerminal(t: InterpTask): boolean {
 }
 
 function wakeJoiner(done: InterpTask): void {
-  if (done.joinWaiter && !done.joinWaiter.isMain) {
-    enqueue(done.joinWaiter);
-  }
+  const j = done.joinWaiter;
   done.joinWaiter = null;
+  if (!j || j.isMain) return;
+  /* Fiber join parks once; resumeValue is the final mn_task_join Result. */
+  if (done.status === "cancelled") {
+    j.resumeValue = vVariant("Err", [vUnit()]);
+  } else {
+    j.resumeValue = vVariant("Ok", [done.result]);
+  }
+  enqueue(j);
 }
 
 function notifyCell(c: InterpWaitCell): void {
   c.notified = true;
-  if (c.waiter) {
-    const w = c.waiter;
-    c.waiter = null;
+  if (c.waitersHead) {
+    const w = c.waitersHead;
+    c.waitersHead = w.waitNext;
+    if (c.waitersHead === null) c.waitersTail = null;
+    w.waitNext = null;
     w.waitingOn = null;
-    /* Cont resume does not re-enter waitOnCell, so consume the bit here. */
-    c.notified = false;
+    c.notified = false; /* consumed by woken waiter */
+    /* Cont resume does not re-enter waitOnCell — result is in resumeValue. */
+    w.resumeValue = vVariant("Ok", [vUnit()]);
     if (!w.isMain) enqueue(w);
   }
 }
@@ -163,7 +209,7 @@ function finishTask(t: InterpTask, status: "done" | "cancelled", result: Value):
   wakeJoiner(t);
 }
 
-function parkCurrent(): void {
+function parkCurrent(resumeValue: Value = vUnit()): void {
   const t = current!;
   if (t.isMain) {
     throw new Error("mn_task: cannot park main");
@@ -173,7 +219,7 @@ function parkCurrent(): void {
   }
   t.status = "suspended";
   t.stack = activeStack.slice();
-  t.resumeValue = vUnit();
+  t.resumeValue = resumeValue;
   throw new TaskPark();
 }
 
@@ -191,7 +237,12 @@ function runOne(t: InterpTask, host: Host): void {
       const rv = t.resumeValue;
       t.stack = null;
       t.resumeValue = null;
-      if (t.cancelRequested) {
+      /* Soft cancel from wait: resume Cont with Err Result; do not finish early. */
+      const softWaitCancel =
+        t.cancelRequested &&
+        rv.tag === "variant" &&
+        rv.ctor === "Err";
+      if (t.cancelRequested && !softWaitCancel) {
         finishTask(t, "cancelled", vUnit());
         return;
       }
@@ -233,26 +284,39 @@ function pump(host: Host): void {
   }
 }
 
-function waitOnCell(c: InterpWaitCell, host: Host): void {
+/** Returns Ok/Err Result value, or parks (throws TaskPark). */
+function waitOnCell(c: InterpWaitCell, host: Host): Value {
   const self = current!;
+  if (self.cancelRequested || self.status === "cancelled") {
+    return vVariant("Err", [vUnit()]);
+  }
   if (c.notified) {
     c.notified = false;
-    return;
+    return vVariant("Ok", [vUnit()]);
   }
   if (self.isMain) {
     while (!c.notified) {
+      if (self.cancelRequested) {
+        return vVariant("Err", [vUnit()]);
+      }
       if (runnable.length > 0) {
         pump(host);
         continue;
       }
       throw new Error("mn_task_wait: main stuck");
     }
+    if (self.cancelRequested) {
+      return vVariant("Err", [vUnit()]);
+    }
     c.notified = false;
-    return;
+    return vVariant("Ok", [vUnit()]);
   }
-  c.waiter = self;
+  waiterEnqueue(c, self);
   self.waitingOn = c;
-  parkCurrent();
+  /* Default resumeValue overwritten by notify/cancel before resume. */
+  parkCurrent(vVariant("Ok", [vUnit()]));
+  /* unreachable — park throws */
+  return vVariant("Ok", [vUnit()]);
 }
 
 export function taskSpawn(thunk: Value): Value {
@@ -268,6 +332,7 @@ export function taskSpawn(thunk: Value): Value {
     cancelRequested: false,
     doneCell: allocCell(),
     waitingOn: null,
+    waitNext: null,
     joinWaiter: null,
   };
   all.push(t);
@@ -282,7 +347,7 @@ export function taskSelf(): Value {
 
 export function taskSuspendForTest(): Value {
   taskEnsureMain();
-  parkCurrent();
+  parkCurrent(vUnit());
   return vUnit();
 }
 
@@ -307,7 +372,7 @@ export function taskYield(host: Host): Value {
     return vUnit();
   }
   enqueue(self);
-  parkCurrent();
+  parkCurrent(vUnit());
   return vUnit();
 }
 
@@ -320,8 +385,7 @@ export function taskWait(cellId: bigint, host: Host): Value {
   taskEnsureMain();
   const c = findCell(Number(cellId));
   if (!c) throw new Error("mn_task_wait: bad cell");
-  waitOnCell(c, host);
-  return vUnit();
+  return waitOnCell(c, host);
 }
 
 export function taskNotify(cellId: bigint, host: Host): Value {
@@ -335,12 +399,20 @@ export function taskNotify(cellId: bigint, host: Host): Value {
   return vUnit();
 }
 
-function joinWaitUntilTerminal(target: InterpTask, host: Host): void {
+export function taskJoin(id: bigint, host: Host): Value {
+  taskEnsureMain();
+  const target = find(Number(id));
+  if (!target) throw new Error("mn_task_join: bad id");
   const self = current!;
-  target.joinWaiter = self;
 
   if (self.isMain) {
+    target.joinWaiter = self;
     while (!isTerminal(target)) {
+      if (self.cancelRequested) {
+        target.joinWaiter = null;
+        finishTask(self, "cancelled", vUnit());
+        throw new Error("mn_task_join: main cancelled");
+      }
       if (runnable.length > 0) {
         pump(host);
         continue;
@@ -350,35 +422,43 @@ function joinWaitUntilTerminal(target: InterpTask, host: Host): void {
         pump(host);
         continue;
       }
-      if (target.status === "suspended") {
+      if (target.status === "suspended" && target.waitingOn === null) {
+        /* Synthetic park only — not wait-cell waiters. */
         enqueue(target);
         pump(host);
         continue;
       }
+      if (target.status === "suspended" && target.waitingOn !== null) {
+        if (runnable.length > 0) {
+          pump(host);
+          continue;
+        }
+        throw new Error("mn_task_join: target waiting on cell");
+      }
       throw new Error("mn_task_join: stuck");
     }
-  } else {
-    while (!isTerminal(target)) {
-      if (target.status === "suspended" && runnable.length === 0) {
-        enqueue(target);
-      }
-      waitOnCell(target.doneCell, host);
+    target.joinWaiter = null;
+    activate(self);
+    if (target.status === "cancelled") {
+      return vVariant("Err", [vUnit()]);
     }
+    return vVariant("Ok", [target.result]);
   }
 
-  target.joinWaiter = null;
-  activate(self);
-}
-
-export function taskJoin(id: bigint, host: Host): Value {
-  taskEnsureMain();
-  const target = find(Number(id));
-  if (!target) throw new Error("mn_task_join: bad id");
-  joinWaitUntilTerminal(target, host);
-  if (target.status === "cancelled") {
-    return vVariant("Err", [vUnit()]);
+  /* Fiber join: park once; finishTask/wakeJoiner sets resumeValue to Result. */
+  if (isTerminal(target)) {
+    if (target.status === "cancelled") {
+      return vVariant("Err", [vUnit()]);
+    }
+    return vVariant("Ok", [target.result]);
   }
-  return vVariant("Ok", [target.result]);
+  target.joinWaiter = self;
+  if (target.status === "suspended" || target.status === "runnable") {
+    enqueue(target);
+  }
+  parkCurrent(vUnit());
+  /* unreachable — Cont resumes with join Result */
+  return vVariant("Ok", [vUnit()]);
 }
 
 export function taskCancel(id: bigint, host: Host): Value {
@@ -394,8 +474,15 @@ export function taskCancel(id: bigint, host: Host): Value {
 
   if (t.waitingOn) {
     const c = t.waitingOn;
+    waiterUnlink(c, t);
     t.waitingOn = null;
-    if (c.waiter === t) c.waiter = null;
+    /* Soft cancel: resume wait with Err; do not consume sticky notify. */
+    t.resumeValue = vVariant("Err", [vUnit()]);
+    if (!t.isMain) enqueue(t);
+    if (current?.isMain) {
+      pump(host);
+    }
+    return vUnit();
   }
 
   finishTask(t, "cancelled", vUnit());
@@ -404,6 +491,23 @@ export function taskCancel(id: bigint, host: Host): Value {
     pump(host);
   }
   return vUnit();
+}
+
+export function taskDictSet(key: Value, value: Value): Value {
+  taskEnsureMain();
+  if (key.tag !== "str") throw new Error("mn_task_dict_set: expected Str key");
+  const name = new TextDecoder().decode(key.bytes);
+  processDict.set(name, value);
+  return vUnit();
+}
+
+export function taskDictGet(key: Value): Value {
+  taskEnsureMain();
+  if (key.tag !== "str") throw new Error("mn_task_dict_get: expected Str key");
+  const name = new TextDecoder().decode(key.bytes);
+  const v = processDict.get(name);
+  if (v === undefined) return vVariant("None");
+  return vVariant("Some", [v]);
 }
 
 /** Test helper: reset module state between tests. */
@@ -415,4 +519,5 @@ export function taskResetForTests(): void {
   current = null;
   runnable = [];
   activeStack = null;
+  processDict = new Map();
 }

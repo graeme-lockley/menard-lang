@@ -340,8 +340,11 @@ MnWord mn_task_join(MnWord id_tagged);         /* → Result a Unit (Err = cance
 MnWord mn_task_cancel(MnWord id_tagged);       /* → Unit */
 MnWord mn_task_yield(void);                    /* → Unit; cooperative */
 MnWord mn_task_wait_new(void);                 /* → Int wait-cell id */
-MnWord mn_task_wait(MnWord cell_tagged);       /* → Unit; atomic wait */
-MnWord mn_task_notify(MnWord cell_tagged);     /* → Unit; atomic notify */
+MnWord mn_task_wait(MnWord cell_tagged);       /* → Result Unit Unit (Err = cancelled) */
+MnWord mn_task_notify(MnWord cell_tagged);     /* → Unit; wake ≤1 waiter; sticky */
+/* Type-erased process dictionary (Build E registry); honor-system get typing. */
+MnWord mn_task_dict_set(MnWord key_str, MnWord value); /* → Unit */
+MnWord mn_task_dict_get(MnWord key_str);               /* → Maybe a */
 
 #ifdef __cplusplus
 }

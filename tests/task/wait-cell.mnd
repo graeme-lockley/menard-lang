@@ -1,9 +1,10 @@
-; Build D: wait-cell atomic-wait guarantee (notify-before-wait).
+; Build D/E: wait-cell atomic-wait, multi-waiter, cancel-returning wait.
 import std/sched as Sched
 
-let wait-on(cell: Int) -> Int {
-  Sched.wait(cell)
-  7
+let wait-ok(cell: Int) -> Int {
+  match (Sched.wait(cell))
+    | Ok(_) -> 7
+    | Err(_) -> -1
 }
 
 let unwrap(r: Result Int Unit) -> Int =
@@ -15,17 +16,74 @@ let main() -> Int {
   ; Notify before wait — must not lose the wakeup.
   let cell = Sched.wait-new()
   Sched.notify(cell)
-  let t = Sched.spawn(fn () = wait-on(cell))
+  let t = Sched.spawn(fn () = wait-ok(cell))
   println(unwrap(Sched.join(t)))
 
   ; Notify after wait — peer wakes the waiter.
   let cell2 = Sched.wait-new()
-  let waiter = Sched.spawn(fn () = wait-on(cell2))
+  let waiter = Sched.spawn(fn () = wait-ok(cell2))
   let notifier = Sched.spawn(fn () = {
     Sched.notify(cell2)
     1
   })
   println(unwrap(Sched.join(waiter)))
   println(unwrap(Sched.join(notifier)))
+
+  ; Multi-waiter: one notify wakes exactly one; second needs another notify.
+  let cell3 = Sched.wait-new()
+  let acc = ref(0)
+  let w1 = Sched.spawn(fn () = {
+    match (Sched.wait(cell3))
+      | Ok(_) -> {
+          set!(acc, deref(acc) + 1)
+          1
+        }
+      | Err(_) -> 0
+  })
+  let w2 = Sched.spawn(fn () = {
+    match (Sched.wait(cell3))
+      | Ok(_) -> {
+          set!(acc, deref(acc) + 10)
+          1
+        }
+      | Err(_) -> 0
+  })
+  Sched.notify(cell3)
+  let _ = Sched.join(w1)
+  ; Second waiter still parked — wake it.
+  Sched.notify(cell3)
+  let _ = Sched.join(w2)
+  println(deref(acc))
+
+  ; Cancel during wait — soft Err in-frame; join still Cancelled; sticky kept.
+  let cell4 = Sched.wait-new()
+  let saw = ref(0)
+  let ready = ref(0)
+  let parked = Sched.spawn(fn () = {
+    set!(ready, 1)
+    match (Sched.wait(cell4))
+      | Ok(_) -> {
+          set!(saw, 1)
+          0
+        }
+      | Err(_) -> {
+          set!(saw, 3)
+          0
+        }
+  })
+  ; Pump until the child has entered wait (ready=1 and parked).
+  loop ()
+    if (deref(ready) == 0) -> {
+      Sched.yield()
+      recur()
+    } | ()
+  Sched.yield()
+  Sched.cancel(parked)
+  match (Sched.join(parked))
+    | Ok(_) -> println(0)
+    | Err(_) -> println(deref(saw))
+  Sched.notify(cell4)
+  let peer = Sched.spawn(fn () = wait-ok(cell4))
+  println(unwrap(Sched.join(peer)))
   0
 }

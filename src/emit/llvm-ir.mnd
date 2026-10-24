@@ -239,7 +239,7 @@ pub let pool-extra-constants(objs: List PoolObj) -> Int =
 ; How many module-scope value ids the fixed runtime externs occupy.
 ; Defined here so the id helpers below can see it. The order those
 ; externs are declared in is documented with `extern-write-stdout-abs`.
-pub let extern-count = 105
+pub let extern-count = 107
 
 ; Cstring globals, then two globals per emitted object (shape, object),
 ; then the fixed runtime singletons. Function externs begin at this id.
@@ -620,6 +620,12 @@ pub let extern-task-wait-abs(num-strings: Int) -> Int =
 
 pub let extern-task-notify-abs(num-strings: Int) -> Int =
   num-strings + 104
+
+pub let extern-task-dict-set-abs(num-strings: Int) -> Int =
+  num-strings + 105
+
+pub let extern-task-dict-get-abs(num-strings: Int) -> Int =
+  num-strings + 106
 
 ; Builtin constructor tags — must match runtime/src/variants.c.
 pub let tag-nil = 0

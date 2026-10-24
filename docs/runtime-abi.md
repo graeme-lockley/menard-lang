@@ -47,8 +47,10 @@ Public façade: `stdlib/task.mnd` (no `extern`; wraps `std/sched`).
 | `mn_task_cancel` | `Sched.cancel` | Cooperative cancel |
 | `mn_task_yield` | `Sched.yield` | Cooperative yield |
 | `mn_task_wait_new` | `Sched.wait-new` | Wait-cell id |
-| `mn_task_wait` | `Sched.wait` | Atomic wait on cell |
-| `mn_task_notify` | `Sched.notify` | Atomic notify (sticky) |
+| `mn_task_wait` | `Sched.wait` | → `Result Unit Unit` (`Err` = cancelled soft-resume); multi-waiter FIFO |
+| `mn_task_notify` | `Sched.notify` | Wake ≤1 waiter; sticky if none |
+| `mn_task_dict_set` | `Sched.dict-set` | Type-erased process dict (Build E registry) |
+| `mn_task_dict_get` | `Sched.dict-get` | → `Maybe a` (honor-system typing) |
 
 ## App-facing seam symbols
 

@@ -460,33 +460,37 @@ serialised receive loop, send/call, lifecycle by convention.
 
 ### Done when
 
-- [ ] Mailbox send/receive correct under concurrent senders (cooperative).
-- [ ] No lost wakeup in mailbox tests.
-- [ ] Actor example + tests for put/get/search-style protocol.
-- [ ] `Actor.call` usable without forcing every protocol to expose reply Pids
+- [x] Mailbox send/receive correct under concurrent senders (cooperative).
+- [x] No lost wakeup in mailbox tests.
+- [x] Actor example + tests for put/get/search-style protocol.
+- [x] `Actor.call` usable without forcing every protocol to expose reply Pids
   ```
-  (or documented interim shape).
+  (`Ask[req, res]` + `call` / `serve*`).
   ```
-- [ ] Lifecycle behaviour documented even if v1 is simple.
+- [x] Lifecycle behaviour documented even if v1 is simple.
 
 ### Results / outputs (feeds later builds)
 
 | Output | Used by |
 |---|---|
-| `std/mailbox`, `std/actor` | **F** (HTTP gateway → domain actors) |
+| `std/actor` (Mailbox + Actor) | **F** (HTTP gateway → domain actors) |
 | Example service patterns | Apps / guide |
 | Lifecycle hooks sufficient for supervision | **F** |
 
-### Open questions (drive planning)
+### Decisions (Stage E)
 
-1. One module or two (`std/mailbox` vs fold into `std/actor`)?
-2. Queue representation: cons-list, two-list, or ring in Menard?
-3. `Pid a` typing: phantom message type only, or richer protocols now?
-4. Interim vs final `Actor.call` (reply Pid in message vs typed request/response)?
-5. Message-after-death: drop, error to sender, or dead-letter process?
-6. Panic in actor: kill actor only, or escalate to scope?
-7. Are named actor registries in E or deferred to F?
-8. Must mailboxes support multiple waiters or only classic single consumer?
+| # | Decision |
+|---|---|
+| 1 | One module: `std/actor` (Mailbox folded in). |
+| 2 | Two-list unbounded queue. |
+| 3 | Phantom `Pid[a]`. |
+| 4 | Typed `Actor.call` via `Ask[req, res]` (no reply Pid in user ADTs). |
+| 5 | Message-after-death → error to sender (`ActorDead`). |
+| 6 | Cancel/failure: kill actor + escalate nursery. |
+| 7 | Simple name registry in E (`register` / `whereis`). |
+| 8 | Multi-waiter mailboxes; notify wakes one. |
+| 9 | Cancel-returning `mn_task_wait` (`Result`); receive observes `ActorCancelled`. |
+| 10 | Write-up: [build-e-actors.md](build-e-actors.md). |
 
 ---
 
@@ -679,4 +683,5 @@ callbacks). **C → D is mandatory.**
 | [runtime-abi.md](runtime-abi.md) | Seam `mn_*` inventory (Build A) |
 | [build-c-suspension.md](build-c-suspension.md) | Build C mechanism + temporary APIs |
 | [build-d-tasks.md](build-d-tasks.md) | Build D Task API + wait cells + cancel |
+| [build-e-actors.md](build-e-actors.md) | Build E Mailbox + Actor + lifecycle |
 | [runtime/README.md](../runtime/README.md) | C runtime layout |

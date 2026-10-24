@@ -46,6 +46,8 @@ import {
   taskWaitNew,
   taskWait,
   taskNotify,
+  taskDictSet,
+  taskDictGet,
   taskEnsureMain,
 } from "./task.ts";
 
@@ -274,6 +276,8 @@ const EXTERN_BUILTIN: Record<string, string> = {
   mn_task_wait_new: "mn_task_wait_new",
   mn_task_wait: "mn_task_wait",
   mn_task_notify: "mn_task_notify",
+  mn_task_dict_set: "mn_task_dict_set",
+  mn_task_dict_get: "mn_task_dict_get",
 };
 
 function defineTop(ast: Ast, env: Env): void {
@@ -1414,6 +1418,7 @@ function installBuiltins(env: Env): void {
     "mn_task_spawn", "mn_task_self", "mn_task_suspend_for_test",
     "mn_task_resume", "mn_task_join", "mn_task_cancel",
     "mn_task_yield", "mn_task_wait_new", "mn_task_wait", "mn_task_notify",
+    "mn_task_dict_set", "mn_task_dict_get",
     "NotFound", "Permission", "Exists", "IsADirectory", "NotADirectory",
     "InvalidPath", "TooLarge", "Other", "Unsupported",
     "NotExecutable", "InvalidArgument", "TooManyArguments",
@@ -1823,6 +1828,14 @@ function applyBuiltin(
       const id = args[0]!;
       if (id.tag !== "int") throw new PanicError("mn_task_notify: expected Int", span);
       return taskNotify(id.value, host);
+    }
+    case "mn_task_dict_set": {
+      if (args.length < 2) throw new PanicError("mn_task_dict_set: arity", span);
+      return taskDictSet(args[0]!, args[1]!);
+    }
+    case "mn_task_dict_get": {
+      if (args.length < 1) throw new PanicError("mn_task_dict_get: arity", span);
+      return taskDictGet(args[0]!);
     }
     default:
       throw new PanicError(`unknown builtin ${name}`, span);

@@ -76,6 +76,8 @@ function hermeticPrograms(): string[] {
       const text = codeOf(rel);
       if (!/let main\(\) -> (Int|Unit)\b/.test(text)) continue;
       if (/\bspawn(?:-capture)?\(/.test(text)) continue;
+      /* Cooperative concurrency is dual-host tested under tests/task|actor. */
+      if (/import std\/(?:task|actor|sched)\b/.test(text)) continue;
       out.push(rel);
     }
   }

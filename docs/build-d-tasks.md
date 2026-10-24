@@ -14,7 +14,7 @@
 | 3 | `Task.join` → `Result a Cancelled` (`Cancelled` unit ADT). |
 | 4 | `Task.cancel` is public; scope exit also cancels unfinished children. |
 | 5 | Scope: `Task.scope(body)` + `Task.spawn-in(scope, thunk)` + bare `Task.spawn`. |
-| 6 | Atomic wait: runtime **wait cells** (`mn_task_wait_new` / `wait` / `notify`) with sticky notify bit + single waiter. Not Platform API. |
+| 6 | Atomic wait: runtime **wait cells** (`mn_task_wait_new` / `wait` / `notify`) with sticky notify. Build E: multi-waiter FIFO; `wait` → `Result` (cancel soft-resume). Not Platform API. |
 | 7 | Handles: `type Task[a] = Tid(Int)` (ctor name `Tid` so the module alias `Task` is free). Debug via `Task.id`. |
 | 8 | Fairness: cooperative `Task.yield` only; no priorities. |
 | 9 | Join from any task (Build C main-only restriction lifted). |
@@ -31,7 +31,7 @@
 
 ## Wait-cell guarantee
 
-`mn_task_wait(cell)` and `mn_task_notify(cell)` are atomic at the runtime boundary: no Menard runs between the notified-bit check and park. Notify-before-wait is sticky; the waiter returns without sleeping. Single waiter per cell (enough for join and for Build E’s classic mailbox consumer).
+`mn_task_wait(cell)` and `mn_task_notify(cell)` are atomic at the runtime boundary: no Menard runs between the notified-bit check and park. Notify-before-wait is sticky; the waiter returns without sleeping. Build E extends cells to a **multi-waiter FIFO** (notify wakes ≤1) and makes `wait` return `Result Unit Unit` so cancel soft-resumes with `Err` (see [build-e-actors.md](build-e-actors.md)).
 
 ## Cancel matrix (D)
 
@@ -58,4 +58,4 @@ Must not suspend: pure stdlib ops, non-listed seam calls.
 
 - `Task.spawn-in` is correct on the interpreter and on native without GC stress; under `MENARD_GC_STRESS` a cross-module rooting flake remains — acceptance tests use an equivalent local helper. Prefer fixing emitter rooting before E leans hard on `spawn-in` in stress suites.
 - No priorities / preemption.
-- Wait cells allow one waiter (mailbox v1 = single consumer).
+- Wait cells were single-waiter in D; multi-waiter + cancel-returning wait landed in E.

@@ -1,13 +1,14 @@
 /*
- * Cooperative single-mutator task runtime (Build D).
+ * Cooperative single-mutator task runtime (Build D/E).
  *
  * Native: task-local fiber stacks (ucontext). Menard values live in
  * per-task shadow stacks (GC). Pump model: join/resume/yield drive
  * runnable fibers via a host context on the caller's stack.
  *
  * Wait cells provide the atomic-wait guarantee (notify-before-wait does
- * not lose a wakeup). Public Platform API is std/task; this file is the
- * Runtime ABI behind it (plus internal harness symbols).
+ * not lose a wakeup). Multi-waiter FIFO; notify wakes at most one.
+ * Cancel of a wait-cell waiter soft-resumes so mn_task_wait returns Err.
+ * Public Platform API is std/task; this file is the Runtime ABI behind it.
  */
 #define _XOPEN_SOURCE 700
 
@@ -33,7 +34,8 @@ typedef enum {
 typedef struct MnWaitCell {
   int id;
   int notified;
-  struct MnTask *waiter;
+  struct MnTask *waiters_head;
+  struct MnTask *waiters_tail;
   struct MnWaitCell *next;
 } MnWaitCell;
 
@@ -50,6 +52,7 @@ typedef struct MnTask {
   int cancel_requested;
   MnWaitCell *done_cell;
   MnWaitCell *waiting_on;
+  struct MnTask *wait_next; /* next in a wait-cell FIFO */
   struct MnTask *join_waiter;
   struct MnTask *next_runnable;
   struct MnTask *all_next;
@@ -60,6 +63,14 @@ static int next_id = 1;
 
 static MnWaitCell *all_cells = NULL;
 static int next_cell_id = 1;
+
+typedef struct MnDictEntry {
+  MnWord key;
+  MnWord value;
+  struct MnDictEntry *next;
+} MnDictEntry;
+
+static MnDictEntry *dict_head = NULL;
 
 static MnTask *current = NULL;
 static MnTask *runnable_head = NULL;
@@ -80,6 +91,9 @@ static void park_current(void);
 static void notify_cell(MnWaitCell *c);
 static void finish_task(MnTask *t, MnTaskStatus st, MnWord result);
 static int is_terminal(MnTask *t);
+static void waiter_enqueue(MnWaitCell *c, MnTask *t);
+static void waiter_unlink(MnWaitCell *c, MnTask *t);
+static int wait_on_cell(MnWaitCell *c);
 
 static void enqueue(MnTask *t) {
   if (t == NULL) {
@@ -193,15 +207,49 @@ static void wake_joiner(MnTask *done) {
   }
 }
 
+static void waiter_enqueue(MnWaitCell *c, MnTask *t) {
+  t->wait_next = NULL;
+  if (c->waiters_tail == NULL) {
+    c->waiters_head = c->waiters_tail = t;
+  } else {
+    c->waiters_tail->wait_next = t;
+    c->waiters_tail = t;
+  }
+}
+
+static void waiter_unlink(MnWaitCell *c, MnTask *t) {
+  MnTask *prev = NULL;
+  for (MnTask *p = c->waiters_head; p != NULL; p = p->wait_next) {
+    if (p == t) {
+      if (prev == NULL) {
+        c->waiters_head = t->wait_next;
+      } else {
+        prev->wait_next = t->wait_next;
+      }
+      if (c->waiters_tail == t) {
+        c->waiters_tail = prev;
+      }
+      t->wait_next = NULL;
+      return;
+    }
+    prev = p;
+  }
+}
+
 static void notify_cell(MnWaitCell *c) {
   if (c == NULL) {
     return;
   }
   c->notified = 1;
-  if (c->waiter != NULL) {
-    MnTask *w = c->waiter;
-    c->waiter = NULL;
+  if (c->waiters_head != NULL) {
+    MnTask *w = c->waiters_head;
+    c->waiters_head = w->wait_next;
+    if (c->waiters_head == NULL) {
+      c->waiters_tail = NULL;
+    }
+    w->wait_next = NULL;
     w->waiting_on = NULL;
+    c->notified = 0; /* consumed by the woken waiter */
     if (!w->is_main) {
       enqueue(w);
     }
@@ -216,6 +264,8 @@ static void finish_task(MnTask *t, MnTaskStatus st, MnWord result) {
   wake_joiner(t);
 }
 
+/* Park; resume returns to caller. Cancel of wait-cell waiters is soft
+ * (caller sees cancel_requested). Hard cancel never resumes. */
 static void park_current(void) {
   MnTask *t = current;
   if (t->is_main) {
@@ -227,14 +277,6 @@ static void park_current(void) {
   t->status = MN_TASK_SUSPENDED;
   swapcontext(&t->ctx, host_ctx);
   activate(t);
-  if (t->cancel_requested || t->status == MN_TASK_CANCELLED) {
-    finish_task(t, MN_TASK_CANCELLED, MN_UNIT);
-    if (host_ctx == NULL) {
-      mn_panic("mn_task: cancelled with no host");
-    }
-    swapcontext(&t->ctx, host_ctx);
-    mn_panic("mn_task: resume after cancel");
-  }
 }
 
 static void start_fiber(MnTask *t) {
@@ -311,35 +353,53 @@ static void pump(void) {
   }
 }
 
-/* Atomic wait: check notified bit, else register waiter and park.
- * Single-mutator — no Menard runs between check and park. */
-static void wait_on_cell(MnWaitCell *c) {
+/* Atomic wait: 0 = notified, 1 = cancelled. Single-mutator — no Menard
+ * between check and park. */
+static int wait_on_cell(MnWaitCell *c) {
   MnTask *self = current;
+  if (self->cancel_requested || self->status == MN_TASK_CANCELLED) {
+    return 1;
+  }
   if (c->notified) {
     c->notified = 0;
-    return;
+    return 0;
   }
   if (self->is_main) {
     while (!c->notified) {
+      if (self->cancel_requested) {
+        return 1;
+      }
       if (runnable_head != NULL) {
         pump();
         continue;
       }
       mn_panic("mn_task_wait: main stuck");
     }
+    if (self->cancel_requested) {
+      return 1;
+    }
     c->notified = 0;
-    return;
+    return 0;
   }
-  c->waiter = self;
+  waiter_enqueue(c, self);
   self->waiting_on = c;
   park_current();
+  self->waiting_on = NULL;
+  if (self->cancel_requested || self->status == MN_TASK_CANCELLED) {
+    return 1;
+  }
   c->notified = 0;
+  return 0;
 }
 
 void mn_task_visit_roots(mn_root_visit_fn fn, void *ctx) {
   for (MnTask *t = all_tasks; t != NULL; t = t->all_next) {
     fn(&t->closure, ctx);
     fn(&t->result, ctx);
+  }
+  for (MnDictEntry *e = dict_head; e != NULL; e = e->next) {
+    fn(&e->key, ctx);
+    fn(&e->value, ctx);
   }
 }
 
@@ -372,6 +432,14 @@ MnWord mn_task_self(void) {
 MnWord mn_task_suspend_for_test(void) {
   ensure_main_task();
   park_current();
+  if (current->cancel_requested || current->status == MN_TASK_CANCELLED) {
+    finish_task(current, MN_TASK_CANCELLED, MN_UNIT);
+    if (host_ctx == NULL) {
+      mn_panic("mn_task: cancelled with no host");
+    }
+    swapcontext(&current->ctx, host_ctx);
+    mn_panic("mn_task: resume after cancel");
+  }
   return MN_UNIT;
 }
 
@@ -400,6 +468,14 @@ MnWord mn_task_yield(void) {
   }
   enqueue(self);
   park_current();
+  if (self->cancel_requested || self->status == MN_TASK_CANCELLED) {
+    finish_task(self, MN_TASK_CANCELLED, MN_UNIT);
+    if (host_ctx == NULL) {
+      mn_panic("mn_task: cancelled with no host");
+    }
+    swapcontext(&self->ctx, host_ctx);
+    mn_panic("mn_task: resume after cancel");
+  }
   return MN_UNIT;
 }
 
@@ -416,11 +492,15 @@ MnWord mn_task_wait(MnWord cell_tagged) {
   if (c == NULL) {
     mn_panic("mn_task_wait: bad cell");
   }
-  wait_on_cell(c);
-  if (current->cancel_requested || current->status == MN_TASK_CANCELLED) {
-    /* park_current already finishes cancelled fibers; main returns. */
+  MnWord out;
+  mn_root_push(&out);
+  if (wait_on_cell(c) != 0) {
+    out = mn_err(MN_UNIT);
+  } else {
+    out = mn_ok(MN_UNIT);
   }
-  return MN_UNIT;
+  mn_root_pop();
+  return out;
 }
 
 MnWord mn_task_notify(MnWord cell_tagged) {
@@ -437,12 +517,29 @@ MnWord mn_task_notify(MnWord cell_tagged) {
   return MN_UNIT;
 }
 
+static void join_abort_self(void) {
+  MnTask *self = current;
+  finish_task(self, MN_TASK_CANCELLED, MN_UNIT);
+  if (self->is_main) {
+    mn_panic("mn_task_join: main cancelled");
+  }
+  if (host_ctx == NULL) {
+    mn_panic("mn_task: cancelled with no host");
+  }
+  swapcontext(&self->ctx, host_ctx);
+  mn_panic("mn_task: resume after cancel");
+}
+
 static void join_wait_until_terminal(MnTask *target) {
   MnTask *self = current;
   target->join_waiter = self;
 
   if (self->is_main) {
     while (!is_terminal(target)) {
+      if (self->cancel_requested) {
+        target->join_waiter = NULL;
+        join_abort_self();
+      }
       if (runnable_head != NULL) {
         pump();
         continue;
@@ -452,11 +549,20 @@ static void join_wait_until_terminal(MnTask *target) {
         pump();
         continue;
       }
-      if (target->status == MN_TASK_SUSPENDED) {
-        /* Auto-resume to avoid join deadlock (Build C behaviour). */
+      if (target->status == MN_TASK_SUSPENDED && target->waiting_on == NULL) {
+        /* Auto-resume synthetic parks (suspend-for-test / yield) only.
+         * Wait-cell waiters must be woken by notify/cancel — not join. */
         enqueue(target);
         pump();
         continue;
+      }
+      if (target->status == MN_TASK_SUSPENDED && target->waiting_on != NULL) {
+        /* Target is parked on a wait cell — pump others; do not spurious-wake. */
+        if (runnable_head != NULL) {
+          pump();
+          continue;
+        }
+        mn_panic("mn_task_join: target waiting on cell");
       }
       mn_panic("mn_task_join: stuck");
     }
@@ -465,7 +571,10 @@ static void join_wait_until_terminal(MnTask *target) {
       if (target->status == MN_TASK_SUSPENDED && runnable_head == NULL) {
         enqueue(target);
       }
-      wait_on_cell(target->done_cell);
+      if (wait_on_cell(target->done_cell) != 0) {
+        target->join_waiter = NULL;
+        join_abort_self();
+      }
     }
   }
 
@@ -511,10 +620,16 @@ MnWord mn_task_cancel(MnWord id_tagged) {
 
   if (t->waiting_on != NULL) {
     MnWaitCell *c = t->waiting_on;
+    waiter_unlink(c, t);
     t->waiting_on = NULL;
-    if (c->waiter == t) {
-      c->waiter = NULL;
+    /* Soft cancel: resume so mn_task_wait returns Err; do not consume sticky. */
+    if (!t->is_main) {
+      enqueue(t);
     }
+    if (current != NULL && current->is_main && host_ctx == NULL) {
+      pump();
+    }
+    return MN_UNIT;
   }
 
   finish_task(t, MN_TASK_CANCELLED, MN_UNIT);
@@ -523,4 +638,58 @@ MnWord mn_task_cancel(MnWord id_tagged) {
     pump();
   }
   return MN_UNIT;
+}
+
+static int dict_key_eq(MnWord a, MnWord b) {
+  int64_t la = mn_word_to_int(mn_str_byte_length(a));
+  int64_t lb = mn_word_to_int(mn_str_byte_length(b));
+  if (la != lb) {
+    return 0;
+  }
+  for (int64_t i = 0; i < la; i++) {
+    if (mn_word_to_int(mn_str_byte(a, mn_int_to_word(i))) !=
+        mn_word_to_int(mn_str_byte(b, mn_int_to_word(i)))) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+MnWord mn_task_dict_set(MnWord key_str, MnWord value) {
+  ensure_main_task();
+  MnWord k;
+  MnWord v;
+  mn_root_push(&k);
+  mn_root_push(&v);
+  k = key_str;
+  v = value;
+  for (MnDictEntry *e = dict_head; e != NULL; e = e->next) {
+    if (dict_key_eq(e->key, k)) {
+      e->value = v;
+      mn_root_pop();
+      mn_root_pop();
+      return MN_UNIT;
+    }
+  }
+  MnDictEntry *e = (MnDictEntry *)calloc(1, sizeof(MnDictEntry));
+  if (e == NULL) {
+    mn_panic("mn_task_dict_set: oom");
+  }
+  e->key = k;
+  e->value = v;
+  e->next = dict_head;
+  dict_head = e;
+  mn_root_pop();
+  mn_root_pop();
+  return MN_UNIT;
+}
+
+MnWord mn_task_dict_get(MnWord key_str) {
+  ensure_main_task();
+  for (MnDictEntry *e = dict_head; e != NULL; e = e->next) {
+    if (dict_key_eq(e->key, key_str)) {
+      return mn_some(e->value);
+    }
+  }
+  return mn_none();
 }

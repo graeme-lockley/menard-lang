@@ -1,0 +1,84 @@
+; UserManager service — typed Actor.call without reply Pids in the protocol.
+; Run: `./mn run examples/user-manager.mnd`
+;      `./mn inter examples/user-manager.mnd`
+
+import std/actor as Actor
+pub import std/actor (ActorError, Ask)
+import std/list as List
+import std/map as Map
+import std/string as String
+
+record User {
+  id: Str
+  name: Str
+  email: Str
+}
+
+type UserReq =
+  | Put(User)
+  | Get(Str)
+  | Search(Str)
+
+type UserRes =
+  | OkUser(User)
+  | OkUsers(List User)
+  | NotFound
+  | BadRequest(Str)
+
+let step(db: Map Str User, req: UserReq) -> (Map Str User * UserRes) =
+  match (req)
+    | Put(u) ->
+      match (u)
+        | User(id, _, _) -> (Map.set(id, u, db), OkUser(u))
+    | Get(id) ->
+      match (Map.lookup(id, db))
+        | Some(u) -> (db, OkUser(u))
+        | None -> (db, NotFound())
+    | Search(q) -> {
+        let users =
+          List.filter-map(
+            fn (id) = {
+              match (Map.lookup(id, db))
+                | None -> None()
+                | Some(u) ->
+                  match (u)
+                    | User(_, name, _) ->
+                      if (name == q) -> Some(u) | None()
+            },
+            Map.keys(db)
+          )
+        (db, OkUsers(users))
+      }
+
+let show-user(u: User) -> Str =
+  match (u)
+    | User(id, name, email) ->
+      String.concat(id, ":", name, "<", email, ">")
+
+let show-res(r: Result UserRes ActorError) -> Str =
+  match (r)
+    | Err(_) -> "error"
+    | Ok(NotFound()) -> "not-found"
+    | Ok(BadRequest(s)) -> String.concat("bad:", s)
+    | Ok(OkUser(u)) -> show-user(u)
+    | Ok(OkUsers(xs)) ->
+      String.concat("users:", String.from-int(List.length(xs)))
+
+let main() -> Int {
+  let um = Actor.serve-state(Map.empty(), step)
+  Actor.register("user-manager", um)
+
+  let ada = User("1", "Ada", "ada@example.com")
+  println(show-res(Actor.call(um, Put(ada))))
+  println(show-res(Actor.call(um, Get("1"))))
+  println(show-res(Actor.call(um, Search("Ada"))))
+  println(show-res(Actor.call(um, Get("nope"))))
+
+  match (Actor.whereis("user-manager"))
+    | None -> println("registry-miss")
+    | Some(p) -> println(show-res(Actor.call(p, Get("1"))))
+
+  Actor.cancel(um)
+  let _ = Actor.join(um)
+  0
+}
