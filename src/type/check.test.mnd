@@ -104,3 +104,12 @@ test "visible type spellings bind to one canonical id" = {
   let c = TNominal(type-resolve(env, "C"), "C", [], "variant")
   type-equal(a, b) && (type-equal(a, c) == false)
 }
+
+test "own declarations adopt the bound canonical id" = {
+  let env = empty-env()
+  type-bind!(env, "Pid", "std/actor#Pid")
+  type-set(env, RecordDef("Pid", "Pid", [], []))
+  match (type-get(env, "Pid"))
+    | Some(td) -> type-def-id(td) == "std/actor#Pid" && type-def-name(td) == "Pid"
+    | None -> false
+}

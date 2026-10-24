@@ -156,12 +156,14 @@ pub let type-resolve(env: TypeEnv, spelling: Str) -> Str =
     | Some(id) -> id
     | None -> spelling
 
-let type-get(env: TypeEnv, spelling: Str) -> Maybe TypeDef =
+pub let type-get(env: TypeEnv, spelling: Str) -> Maybe TypeDef =
   Map.lookup(type-resolve(env, spelling), deref(env.types))
 
-let type-set(env: TypeEnv, td: TypeDef) -> Unit {
-  type-bind!(env, type-def-name(td), type-def-id(td))
-  set!(env.types, Map.set(type-def-id(td), td, deref(env.types)))
+pub let type-set(env: TypeEnv, td: TypeDef) -> Unit {
+  let name = type-def-name(td)
+  let id = type-resolve(env, name)
+  type-bind!(env, name, id)
+  set!(env.types, Map.set(id, type-def-with-id(td, id), deref(env.types)))
 }
 
 let ctor-get(env: TypeEnv, name: Str) -> Maybe CtorInfo =
@@ -838,11 +840,12 @@ let parse-record-fields-cons(env: TypeEnv, f: Ast, rest: List Ast, params: List 
 let collect-defrec-fields(env: TypeEnv, np: NameParams, fields: List Ast) -> Unit {
   let name = name-params-name(np)
   let params = name-params-params(np)
+  let id = type-resolve(env, name)
   let rfields = parse-record-fields(env, fields, params)
   let ftypes = record-field-types(rfields)
   type-set(env, RecordDef(name, name, params, rfields))
-  ctor-set(env, name, CtorInfo(name, name, ftypes, params))
-  value-set(env, name, Scheme(params, t-fn(ftypes, t-nominal-id(name, name, params-to-types(params), "record"))))
+  ctor-set(env, name, CtorInfo(id, name, ftypes, params))
+  value-set(env, name, Scheme(params, t-fn(ftypes, t-nominal-id(id, name, params-to-types(params), "record"))))
 }
 
 let collect-defrec-named(env: TypeEnv, name-part: Ast, fields: List Ast) -> Unit =
@@ -910,8 +913,9 @@ let collect-variant-ctor-cons(env: TypeEnv, type-id: Str, type-name: Str, params
 let collect-variant-ctors(env: TypeEnv, np: NameParams, ctor-asts: List Ast) -> Unit {
   let name = name-params-name(np)
   let params = name-params-params(np)
+  let id = type-resolve(env, name)
   type-set(env, VariantDef(name, name, params, []))
-  let vctors = collect-variant-ctor-list(env, name, name, params, ctor-asts)
+  let vctors = collect-variant-ctor-list(env, id, name, params, ctor-asts)
   type-set(env, VariantDef(name, name, params, vctors))
 }
 
@@ -2817,6 +2821,40 @@ let rest-to-type(es: List RestError) -> List TypeError =
 ; first (so mutual recursion and forward references between defns
 ; typecheck), then check every body/expression. Rest parameters are
 ; packed first, so the typer sees an ordinary list parameter.
+let is-type-binding(form: Ast) -> Bool =
+  match (form)
+    | ParenNode(head :: _ :: _ :: [], _) -> is-sym(head, "type-binding")
+    | _ -> false
+
+let collect-type-bindings(env: TypeEnv, forms: List Ast) -> Unit =
+  match (forms)
+    | [] -> ()
+    | form :: rest ->
+      {
+        match (form)
+          | ParenNode(_ :: visible :: canonical :: [], _) ->
+            match (visible)
+              | StrNode(v, _) ->
+                match (canonical)
+                  | StrNode(id, _) ->
+                    if (is-type-binding(form)) -> type-bind!(env, v, id) | ()
+                  | _ -> ()
+              | _ -> ()
+          | _ -> ()
+        collect-type-bindings(env, rest)
+      }
+
+let strip-type-bindings(forms: List Ast, acc: List Ast) -> List Ast =
+  match (forms)
+    | [] -> reverse-asts(acc, [])
+    | form :: rest ->
+      if (is-type-binding(form)) -> strip-type-bindings(rest, acc) | strip-type-bindings(rest, form :: acc)
+
+let reverse-asts(xs: List Ast, acc: List Ast) -> List Ast =
+  match (xs)
+    | [] -> acc
+    | x :: rest -> reverse-asts(rest, x :: acc)
+
 let typecheck-collected(forms: List Ast) -> Result (List Ast) (List TypeError) {
   set!(proj-notes, [])
   set!(ques-notes, [])
@@ -2825,14 +2863,16 @@ let typecheck-collected(forms: List Ast) -> Result (List Ast) (List TypeError) {
   set!(print-names, Map.empty())
   set!(show-notes, [])
   let env = empty-env()
+  collect-type-bindings(env, forms)
+  let forms2 = strip-type-bindings(forms, [])
   let skip = ref([])
-  register-stubs(env, forms, ref([]), skip)
-  collect-defs-skip(env, forms, deref(skip))
-  collect-defn-schemes(env, forms)
-  push-type-errs(env, check-pub-private-forms(forms))
+  register-stubs(env, forms2, ref([]), skip)
+  collect-defs-skip(env, forms2, deref(skip))
+  collect-defn-schemes(env, forms2)
+  push-type-errs(env, check-pub-private-forms(forms2))
   let top-local = ref(Map.empty())
-  run-typecheck-top(env, forms, top-local)
-  finish-typecheck(forms, deref(env.diags), env)
+  run-typecheck-top(env, forms2, top-local)
+  finish-typecheck(forms2, deref(env.diags), env)
 }
 
 let push-type-errs(env: TypeEnv, xs: List TypeError) -> Unit =

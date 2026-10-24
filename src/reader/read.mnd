@@ -2546,6 +2546,7 @@ let parse-decl-inner(ps: Ps) -> Result Ast ParseError {
     | t.text == "type" -> parse-type-decl(ps)
     | t.text == "let" -> parse-let(ps, t.indent)
     | t.text == "test" -> parse-test(ps)
+    | t.text == "type-binding" -> parse-type-binding(ps)
     | else -> perr(t, "expected a declaration")
 }
 
@@ -2576,9 +2577,32 @@ let wrap-pub(pub-tok: Tok, inner: Ast) -> Ast =
 let is-decl(t: Tok) -> Bool =
   cond
     | t.text == "runtime" -> true
+    | t.text == "type-binding" -> true
     | t.kind == "kw" && (t.text == "pub" || t.text == "import" || t.text == "extern" || t.text == "alias" || t.text == "record" || t.text == "type" || t.text == "let") -> true
     | t.text == "test" -> true
     | else -> false
+
+; Compiler-generated canonical type binding, cached as
+; `type-binding "visible" "canonical"`. Not written by hand.
+let parse-type-binding(ps: Ps) -> Result Ast ParseError {
+  let kw = peek(ps)
+  advance(ps)
+  let visible = peek(ps)
+  cond
+    | visible.kind != "str" -> perr(visible, "expected a type spelling")
+    | else ->
+      {
+        advance(ps)
+        let canonical = peek(ps)
+        cond
+          | canonical.kind != "str" -> perr(canonical, "expected a canonical type id")
+          | else ->
+            {
+              advance(ps)
+              Ok(ParenNode([sym-at("type-binding", tok-span(kw)), str-node(visible), str-node(canonical)], span-join(tok-span(kw), tok-span(canonical))))
+            }
+      }
+}
 
 let parse-file-acc(ps: Ps, acc: List Ast) -> Result (List Ast) ParseError =
   cond

@@ -24,8 +24,8 @@ import std/string as String
 import std/sys
 import std/string-buffer as Buf
 
-; Version 5 invalidates objects whose print formatters use Cons/Nil list syntax.
-let iface-version = 5
+; Version 6 carries canonical type bindings; version 5 invalidated objects whose print formatters use Cons/Nil list syntax.
+let iface-version = 6
 
 pub record DepRec {
   hash: Int
@@ -52,6 +52,7 @@ pub record Iface {
   main-ret: Str
   fns: List FnRec
   ctors: List CtorRec
+  bindings: List Ast
   stubs: List Ast
 }
 
@@ -178,12 +179,30 @@ let write-stubs(sb: StringBuffer, stubs: List Ast) -> Unit =
         write-stubs(sb, rest)
       }
 
+let write-bindings(sb: StringBuffer, bindings: List Ast) -> Unit =
+  match (bindings)
+    | [] -> ()
+    | b :: rest ->
+      {
+        match (b)
+          | ParenNode(_ :: visible :: canonical :: [], _) ->
+            match (visible)
+              | StrNode(v, _) ->
+                match (canonical)
+                  | StrNode(id, _) ->
+                    add-line(sb, String.concat("type-binding ", String.concat(quote-str(v), String.concat(" ", quote-str(id)))))
+                  | _ -> ()
+              | _ -> ()
+          | _ -> ()
+        write-bindings(sb, rest)
+      }
+
 let dash(s: Str) -> Str =
   if (String.length(s) == 0) -> "-" | s
 
 let iface-text(iface: Iface) -> Str =
   match (iface)
-    | Iface(src, deps, init, main-sym, main-ret, fns, ctors, stubs) ->
+    | Iface(src, deps, init, main-sym, main-ret, fns, ctors, bindings, stubs) ->
       {
         let sb = Buf.new()
         add-line(sb, String.concat("mni(", show(iface-version), ")"))
@@ -193,6 +212,7 @@ let iface-text(iface: Iface) -> Str =
         add-line(sb, call2("main", quote-str(dash(main-sym)), quote-str(dash(main-ret))))
         write-fns(sb, fns)
         write-ctors(sb, ctors)
+        write-bindings(sb, bindings)
         write-stubs(sb, stubs)
         Buf.take-str!(sb)
       }
@@ -264,7 +284,7 @@ let reverse-asts(xs: List Ast, acc: List Ast) -> List Ast =
     | [] -> acc
     | x :: rest -> reverse-asts(rest, x :: acc)
 
-let take-form(a: Ast, src-hash: Ref Int, deps: Ref (List DepRec), init: Ref Str, main-sym: Ref Str, main-ret: Ref Str, fns: Ref (List FnRec), ctors: Ref (List CtorRec), stubs: Ref (List Ast)) -> Unit =
+let take-form(a: Ast, src-hash: Ref Int, deps: Ref (List DepRec), init: Ref Str, main-sym: Ref Str, main-ret: Ref Str, fns: Ref (List FnRec), ctors: Ref (List CtorRec), bindings: Ref (List Ast), stubs: Ref (List Ast)) -> Unit =
   match (a)
     | ParenNode(elems, _) ->
       {
@@ -282,18 +302,19 @@ let take-form(a: Ast, src-hash: Ref Int, deps: Ref (List DepRec), init: Ref Str,
           | h == "fn-rec" -> set!(fns, FnRec(elem-str(elems, 1), elem-str(elems, 2), elem-int(elems, 3)) :: deref(fns))
           | h == "ctor" -> set!(ctors, CtorRec(elem-str(elems, 1), elem-int(elems, 2), elem-int(elems, 3)) :: deref(ctors))
           | h == "mni" -> ()
+          | h == "type-binding" -> set!(bindings, a :: deref(bindings))
           | else -> set!(stubs, a :: deref(stubs))
         ()
       }
     | _ -> ()
 
-let take-forms(forms: List Ast, src-hash: Ref Int, deps: Ref (List DepRec), init: Ref Str, main-sym: Ref Str, main-ret: Ref Str, fns: Ref (List FnRec), ctors: Ref (List CtorRec), stubs: Ref (List Ast)) -> Unit =
+let take-forms(forms: List Ast, src-hash: Ref Int, deps: Ref (List DepRec), init: Ref Str, main-sym: Ref Str, main-ret: Ref Str, fns: Ref (List FnRec), ctors: Ref (List CtorRec), bindings: Ref (List Ast), stubs: Ref (List Ast)) -> Unit =
   match (forms)
     | [] -> ()
     | f :: rest ->
       {
-        take-form(f, src-hash, deps, init, main-sym, main-ret, fns, ctors, stubs)
-        take-forms(rest, src-hash, deps, init, main-sym, main-ret, fns, ctors, stubs)
+        take-form(f, src-hash, deps, init, main-sym, main-ret, fns, ctors, bindings, stubs)
+        take-forms(rest, src-hash, deps, init, main-sym, main-ret, fns, ctors, bindings, stubs)
       }
 
 let iface-from-forms(forms: List Ast) -> Iface {
@@ -304,9 +325,10 @@ let iface-from-forms(forms: List Ast) -> Iface {
   let main-ret = ref("")
   let fns = ref([])
   let ctors = ref([])
+  let bindings = ref([])
   let stubs = ref([])
-  take-forms(forms, src-hash, deps, init, main-sym, main-ret, fns, ctors, stubs)
-  Iface(deref(src-hash), reverse-deps(deref(deps), []), deref(init), deref(main-sym), deref(main-ret), reverse-fns(deref(fns), []), reverse-ctors(deref(ctors), []), reverse-asts(deref(stubs), []))
+  take-forms(forms, src-hash, deps, init, main-sym, main-ret, fns, ctors, bindings, stubs)
+  Iface(deref(src-hash), reverse-deps(deref(deps), []), deref(init), deref(main-sym), deref(main-ret), reverse-fns(deref(fns), []), reverse-ctors(deref(ctors), []), reverse-asts(deref(bindings), []), reverse-asts(deref(stubs), []))
 }
 
 let compatible-iface(forms: List Ast) -> Bool =
@@ -339,7 +361,7 @@ let stamps-fresh(abs: Str) -> Bool {
 
 pub let iface-fresh(abs: Str, iface: Iface) -> Bool =
   match (iface)
-    | Iface(src, deps, _, _, _, _, _, _) -> exists(object-path(abs)) && deps-match(deps) && (stamps-fresh(abs) || hash-file(abs) == src)
+    | Iface(src, deps, _, _, _, _, _, _, _) -> exists(object-path(abs)) && deps-match(deps) && (stamps-fresh(abs) || hash-file(abs) == src)
 
 pub let remove-cache(abs: Str) -> Unit {
   remove(iface-path(abs))

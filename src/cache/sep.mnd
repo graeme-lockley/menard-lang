@@ -104,6 +104,7 @@ let suite-member(ctx: Ctx, abs: Str) -> Bool =
 record Surface {
   fns: List FnRec
   ctors: List CtorRec
+  bindings: List Ast
   stubs: List Ast
 }
 
@@ -115,6 +116,43 @@ let sym(n: Str) -> Ast =
 
 let str-node(s: Str) -> Ast =
   StrNode(s, blank())
+
+let type-binding-form(visible: Str, id: Str) -> Ast =
+  ParenNode([sym("type-binding"), str-node(visible), str-node(id)], blank())
+
+let canonical-type-id(abs: Str, name: Str) -> Str =
+  String.concat(abs, String.concat("#", name))
+
+let reverse-asts(xs: List Ast, acc: List Ast) -> List Ast =
+  match (xs)
+    | [] -> acc
+    | x :: rest -> reverse-asts(rest, x :: acc)
+
+let own-type-binding(form: Ast, abs: Str) -> Maybe Ast =
+  match (unwrap-pub(form))
+    | ParenNode(head :: name-part :: _, _) ->
+      match (sym-str(head))
+        | Some(kind) ->
+          match (kind)
+            | "defrec" ->
+              match (bare-name(name-part))
+                | Some(name) -> Some(type-binding-form(name, canonical-type-id(abs, name)))
+                | None -> None()
+            | "variant" ->
+              match (bare-name(name-part))
+                | Some(name) -> Some(type-binding-form(name, canonical-type-id(abs, name)))
+                | None -> None()
+            | _ -> None()
+        | None -> None()
+    | _ -> None()
+
+let own-type-bindings(forms: List Ast, abs: Str, acc: List Ast) -> List Ast =
+  match (forms)
+    | [] -> reverse-asts(acc, [])
+    | form :: rest ->
+      match (own-type-binding(form, abs))
+        | Some(b) -> own-type-bindings(rest, abs, b :: acc)
+        | None -> own-type-bindings(rest, abs, acc)
 
 let int-node(n: Int) -> Ast =
   IntNode(n, blank())
@@ -448,7 +486,7 @@ let collect-pub(form: Ast, rest: List Ast, path: Str, fns: List FnRec, names: Li
 }
 
 let empty-surface() -> Surface =
-  Surface([], [], [])
+  Surface([], [], [], [])
 
 let surface-drop-fn(fns: List FnRec, name: Str) -> List FnRec =
   match (fns)
@@ -466,9 +504,9 @@ let surface-add-fns(fns: List FnRec, acc: List FnRec) -> List FnRec =
 ; has to precede the alias that names it.
 let surface-add(iface: Iface, acc: Surface) -> Surface =
   match (iface)
-    | Iface(_, _, _, _, _, fns, ctors, stubs) ->
+    | Iface(_, _, _, _, _, fns, ctors, bindings, stubs) ->
       match (acc)
-        | Surface(af, ac, as) -> Surface(surface-add-fns(fns, af), append-ctors(ctors, ac), append-asts(as, stubs))
+        | Surface(af, ac, ab, as) -> Surface(surface-add-fns(fns, af), append-ctors(ctors, ac), append-asts(ab, bindings), append-asts(as, stubs))
 
 let append-ctors(xs: List CtorRec, ys: List CtorRec) -> List CtorRec =
   match (xs)
@@ -488,7 +526,7 @@ let walk-surface(path: Str, done: Map Str Iface, seen: Ref (Map Str Bool), acc: 
 
 let walk-deps(iface: Iface, done: Map Str Iface, seen: Ref (Map Str Bool), acc: Surface) -> Surface =
   match (iface)
-    | Iface(_, deps, _, _, _, _, _, _) -> walk-dep-list(deps, done, seen, acc)
+    | Iface(_, deps, _, _, _, _, _, _, _) -> walk-dep-list(deps, done, seen, acc)
 
 let walk-dep-list(deps: List DepRec, done: Map Str Iface, seen: Ref (Map Str Bool), acc: Surface) -> Surface =
   match (deps)
@@ -516,12 +554,12 @@ let direct-surfaces(paths: List Str, done: Map Str Iface, acc: Surface) -> Surfa
     | path :: rest ->
       match (Map.lookup(path, done))
         | None -> direct-surfaces(rest, done, acc)
-        | Some(Iface(_, _, _, _, _, fns, _, stubs)) ->
+        | Some(Iface(_, _, _, _, _, fns, _, bindings, stubs)) ->
           match (acc)
-            | Surface(af, ac, as) -> {
+            | Surface(af, ac, ab, as) -> {
               let values = value-stubs(stubs)
               let previous = drop-shadowed-values(as, qualified-renames(values, "", Map.empty()))
-              direct-surfaces(rest, done, Surface(surface-add-fns(fns, af), ac, append-asts(previous, values)))
+              direct-surfaces(rest, done, Surface(surface-add-fns(fns, af), ac, append-asts(ab, bindings), append-asts(previous, values)))
             }
 
 let value-stubs(stubs: List Ast) -> List Ast =
@@ -576,14 +614,14 @@ let alias-surfaces(from: Str, forms: List Ast, done: Map Str Iface, acc: Surface
             | spec :: _ ->
               match (Map.lookup(canonical-path(resolve-import(from, spec)), done))
                 | None -> alias-surfaces(from, rest, done, acc)
-                | Some(Iface(_, _, _, _, _, fns, _, stubs)) ->
+                | Some(Iface(_, _, _, _, _, fns, _, bindings, stubs)) ->
                   match (acc)
-                    | Surface(af, ac, as) ->
+                    | Surface(af, ac, ab, as) ->
                       {
                         let prefix = import-alias-prefix(name)
                         let values = value-stubs(stubs)
                         let renamed = rename-module-forms(values, qualified-renames(values, prefix, Map.empty()))
-                        alias-surfaces(from, rest, done, Surface(append-fns(qualified-fns(fns, prefix), af), ac, append-asts(as, renamed)))
+                        alias-surfaces(from, rest, done, Surface(append-fns(qualified-fns(fns, prefix), af), ac, append-asts(ab, bindings), append-asts(as, renamed)))
                       }
             | [] -> alias-surfaces(from, rest, done, acc)
 
@@ -706,7 +744,7 @@ let finish-fresh(abs: Str, iface: Iface, ctx: Ctx) -> Result Iface Str =
   match (ctx)
     | Ctx(_, _, _, _, done, _, order, inits, _, _, _) ->
       match (iface)
-        | Iface(_, _, init, _, _, _, _, _) ->
+        | Iface(_, _, init, _, _, _, _, _, _) ->
           {
             set!(done, Map.set(abs, iface, deref(done)))
             set!(order, snoc-str(deref(order), object-path(abs)))
@@ -730,9 +768,10 @@ let compile-forms-open(abs: Str, src: Str, display: Str, forms: List Ast, direct
   let body0 = prepare-body(strip-module-forms(forms), for-test)
   let done = deref(ctx-done(ctx))
   let surface = alias-surfaces(abs, forms, done, direct-surfaces(bare-import-paths(abs, forms), done, surface-of(direct, done)))
+  let own = own-type-bindings(forms, abs, [])
   match (surface)
-    | Surface(fns, ctors, stubs) ->
-      match (compile-checked(abs, src, display, body0, exported, direct, fns, ctors, stubs, for-test, ctx, started))
+    | Surface(fns, ctors, bindings, stubs) ->
+      match (compile-checked(abs, src, display, body0, exported, direct, fns, ctors, bindings, own, stubs, for-test, ctx, started))
         | Ok(iface) ->
           {
             note-compiling(abs, ctx, since(started))
@@ -764,20 +803,21 @@ let drop-let-forms(xs: List Ast, acc: List Ast) -> List Ast =
     | f :: rest ->
       if (is-let-form(f)) -> drop-let-forms(rest, acc) | drop-let-forms(rest, f :: acc)
 
-let compile-checked(abs: Str, src: Str, display: Str, body: List Ast, exported: Export, direct: List DepRec, fns: List FnRec, ctors: List CtorRec, stubs: List Ast, for-test: Bool, ctx: Ctx, started: Int) -> Result Iface Str {
+let compile-checked(abs: Str, src: Str, display: Str, body: List Ast, exported: Export, direct: List DepRec, fns: List FnRec, ctors: List CtorRec, bindings: List Ast, own-bindings: List Ast, stubs: List Ast, for-test: Bool, ctx: Ctx, started: Int) -> Result Iface Str {
   let types = drop-let-forms(stubs, [])
   let body1 = append-asts(lets-only(stubs, []), body)
-  match (typecheck-forms(append-asts(types, body1)))
+  let all_types = append-asts(bindings, append-asts(own-bindings, types))
+  match (typecheck-forms(append-asts(all_types, body1)))
     | Err(es) ->
       {
         note-compiling(abs, ctx, since(started))
         report-types(abs, src, es)
         Err("")
       }
-    | Ok(checked) -> compile-lower(abs, src, display, drop-n(length(types), checked), exported, direct, fns, ctors, for-test, ctx, started)
+    | Ok(checked) -> compile-lower(abs, src, display, drop-n(length(types), checked), exported, direct, fns, ctors, own-bindings, for-test, ctx, started)
 }
 
-let compile-lower(abs: Str, src: Str, display: Str, body: List Ast, exported: Export, direct: List DepRec, fns: List FnRec, ctors: List CtorRec, for-test: Bool, ctx: Ctx, started: Int) -> Result Iface Str {
+let compile-lower(abs: Str, src: Str, display: Str, body: List Ast, exported: Export, direct: List DepRec, fns: List FnRec, ctors: List CtorRec, bindings: List Ast, for-test: Bool, ctx: Ctx, started: Int) -> Result Iface Str {
   let rewritten = lower-runtime-forms(body)
   let renamed = rename-module-forms(rewritten, add-rename(rewritten, abs, Map.empty()))
   let init-ref = ref([])
@@ -795,10 +835,10 @@ let compile-lower(abs: Str, src: Str, display: Str, body: List Ast, exported: Ex
         report-plain(msg)
         Err("")
       }
-    | Ok(bytes) -> compile-store(abs, src, with-init, exported, direct, info, init-ref, bytes, ctx, started)
+    | Ok(bytes) -> compile-store(abs, src, with-init, exported, direct, info, init-ref, bytes, bindings, ctx, started)
 }
 
-let compile-store(abs: Str, src: Str, with-init: List Ast, exported: Export, direct: List DepRec, info: CtorTable, init-ref: Ref (List Str), bytes: Str, ctx: Ctx, started: Int) -> Result Iface Str =
+let compile-store(abs: Str, src: Str, with-init: List Ast, exported: Export, direct: List DepRec, info: CtorTable, init-ref: Ref (List Str), bytes: Str, bindings: List Ast, ctx: Ctx, started: Int) -> Result Iface Str =
   match (exported)
     | Export(fns, names, stubs) ->
       match (info)
@@ -815,7 +855,7 @@ let compile-store(abs: Str, src: Str, with-init: List Ast, exported: Export, dir
                 | None -> ""
             let main-sym =
               if (String.length(main-ret) > 0) -> main-name | ""
-            let iface = Iface(bytes-hash(src), direct, init, main-sym, main-ret, fns, filter-ctors(local, names, []), reverse(stubs))
+            let iface = Iface(bytes-hash(src), direct, init, main-sym, main-ret, fns, filter-ctors(local, names, []), bindings, reverse(stubs))
             cond
               | write-bytes(object-path(abs), bytes) ->
                 cond
@@ -986,7 +1026,7 @@ let ensure-mod(abs: Str, ctx: Ctx) -> Result Iface Str =
 
 let iface-main(iface: Iface) -> Str =
   match (iface)
-    | Iface(_, _, _, main-sym, _, _, _, _) -> main-sym
+    | Iface(_, _, _, main-sym, _, _, _, _, _) -> main-sym
 
 ; A suite member's object has to export `main`. An interface left by a
 ; non-test compile of the same file does not, so it is not reusable.
@@ -997,7 +1037,7 @@ let ensure-body(abs: Str, ctx: Ctx) -> Result Iface Str =
   match (read-iface(abs))
     | Some(iface) ->
       match (iface)
-        | Iface(_, deps, _, _, _, _, _, _) ->
+        | Iface(_, deps, _, _, _, _, _, _, _) ->
           match (ensure-list(dep-paths(deps), ctx))
             | Ok(_) ->
               if (reusable(ctx, abs, iface)) -> finish-fresh(abs, iface, ctx) | compile-file(abs, ctx)
@@ -1014,7 +1054,7 @@ let boot-path(abs: Str) -> Str =
 
 let link-closure(abs: Str, iface: Iface, ctx: Ctx, cc: Str, runtime: Str, bin: Str) -> Result Str Str =
   match (iface)
-    | Iface(_, _, _, main-sym, main-ret, _, _, _) ->
+    | Iface(_, _, _, main-sym, main-ret, _, _, _, _) ->
       cond
         | String.length(main-sym) == 0 -> Err("program has no top-level `defn main`")
         | else ->

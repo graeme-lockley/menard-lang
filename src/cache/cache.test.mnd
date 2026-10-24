@@ -18,7 +18,7 @@ record Box[a] {
   value: a
 }
 ")
-  Iface(41, [DepRec(7, "/tmp/dep.mnd")], "init-sym", "main-sym", "Int", [FnRec("id", "mn_id", 1)], [CtorRec("Ok", 4, 1)], stubs)
+  Iface(41, [DepRec(7, "/tmp/dep.mnd")], "init-sym", "main-sym", "Int", [FnRec("id", "mn_id", 1)], [CtorRec("Ok", 4, 1)], [], stubs)
 }
 
 let round-path() -> Str =
@@ -46,7 +46,7 @@ let stubs-ok(stubs: List Ast) -> Bool =
 
 let same(got: Iface) -> Bool =
   match (got)
-    | Iface(h, deps, init, main-sym, main-ret, fns, ctors, stubs) ->
+    | Iface(h, deps, init, main-sym, main-ret, fns, ctors, _bindings, stubs) ->
       h == 41 && dep-ok(deps) && init == "init-sym" && main-sym == "main-sym" && main-ret == "Int" && fn-ok(fns) && ctor-ok(ctors) && stubs-ok(stubs)
 
 test "an interface file round-trips" = {
