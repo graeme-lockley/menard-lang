@@ -969,6 +969,20 @@ let form-in-list(ast: Ast, forms: List Ast) -> Bool =
     | f :: rest ->
       if (form-text(ast) == form-text(f)) -> true | form-in-list(ast, rest)
 
+let is-type-stub(ast: Ast) -> Bool =
+  match (unwrap-pub(ast))
+    | ParenNode(head :: _, _) ->
+      match (sym-str(head))
+        | Some(n) -> n == "defrec" || n == "record" || n == "variant" || n == "type" || n == "alias" || n == "extern" || n == "runtime"
+        | None -> false
+    | _ -> false
+
+let only-type-stubs(stubs: List Ast, acc: List Ast) -> List Ast =
+  match (stubs)
+    | [] -> reverse(acc)
+    | s :: rest ->
+      if (is-type-stub(s)) -> only-type-stubs(rest, s :: acc) | only-type-stubs(rest, acc)
+
 let drop-type-stubs(checked: List Ast, stubs: List Ast, acc: List Ast) -> List Ast =
   match (checked)
     | [] -> reverse(acc)
@@ -986,7 +1000,7 @@ let compile-checked(abs: Str, src: Str, display: Str, body: List Ast, exported: 
         report-types(abs, src, es)
         Err("")
       }
-    | Ok(checked) -> compile-lower(abs, src, display, drop-type-stubs(checked, stubs, []), exported, direct, fns, ctors, stored-bindings, for-test, ctx, started)
+    | Ok(checked) -> compile-lower(abs, src, display, drop-type-stubs(checked, only-type-stubs(stubs, []), []), exported, direct, fns, ctors, stored-bindings, for-test, ctx, started)
 }
 
 let compile-lower(abs: Str, src: Str, display: Str, body: List Ast, exported: Export, direct: List DepRec, fns: List FnRec, ctors: List CtorRec, bindings: List Ast, for-test: Bool, ctx: Ctx, started: Int) -> Result Iface Str {

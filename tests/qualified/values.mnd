@@ -1,0 +1,11 @@
+import std/io
+
+let stdout = 1
+let ty-i64 = 1
+
+let f() -> Int = ty-i64
+
+let main() -> Int {
+  let _ = write(stdout, "x")
+  f()
+}

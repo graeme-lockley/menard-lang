@@ -58,6 +58,17 @@ describe("canonical qualified types", () => {
     { timeout: 180_000 },
   );
 
+  test.skipIf(!Bun.which("clang"))(
+    "native value stubs survive canonicalization",
+    () => {
+      const r = runNative("tests/qualified/values.mnd");
+      expect(r.stderr).toBe("");
+      expect(r.status).toBe(1);
+      expect(r.stdout).toBe("x");
+    },
+    { timeout: 180_000 },
+  );
+
   test(
     "unqualified constructor is rejected",
     () => {
