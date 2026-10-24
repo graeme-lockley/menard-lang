@@ -120,6 +120,9 @@ let str-node(s: Str) -> Ast =
 let type-binding-form(visible: Str, id: Str) -> Ast =
   ParenNode([sym("type-binding"), str-node(visible), str-node(id)], blank())
 
+let ctor-binding-form(visible: Str, id: Str) -> Ast =
+  ParenNode([sym("ctor-binding"), str-node(visible), str-node(id)], blank())
+
 let canonical-type-id(abs: Str, name: Str) -> Str =
   String.concat(abs, String.concat("#", name))
 
@@ -153,6 +156,16 @@ let own-type-bindings(forms: List Ast, abs: Str, acc: List Ast) -> List Ast =
       match (own-type-binding(form, abs))
         | Some(b) -> own-type-bindings(rest, abs, b :: acc)
         | None -> own-type-bindings(rest, abs, acc)
+
+let own-ctor-binding-list(names: List Str, abs: Str, acc: List Ast) -> List Ast =
+  match (names)
+    | [] -> acc
+    | n :: rest -> own-ctor-binding-list(rest, abs, ctor-binding-form(n, canonical-type-id(abs, n)) :: acc)
+
+let own-ctor-bindings(forms: List Ast, abs: Str, acc: List Ast) -> List Ast =
+  match (forms)
+    | [] -> reverse-asts(acc, [])
+    | form :: rest -> own-ctor-bindings(rest, abs, own-ctor-binding-list(ctor-names-of(form, []), abs, acc))
 
 let int-node(n: Int) -> Ast =
   IntNode(n, blank())
@@ -768,7 +781,7 @@ let compile-forms-open(abs: Str, src: Str, display: Str, forms: List Ast, direct
   let body0 = prepare-body(strip-module-forms(forms), for-test)
   let done = deref(ctx-done(ctx))
   let surface = alias-surfaces(abs, forms, done, direct-surfaces(bare-import-paths(abs, forms), done, surface-of(direct, done)))
-  let own = own-type-bindings(forms, abs, [])
+  let own = append-asts(own-type-bindings(forms, abs, []), own-ctor-bindings(forms, abs, []))
   match (surface)
     | Surface(fns, ctors, bindings, stubs) ->
       match (compile-checked(abs, src, display, body0, exported, direct, fns, ctors, bindings, own, stubs, for-test, ctx, started))

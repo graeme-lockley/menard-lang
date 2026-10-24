@@ -58,6 +58,7 @@ pub record TypeEnv {
   ctors: Ref (Map Str CtorInfo)
   aliases: Ref (Map Str Type)
   type-bindings: Ref (Map Str Str)
+  ctor-bindings: Ref (Map Str Str)
   next-var: Ref Int
   diags: Ref (List TypeError)
   subst: Ref (Map Int Type)
@@ -156,6 +157,14 @@ pub let type-resolve(env: TypeEnv, spelling: Str) -> Str =
     | Some(id) -> id
     | None -> spelling
 
+pub let ctor-bind!(env: TypeEnv, spelling: Str, id: Str) -> Unit =
+  set!(env.ctor-bindings, Map.set(spelling, id, deref(env.ctor-bindings)))
+
+pub let ctor-resolve(env: TypeEnv, spelling: Str) -> Str =
+  match (Map.lookup(spelling, deref(env.ctor-bindings)))
+    | Some(id) -> id
+    | None -> spelling
+
 pub let type-get(env: TypeEnv, spelling: Str) -> Maybe TypeDef =
   Map.lookup(type-resolve(env, spelling), deref(env.types))
 
@@ -166,10 +175,10 @@ pub let type-set(env: TypeEnv, td: TypeDef) -> Unit {
   set!(env.types, Map.set(id, type-def-with-id(td, id), deref(env.types)))
 }
 
-let ctor-get(env: TypeEnv, name: Str) -> Maybe CtorInfo =
-  Map.lookup(name, deref(env.ctors))
+pub let ctor-get(env: TypeEnv, name: Str) -> Maybe CtorInfo =
+  Map.lookup(ctor-resolve(env, name), deref(env.ctors))
 
-let ctor-set(env: TypeEnv, name: Str, c: CtorInfo) -> Unit =
+pub let ctor-set(env: TypeEnv, name: Str, c: CtorInfo) -> Unit =
   set!(env.ctors, Map.set(name, c, deref(env.ctors)))
 
 let alias-get(env: TypeEnv, name: Str) -> Maybe Type =
@@ -302,7 +311,7 @@ let install-builtins(env: TypeEnv) -> Unit {
 }
 
 pub let empty-env() -> TypeEnv {
-  let env = TypeEnv(ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(0), ref([]), ref(Map.empty()), ref(None()))
+  let env = TypeEnv(ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(0), ref([]), ref(Map.empty()), ref(None()))
   install-builtins(env)
   env
 }
@@ -844,8 +853,10 @@ let collect-defrec-fields(env: TypeEnv, np: NameParams, fields: List Ast) -> Uni
   let rfields = parse-record-fields(env, fields, params)
   let ftypes = record-field-types(rfields)
   type-set(env, RecordDef(name, name, params, rfields))
-  ctor-set(env, name, CtorInfo(id, name, ftypes, params))
-  value-set(env, name, Scheme(params, t-fn(ftypes, t-nominal-id(id, name, params-to-types(params), "record"))))
+  let canonical = ctor-resolve(env, name)
+  ctor-bind!(env, name, canonical)
+  ctor-set(env, canonical, CtorInfo(id, name, ftypes, params))
+  value-set(env, canonical, Scheme(params, t-fn(ftypes, t-nominal-id(id, name, params-to-types(params), "record"))))
 }
 
 let collect-defrec-named(env: TypeEnv, name-part: Ast, fields: List Ast) -> Unit =
@@ -867,8 +878,10 @@ let ctor-owner(c: CtorInfo) -> Str =
 ; lists the IoError singletons NotFound and Permission for exhaustiveness
 ; without taking them away from IoError.
 let register-variant-ctor-set(env: TypeEnv, type-id: Str, type-name: Str, params: List Str, cname: Str, payloads: List Type) -> Unit {
-  ctor-set(env, cname, CtorInfo(type-id, type-name, payloads, params))
-  value-set(env, cname, Scheme(params, t-fn(payloads, t-nominal-id(type-id, type-name, params-to-types(params), "variant"))))
+  let canonical = ctor-resolve(env, cname)
+  ctor-bind!(env, cname, canonical)
+  ctor-set(env, canonical, CtorInfo(type-id, type-name, payloads, params))
+  value-set(env, canonical, Scheme(params, t-fn(payloads, t-nominal-id(type-id, type-name, params-to-types(params), "variant"))))
 }
 
 let register-variant-ctor-checked(env: TypeEnv, type-id: Str, type-name: Str, params: List Str, cname: Str, payloads: List Type) -> Unit =
@@ -1101,7 +1114,7 @@ let infer(env: TypeEnv, ast: Ast, local: Map Str Type) -> Type =
     | ParenNode(elems, sp) -> infer-paren(env, elems, sp, local)
 
 let infer-sym-global(env: TypeEnv, name: Str, sp: Span) -> Type =
-  match (value-get(env, name))
+  match (value-get(env, ctor-resolve(env, name)))
     | Some(s) -> instantiate(env, s)
     | None ->
       {
@@ -2823,7 +2836,8 @@ let rest-to-type(es: List RestError) -> List TypeError =
 ; packed first, so the typer sees an ordinary list parameter.
 let is-type-binding(form: Ast) -> Bool =
   match (form)
-    | ParenNode(head :: _ :: _ :: [], _) -> is-sym(head, "type-binding")
+    | ParenNode(head :: _ :: _ :: [], _) ->
+      is-sym(head, "type-binding") || is-sym(head, "ctor-binding")
     | _ -> false
 
 let collect-type-bindings(env: TypeEnv, forms: List Ast) -> Unit =
@@ -2832,12 +2846,15 @@ let collect-type-bindings(env: TypeEnv, forms: List Ast) -> Unit =
     | form :: rest ->
       {
         match (form)
-          | ParenNode(_ :: visible :: canonical :: [], _) ->
+          | ParenNode(head :: visible :: canonical :: [], _) ->
             match (visible)
               | StrNode(v, _) ->
                 match (canonical)
                   | StrNode(id, _) ->
-                    if (is-type-binding(form)) -> type-bind!(env, v, id) | ()
+                    cond
+                      | is-sym(head, "type-binding") -> type-bind!(env, v, id)
+                      | is-sym(head, "ctor-binding") -> ctor-bind!(env, v, id)
+                      | else -> ()
                   | _ -> ()
               | _ -> ()
           | _ -> ()

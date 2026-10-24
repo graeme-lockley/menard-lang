@@ -113,3 +113,12 @@ test "own declarations adopt the bound canonical id" = {
     | Some(td) -> type-def-id(td) == "std/actor#Pid" && type-def-name(td) == "Pid"
     | None -> false
 }
+
+test "a constructor spelling resolves through its canonical binding" = {
+  let env = empty-env()
+  ctor-bind!(env, "A", "module-a#A")
+  ctor-set(env, "module-a#A", CtorInfo("module-a#T", "T", [], []))
+  match (ctor-get(env, "A"))
+    | Some(c) -> ctor-owner-id(c) == "module-a#T" && ctor-owner-name(c) == "T"
+    | None -> false
+}

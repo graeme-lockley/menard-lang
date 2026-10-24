@@ -179,18 +179,23 @@ let write-stubs(sb: StringBuffer, stubs: List Ast) -> Unit =
         write-stubs(sb, rest)
       }
 
+let binding-head(ast: Ast) -> Str =
+  match (ast)
+    | SymNode(n, _) -> n
+    | _ -> "type-binding"
+
 let write-bindings(sb: StringBuffer, bindings: List Ast) -> Unit =
   match (bindings)
     | [] -> ()
     | b :: rest ->
       {
         match (b)
-          | ParenNode(_ :: visible :: canonical :: [], _) ->
+          | ParenNode(head :: visible :: canonical :: [], _) ->
             match (visible)
               | StrNode(v, _) ->
                 match (canonical)
                   | StrNode(id, _) ->
-                    add-line(sb, String.concat("type-binding ", String.concat(quote-str(v), String.concat(" ", quote-str(id)))))
+                    add-line(sb, String.concat(binding-head(head), String.concat(" ", String.concat(quote-str(v), String.concat(" ", quote-str(id))))))
                   | _ -> ()
               | _ -> ()
           | _ -> ()
@@ -303,6 +308,7 @@ let take-form(a: Ast, src-hash: Ref Int, deps: Ref (List DepRec), init: Ref Str,
           | h == "ctor" -> set!(ctors, CtorRec(elem-str(elems, 1), elem-int(elems, 2), elem-int(elems, 3)) :: deref(ctors))
           | h == "mni" -> ()
           | h == "type-binding" -> set!(bindings, a :: deref(bindings))
+          | h == "ctor-binding" -> set!(bindings, a :: deref(bindings))
           | else -> set!(stubs, a :: deref(stubs))
         ()
       }
