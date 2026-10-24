@@ -1,0 +1,103 @@
+import "../reader/ast.mnd"
+import "../reader/read.mnd"
+import "../reader/print.mnd"
+import "./canonicalize.mnd"
+import std/map as Map
+import std/string as String
+
+let blank() -> Span =
+  Span(0, 0, 0, 1)
+
+let forms-of(src: Str) -> List Ast =
+  match (read-all(src))
+    | Ok(fs) -> fs
+    | Err(_) -> []
+
+let printed(forms: List Ast) -> Str =
+  match (forms)
+    | [] -> ""
+    | f :: rest -> String.concat(print-form(f), String.concat("\n", printed(rest)))
+
+let has(haystack: Str, needle: Str) -> Bool =
+  String.contains(needle, haystack)
+
+let type-bindings() -> Map Str Str =
+  Map.set("Bar", "m#Bar", Map.set("Foo", "m#Foo", Map.empty()))
+
+let ctor-bindings() -> Map Str Str =
+  Map.set("B", "m#B", Map.set("A", "m#A", Map.empty()))
+
+let append-asts(xs: List Ast, ys: List Ast) -> List Ast =
+  match (xs)
+    | [] -> ys
+    | x :: rest -> x :: append-asts(rest, ys)
+
+let typed() -> List Ast =
+  append-asts(
+    forms-of("let f(x: Foo, y: List (Maybe Foo)) -> Map Foo Bar = x
+
+record R {
+  a: Foo
+  b: (Foo) -> Bar
+}
+
+type V =
+  | A(Foo)
+  | B(List Bar)
+
+alias X = Foo * Bar
+"),
+    forms-of("extern e(x: Foo) -> Bar
+
+runtime r(x: Foo) -> Bar
+")
+  )
+
+test "type positions are canonicalized" = {
+  let out = printed(canonicalize-types(typed(), type-bindings()))
+  has(out, "x: m#Foo") &&
+    has(out, "List (Maybe m#Foo)") &&
+    has(out, "Map m#Foo m#Bar") &&
+    has(out, "a: m#Foo") &&
+    has(out, "(m#Foo) -> m#Bar") &&
+    has(out, "A(m#Foo)") &&
+    has(out, "B(List m#Bar)") &&
+    has(out, "alias X = m#Foo * m#Bar") &&
+    has(out, "extern e(x: m#Foo) -> m#Bar") &&
+    has(out, "runtime r(x: m#Foo) -> m#Bar")
+}
+
+let ctor-source() -> List Ast =
+  forms-of("let f(x: Foo) -> Foo =
+  match (x)
+    | A(y) -> B(y)
+    | C -> x
+")
+
+test "constructor uses and patterns are canonicalized" = {
+  let out = printed(canonicalize-ctors(ctor-source(), ctor-bindings()))
+  has(out, "| m#A(y) -> m#B(y)") && has(out, "| C -> x") && has(out, "f(x: Foo)")
+}
+
+test "non-constructor symbols are left alone" = {
+  let out = printed(canonicalize-ctors(ctor-source(), ctor-bindings()))
+  has(out, "x") && has(out, "y")
+}
+
+test "qualified projections are left for import rewriting" = {
+  let proj = ParenNode([SymNode("project", blank()), SymNode("Q", blank()), SymNode("A", blank())], blank())
+  let form = ParenNode([SymNode("let", blank()), SymNode("v", blank()), SymNode("=", blank()), proj], blank())
+  let out = canonicalize-ctors([form], ctor-bindings())
+  match (out)
+    | ParenNode(_ :: _ :: _ :: ParenNode([_, SymNode("Q", _), SymNode("A", _)], _) :: [], _) :: [] -> true
+    | _ -> false
+}
+
+test "binding forms are untouched" = {
+  let tb = ParenNode([SymNode("type-binding", blank()), StrNode("Foo", blank()), StrNode("m#Foo", blank())], blank())
+  let cb = ParenNode([SymNode("ctor-binding", blank()), StrNode("A", blank()), StrNode("m#A", blank())], blank())
+  let ts = printed(canonicalize-types([tb], type-bindings()))
+  let cs = printed(canonicalize-ctors([cb], ctor-bindings()))
+  has(ts, "type-binding(\"Foo\", \"m#Foo\")") && has(cs, "ctor-binding(\"A\", \"m#A\")")
+}
+

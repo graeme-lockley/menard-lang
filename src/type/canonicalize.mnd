@@ -1,0 +1,187 @@
+; Canonicalize source spellings in the compiler's own AST.
+;
+; `canonicalize-types` rewrites only type positions; `canonicalize-ctors`
+; rewrites constructor uses in expression/pattern positions. Neither rewrites
+; declaration names, local binders, or `(project Q x)` forms.
+
+import "../reader/ast.mnd"
+import std/list
+import std/map as Map
+import std/string as String
+
+record Split {
+  before: List Ast
+  arrow: Ast
+  after: List Ast
+}
+
+let append-asts(xs: List Ast, ys: List Ast) -> List Ast =
+  match (xs)
+    | [] -> ys
+    | x :: rest -> x :: append-asts(rest, ys)
+
+let sym-str(ast: Ast) -> Maybe Str =
+  match (ast)
+    | SymNode(n, _) -> Some(n)
+    | _ -> None()
+
+let is-sym-name(ast: Ast, name: Str) -> Bool =
+  match (ast)
+    | SymNode(n, _) -> n == name
+    | _ -> false
+
+let is-binding-form(ast: Ast) -> Bool =
+  match (ast)
+    | ParenNode(head :: _ :: _ :: [], _) ->
+      is-sym-name(head, "type-binding") || is-sym-name(head, "ctor-binding")
+    | _ -> false
+
+let is-project-form(ast: Ast) -> Bool =
+  match (ast)
+    | ParenNode(head :: _ :: _ :: _, _) -> is-sym-name(head, "project")
+    | _ -> false
+
+; -- type positions ---------------------------------------------------------
+
+let canonicalize-type(ast: Ast, bindings: Map Str Str) -> Ast =
+  match (ast)
+    | SymNode(n, sp) ->
+      match (Map.lookup(n, bindings))
+        | Some(id) -> SymNode(id, sp)
+        | None -> ast
+    | ParenNode(elems, sp) -> ParenNode(map(fn (e) = canonicalize-type(e, bindings), elems), sp)
+    | BracketNode(elems, sp) -> BracketNode(map(fn (e) = canonicalize-type(e, bindings), elems), sp)
+    | _ -> ast
+
+let ends-colon(name: Str) -> Bool =
+  String.length(name) > 0 && String.byte(String.length(name) - 1, name) == 58
+
+let canonicalize-param(ast: Ast, bindings: Map Str Str) -> Ast =
+  match (ast)
+    | ParenNode([SymNode(name, nsp), t], sp) ->
+      if (ends-colon(name)) -> ParenNode([SymNode(name, nsp), canonicalize-type(t, bindings)], sp) | ast
+    | ParenNode([SymNode(kind, ksp), pat, t], sp) ->
+      if (kind == "param") -> ParenNode([SymNode(kind, ksp), pat, canonicalize-type(t, bindings)], sp) | ast
+    | _ -> ast
+
+let canonicalize-params(xs: List Ast, bindings: Map Str Str) -> List Ast =
+  match (xs)
+    | [] -> []
+    | x :: rest -> canonicalize-param(x, bindings) :: canonicalize-params(rest, bindings)
+
+let split-arrow(xs: List Ast, before: List Ast) -> Maybe Split =
+  match (xs)
+    | [] -> None()
+    | x :: rest ->
+      if (is-sym-name(x, "->")) -> Some(Split(before, x, rest)) | split-arrow(rest, append-asts(before, [x]))
+
+let canonicalize-signature-elems(elems: List Ast, bindings: Map Str Str) -> List Ast =
+  match (elems)
+    | head :: name :: rest ->
+      match (split-arrow(rest, []))
+        | None -> elems
+        | Some(Split(before, arrow, after)) ->
+          match (after)
+            | ret :: tail ->
+              append-asts([head, name], append-asts(canonicalize-params(before, bindings), arrow :: canonicalize-type(ret, bindings) :: tail))
+            | [] -> elems
+    | _ -> elems
+
+let canonicalize-field(ast: Ast, bindings: Map Str Str) -> Ast =
+  match (ast)
+    | ParenNode([SymNode(name, nsp), t], sp) ->
+      if (ends-colon(name)) -> ParenNode([SymNode(name, nsp), canonicalize-type(t, bindings)], sp) | ast
+    | _ -> ast
+
+let canonicalize-fields(xs: List Ast, bindings: Map Str Str) -> List Ast =
+  match (xs)
+    | [] -> []
+    | x :: rest -> canonicalize-field(x, bindings) :: canonicalize-fields(rest, bindings)
+
+let canonicalize-ctor-payloads(xs: List Ast, bindings: Map Str Str) -> List Ast =
+  match (xs)
+    | [] -> []
+    | x :: rest -> canonicalize-type(x, bindings) :: canonicalize-ctor-payloads(rest, bindings)
+
+let canonicalize-variant-ctor(ast: Ast, bindings: Map Str Str) -> Ast =
+  match (ast)
+    | ParenNode(head :: payloads, sp) -> ParenNode(head :: canonicalize-ctor-payloads(payloads, bindings), sp)
+    | _ -> ast
+
+let canonicalize-decl-form(ast: Ast, bindings: Map Str Str) -> Ast =
+  match (ast)
+    | ParenNode(elems, sp) ->
+      match (elems)
+        | head :: rest ->
+          match (sym-str(head))
+            | Some(hn) ->
+              match (hn)
+                | "pub" -> ParenNode(head :: map(fn (e) = canonicalize-decl-form(e, bindings), rest), sp)
+                | "defn" -> ParenNode(canonicalize-signature-elems(elems, bindings), sp)
+                | "let" -> ParenNode(canonicalize-signature-elems(elems, bindings), sp)
+                | "extern" -> ParenNode(canonicalize-signature-elems(elems, bindings), sp)
+                | "runtime" -> ParenNode(canonicalize-signature-elems(elems, bindings), sp)
+                | "record" -> canonicalize-record-form(head, rest, sp, bindings)
+                | "defrec" -> canonicalize-record-form(head, rest, sp, bindings)
+                | "type" -> canonicalize-variant-form(head, rest, sp, bindings)
+                | "variant" -> canonicalize-variant-form(head, rest, sp, bindings)
+                | "alias" -> canonicalize-alias-form(head, rest, sp, bindings)
+                | _ -> ast
+            | None -> ast
+        | [] -> ast
+    | _ -> ast
+
+let canonicalize-record-form(head: Ast, rest: List Ast, sp: Span, bindings: Map Str Str) -> Ast =
+  match (rest)
+    | name :: fields -> ParenNode(append-asts([head, name], canonicalize-fields(fields, bindings)), sp)
+    | [] -> ParenNode([head], sp)
+
+let canonicalize-variant-form(head: Ast, rest: List Ast, sp: Span, bindings: Map Str Str) -> Ast =
+  match (rest)
+    | name :: ctors -> ParenNode(append-asts([head, name], map(fn (c) = canonicalize-variant-ctor(c, bindings), ctors)), sp)
+    | [] -> ParenNode([head], sp)
+
+let canonicalize-alias-form(head: Ast, rest: List Ast, sp: Span, bindings: Map Str Str) -> Ast =
+  match (rest)
+    | name :: eq :: rhs :: tail ->
+      if (is-sym-name(eq, "=")) -> ParenNode(append-asts([head, name, eq, canonicalize-type(rhs, bindings)], tail), sp) | ParenNode(append-asts([head, name, canonicalize-type(eq, bindings)], tail), sp)
+    | name :: rhs :: tail -> ParenNode(append-asts([head, name, canonicalize-type(rhs, bindings)], tail), sp)
+    | _ -> ParenNode(head :: rest, sp)
+
+pub let canonicalize-types(forms: List Ast, bindings: Map Str Str) -> List Ast =
+  match (forms)
+    | [] -> []
+    | f :: rest ->
+      if (is-binding-form(f)) -> f :: canonicalize-types(rest, bindings) | canonicalize-decl-form(f, bindings) :: canonicalize-types(rest, bindings)
+
+; -- constructor uses -------------------------------------------------------
+
+let canonicalize-ctor-ast(ast: Ast, bindings: Map Str Str) -> Ast =
+  match (ast)
+    | SymNode(n, sp) ->
+      match (Map.lookup(n, bindings))
+        | Some(id) -> SymNode(id, sp)
+        | None -> ast
+    | ParenNode(elems, sp) ->
+      if (is-project-form(ast) || is-binding-form(ast)) -> ast | ParenNode(map(fn (e) = canonicalize-ctor-ast(e, bindings), elems), sp)
+    | BracketNode(elems, sp) -> BracketNode(map(fn (e) = canonicalize-ctor-ast(e, bindings), elems), sp)
+    | _ -> ast
+
+let canonicalize-ctor-form(ast: Ast, bindings: Map Str Str) -> Ast =
+  match (ast)
+    | ParenNode(head :: rest, sp) ->
+      match (sym-str(head))
+        | Some("pub") -> ParenNode(head :: map(fn (e) = canonicalize-ctor-form(e, bindings), rest), sp)
+        | Some("defn") | Some("let") ->
+          match (rest)
+            | name :: more -> ParenNode(head :: name :: map(fn (e) = canonicalize-ctor-ast(e, bindings), more), sp)
+            | [] -> ast
+        | Some("record") | Some("defrec") | Some("type") | Some("variant") | Some("alias") | Some("extern") | Some("runtime") -> ast
+        | _ -> canonicalize-ctor-ast(ast, bindings)
+    | _ -> canonicalize-ctor-ast(ast, bindings)
+
+pub let canonicalize-ctors(forms: List Ast, bindings: Map Str Str) -> List Ast =
+  match (forms)
+    | [] -> []
+    | f :: rest ->
+      if (is-binding-form(f)) -> f :: canonicalize-ctors(rest, bindings) | canonicalize-ctor-form(f, bindings) :: canonicalize-ctors(rest, bindings)
