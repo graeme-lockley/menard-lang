@@ -2,6 +2,7 @@
 ; when `./mn test` is run from a subdirectory. CLI dump flags stay in
 ; tests/phase2/desugar.test.ts.
 
+import "../reader/ast.mnd"
 import "../reader/read.mnd"
 import "../reader/print.mnd"
 import "../test/paths.mnd"

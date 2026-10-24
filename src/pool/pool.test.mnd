@@ -4,6 +4,7 @@
 ; `println` adds. `emit` still running collection stays in
 ; tests/phase2/pool.test.ts.
 
+import "../reader/ast.mnd"
 import "../reader/read.mnd"
 import "../test/paths.mnd"
 import "./pool.mnd"
