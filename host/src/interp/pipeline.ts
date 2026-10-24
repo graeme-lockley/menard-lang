@@ -189,9 +189,18 @@ function runModules(src: Uint8Array, path: string, host: Host): RunResult {
     const importBindings = new Map<string, Value>();
     for (const imp of mod.imports) {
       const ex = exportVals.get(imp.path);
+      const dep = loaded.graph.modules.get(imp.path);
       if (!ex) continue;
       if (imp.alias) {
         importBindings.set(imp.alias, { tag: "module", exports: ex });
+        // Constructors are type-level names; an aliased import leaves them
+        // in unqualified scope, matching the typer and module flattening.
+        if (dep) {
+          for (const ctor of dep.ctors) {
+            const v = ex.get(ctor);
+            if (v) importBindings.set(ctor, v);
+          }
+        }
       } else {
         for (const [k, v] of ex) importBindings.set(k, v);
       }

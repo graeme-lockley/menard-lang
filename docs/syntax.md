@@ -196,6 +196,11 @@ import "./lexer.mnd" as Lexer
 pub import std/io (IoError)
 import github:owner/repo@v1.2.0/console
 
+An aliased import binds the module's values under the alias. The types it
+declares and their constructors stay in unqualified scope, as they do for a
+bare import; `import std/json as Json` still lets `JsonFloat(1.5)` be written
+without the alias. The alias is for function and value access (`Json.encode`).
+
 extern mn_exists(path: Str) -> Bool
 
 pub alias Ints = List Int
