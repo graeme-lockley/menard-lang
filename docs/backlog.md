@@ -14,13 +14,13 @@
 
 | Phase | Theme | Items | Ready | In progress | Done |
 | --- | --- | ---: | ---: | ---: | ---: |
-| 0 | Truth, trust and the unsafe edges | 18 | 16 | 1 | 1 |
+| 0 | Truth, trust and the unsafe edges | 18 | 15 | 1 | 2 |
 | 1 | Daily loop and language decisions | 18 | 0 | 0 | 0 |
 | 2 | Standard library | 12 | 0 | 0 | 0 |
 | 3 | Operational concurrency | 8 | 0 | 0 | 0 |
 | 4 | Project and ecosystem | 17 | 0 | 0 | 0 |
 | 5 | Later | 9 | 0 | 0 | 0 |
-| **Total** | | **82** | **16** | **1** | **1** |
+| **Total** | | **82** | **15** | **1** | **2** |
 
 Priority mix: P0 = 24, P1 = 34, P2 = 19, P3 = 5.
 
@@ -42,7 +42,7 @@ Rows are ordered by phase, then priority, then area, then ID.
 | [CONC-05](reviews/2026-10-24-build-f.md#conc-05) | An actor's death must not hang its callers | Concurrency | P0 | 0 | ready | CONC-01, CONC-02 | [#22](https://github.com/graeme-lockley/menard-lang/issues/22) | — |
 | [DOC-01](reviews/2026-10-24-build-f.md#doc-01) | Truth pass on the guide, with executable snippets | Documentation | P0 | 0 | ready | LANG-01, LANG-03, LANG-06, LANG-07, LANG-15, LIB-08, CONC-10 | [#28](https://github.com/graeme-lockley/menard-lang/issues/28) | — |
 | [DOC-02](reviews/2026-10-24-build-f.md#doc-02) | Specification conformance, the new language decisions, and honest sizing | Documentation | P0 | 0 | ready | LANG-01, LANG-02, LANG-03, LANG-06, LANG-07, LANG-11, LANG-15, CONC-01, CONC-03, CONC-04, CONC-10, DOC-01 | [#29](https://github.com/graeme-lockley/menard-lang/issues/29) | — |
-| [OTH-01](reviews/2026-10-24-build-f.md#oth-01) | Add an MIT licence | Other | P0 | 0 | ready | — | [#24](https://github.com/graeme-lockley/menard-lang/issues/24) | — |
+| [OTH-01](reviews/2026-10-24-build-f.md#oth-01) | Add an MIT licence | Other | P0 | 0 | done | — | [#24](https://github.com/graeme-lockley/menard-lang/issues/24) | [#34](https://github.com/graeme-lockley/menard-lang/pull/34) |
 | [OTH-02](reviews/2026-10-24-build-f.md#oth-02) | Harden CI, add OpenSSL and macOS, and run the new checks | Other | P0 | 0 | ready | TOOL-01, TOOL-03, TOOL-05, CONC-03, CONC-04, CONC-10, OTH-03 | [#25](https://github.com/graeme-lockley/menard-lang/issues/25) | — |
 | [OTH-03](reviews/2026-10-24-build-f.md#oth-03) | Build the regression corpus the P0 bugs prove is missing | Other | P0 | 0 | ready | LANG-01, LANG-02, LANG-03, LANG-04, LANG-06, LANG-07, LANG-15, CONC-01, CONC-03, CONC-04, CONC-06, LIB-06 | [#26](https://github.com/graeme-lockley/menard-lang/issues/26) | — |
 | [LANG-09](reviews/2026-10-24-build-f.md#lang-09) | Operator-spacing diagnostics, and a real `help:` line | Language | P1 | 0 | ready | TOOL-03, DOC-05 | [#16](https://github.com/graeme-lockley/menard-lang/issues/16) | — |

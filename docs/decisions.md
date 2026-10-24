@@ -28,6 +28,29 @@ specification. Where a name changed, the entry that changed it says so.
 
 ---
 
+## 2026-10-24 — MIT licence
+
+### The decision
+
+Menard is released under the MIT licence. The full text is in `LICENSE` at the
+repository root; `host/package.json` declares `"license": "MIT"`.
+
+### Why
+
+MIT is short, permissive and already the default for the surrounding
+JavaScript/Bun ecosystem. It gives users the legal right to use, modify and
+distribute the implementation without a compatibility review, and it does not
+require per-file headers.
+
+### Rejected
+
+Apache-2.0 adds an explicit patent grant but also a notice file and more
+process than a small language needs at this stage. A copyleft licence would
+limit adoption. A separate contributor licence agreement is a later decision,
+not a prerequisite for publishing the source.
+
+---
+
 ## 2026-10-24 — Aliased imports keep constructors unqualified
 
 ### The decision
