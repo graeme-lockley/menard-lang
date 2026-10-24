@@ -16,7 +16,7 @@ function runNative(fixture: string): { status: number | null; stdout: string; st
   try {
     const built = spawnSync(
       process.execPath,
-      ["run", "host/src/cli/menard.ts", "run", "src/mn.mnd", "--", "build", fixture, "-o", binary, "--clean"],
+      ["run", "host/src/cli/menard.ts", "run", "src/mn.mnd", "--", "build", fixture, "-o", binary],
       { cwd: ROOT, encoding: "utf8", timeout: 180_000 },
     );
     if (built.status !== 0) return { status: built.status, stdout: built.stdout, stderr: built.stderr };
@@ -30,7 +30,7 @@ function runNative(fixture: string): { status: number | null; stdout: string; st
 function nativeCheck(fixture: string): { status: number | null; stderr: string } {
   const r = spawnSync(
     process.execPath,
-    ["run", "host/src/cli/menard.ts", "run", "src/mn.mnd", "--", "check", fixture, "--clean"],
+    ["run", "host/src/cli/menard.ts", "run", "src/mn.mnd", "--", "check", fixture],
     { cwd: ROOT, encoding: "utf8", timeout: 180_000 },
   );
   return { status: r.status, stderr: r.stderr };
