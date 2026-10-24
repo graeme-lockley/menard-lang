@@ -595,9 +595,28 @@ let write-extern-decls!(m: BitSink, ma: Int) -> Unit {
   write-extern-decl!(m, func-type-idx-for-arity(1))
   write-extern-decl!(m, func-type-idx-for-arity(2))
   write-extern-decl!(m, func-type-idx-for-arity(1))
+  ; Build F: defer + net + tls
+  write-extern-decl!(m, func-type-idx-for-arity(0))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(0))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(4))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(3))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(2))
+  write-extern-decl!(m, func-type-idx-for-arity(1))
 }
 
- ; mn_char_to_str, mn_sb_clear, mn_apply_3..8, mn_task_*
+ ; mn_char_to_str, mn_sb_clear, mn_apply_3..8, mn_task_*, mn_tcp_*, mn_tls_*
 
  ; mn_slot_set
 
@@ -936,6 +955,24 @@ let write-extern-vst-entries!(v: BitSink, num-strings: Int) -> Unit {
   write-record!(v, vst-code-entry, extern-task-notify-abs(num-strings) :: str-byte-ops("mn_task_notify"))
   write-record!(v, vst-code-entry, extern-task-dict-set-abs(num-strings) :: str-byte-ops("mn_task_dict_set"))
   write-record!(v, vst-code-entry, extern-task-dict-get-abs(num-strings) :: str-byte-ops("mn_task_dict_get"))
+  write-record!(v, vst-code-entry, extern-task-defer-enter-abs(num-strings) :: str-byte-ops("mn_task_defer_enter"))
+  write-record!(v, vst-code-entry, extern-task-defer-push-abs(num-strings) :: str-byte-ops("mn_task_defer_push"))
+  write-record!(v, vst-code-entry, extern-task-defer-leave-abs(num-strings) :: str-byte-ops("mn_task_defer_leave"))
+  write-record!(v, vst-code-entry, extern-tcp-listen-abs(num-strings) :: str-byte-ops("mn_tcp_listen"))
+  write-record!(v, vst-code-entry, extern-tcp-accept-abs(num-strings) :: str-byte-ops("mn_tcp_accept"))
+  write-record!(v, vst-code-entry, extern-tcp-connect-abs(num-strings) :: str-byte-ops("mn_tcp_connect"))
+  write-record!(v, vst-code-entry, extern-tcp-read-abs(num-strings) :: str-byte-ops("mn_tcp_read"))
+  write-record!(v, vst-code-entry, extern-tcp-write-abs(num-strings) :: str-byte-ops("mn_tcp_write"))
+  write-record!(v, vst-code-entry, extern-tcp-close-abs(num-strings) :: str-byte-ops("mn_tcp_close"))
+  write-record!(v, vst-code-entry, extern-udp-bind-abs(num-strings) :: str-byte-ops("mn_udp_bind"))
+  write-record!(v, vst-code-entry, extern-udp-send-abs(num-strings) :: str-byte-ops("mn_udp_send"))
+  write-record!(v, vst-code-entry, extern-udp-recv-abs(num-strings) :: str-byte-ops("mn_udp_recv"))
+  write-record!(v, vst-code-entry, extern-udp-close-abs(num-strings) :: str-byte-ops("mn_udp_close"))
+  write-record!(v, vst-code-entry, extern-tls-client-abs(num-strings) :: str-byte-ops("mn_tls_client"))
+  write-record!(v, vst-code-entry, extern-tls-server-abs(num-strings) :: str-byte-ops("mn_tls_server"))
+  write-record!(v, vst-code-entry, extern-tls-read-abs(num-strings) :: str-byte-ops("mn_tls_read"))
+  write-record!(v, vst-code-entry, extern-tls-write-abs(num-strings) :: str-byte-ops("mn_tls_write"))
+  write-record!(v, vst-code-entry, extern-tls-close-abs(num-strings) :: str-byte-ops("mn_tls_close"))
 }
 
 let lfunc-list-length(fs: List LFunc) -> Int =

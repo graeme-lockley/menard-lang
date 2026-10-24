@@ -206,6 +206,12 @@ function printBlock(ast: Ast & { tag: "list" }, ind: number): string {
 
 function printStmt(a: Ast, ind: number): string {
   if (head(a) === "let") return printForm(a, ind);
+  if (head(a) === "return" && a.tag === "list" && a.elems[1]) {
+    return `return ${printExpr(a.elems[1], ind)}`;
+  }
+  if (head(a) === "defer" && a.tag === "list" && a.elems[1]) {
+    return `defer ${printExpr(a.elems[1], ind)}`;
+  }
   return printExpr(a, ind);
 }
 

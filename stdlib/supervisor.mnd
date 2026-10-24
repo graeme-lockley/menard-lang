@@ -1,0 +1,98 @@
+; OTP-lite one-for-one supervisor helpers (Build F).
+; @module std/supervisor
+
+import std/actor as Actor
+pub import std/actor (Pid)
+import std/list as List
+import std/sched as Sched
+import std/task as Task
+
+pub type Restart =
+  | Permanent
+  | Transient
+  | Temporary
+
+pub record ChildSpec[a] {
+  start: () -> Pid a
+  restart: Restart
+}
+
+pub type Strategy =
+  | OneForOne
+
+; Permanent always; Transient only after cancel; Temporary never.
+; @test should-restart(Permanent(), false) => true
+; @test should-restart(Temporary(), true) => false
+; @test should-restart(Transient(), true) => true
+; @test should-restart(Transient(), false) => false
+pub let should-restart(policy: Restart, cancelled: Bool) -> Bool =
+  match (policy)
+    | Permanent() -> true
+    | Transient() -> cancelled
+    | Temporary() -> false
+
+; Start each child once; return Pids.
+; @test start-children([]) => []
+pub let start-children[a](children: List (ChildSpec a)) -> List (Pid a) =
+  List.map(
+    fn (s) = {
+      match (s)
+        | ChildSpec(boot, _) -> boot()
+    },
+    children
+  )
+
+; Cancel every child Pid (one-for-one stop).
+; @test stop-children([])
+pub let stop-children[a](pids: List (Pid a)) -> Unit =
+  List.for-each(Actor.cancel, pids)
+
+; Restart a single child by calling its start again.
+; @test {
+;   let p = restart-child(ChildSpec(fn () = Actor.spawn(fn (_) = ()), Permanent()))
+;   Actor.cancel(p)
+;   Actor.id(p) > 0
+; } => true
+pub let restart-child[a](spec: ChildSpec a) -> Pid a =
+  match (spec)
+    | ChildSpec(boot, _) -> boot()
+
+; Join one child and restart according to its Restart policy.
+let watch-one[a](spec: ChildSpec a) -> Unit =
+  match (spec)
+    | ChildSpec(boot, restart) ->
+      loop () {
+        let pid = boot()
+        match (Actor.join(pid))
+          | Ok(_) ->
+            if (should-restart(restart, false)) -> {
+              Task.yield()
+              recur()
+            } | ()
+          | Err(_) ->
+            if (should-restart(restart, true)) -> {
+              Task.yield()
+              recur()
+            } | ()
+      }
+
+; One-for-one: spawn a watcher per child under a scope; park until cancel.
+; Scaffolding — prefer start-children / stop-children when you need explicit
+; lifecycle; this loop does not yet surface child exit reasons to callers.
+; @test true
+pub let supervise[a](children: List (ChildSpec a)) -> Unit =
+  Task.scope(fn (scope) = {
+    List.for-each(
+      fn (spec) = {
+        let _ = Task.spawn-in(scope, fn () = {
+          watch-one(spec)
+          0
+        })
+        ()
+      },
+      children
+    )
+    let cell = Sched.wait-new()
+    let _ = Sched.wait(cell)
+    ()
+  })

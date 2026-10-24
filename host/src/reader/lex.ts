@@ -43,6 +43,7 @@ const KEYWORDS = new Set([
   "ref",
   "deref",
   "return",
+  "defer",
   "set!",
   "type",
   "while",

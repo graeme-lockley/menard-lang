@@ -239,7 +239,7 @@ pub let pool-extra-constants(objs: List PoolObj) -> Int =
 ; How many module-scope value ids the fixed runtime externs occupy.
 ; Defined here so the id helpers below can see it. The order those
 ; externs are declared in is documented with `extern-write-stdout-abs`.
-pub let extern-count = 107
+pub let extern-count = 125
 
 ; Cstring globals, then two globals per emitted object (shape, object),
 ; then the fixed runtime singletons. Function externs begin at this id.
@@ -626,6 +626,60 @@ pub let extern-task-dict-set-abs(num-strings: Int) -> Int =
 
 pub let extern-task-dict-get-abs(num-strings: Int) -> Int =
   num-strings + 106
+
+pub let extern-task-defer-enter-abs(num-strings: Int) -> Int =
+  num-strings + 107
+
+pub let extern-task-defer-push-abs(num-strings: Int) -> Int =
+  num-strings + 108
+
+pub let extern-task-defer-leave-abs(num-strings: Int) -> Int =
+  num-strings + 109
+
+pub let extern-tcp-listen-abs(num-strings: Int) -> Int =
+  num-strings + 110
+
+pub let extern-tcp-accept-abs(num-strings: Int) -> Int =
+  num-strings + 111
+
+pub let extern-tcp-connect-abs(num-strings: Int) -> Int =
+  num-strings + 112
+
+pub let extern-tcp-read-abs(num-strings: Int) -> Int =
+  num-strings + 113
+
+pub let extern-tcp-write-abs(num-strings: Int) -> Int =
+  num-strings + 114
+
+pub let extern-tcp-close-abs(num-strings: Int) -> Int =
+  num-strings + 115
+
+pub let extern-udp-bind-abs(num-strings: Int) -> Int =
+  num-strings + 116
+
+pub let extern-udp-send-abs(num-strings: Int) -> Int =
+  num-strings + 117
+
+pub let extern-udp-recv-abs(num-strings: Int) -> Int =
+  num-strings + 118
+
+pub let extern-udp-close-abs(num-strings: Int) -> Int =
+  num-strings + 119
+
+pub let extern-tls-client-abs(num-strings: Int) -> Int =
+  num-strings + 120
+
+pub let extern-tls-server-abs(num-strings: Int) -> Int =
+  num-strings + 121
+
+pub let extern-tls-read-abs(num-strings: Int) -> Int =
+  num-strings + 122
+
+pub let extern-tls-write-abs(num-strings: Int) -> Int =
+  num-strings + 123
+
+pub let extern-tls-close-abs(num-strings: Int) -> Int =
+  num-strings + 124
 
 ; Builtin constructor tags — must match runtime/src/variants.c.
 pub let tag-nil = 0

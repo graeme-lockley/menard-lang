@@ -10,6 +10,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../../host/src/interp/pipeline.ts";
 import { createLiveHost } from "../../host/src/host/index.ts";
+import {
+  opensslCflags,
+  opensslLibs,
+  runtimeInclude,
+  runtimeLibSrcs,
+} from "../helpers/runtime-link.ts";
 
 const rm = promisify(unlink);
 const mkdtempP = promisify(mkdtemp);
@@ -32,21 +38,8 @@ function whichTool(name: string): string | null {
 const clang = whichTool("clang");
 const llvmDis = whichTool("llvm-dis");
 
-const RUNTIME_LIB_SRCS = [
-  "runtime/src/alloc.c",
-  "runtime/src/gc.c",
-  "runtime/src/panic.c",
-  "runtime/src/print.c",
-  "runtime/src/shadow.c",
-  "runtime/src/variants.c",
-  "runtime/src/str.c",
-  "runtime/src/map.c",
-  "runtime/src/closure.c",
-  "runtime/src/io.c",
-  "runtime/src/equal.c",
-  "runtime/src/task.c",
-].map(abs);
-const RUNTIME_INCLUDE = abs("runtime/include");
+const RUNTIME_LIB_SRCS = runtimeLibSrcs(ROOT);
+const RUNTIME_INCLUDE = runtimeInclude(ROOT);
 const entry = "tests/phase2/oracle/spawn-capture.mnd";
 
 function emit(outPath: string): { exitCode: number; stderr: string } {
@@ -115,7 +108,17 @@ describe.skipIf(clang === null || llvmDis === null)("spawn-capture oracle", () =
 
       const link = spawnSync(
         clang!,
-        [bcPath, ...RUNTIME_LIB_SRCS, "-I", RUNTIME_INCLUDE, "-lm", "-o", binPath],
+        [
+          bcPath,
+          ...RUNTIME_LIB_SRCS,
+          "-I",
+          RUNTIME_INCLUDE,
+          ...opensslCflags(),
+          "-lm",
+          ...opensslLibs(),
+          "-o",
+          binPath,
+        ],
         { encoding: "utf-8" },
       );
       expect(link.status).toBe(0);

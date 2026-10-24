@@ -20,6 +20,7 @@ const seam = new Set([
   join(ROOT, "stdlib/proc.mnd"),
   join(ROOT, "stdlib/time.mnd"),
   join(ROOT, "stdlib/sched.mnd"),
+  join(ROOT, "stdlib/net.mnd"),
 ]);
 
 function codeOf(file: string): string {

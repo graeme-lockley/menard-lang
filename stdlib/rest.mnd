@@ -1,0 +1,73 @@
+; Small REST helpers over std/http (Build F).
+; @module std/rest
+
+pub import std/http (Request, Response, Method)
+import std/json as Json
+pub import std/json (Json)
+import std/map as Map
+import std/string as String
+
+; 200 JSON response.
+; @test {
+;   match (ok-json("{}"))
+;     | Response(c, _, b) -> c == 200 && b == "{}"
+;     | _ -> false
+; } => true
+pub let ok-json(body: Str) -> Response =
+  Response(200, Map.set("Content-Type", "application/json", Map.empty()), body)
+
+; 201 JSON response.
+; @test {
+;   match (created-json("{}"))
+;     | Response(c, _, _) -> c == 201
+;     | _ -> false
+; } => true
+pub let created-json(body: Str) -> Response =
+  Response(201, Map.set("Content-Type", "application/json", Map.empty()), body)
+
+; 404 plain-text response.
+; @test {
+;   match (not-found())
+;     | Response(c, _, _) -> c == 404
+;     | _ -> false
+; } => true
+pub let not-found() -> Response =
+  Response(404, Map.set("Content-Type", "text/plain", Map.empty()), "not found")
+
+; 400 plain-text response with message body.
+; @test {
+;   match (bad-request("x"))
+;     | Response(c, _, b) -> c == 400 && b == "x"
+;     | _ -> false
+; } => true
+pub let bad-request(msg: Str) -> Response =
+  Response(400, Map.set("Content-Type", "text/plain", Map.empty()), msg)
+
+; 405 plain-text response.
+; @test {
+;   match (method-not-allowed())
+;     | Response(c, _, _) -> c == 405
+;     | _ -> false
+; } => true
+pub let method-not-allowed() -> Response =
+  Response(405, Map.set("Content-Type", "text/plain", Map.empty()), "method not allowed")
+
+; Split "/a/b/c" into ["a", "b", "c"] (leading slash dropped).
+; @test path-segments("/a/b") => ["a", "b"]
+; @test path-segments("/") => []
+; @test path-segments("a") => ["a"]
+pub let path-segments(path: Str) -> List Str {
+  let p =
+    if (String.starts-with("/", path)) -> String.drop(1, path) | path
+  if (p == "") -> [] | String.split("/", p)
+}
+
+; Decode JSON body or BadRequest.
+; @test json-body(Request(GET(), "/", Map.empty(), "null")) => Ok(JsonNull())
+; @test json-body(Request(GET(), "/", Map.empty(), "{")) => Err("invalid json")
+pub let json-body(req: Request) -> Result Json Str =
+  match (req)
+    | Request(_, _, _, body) ->
+      match (Json.decode(body))
+        | Ok(v) -> Ok(v)
+        | Err(_) -> Err("invalid json")

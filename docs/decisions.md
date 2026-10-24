@@ -28,6 +28,25 @@ specification. Where a name changed, the entry that changed it says so.
 
 ---
 
+## 2026-10-24 — Build F: defer, net, HTTP, OpenSSL, bounded mailboxes
+
+### The decision
+
+Concurrency capstone (Build F): language **`defer`** (LIFO; cancel runs
+remaining cleanups); parkable **`std/net`** (TCP+UDP) and **OpenSSL** TLS via
+`mn_*`; Menard **`std/http`** + **`std/rest`**; bounded actor mailboxes
+(block-on-full, default 1024); **`std/supervisor`** one-for-one helpers.
+Networking is **native-only** (interpreter unbound). Details:
+[build-f-network.md](build-f-network.md).
+
+### Why
+
+§3.10.1a requires cleanup on cancel before concurrent I/O; Menard-first HTTP
+matches the library philosophy; one OpenSSL backend avoids platform `#ifdef`
+splits; block-on-full is industrial backpressure.
+
+---
+
 ## 2026-10-17 — FFI proving ground: SQLite (not EventKit)
 
 ### The decision

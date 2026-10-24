@@ -1146,6 +1146,10 @@ function infer(
         if (ast.elems[1]) return infer(env, ast.elems[1]!, local, subst);
         return prim("Unit");
       }
+      if (hn === "defer") {
+        if (ast.elems[1]) infer(env, ast.elems[1]!, local, subst);
+        return prim("Unit");
+      }
       if (hn === "match") return inferMatch(env, ast, local, subst);
       if (hn === "fn" || hn === "lambda") return inferLambda(env, ast, local, subst);
       if (hn === "quote") {

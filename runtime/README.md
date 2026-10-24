@@ -24,9 +24,15 @@ Allocation comes from a copying nursery. A minor collection traces the shadow st
 | `src/closure.c` | Heap closures |
 | `src/io.c` | Files, the environment, and `posix_spawn` |
 | `src/equal.c` | `=`, `compare`, and `show` |
-| `src/task.c` | Cooperative tasks (`mn_task_*`); per-task fibers, wait cells, GC roots (Build D) |
+| `src/task.c` | Cooperative tasks (`mn_task_*`); per-task fibers, wait cells, GC roots, `mn_task_defer_*` (Build D/F) |
+| `src/net.c` | Parkable TCP/UDP (`mn_tcp_*` / `mn_udp_*`) + `mn_net_poll` (Build F) |
+| `src/tls.c` | OpenSSL TLS (`mn_tls_*`) over a connected TCP fd (Build F) |
 
 `src/smoke_main.c` is a standalone allocator check (`make runtime-smoke`). It is not linked into a Menard program, because that program already defines `main`.
+
+### OpenSSL
+
+`tls.c` needs OpenSSL 3 headers and libs. The Makefile uses `pkg-config openssl` when available, else Homebrew (`/opt/homebrew/opt/openssl@3`) on macOS, else `-lssl -lcrypto`. The Menard driver (`src/cache/sep.mnd` / `src/mn.mnd`) discovers the same Homebrew paths, or honors `MENARD_OPENSSL_CFLAGS` / `MENARD_OPENSSL_LIBS` (space-separated).
 
 Shadow stacks are **per-task** (`shadow.c`); the collector visits every live
 task’s roots and `mn_task_visit_roots` (closures / results). See

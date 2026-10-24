@@ -1,0 +1,119 @@
+; HTTP gateway → UserManager actor (Build F).
+; Native only: `./mn build examples/http-user-manager.mnd -o build/http-um && ./build/http-um`
+;
+; Starts an HTTP server on port 8765:
+;   GET  /users/:id
+;   PUT  /users  JSON {"id","name","email"}
+;   GET  /search?q=Name
+
+import std/actor as Actor
+pub import std/actor (Ask, Pid)
+import std/http as Http
+pub import std/http (Request, Response, Method)
+import std/rest as Rest
+import std/json as Json
+pub import std/json (Json)
+import std/map as Map
+import std/string as String
+import std/list as List
+
+record User {
+  id: Str
+  name: Str
+  email: Str
+}
+
+type UserReq =
+  | Put(User)
+  | Get(Str)
+  | Search(Str)
+
+type UserRes =
+  | OkUser(User)
+  | OkUsers(List User)
+  | Missing
+  | BadRequest(Str)
+
+let step(db: Map Str User, req: UserReq) -> (Map Str User * UserRes) =
+  match (req)
+    | Put(u) ->
+      match (u)
+        | User(id, _, _) -> (Map.set(id, u, db), OkUser(u))
+    | Get(id) ->
+      match (Map.lookup(id, db))
+        | Some(u) -> (db, OkUser(u))
+        | None() -> (db, Missing())
+    | Search(q) -> {
+        let users =
+          List.filter-map(
+            fn (id) = {
+              match (Map.lookup(id, db))
+                | None -> None()
+                | Some(u) ->
+                  match (u)
+                    | User(_, name, _) ->
+                      if (name == q) -> Some(u) | None()
+            },
+            Map.keys(db)
+          )
+        (db, OkUsers(users))
+      }
+
+let user-json(u: User) -> Json =
+  match (u)
+    | User(id, name, email) ->
+      JsonObject({
+        "id" => JsonStr(id),
+        "name" => JsonStr(name),
+        "email" => JsonStr(email),
+      })
+
+let handle(um: Pid (Ask UserReq UserRes), req: Request) -> Response =
+  match (req)
+    | Request(GET(), path, _, _) ->
+      cond
+        | String.starts-with("/users/", path) -> {
+            let id = String.drop(7, path)
+            match (Actor.call(um, Get(id)))
+              | Err(_) -> Rest.bad-request("actor error")
+              | Ok(Missing()) -> Rest.not-found()
+              | Ok(OkUser(u)) -> Rest.ok-json(Json.encode(user-json(u)))
+              | Ok(_) -> Rest.bad-request("unexpected")
+          }
+        | String.starts-with("/search?q=", path) -> {
+            let q = String.drop(10, path)
+            match (Actor.call(um, Search(q)))
+              | Err(_) -> Rest.bad-request("actor error")
+              | Ok(OkUsers(xs)) ->
+                Rest.ok-json(Json.encode(JsonArray(List.map(user-json, xs))))
+              | Ok(_) -> Rest.bad-request("unexpected")
+          }
+        | else -> Rest.not-found()
+    | Request(PUT(), "/users", _, body) ->
+      match (Json.decode(body))
+        | Err(_) -> Rest.bad-request("invalid json")
+        | Ok(JsonObject(m)) -> {
+            let id = Map.lookup("id", m)
+            let name = Map.lookup("name", m)
+            let email = Map.lookup("email", m)
+            match ((id, name, email))
+              | (Some(JsonStr(i)), Some(JsonStr(n)), Some(JsonStr(e))) -> {
+                  let u = User(i, n, e)
+                  match (Actor.call(um, Put(u)))
+                    | Err(_) -> Rest.bad-request("actor error")
+                    | Ok(OkUser(u2)) -> Rest.created-json(Json.encode(user-json(u2)))
+                    | Ok(_) -> Rest.bad-request("unexpected")
+                }
+              | _ -> Rest.bad-request("need id,name,email strings")
+          }
+        | Ok(_) -> Rest.bad-request("object required")
+    | Request(_, _, _, _) -> Rest.method-not-allowed()
+
+let main() -> Int {
+  let um = Actor.serve-state(Map.empty(), step)
+  Actor.register("user-manager", um)
+  println("listening on :8765")
+  match (Http.serve(8765, fn (req) = handle(um, req)))
+    | Ok(_) -> 0
+    | Err(_) -> 1
+}

@@ -567,20 +567,14 @@ This matches “small OS interface; everything possible in Menard.”
 
 ### Done when
 
-- [ ] Accept/connect loops + per-connection tasks work under cancel/shutdown.
-- [ ] Resource cleanup verified on cancel paths.
-- [ ] Menard HTTP **server** and **client** minimal path (HTTP/1.1 subset).
-- [ ] REST-style example (e.g. JSON resource over HTTP) in Menard.
-- [ ] HTTPS path defined: works, or explicitly deferred with a written decision.
-- [ ] Example: HTTP ↔ actor UserManager (or equivalent).
-- [ ] Bounded mailbox or explicit “unbounded v1 + documented risk” decision
-  ```
-  recorded if bounds slip.
-  ```
-- [ ] Dual-host: native required; interpreter may be partial but must not claim
-  ```
-  false agreement.
-  ```
+- [x] Accept/connect loops + per-connection tasks work under cancel/shutdown.
+- [x] Resource cleanup verified on cancel paths (`defer` + cancel).
+- [x] Menard HTTP **server** and **client** minimal path (HTTP/1.1 subset).
+- [x] REST-style example (e.g. JSON resource over HTTP) in Menard.
+- [x] HTTPS path defined: OpenSSL via `mn_tls_*` (see [build-f-network.md](build-f-network.md)).
+- [x] Example: HTTP ↔ actor UserManager (or equivalent).
+- [x] Bounded mailbox (block-on-full, default 1024).
+- [x] Dual-host: native required; interpreter unbound for net/TLS (no false agreement).
 
 ### Results / outputs
 
@@ -591,22 +585,11 @@ This matches “small OS interface; everything possible in Menard.”
 | Supervision/backpressure | Production services |
 | Feedback into design/spec ratification of concurrency | `decisions.md` / spec when ready |
 
-### Open questions (drive planning)
+### Decisions (Stage F)
 
-1. Socket module naming and seam confinement (`std/net` vs `std/tcp`)?
-2. HTTP in `std/http` now, or thin sockets in std and HTTP as `github:` first?
-3. TLS for HTTPS: `mn_*` to a system lib (BoringSSL/OpenSSL), FFI (Build B
-
-   pattern), or defer HTTPS to a follow-on build?
-4. REST: just examples/conventions, or a small `std/rest` helper module?
-5. Resource cleanup: language `defer`-like form vs library `with-*` only?
-6. Interpreter: full parkable sockets or native-only networking for v1?
-7. Bounded mailbox default size / overflow policy (block, drop, error)?
-8. Supervisor API minimal shape (parent link vs explicit `supervise`)?
-9. HTTP/1.1 subset: smallest useful surface (request line + headers + body)?
-10. How does shutdown drain in-flight connection tasks?
-11. Load/soak test harness: in-repo or manual for v1?
-12. UDP in F or later?
+Recorded in [build-f-network.md](build-f-network.md): `std/net` (TCP+UDP),
+`std/http` + `std/rest`, OpenSSL `mn_tls_*`, language `defer`, native-only net,
+block-on-full mailboxes (1024), `std/supervisor` one-for-one helpers.
 
 ---
 
@@ -684,4 +667,5 @@ callbacks). **C → D is mandatory.**
 | [build-c-suspension.md](build-c-suspension.md) | Build C mechanism + temporary APIs |
 | [build-d-tasks.md](build-d-tasks.md) | Build D Task API + wait cells + cancel |
 | [build-e-actors.md](build-e-actors.md) | Build E Mailbox + Actor + lifecycle |
+| [build-f-network.md](build-f-network.md) | Build F defer + net + HTTP + supervision |
 | [runtime/README.md](../runtime/README.md) | C runtime layout |

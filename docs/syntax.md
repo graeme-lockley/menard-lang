@@ -150,7 +150,7 @@ which is what stays total on invalid UTF-8.
 
 ```
 alias  cond  else  extern  fn  if  import  let  loop  match
-panic  pub  record  recur  ref  deref  return  set!  type  while  when
+panic  pub  record  recur  ref  deref  return  defer  set!  type  while  when
 ```
 
 `when` is a pattern guard, not a statement. `else` is a `cond` or `match` arm
@@ -378,7 +378,7 @@ not type application.
 ## 5. Expressions
 
 ```
-expr        = cond / if / match / loop / while / lambda / block / return / panic / bin
+expr        = cond / if / match / loop / while / lambda / block / return / defer / panic / bin
 cond        = "cond" cond-arm+
 cond-arm    = "|" test "->" expr
 if          = "if" "(" expr ")" "->" expr ["|" expr]
@@ -390,6 +390,7 @@ binding     = lower "=" expr
 while       = "while" "(" expr ")" block
 lambda      = "fn" "(" param,* ")" ["->" type] body
 return      = "return" expr
+defer       = "defer" expr
 panic       = "panic" "(" expr ")"
 block       = "{" expr+ "}"
 map         = "{" [map-entry ("," map-entry)* [","]] "}"

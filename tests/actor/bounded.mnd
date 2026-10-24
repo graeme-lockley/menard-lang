@@ -1,0 +1,48 @@
+; Build F: bounded mailbox block-on-full + space notify.
+import std/actor as Actor
+pub import std/actor (ActorCancelled, ActorDead)
+import std/task as Tsk
+
+let main() -> Int {
+  let mb = Actor.mailbox-new-bounded(2)
+  let _ = Actor.send(mb, 1)
+  let _ = Actor.send(mb, 2)
+  let blocked = ref(0)
+  let filler = Tsk.spawn(fn () = {
+    set!(blocked, 1)
+    match (Actor.send(mb, 3))
+      | Ok(_) -> {
+          set!(blocked, 2)
+          0
+        }
+      | Err(_) -> {
+          set!(blocked, -1)
+          0
+        }
+  })
+  loop ()
+    if (deref(blocked) == 0) -> {
+      Tsk.yield()
+      recur()
+    } | ()
+  ; Filler should still be parked on full mailbox.
+  println(deref(blocked))
+  let a = match (Actor.receive(mb))
+    | Ok(n) -> n
+    | Err(_) -> 0
+  println(a)
+  loop ()
+    if (deref(blocked) != 2) -> {
+      Tsk.yield()
+      recur()
+    } | ()
+  let _ = Tsk.join(filler)
+  let b = match (Actor.receive(mb))
+    | Ok(n) -> n
+    | Err(_) -> 0
+  let c = match (Actor.receive(mb))
+    | Ok(n) -> n
+    | Err(_) -> 0
+  println(b + c)
+  0
+}

@@ -1,0 +1,260 @@
+; Minimal HTTP/1.1 client + server in Menard (Build F).
+; Request line + headers + Content-Length body.
+; @module std/http
+
+import std/net as Net
+pub import std/io (IoError)
+import std/int as Int
+import std/list as List
+import std/map as Map
+import std/string as String
+import std/task as Task
+
+pub type Method =
+  | GET
+  | POST
+  | PUT
+  | DELETE
+  | HEAD
+  | OPTIONS
+  | OtherMethod(Str)
+
+pub record Request {
+  method: Method
+  path: Str
+  headers: Map Str Str
+  body: Str
+}
+
+pub record Response {
+  status: Int
+  headers: Map Str Str
+  body: Str
+}
+
+pub type HttpError =
+  | NetErr(IoError)
+  | BadRequest(Str)
+  | Incomplete
+  | Closed
+
+; Parse a method token into Method.
+let method-of(s: Str) -> Method =
+  cond
+    | s == "GET" -> GET()
+    | s == "POST" -> POST()
+    | s == "PUT" -> PUT()
+    | s == "DELETE" -> DELETE()
+    | s == "HEAD" -> HEAD()
+    | s == "OPTIONS" -> OPTIONS()
+    | else -> OtherMethod(s)
+
+; Render a Method as its wire spelling.
+let method-str(m: Method) -> Str =
+  match (m)
+    | GET() -> "GET"
+    | POST() -> "POST"
+    | PUT() -> "PUT"
+    | DELETE() -> "DELETE"
+    | HEAD() -> "HEAD"
+    | OPTIONS() -> "OPTIONS"
+    | OtherMethod(s) -> s
+
+; Prefer exact then common Content-Length spellings.
+let content-length(headers: Map Str Str) -> Int =
+  match (Map.lookup("content-length", headers))
+    | Some(s) -> Int.from-str(s) ? 0
+    | None ->
+      match (Map.lookup("Content-Length", headers))
+        | Some(s) -> Int.from-str(s) ? 0
+        | None -> 0
+
+; Read until the header/body separator appears (or EOF/error).
+let read-headers(fd: Int, acc: Str) -> Result Str HttpError =
+  match (String.index-of("\r\n\r\n", acc))
+    | Some(_) -> Ok(acc)
+    | None ->
+      match (Net.read(fd, 4096))
+        | Err(e) -> Err(NetErr(e))
+        | Ok("") ->
+          if (acc == "") -> Err(Closed()) | Err(Incomplete())
+        | Ok(chunk) -> read-headers(fd, String.concat(acc, chunk))
+
+; Fold `Name: value` lines into a header map.
+let parse-header-lines(lines: List Str, headers: Map Str Str) -> Map Str Str =
+  match (lines)
+    | [] -> headers
+    | line :: rest ->
+      match (String.index-of(":", line))
+        | None -> parse-header-lines(rest, headers)
+        | Some(at) -> {
+            let name = String.slice(0, at, line)
+            let raw = String.drop(at + 1, line)
+            let val =
+              if (String.starts-with(" ", raw)) -> String.drop(1, raw) | raw
+            parse-header-lines(rest, Map.set(name, val, headers))
+          }
+
+; Read until `need` body bytes are accumulated.
+let read-body(fd: Int, need: Int, acc: Str) -> Result Str HttpError =
+  cond
+    | need <= 0 -> Ok(acc)
+    | String.length(acc) >= need -> Ok(String.slice(0, need, acc))
+    | else ->
+      match (Net.read(fd, need - String.length(acc)))
+        | Err(e) -> Err(NetErr(e))
+        | Ok("") -> Err(Incomplete())
+        | Ok(chunk) -> read-body(fd, need, String.concat(acc, chunk))
+
+; Parse a raw HTTP/1.1 request buffer into Request plus leftover bytes.
+let parse-request(raw: Str) -> Result (Request * Str) HttpError =
+  match (String.index-of("\r\n\r\n", raw))
+    | None -> Err(Incomplete())
+    | Some(at) -> {
+        let head = String.slice(0, at, raw)
+        let rest = String.drop(at + 4, raw)
+        let lines = String.split("\r\n", head)
+        match (lines)
+          | [] -> Err(BadRequest("empty"))
+          | req-line :: hdrs ->
+            match (String.split(" ", req-line))
+              | [meth, path, _] -> {
+                  let headers = parse-header-lines(hdrs, Map.empty())
+                  let n = content-length(headers)
+                  if (String.length(rest) < n) -> Err(Incomplete()) | {
+                    let body = String.slice(0, n, rest)
+                    let leftover = String.drop(n, rest)
+                    Ok((Request(method-of(meth), path, headers, body), leftover))
+                  }
+                }
+              | _ -> Err(BadRequest("bad request line"))
+      }
+
+; Render headers as `Name: value\r\n` lines.
+let format-headers(headers: Map Str Str) -> Str =
+  List.fold(
+    fn (acc, k) = {
+      match (Map.lookup(k, headers))
+        | None -> acc
+        | Some(v) -> String.concat(acc, k, ": ", v, "\r\n")
+    },
+    "",
+    Map.keys(headers)
+  )
+
+; Serialize a Response to HTTP/1.1 bytes (always sets Content-Length).
+; @test String.starts-with("HTTP/1.1 200 ", format-response(Response(200, Map.empty(), "hi"))) => true
+pub let format-response(res: Response) -> Str =
+  match (res)
+    | Response(status, headers, body) -> {
+        let with-len = Map.set("Content-Length", String.from-int(String.length(body)), headers)
+        String.concat(
+          "HTTP/1.1 ",
+          String.from-int(status),
+          " OK\r\n",
+          format-headers(with-len),
+          "\r\n",
+          body
+        )
+      }
+
+; Serialize a Request to HTTP/1.1 bytes (sets Host and Content-Length).
+; @test String.starts-with("GET / HTTP/1.1", format-request("h", Request(GET(), "/", Map.empty(), ""))) => true
+pub let format-request(host: Str, req: Request) -> Str =
+  match (req)
+    | Request(method, path, headers, body) -> {
+        let h0 = Map.set("Host", host, headers)
+        let h1 = Map.set("Content-Length", String.from-int(String.length(body)), h0)
+        String.concat(
+          method-str(method),
+          " ",
+          path,
+          " HTTP/1.1\r\n",
+          format-headers(h1),
+          "\r\n",
+          body
+        )
+      }
+
+; Read one HTTP request from a connected fd. Native only.
+; @test true
+pub let read-request(fd: Int) -> Result Request HttpError =
+  match (read-headers(fd, ""))
+    | Err(e) -> Err(e)
+    | Ok(raw) ->
+      match (parse-request(raw))
+        | Err(e) -> Err(e)
+        | Ok((req, _)) -> Ok(req)
+
+; Write one HTTP response to a connected fd. Native only.
+; @test true
+pub let write-response(fd: Int, res: Response) -> Result Unit HttpError =
+  match (Net.write(fd, format-response(res)))
+    | Err(e) -> Err(NetErr(e))
+    | Ok(_) -> Ok(())
+
+; Accept loop under Task.scope; defer closes the listener. Native only.
+; @test true
+pub let serve(port: Int, handler: (Request) -> Response) -> Result Unit HttpError =
+  match (Net.listen(port))
+    | Err(e) -> Err(NetErr(e))
+    | Ok(listener) -> {
+        defer Net.close(listener)
+        Task.scope(fn (scope) = {
+          loop () {
+            match (Net.accept(listener))
+              | Err(_) -> ()
+              | Ok(conn) -> {
+                  let _ =
+                    Task.spawn-in(scope, fn () = {
+                      defer Net.close(conn)
+                      match (read-request(conn))
+                        | Err(_) -> 0
+                        | Ok(req) -> {
+                            let _ = write-response(conn, handler(req))
+                            0
+                          }
+                    })
+                  recur()
+                }
+          }
+        })
+        Ok(())
+      }
+
+; One-shot HTTP client request. Native only.
+; @test true
+pub let request(host: Str, port: Int, req: Request) -> Result Response HttpError =
+  match (Net.connect(host, port))
+    | Err(e) -> Err(NetErr(e))
+    | Ok(fd) -> {
+        defer Net.close(fd)
+        match (Net.write(fd, format-request(host, req)))
+          | Err(e) -> Err(NetErr(e))
+          | Ok(_) ->
+            match (read-headers(fd, ""))
+              | Err(e) -> Err(e)
+              | Ok(raw) ->
+                match (String.index-of("\r\n\r\n", raw))
+                  | None -> Err(Incomplete())
+                  | Some(at) -> {
+                      let head = String.slice(0, at, raw)
+                      let rest = String.drop(at + 4, raw)
+                      let lines = String.split("\r\n", head)
+                      match (lines)
+                        | [] -> Err(BadRequest("empty response"))
+                        | status-line :: hdrs -> {
+                            let headers = parse-header-lines(hdrs, Map.empty())
+                            let n = content-length(headers)
+                            match (read-body(fd, n, rest))
+                              | Err(e) -> Err(e)
+                              | Ok(body) -> {
+                                  let code =
+                                    match (String.split(" ", status-line))
+                                      | _ :: c :: _ -> Int.from-str(c) ? 0
+                                      | _ -> 0
+                                  Ok(Response(code, headers, body))
+                                }
+                          }
+                    }
+      }

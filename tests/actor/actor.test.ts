@@ -56,6 +56,7 @@ function runNative(fixture: string): { status: number | null; stdout: string; st
 
 /* sum sends, get ok, search count, notfound, registry get, death, escalate saw */
 const BASIC_EXPECTED = "30\n1\n1\n0\n1\n1\n11\n";
+const BOUNDED_EXPECTED = "1\n1\n5\n";
 
 describe("Build E actors", () => {
   test("interpreter: mailbox + Actor.call + death + registry + escalate", () => {
@@ -65,6 +66,13 @@ describe("Build E actors", () => {
     expect(r.stdout).toBe(BASIC_EXPECTED);
   });
 
+  test("interpreter: bounded mailbox block-on-full", () => {
+    const r = runInterpreter("tests/actor/bounded.mnd");
+    expect(r.stderr).not.toContain("panic");
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe(BOUNDED_EXPECTED);
+  });
+
   test.skipIf(!Bun.which("clang"))(
     "native: actor acceptance",
     () => {
@@ -72,6 +80,17 @@ describe("Build E actors", () => {
       expect(r.stderr).toBe("");
       expect(r.status).toBe(0);
       expect(r.stdout).toBe(BASIC_EXPECTED);
+    },
+    { timeout: 180_000 },
+  );
+
+  test.skipIf(!Bun.which("clang"))(
+    "native: bounded mailbox block-on-full",
+    () => {
+      const r = runNative("tests/actor/bounded.mnd");
+      expect(r.stderr).toBe("");
+      expect(r.status).toBe(0);
+      expect(r.stdout).toBe(BOUNDED_EXPECTED);
     },
     { timeout: 180_000 },
   );

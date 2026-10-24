@@ -1,0 +1,43 @@
+; Build F: HTTP server + client in one process (native).
+import std/http as Http
+pub import std/http (Request, Response, Method, GET)
+import std/map as Map
+import std/task as Task
+import std/net as Net
+
+let main() -> Int {
+  let port = 18765
+  let ready = ref(0)
+  let server = Task.spawn(fn () = {
+    set!(ready, 1)
+    match (Http.serve(port, fn (req) = {
+      match (req)
+        | Request(_, path, _, _) ->
+          Response(200, Map.set("Content-Type", "text/plain", Map.empty()), path)
+    }))
+      | Ok(_) -> 0
+      | Err(_) -> 1
+  })
+  loop ()
+    if (deref(ready) == 0) -> {
+      Task.yield()
+      recur()
+    } | ()
+  ; Give the accept loop a moment to listen.
+  Task.yield()
+  Task.yield()
+  match (Http.request("127.0.0.1", port, Request(GET(), "/hi", Map.empty(), "")))
+    | Ok(Response(code, _, body)) -> {
+        println(code)
+        println(body)
+        Task.cancel(server)
+        let _ = Task.join(server)
+        0
+      }
+    | Err(_) -> {
+        println(0)
+        Task.cancel(server)
+        let _ = Task.join(server)
+        1
+      }
+}

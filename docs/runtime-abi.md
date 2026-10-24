@@ -25,6 +25,7 @@ to this catalogue. Example: [examples/ffi/sqlite/](../examples/ffi/sqlite/)
 | `stdlib/proc.mnd` | Argv-vector spawn |
 | `stdlib/time.mnd` | Wall clock only (`mn_now_ms`) |
 | `stdlib/sched.mnd` | **Internal** task runtime (Build D) — not Platform API; prefer `std/task` |
+| `stdlib/net.mnd` | Parkable TCP/UDP + OpenSSL TLS (Build F); interpreter unbound |
 
 Confinement is enforced by the host module loader (`E_EXTERN_SEAM`) and by lint
 tests. Compiler/runtime-internal symbols (strings, maps, GC, apply, floats, …)
@@ -51,6 +52,20 @@ Public façade: `stdlib/task.mnd` (no `extern`; wraps `std/sched`).
 | `mn_task_notify` | `Sched.notify` | Wake ≤1 waiter; sticky if none |
 | `mn_task_dict_set` | `Sched.dict-set` | Type-erased process dict (Build E registry) |
 | `mn_task_dict_get` | `Sched.dict-get` | → `Maybe a` (honor-system typing) |
+| `mn_task_defer_enter` | `Sched.defer-enter` | Defer scope enter (Build F) |
+| `mn_task_defer_push` | `Sched.defer-push` | Push zero-arg cleanup closure |
+| `mn_task_defer_leave` | `Sched.defer-leave` | Run LIFO cleanups for current depth |
+
+### Network + TLS (Build F)
+
+See [build-f-network.md](build-f-network.md). Platform façade: `stdlib/net.mnd`.
+Native only — interpreter stubs throw unbound.
+
+| Symbol | Notes |
+|---|---|
+| `mn_tcp_listen` / `accept` / `connect` / `read` / `write` / `close` | Non-blocking; park via wait cells + `mn_net_poll` |
+| `mn_udp_bind` / `send` / `recv` / `close` | Same parking model |
+| `mn_tls_client` / `server` / `read` / `write` / `close` | OpenSSL over an existing TCP fd |
 
 ## App-facing seam symbols
 

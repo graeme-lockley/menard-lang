@@ -1,0 +1,117 @@
+; Parkable TCP/UDP + TLS (Build F). Native seam; interpreter unbound.
+; @module std/net
+
+pub import std/io (IoError)
+
+extern mn_tcp_listen(port: Int) -> Result Int IoError
+extern mn_tcp_accept(fd: Int) -> Result Int IoError
+extern mn_tcp_connect(host: Str, port: Int) -> Result Int IoError
+extern mn_tcp_read(fd: Int, max: Int) -> Result Str IoError
+extern mn_tcp_write(fd: Int, data: Str) -> Result Unit IoError
+extern mn_tcp_close(fd: Int) -> Unit
+
+extern mn_udp_bind(port: Int) -> Result Int IoError
+extern mn_udp_send(fd: Int, host: Str, port: Int, data: Str) -> Result Unit IoError
+extern mn_udp_recv(fd: Int, max: Int) -> Result Str IoError
+extern mn_udp_close(fd: Int) -> Unit
+
+extern mn_tls_client(fd: Int) -> Result Int IoError
+extern mn_tls_server(fd: Int, cert: Str, key: Str) -> Result Int IoError
+extern mn_tls_read(id: Int, max: Int) -> Result Str IoError
+extern mn_tls_write(id: Int, data: Str) -> Result Unit IoError
+extern mn_tls_close(id: Int) -> Unit
+
+; --- TCP ---
+
+; Bind and listen on a TCP port. Native only.
+; @test true
+pub let listen(port: Int) -> Result Int IoError =
+  mn_tcp_listen(port)
+
+; Accept one connection. Parks until ready. Native only.
+; @test true
+pub let accept(fd: Int) -> Result Int IoError =
+  mn_tcp_accept(fd)
+
+; Connect to host:port. Parks until connected. Native only.
+; @test true
+pub let connect(host: Str, port: Int) -> Result Int IoError =
+  mn_tcp_connect(host, port)
+
+; Read up to max bytes. Parks until data or EOF. Native only.
+; @test true
+pub let read(fd: Int, max: Int) -> Result Str IoError =
+  mn_tcp_read(fd, max)
+
+; Write data. Parks until complete or error. Native only.
+; @test true
+pub let write(fd: Int, data: Str) -> Result Unit IoError =
+  mn_tcp_write(fd, data)
+
+; Close a TCP fd. Native only.
+; @test true
+pub let close(fd: Int) -> Unit =
+  mn_tcp_close(fd)
+
+; Run body with a connected fd; always close (uses language defer). Native only.
+; @test true
+pub let with-connection[a](fd: Int, body: (Int) -> a) -> a {
+  defer close(fd)
+  body(fd)
+}
+
+; --- UDP ---
+
+; Bind a UDP socket to a port. Native only.
+; @test true
+pub let udp-bind(port: Int) -> Result Int IoError =
+  mn_udp_bind(port)
+
+; Send a UDP datagram. Native only.
+; @test true
+pub let udp-send(fd: Int, host: Str, port: Int, data: Str) -> Result Unit IoError =
+  mn_udp_send(fd, host, port, data)
+
+; Receive a UDP datagram (up to max bytes). Native only.
+; @test true
+pub let udp-recv(fd: Int, max: Int) -> Result Str IoError =
+  mn_udp_recv(fd, max)
+
+; Close a UDP fd. Native only.
+; @test true
+pub let udp-close(fd: Int) -> Unit =
+  mn_udp_close(fd)
+
+; --- TLS (OpenSSL) ---
+
+; Client TLS handshake over a connected TCP fd. Native only.
+; @test true
+pub let tls-client(fd: Int) -> Result Int IoError =
+  mn_tls_client(fd)
+
+; Server TLS handshake with cert/key paths. Native only.
+; @test true
+pub let tls-server(fd: Int, cert: Str, key: Str) -> Result Int IoError =
+  mn_tls_server(fd, cert, key)
+
+; Read from a TLS session. Native only.
+; @test true
+pub let tls-read(id: Int, max: Int) -> Result Str IoError =
+  mn_tls_read(id, max)
+
+; Write to a TLS session. Native only.
+; @test true
+pub let tls-write(id: Int, data: Str) -> Result Unit IoError =
+  mn_tls_write(id, data)
+
+; Close a TLS session. Native only.
+; @test true
+pub let tls-close(id: Int) -> Unit =
+  mn_tls_close(id)
+
+; Run body with a TLS id; always tls-close (uses language defer). Native only.
+; @test true
+pub let with-tls[a](id: Int, body: (Int) -> a) -> a {
+  defer tls-close(id)
+  body(id)
+}

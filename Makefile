@@ -11,6 +11,17 @@ endif
 # `trunc` lives in libm rather than libc.
 CFLAGS ?= -std=c11 -Wall -Wextra -O2 -D_DEFAULT_SOURCE
 LDLIBS ?= -lm
+OPENSSL_CFLAGS := $(shell pkg-config --cflags openssl 2>/dev/null)
+OPENSSL_LIBS := $(shell pkg-config --libs openssl 2>/dev/null || echo -lssl -lcrypto)
+# Homebrew OpenSSL on macOS when pkg-config is missing.
+ifeq ($(OPENSSL_CFLAGS),)
+  ifneq ($(wildcard /opt/homebrew/opt/openssl@3/include),)
+    OPENSSL_CFLAGS := -I/opt/homebrew/opt/openssl@3/include
+    OPENSSL_LIBS := -L/opt/homebrew/opt/openssl@3/lib -lssl -lcrypto
+  endif
+endif
+CFLAGS += $(OPENSSL_CFLAGS)
+LDLIBS += $(OPENSSL_LIBS)
 RUNTIME_DIR := runtime
 RUNTIME_BUILD := $(RUNTIME_DIR)/build
 RUNTIME_SRCS := $(RUNTIME_DIR)/src/alloc.c $(RUNTIME_DIR)/src/gc.c $(RUNTIME_DIR)/src/panic.c $(RUNTIME_DIR)/src/shadow.c $(RUNTIME_DIR)/src/smoke_main.c
@@ -19,7 +30,7 @@ RUNTIME_SRCS := $(RUNTIME_DIR)/src/alloc.c $(RUNTIME_DIR)/src/gc.c $(RUNTIME_DIR
 # shadow stack, and the fd-1 print helpers. Deliberately excludes
 # smoke_main.c: that file defines its own `main`, which would collide with
 # the `main` an emitted `.bc` module already defines.
-RUNTIME_LIB_SRCS := $(RUNTIME_DIR)/src/alloc.c $(RUNTIME_DIR)/src/gc.c $(RUNTIME_DIR)/src/panic.c $(RUNTIME_DIR)/src/print.c $(RUNTIME_DIR)/src/shadow.c $(RUNTIME_DIR)/src/variants.c $(RUNTIME_DIR)/src/str.c $(RUNTIME_DIR)/src/map.c $(RUNTIME_DIR)/src/closure.c $(RUNTIME_DIR)/src/io.c $(RUNTIME_DIR)/src/equal.c $(RUNTIME_DIR)/src/task.c
+RUNTIME_LIB_SRCS := $(RUNTIME_DIR)/src/alloc.c $(RUNTIME_DIR)/src/gc.c $(RUNTIME_DIR)/src/panic.c $(RUNTIME_DIR)/src/print.c $(RUNTIME_DIR)/src/shadow.c $(RUNTIME_DIR)/src/variants.c $(RUNTIME_DIR)/src/str.c $(RUNTIME_DIR)/src/map.c $(RUNTIME_DIR)/src/closure.c $(RUNTIME_DIR)/src/io.c $(RUNTIME_DIR)/src/equal.c $(RUNTIME_DIR)/src/task.c $(RUNTIME_DIR)/src/net.c $(RUNTIME_DIR)/src/tls.c
 
 BUILD_DIR := build
 

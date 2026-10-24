@@ -69,6 +69,9 @@ void mn_shadow_unregister(MnShadow *s);
 /* Task GC roots: closure, result, and any park payload. */
 void mn_task_visit_roots(mn_root_visit_fn fn, void *ctx);
 
+/* Drive parkable socket completions (Build F). Returns # notified. */
+int mn_net_poll(int timeout_ms);
+
 int mn_gc_stress(void);
 int mn_gc_verify(void);
 void mn_gc_note_exit(void);

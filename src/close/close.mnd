@@ -470,11 +470,23 @@ let close-expr(ast: Ast, scope: List Str, subst: Map Str LiftedInfo, counter: Re
 let close-expr-head(head: Ast, rest: List Ast, sp: Span, orig: Ast, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> ExprResult =
   cond
     | is-sym(head, "do") -> close-expr-do(rest, sp, scope, subst, counter)
+    | is-sym(head, "defer") -> close-expr-defer(rest, sp, scope, subst, counter)
     | is-sym(head, "fn") || is-sym(head, "lambda") -> close-expr-lambda(rest, scope, subst, counter)
     | is-sym(head, "match") -> close-expr-match(rest, sp, scope, subst, counter)
     | is-sym(head, "let") -> close-expr-let(rest, sp, orig, scope, subst, counter)
     | is-sym(head, "loop") -> close-expr-loop(rest, sp, scope, subst, counter)
     | else -> close-expr-app(head, rest, sp, scope, subst, counter)
+
+; `(defer e)` → `(mn_task_defer_push (fn () = e))` then lift the thunk.
+let close-expr-defer(rest: List Ast, sp: Span, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> ExprResult =
+  match (rest)
+    | body :: _ ->
+      {
+        let params = ParenNode([], sp)
+        let lifted = close-expr-lambda([params, body], scope, subst, counter)
+        ExprResult(ParenNode([SymNode("mn_task_defer_push", sp), expr-result-ast(lifted)], sp), expr-result-extra(lifted))
+      }
+    | [] -> ExprResult(ParenNode([SymNode("mn_task_defer_push", sp), ParenNode([SymNode("fn", sp), ParenNode([], sp), ParenNode([], sp)], sp)], sp), [])
 
 let close-expr-lambda(rest: List Ast, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> ExprResult =
   match (rest)
@@ -485,10 +497,45 @@ let close-expr-lambda(rest: List Ast, scope: List Str, subst: Map Str LiftedInfo
       }
     | _ -> ExprResult(ParenNode(SymNode("fn", dummy-span()) :: rest, dummy-span()), [])
 
+; Wrap every `do` with defer enter/leave so cleanups run on block exit (Build F).
 let close-expr-do(rest: List Ast, sp: Span, scope: List Str, subst: Map Str LiftedInfo, counter: Ref Int) -> ExprResult {
   let result = close-body(rest, scope, subst, counter)
-  ExprResult(ParenNode(SymNode("do", sp) :: body-result-forms(result), sp), body-result-extra(result))
+  let wrapped = wrap-do-defer-scope(body-result-forms(result), sp, counter)
+  ExprResult(ParenNode(SymNode("do", sp) :: wrapped, sp), body-result-extra(result))
 }
+
+let wrap-do-defer-scope(forms: List Ast, sp: Span, counter: Ref Int) -> List Ast {
+  let enter = ParenNode([SymNode("mn_task_defer_enter", sp)], sp)
+  let leave = ParenNode([SymNode("mn_task_defer_leave", sp)], sp)
+  match (forms)
+    | [] -> [enter, leave, ParenNode([], sp)]
+    | last :: [] ->
+      {
+        let n = String.concat("__mndefer_r", show(deref(counter)))
+        set!(counter, deref(counter) + 1)
+        [enter, ParenNode([SymNode("let", sp), SymNode(n, sp), last], sp), leave, SymNode(n, sp)]
+      }
+    | _ ->
+      {
+        let n = String.concat("__mndefer_r", show(deref(counter)))
+        set!(counter, deref(counter) + 1)
+        let last = list-last-ast(forms)
+        let init = list-init-ast(forms)
+        enter :: append-list(init, [ParenNode([SymNode("let", sp), SymNode(n, sp), last], sp), leave, SymNode(n, sp)])
+      }
+}
+
+let list-last-ast(xs: List Ast) -> Ast =
+  match (xs)
+    | [] -> ParenNode([], dummy-span())
+    | h :: [] -> h
+    | _ :: t -> list-last-ast(t)
+
+let list-init-ast(xs: List Ast) -> List Ast =
+  match (xs)
+    | [] -> []
+    | _ :: [] -> []
+    | h :: t -> h :: list-init-ast(t)
 
 record ExprListResult {
   asts: List Ast

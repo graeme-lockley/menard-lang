@@ -1343,6 +1343,15 @@ let infer-return(env: TypeEnv, rest: List Ast, local: Map Str Type) -> Type =
     | [] -> t-unit()
     | a :: _ -> infer(env, a, local)
 
+let infer-defer(env: TypeEnv, rest: List Ast, local: Map Str Type) -> Type {
+  match (rest)
+    | a :: _ -> {
+        let _ = infer(env, a, local)
+        t-unit()
+      }
+    | [] -> t-unit()
+}
+
 ; -- quote --
 
 let infer-quote(ast: Ast) -> Type =
@@ -2175,6 +2184,7 @@ let infer-paren-named(env: TypeEnv, hn: Str, elems: List Ast, rest: List Ast, sp
     | "recur" -> infer-recur(env, elems, sp, local)
     | "panic" -> infer-panic(env, rest, local)
     | "return" -> infer-return(env, rest, local)
+    | "defer" -> infer-defer(env, rest, local)
     | "match" -> infer-match(env, elems, sp, local)
     | "fn" -> infer-lambda(env, elems, sp, local)
     | "lambda" -> infer-lambda(env, elems, sp, local)

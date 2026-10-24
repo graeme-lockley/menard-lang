@@ -26,6 +26,11 @@ export type InterpWaitCell = {
   waitersTail: InterpTask | null;
 };
 
+export type InterpDeferEntry = {
+  clo: Value;
+  depth: number;
+};
+
 export type InterpTask = {
   id: number;
   status: TaskStatus;
@@ -41,6 +46,10 @@ export type InterpTask = {
   waitingOn: InterpWaitCell | null;
   waitNext: InterpTask | null;
   joinWaiter: InterpTask | null;
+  /** Newest first; Build F defer cleanups. */
+  defers: InterpDeferEntry[];
+  deferDepth: number;
+  runningDefers: boolean;
 };
 
 export class TaskPark extends Error {
@@ -136,6 +145,9 @@ export function taskEnsureMain(): InterpTask {
     waitingOn: null,
     waitNext: null,
     joinWaiter: null,
+    defers: [],
+    deferDepth: 0,
+    runningDefers: false,
   };
   all.push(t);
   current = t;
@@ -201,7 +213,42 @@ function notifyCell(c: InterpWaitCell): void {
   }
 }
 
-function finishTask(t: InterpTask, status: "done" | "cancelled", result: Value): void {
+function runDefersLeave(t: InterpTask, host: Host): void {
+  if (t.runningDefers || !applyThunk) return;
+  t.runningDefers = true;
+  const depth = t.deferDepth;
+  while (t.defers.length > 0 && t.defers[0]!.depth === depth) {
+    const e = t.defers.shift()!;
+    applyThunk(e.clo, host);
+  }
+  if (t.deferDepth > 0) t.deferDepth--;
+  t.runningDefers = false;
+}
+
+function runDefersAll(t: InterpTask, host: Host): void {
+  if (t.runningDefers || !applyThunk) {
+    t.defers = [];
+    t.deferDepth = 0;
+    return;
+  }
+  t.runningDefers = true;
+  while (t.defers.length > 0) {
+    const e = t.defers.shift()!;
+    applyThunk(e.clo, host);
+  }
+  t.deferDepth = 0;
+  t.runningDefers = false;
+}
+
+function finishTask(t: InterpTask, status: "done" | "cancelled", result: Value, host?: Host): void {
+  const saved = current;
+  current = t;
+  if (host) runDefersAll(t, host);
+  else {
+    t.defers = [];
+    t.deferDepth = 0;
+  }
+  current = saved;
   t.result = result;
   t.status = status;
   t.cancelRequested = false;
@@ -229,7 +276,7 @@ function runOne(t: InterpTask, host: Host): void {
   activate(t);
   try {
     if (t.cancelRequested && t.stack === null && t.thunk !== null) {
-      finishTask(t, "cancelled", vUnit());
+      finishTask(t, "cancelled", vUnit(), host);
       return;
     }
     if (t.stack !== null && t.resumeValue !== null && continueDrive) {
@@ -243,15 +290,15 @@ function runOne(t: InterpTask, host: Host): void {
         rv.tag === "variant" &&
         rv.ctor === "Err";
       if (t.cancelRequested && !softWaitCancel) {
-        finishTask(t, "cancelled", vUnit());
+        finishTask(t, "cancelled", vUnit(), host);
         return;
       }
       try {
         const result = continueDrive(stack, rv, host);
         if (t.cancelRequested || t.status === "cancelled") {
-          finishTask(t, "cancelled", vUnit());
+          finishTask(t, "cancelled", vUnit(), host);
         } else {
-          finishTask(t, "done", result);
+          finishTask(t, "done", result, host);
         }
       } catch (e) {
         if (e instanceof TaskPark) return;
@@ -262,9 +309,9 @@ function runOne(t: InterpTask, host: Host): void {
         const result = applyThunk(t.thunk, host);
         if (t.status === "suspended") return;
         if (t.cancelRequested || t.status === "cancelled") {
-          finishTask(t, "cancelled", vUnit());
+          finishTask(t, "cancelled", vUnit(), host);
         } else {
-          finishTask(t, "done", result);
+          finishTask(t, "done", result, host);
         }
       } catch (e) {
         if (e instanceof TaskPark) return;
@@ -334,6 +381,9 @@ export function taskSpawn(thunk: Value): Value {
     waitingOn: null,
     waitNext: null,
     joinWaiter: null,
+    defers: [],
+    deferDepth: 0,
+    runningDefers: false,
   };
   all.push(t);
   enqueue(t);
@@ -410,7 +460,7 @@ export function taskJoin(id: bigint, host: Host): Value {
     while (!isTerminal(target)) {
       if (self.cancelRequested) {
         target.joinWaiter = null;
-        finishTask(self, "cancelled", vUnit());
+        finishTask(self, "cancelled", vUnit(), host);
         throw new Error("mn_task_join: main cancelled");
       }
       if (runnable.length > 0) {
@@ -485,11 +535,30 @@ export function taskCancel(id: bigint, host: Host): Value {
     return vUnit();
   }
 
-  finishTask(t, "cancelled", vUnit());
+  finishTask(t, "cancelled", vUnit(), host);
 
   if (current?.isMain) {
     pump(host);
   }
+  return vUnit();
+}
+
+export function taskDeferEnter(): Value {
+  taskEnsureMain();
+  current!.deferDepth++;
+  return vUnit();
+}
+
+export function taskDeferPush(clo: Value): Value {
+  taskEnsureMain();
+  const t = current!;
+  t.defers.unshift({ clo, depth: t.deferDepth });
+  return vUnit();
+}
+
+export function taskDeferLeave(host: Host): Value {
+  taskEnsureMain();
+  runDefersLeave(current!, host);
   return vUnit();
 }
 

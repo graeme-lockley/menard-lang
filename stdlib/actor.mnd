@@ -11,35 +11,56 @@ pub type ActorError =
   | ActorCancelled
   | ActorDead
 
+; Default bounded capacity (Build F backpressure).
+; @test default-capacity() => 1024
+pub let default-capacity() -> Int =
+  1024
+
 pub record Mailbox[a] {
   front: Ref (List a)
   back: Ref (List a)
   cell: Int
+  space: Int
+  count: Ref Int
+  capacity: Int
   alive: Ref Bool
 }
 
-; Empty live mailbox.
+; Empty live mailbox with default capacity.
 ; @test {
 ;   let mb = mailbox-new()
 ;   let _ = send(mb, 1)
 ;   receive(mb)
 ; } => Ok(1)
 pub let mailbox-new[a]() -> Mailbox a =
-  Mailbox(ref([]), ref([]), Sched.wait-new(), ref(true))
+  mailbox-new-bounded(default-capacity())
+
+; Empty live mailbox with explicit capacity (block-on-full send).
+; @test {
+;   let mb = mailbox-new-bounded(1)
+;   let _ = send(mb, 7)
+;   receive(mb)
+; } => Ok(7)
+pub let mailbox-new-bounded[a](capacity: Int) -> Mailbox a =
+  Mailbox(ref([]), ref([]), Sched.wait-new(), Sched.wait-new(), ref(0), capacity, ref(true))
 
 ; Push onto the two-list back spine.
 let mb-enqueue[a](mb: Mailbox a, msg: a) -> Unit =
   match (mb)
-    | Mailbox(_, back, _, _) ->
-      set!(back, msg :: deref(back))
+    | Mailbox(_, back, _, _, count, _, _) -> {
+        set!(back, msg :: deref(back))
+        set!(count, deref(count) + 1)
+      }
 
 ; Pop from the front, rotating the back list when needed.
 let try-dequeue[a](mb: Mailbox a) -> Maybe a =
   match (mb)
-    | Mailbox(front, back, _, _) ->
+    | Mailbox(front, back, _, space, count, _, _) ->
       match (deref(front))
         | h :: t -> {
             set!(front, t)
+            set!(count, deref(count) - 1)
+            Sched.notify(space)
             Some(h)
           }
         | [] ->
@@ -51,31 +72,55 @@ let try-dequeue[a](mb: Mailbox a) -> Maybe a =
             | h :: t -> {
                 set!(front, t)
                 set!(back, [])
+                set!(count, deref(count) - 1)
+                Sched.notify(space)
                 Some(h)
               }
 
 ; Whether the mailbox still accepts messages.
 let is-alive[a](mb: Mailbox a) -> Bool =
   match (mb)
-    | Mailbox(_, _, _, alive) -> deref(alive)
+    | Mailbox(_, _, _, _, _, _, alive) -> deref(alive)
 
-; Wait-cell id for this mailbox.
+; Wait-cell id for receivers.
 let mb-cell[a](mb: Mailbox a) -> Int =
   match (mb)
-    | Mailbox(_, _, cell, _) -> cell
+    | Mailbox(_, _, cell, _, _, _, _) -> cell
 
-; Non-suspending send. Err(ActorDead) if the mailbox was closed.
+; Wait-cell id for senders blocked on a full mailbox.
+let mb-space[a](mb: Mailbox a) -> Int =
+  match (mb)
+    | Mailbox(_, _, _, space, _, _, _) -> space
+
+; Current number of queued messages.
+let mb-count[a](mb: Mailbox a) -> Int =
+  match (mb)
+    | Mailbox(_, _, _, _, count, _, _) -> deref(count)
+
+; Configured capacity of the mailbox.
+let mb-capacity[a](mb: Mailbox a) -> Int =
+  match (mb)
+    | Mailbox(_, _, _, _, _, capacity, _) -> capacity
+
+; Send with backpressure: park when full until space or cancel/death.
 ; @test {
 ;   let mb = mailbox-new()
 ;   close(mb)
 ;   send(mb, 1)
 ; } => Err(ActorDead())
 pub let send[a](mb: Mailbox a, msg: a) -> Result Unit ActorError {
-  if (not(is-alive(mb))) -> Err(ActorDead()) | {
-    mb-enqueue(mb, msg)
-    Sched.notify(mb-cell(mb))
-    Ok(())
-  }
+  loop ()
+    if (not(is-alive(mb))) -> Err(ActorDead()) | {
+      if (mb-count(mb) >= mb-capacity(mb)) -> {
+        match (Sched.wait(mb-space(mb)))
+          | Err(_) -> Err(ActorCancelled())
+          | Ok(_) -> recur()
+      } | {
+        mb-enqueue(mb, msg)
+        Sched.notify(mb-cell(mb))
+        Ok(())
+      }
+    }
 }
 
 ; Suspend until a message arrives, or ActorCancelled / ActorDead.
@@ -105,11 +150,12 @@ pub let receive[a](mb: Mailbox a) -> Result a ActorError {
 ; } => Err(ActorDead())
 pub let close[a](mb: Mailbox a) -> Unit =
   match (mb)
-    | Mailbox(_, _, cell, alive) -> {
+    | Mailbox(_, _, cell, space, _, _, alive) -> {
         set!(alive, false)
         loop (n = 0)
           if (n >= 64) -> () | {
             Sched.notify(cell)
+            Sched.notify(space)
             recur(n + 1)
           }
       }

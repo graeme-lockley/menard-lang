@@ -1,0 +1,53 @@
+; Build F native TCP echo smoke.
+pub import std/io (IoError)
+import std/net as Net
+import std/task as Task
+
+let unwrap-fd(r: Result Int IoError) -> Int =
+  match (r)
+    | Ok(fd) -> fd
+    | Err(_) -> -1
+
+let main() -> Int {
+  let listener = unwrap-fd(Net.listen(18765))
+  if (listener < 0) -> {
+    println("listen-fail")
+    1
+  } | {
+    defer Net.close(listener)
+    let server = Task.spawn(fn () = {
+      match (Net.accept(listener))
+        | Err(_) -> 0
+        | Ok(conn) -> {
+            defer Net.close(conn)
+            match (Net.read(conn, 64))
+              | Err(_) -> 0
+              | Ok(data) -> {
+                  let _ = Net.write(conn, data)
+                  0
+                }
+          }
+    })
+    match (Net.connect("127.0.0.1", 18765))
+      | Err(_) -> {
+          println("connect-fail")
+          Task.cancel(server)
+          let _ = Task.join(server)
+          1
+        }
+      | Ok(c) -> {
+          defer Net.close(c)
+          let _ = Net.write(c, "ping")
+          match (Net.read(c, 64))
+            | Err(_) -> {
+                println("read-fail")
+                1
+              }
+            | Ok(got) -> {
+                println(got)
+                let _ = Task.join(server)
+                0
+              }
+        }
+  }
+}

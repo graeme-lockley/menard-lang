@@ -28,6 +28,13 @@ extern mn_task_dict_set[a](key: Str, value: a) -> Unit
 
 extern mn_task_dict_get[a](key: Str) -> Maybe a
 
+; Block-scoped defer (Build F). Prefer the language `defer` form.
+extern mn_task_defer_enter() -> Unit
+
+extern mn_task_defer_push(thunk: () -> Unit) -> Unit
+
+extern mn_task_defer_leave() -> Unit
+
 ; Spawn a zero-argument thunk as a cooperative task. Returns an opaque id.
 ; @test join(spawn(fn () = 41)) => Ok(41)
 pub let spawn[a](thunk: () -> a) -> Int =
@@ -102,3 +109,29 @@ pub let dict-set[a](key: Str, value: a) -> Unit =
 ; } => Some(3)
 pub let dict-get[a](key: Str) -> Maybe a =
   mn_task_dict_get(key)
+
+; Enter a defer scope (paired with defer-leave). Language `do` blocks do this.
+; @test {
+;   defer-enter()
+;   defer-leave()
+; }
+pub let defer-enter() -> Unit =
+  mn_task_defer_enter()
+
+; Register a cleanup thunk for the current defer scope (LIFO).
+; @test {
+;   defer-enter()
+;   defer-push(fn () = ())
+;   defer-leave()
+; }
+pub let defer-push(thunk: () -> Unit) -> Unit =
+  mn_task_defer_push(thunk)
+
+; Run LIFO cleanups for the current scope and pop it.
+; @test {
+;   defer-enter()
+;   defer-push(fn () = ())
+;   defer-leave()
+; }
+pub let defer-leave() -> Unit =
+  mn_task_defer_leave()

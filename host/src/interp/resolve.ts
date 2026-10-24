@@ -33,6 +33,7 @@ export const enum Sf {
   Char = 14,
   Tuple = 15,
   Ques = 16,
+  Defer = 17,
 }
 
 const SF_BY_NAME: Record<string, Sf> = {
@@ -43,6 +44,7 @@ const SF_BY_NAME: Record<string, Sf> = {
   recur: Sf.Recur,
   panic: Sf.Panic,
   return: Sf.Return,
+  defer: Sf.Defer,
   match: Sf.Match,
   fn: Sf.Fn,
   lambda: Sf.Fn,

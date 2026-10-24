@@ -1,0 +1,37 @@
+; Build F — language defer: LIFO on block exit; cancel runs pending cleanups.
+import std/task as Task
+import std/sched as Sched
+pub import std/task (Cancelled)
+
+let defer-order() -> Int {
+  let r = ref(0)
+  {
+    defer set!(r, deref(r) * 10 + 1)
+    defer set!(r, deref(r) * 10 + 2)
+    set!(r, 3)
+  }
+  deref(r)
+}
+
+; Park on a wait cell so cancel hits a suspended task that already
+; registered defer (hard cancel of a never-started thunk has no cleanups).
+let defer-cancel-cleanup() -> Int {
+  let flag = ref(0)
+  let ready = Sched.wait-new()
+  let t = Task.spawn(fn () = {
+    defer set!(flag, 1)
+    Sched.notify(ready)
+    let _ = Sched.wait(Sched.wait-new())
+    0
+  })
+  let _ = Sched.wait(ready)
+  Task.cancel(t)
+  let _ = Task.join(t)
+  deref(flag)
+}
+
+let main() -> Int {
+  println(defer-order())
+  println(defer-cancel-cleanup())
+  0
+}

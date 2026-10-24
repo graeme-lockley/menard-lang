@@ -2028,7 +2028,7 @@ let is-runtime-op(hn: Str) -> Bool =
   hn == "write" || hn == "mn_write" || str-in-list(hn, runtime-op-names())
 
 let runtime-op-names() -> List Str =
-  ["str-concat", "str-byte-length", "str-byte", "str-slice", "char->str", "ref", "deref", "set!", "sb-new", "sb-append!", "sb-append-byte!", "sb-take-str!", "sb-clear!", "map-new", "map-set", "map-get", "map-has", "map-size", "map-keys", "mn-env-0", "mn-env-1", "mn-env-get", "mn-closure-new", "mn-apply-0", "mn-apply-1", "mn-apply-2", "mn-apply-3", "mn-apply-4", "mn-apply-5", "mn-apply-6", "mn-apply-7", "mn-apply-8", "arg-count", "arg", "read-file", "write-file", "show", "mn-env-new", "mn-env-set", "compare", "sb-length", "sb-to-str", "dump", "spawn", "spawn-capture", "getenv", "exists", "rename", "isatty", "mtime", "cwd", "ensure-dir", "list-dir", "realpath", "now-ms", "remove", "is-dir", "mn_isatty", "mn_mtime", "mn_cwd", "mn_ensure_dir", "mn_list_dir", "mn_realpath", "mn_now_ms", "mn_remove", "mn_is_dir", "mn_arg_count", "mn_arg", "mn_read_file", "mn_write_file", "mn_spawn", "mn_spawn_capture", "mn_getenv", "mn_exists", "mn_rename", "f+", "f-", "f*", "f/", "mn_task_spawn", "mn_task_self", "mn_task_suspend_for_test", "mn_task_resume", "mn_task_join", "mn_task_cancel", "mn_task_yield", "mn_task_wait_new", "mn_task_wait", "mn_task_notify", "mn_task_dict_set", "mn_task_dict_get"]
+  ["str-concat", "str-byte-length", "str-byte", "str-slice", "char->str", "ref", "deref", "set!", "sb-new", "sb-append!", "sb-append-byte!", "sb-take-str!", "sb-clear!", "map-new", "map-set", "map-get", "map-has", "map-size", "map-keys", "mn-env-0", "mn-env-1", "mn-env-get", "mn-closure-new", "mn-apply-0", "mn-apply-1", "mn-apply-2", "mn-apply-3", "mn-apply-4", "mn-apply-5", "mn-apply-6", "mn-apply-7", "mn-apply-8", "arg-count", "arg", "read-file", "write-file", "show", "mn-env-new", "mn-env-set", "compare", "sb-length", "sb-to-str", "dump", "spawn", "spawn-capture", "getenv", "exists", "rename", "isatty", "mtime", "cwd", "ensure-dir", "list-dir", "realpath", "now-ms", "remove", "is-dir", "mn_isatty", "mn_mtime", "mn_cwd", "mn_ensure_dir", "mn_list_dir", "mn_realpath", "mn_now_ms", "mn_remove", "mn_is_dir", "mn_arg_count", "mn_arg", "mn_read_file", "mn_write_file", "mn_spawn", "mn_spawn_capture", "mn_getenv", "mn_exists", "mn_rename", "f+", "f-", "f*", "f/", "mn_task_spawn", "mn_task_self", "mn_task_suspend_for_test", "mn_task_resume", "mn_task_join", "mn_task_cancel", "mn_task_yield", "mn_task_wait_new", "mn_task_wait", "mn_task_notify", "mn_task_dict_set", "mn_task_dict_get", "mn_task_defer_enter", "mn_task_defer_push", "mn_task_defer_leave", "mn_tcp_listen", "mn_tcp_accept", "mn_tcp_connect", "mn_tcp_read", "mn_tcp_write", "mn_tcp_close", "mn_udp_bind", "mn_udp_send", "mn_udp_recv", "mn_udp_close", "mn_tls_client", "mn_tls_server", "mn_tls_read", "mn_tls_write", "mn_tls_close"]
 
 ; `extern` declares the C symbol (`mn_exists`). Ambient compiler calls
 ; still use the Menard name (`exists`). Both lower to the same abs id.
@@ -2056,6 +2056,24 @@ let seam-menard-name(hn: Str) -> Str =
     | hn == "mn_task_notify" -> "mn_task_notify"
     | hn == "mn_task_dict_set" -> "mn_task_dict_set"
     | hn == "mn_task_dict_get" -> "mn_task_dict_get"
+    | hn == "mn_task_defer_enter" -> "mn_task_defer_enter"
+    | hn == "mn_task_defer_push" -> "mn_task_defer_push"
+    | hn == "mn_task_defer_leave" -> "mn_task_defer_leave"
+    | hn == "mn_tcp_listen" -> "mn_tcp_listen"
+    | hn == "mn_tcp_accept" -> "mn_tcp_accept"
+    | hn == "mn_tcp_connect" -> "mn_tcp_connect"
+    | hn == "mn_tcp_read" -> "mn_tcp_read"
+    | hn == "mn_tcp_write" -> "mn_tcp_write"
+    | hn == "mn_tcp_close" -> "mn_tcp_close"
+    | hn == "mn_udp_bind" -> "mn_udp_bind"
+    | hn == "mn_udp_send" -> "mn_udp_send"
+    | hn == "mn_udp_recv" -> "mn_udp_recv"
+    | hn == "mn_udp_close" -> "mn_udp_close"
+    | hn == "mn_tls_client" -> "mn_tls_client"
+    | hn == "mn_tls_server" -> "mn_tls_server"
+    | hn == "mn_tls_read" -> "mn_tls_read"
+    | hn == "mn_tls_write" -> "mn_tls_write"
+    | hn == "mn_tls_close" -> "mn_tls_close"
     | else -> os-menard-name(hn)
 
 let os-menard-name(hn: Str) -> Str =
@@ -2158,6 +2176,24 @@ let runtime-op-abs-named(hn: Str, ns: Int) -> Int =
     | hn == "mn_task_notify" -> extern-task-notify-abs(ns)
     | hn == "mn_task_dict_set" -> extern-task-dict-set-abs(ns)
     | hn == "mn_task_dict_get" -> extern-task-dict-get-abs(ns)
+    | hn == "mn_task_defer_enter" -> extern-task-defer-enter-abs(ns)
+    | hn == "mn_task_defer_push" -> extern-task-defer-push-abs(ns)
+    | hn == "mn_task_defer_leave" -> extern-task-defer-leave-abs(ns)
+    | hn == "mn_tcp_listen" -> extern-tcp-listen-abs(ns)
+    | hn == "mn_tcp_accept" -> extern-tcp-accept-abs(ns)
+    | hn == "mn_tcp_connect" -> extern-tcp-connect-abs(ns)
+    | hn == "mn_tcp_read" -> extern-tcp-read-abs(ns)
+    | hn == "mn_tcp_write" -> extern-tcp-write-abs(ns)
+    | hn == "mn_tcp_close" -> extern-tcp-close-abs(ns)
+    | hn == "mn_udp_bind" -> extern-udp-bind-abs(ns)
+    | hn == "mn_udp_send" -> extern-udp-send-abs(ns)
+    | hn == "mn_udp_recv" -> extern-udp-recv-abs(ns)
+    | hn == "mn_udp_close" -> extern-udp-close-abs(ns)
+    | hn == "mn_tls_client" -> extern-tls-client-abs(ns)
+    | hn == "mn_tls_server" -> extern-tls-server-abs(ns)
+    | hn == "mn_tls_read" -> extern-tls-read-abs(ns)
+    | hn == "mn_tls_write" -> extern-tls-write-abs(ns)
+    | hn == "mn_tls_close" -> extern-tls-close-abs(ns)
     | else -> extern-rename-abs(ns)
 
 let runtime-op-arity(hn: Str) -> Int =
@@ -2165,10 +2201,14 @@ let runtime-op-arity(hn: Str) -> Int =
 
 let runtime-op-arity-named(hn: Str) -> Int =
   cond
-    | hn == "cwd" || hn == "now-ms" || hn == "mn_task_self" || hn == "mn_task_suspend_for_test" || hn == "mn_task_yield" || hn == "mn_task_wait_new" -> 0
+    | hn == "cwd" || hn == "now-ms" || hn == "mn_task_self" || hn == "mn_task_suspend_for_test" || hn == "mn_task_yield" || hn == "mn_task_wait_new" || hn == "mn_task_defer_enter" || hn == "mn_task_defer_leave" -> 0
+    | hn == "mn_udp_send" -> 4
+    | hn == "mn_tls_server" -> 3
+    | hn == "mn_tcp_connect" || hn == "mn_tcp_read" || hn == "mn_tcp_write" || hn == "mn_udp_recv" || hn == "mn_tls_read" || hn == "mn_tls_write" -> 2
+    | hn == "mn_tcp_listen" || hn == "mn_tcp_accept" || hn == "mn_tcp_close" || hn == "mn_udp_bind" || hn == "mn_udp_close" || hn == "mn_tls_client" || hn == "mn_tls_close" -> 1
     | str-in-list(hn, ["isatty", "mtime", "ensure-dir", "list-dir", "realpath", "remove", "is-dir"]) -> 1
     | hn == "sb-new" || hn == "map-new" || hn == "mn-env-0" || hn == "arg-count" -> 0
-    | str-in-list(hn, ["str-byte-length", "char->str", "ref", "deref", "sb-take-str!", "sb-clear!", "map-size", "map-keys", "mn-env-1", "mn-env-new", "arg", "read-file", "mn-apply-0", "show", "sb-length", "sb-to-str", "dump", "spawn", "getenv", "exists", "mn_task_spawn", "mn_task_resume", "mn_task_join", "mn_task_cancel", "mn_task_wait", "mn_task_notify", "mn_task_dict_get"]) -> 1
+    | str-in-list(hn, ["str-byte-length", "char->str", "ref", "deref", "sb-take-str!", "sb-clear!", "map-size", "map-keys", "mn-env-1", "mn-env-new", "arg", "read-file", "mn-apply-0", "show", "sb-length", "sb-to-str", "dump", "spawn", "getenv", "exists", "mn_task_spawn", "mn_task_resume", "mn_task_join", "mn_task_cancel", "mn_task_wait", "mn_task_notify", "mn_task_dict_get", "mn_task_defer_push"]) -> 1
     | hn == "str-slice" || hn == "map-set" || hn == "mn-apply-2" || hn == "mn-env-set" -> 3
     | hn == "mn-apply-3" -> 4
     | hn == "mn-apply-4" -> 5

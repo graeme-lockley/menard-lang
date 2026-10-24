@@ -346,6 +346,32 @@ MnWord mn_task_notify(MnWord cell_tagged);     /* → Unit; wake ≤1 waiter; st
 MnWord mn_task_dict_set(MnWord key_str, MnWord value); /* → Unit */
 MnWord mn_task_dict_get(MnWord key_str);               /* → Maybe a */
 
+/* Block-scoped defer (Build F). Push a zero-arg cleanup closure; enter/leave
+ * nest with `do` blocks. leave runs LIFO for the current depth. Cancel runs
+ * all remaining cleanups before the task finishes. */
+MnWord mn_task_defer_enter(void);              /* → Unit */
+MnWord mn_task_defer_push(MnWord clo0);        /* → Unit; clo: () -> Unit */
+MnWord mn_task_defer_leave(void);              /* → Unit */
+
+/* Parkable TCP/UDP (Build F). Interpreter unbound. */
+MnWord mn_tcp_listen(MnWord port_tagged);      /* → Result Int IoError */
+MnWord mn_tcp_accept(MnWord fd_tagged);        /* → Result Int IoError */
+MnWord mn_tcp_connect(MnWord host_str, MnWord port_tagged); /* → Result Int IoError */
+MnWord mn_tcp_read(MnWord fd_tagged, MnWord max_tagged);    /* → Result Str IoError */
+MnWord mn_tcp_write(MnWord fd_tagged, MnWord data);         /* → Result Unit IoError */
+MnWord mn_tcp_close(MnWord fd_tagged);         /* → Unit */
+MnWord mn_udp_bind(MnWord port_tagged);        /* → Result Int IoError */
+MnWord mn_udp_send(MnWord fd_tagged, MnWord host_str, MnWord port_tagged, MnWord data);
+MnWord mn_udp_recv(MnWord fd_tagged, MnWord max_tagged); /* → Result Str IoError */
+MnWord mn_udp_close(MnWord fd_tagged);         /* → Unit */
+
+/* OpenSSL TLS over an existing TCP fd (Build F). Handle is an Int id. */
+MnWord mn_tls_client(MnWord fd_tagged);        /* → Result Int IoError */
+MnWord mn_tls_server(MnWord fd_tagged, MnWord cert_path, MnWord key_path);
+MnWord mn_tls_read(MnWord id_tagged, MnWord max_tagged); /* → Result Str IoError */
+MnWord mn_tls_write(MnWord id_tagged, MnWord data);      /* → Result Unit IoError */
+MnWord mn_tls_close(MnWord id_tagged);         /* → Unit */
+
 #ifdef __cplusplus
 }
 #endif

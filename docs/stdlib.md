@@ -351,9 +351,9 @@ isolation boundary — shared `Ref` across tasks is allowed. See
 | Name | |
 | --- | --- |
 | `ActorError` | `ActorCancelled` \| `ActorDead`. |
-| `Mailbox a` | Two-list queue + wait cell; multi-waiter. |
-| `mailbox-new()` | Empty live mailbox. |
-| `send(mb, msg)` | Non-suspending enqueue; `Err(ActorDead)` if closed. |
+| `Mailbox a` | Two-list queue; receive + space wait cells; **bounded** (default 1024). |
+| `mailbox-new()` / `mailbox-new-bounded(n)` | Empty live mailbox. |
+| `send(mb, msg)` | Enqueue; **parks when full**; `Err` on cancel/death. |
 | `receive(mb)` | Dequeue or wait; `Err` on cancel/death (no lost message on cancel). |
 | `close(mb)` | Mark dead; wake waiters. |
 | `Pid a` | Actor identity (mailbox + task id + nursery scope). |
@@ -365,7 +365,50 @@ isolation boundary — shared `Ref` across tasks is allowed. See
 | `cancel` / `join` / `id` | Lifecycle; cancel escalates the nursery. |
 | `register` / `whereis` | Process-local name → Pid (honor-system typing). |
 
-**Suspend points:** `receive`, `call`.
+**Suspend points:** `receive`, `call`, `send` (when full).
+
+## Supervisor
+
+`import std/supervisor as Supervisor`
+
+OTP-lite helpers (Build F). See [build-f-network.md](build-f-network.md).
+
+| Name | |
+| --- | --- |
+| `ChildSpec` / `Restart` / `Strategy` | Permanent / transient / temporary; one-for-one. |
+| `start-children(specs)` | Start each child once; return Pids. |
+| `stop-children(pids)` | Cancel each Pid. |
+| `restart-child(spec)` | Start one child again. |
+| `supervise(specs)` | One-for-one watchers (scaffolding); prefer start/stop for explicit lifecycle. |
+| `should-restart(policy, cancelled)` | Permanent always; Transient on cancel; Temporary never. |
+
+## Net
+
+`import std/net as Net`
+
+Parkable TCP/UDP and OpenSSL TLS. **Native only** (interpreter unbound).
+
+| Name | |
+| --- | --- |
+| `listen` / `accept` / `connect` / `read` / `write` / `close` | TCP. |
+| `with-connection(fd, body)` | `defer` close around `body`. |
+| `udp-bind` / `udp-send` / `udp-recv` / `udp-close` | UDP. |
+| `tls-client` / `tls-server` / `tls-read` / `tls-write` / `tls-close` | TLS over a TCP fd. |
+| `with-tls(id, body)` | `defer` tls-close. |
+
+## Http / Rest
+
+`import std/http as Http` · `import std/rest as Rest`
+
+Menard HTTP/1.1 (request line + headers + Content-Length) and small REST helpers.
+
+| Name | |
+| --- | --- |
+| `Request` / `Response` / `Method` / `HttpError` | Core types. |
+| `read-request` / `write-response` | Per-connection. |
+| `serve(port, handler)` | Accept loop under `Task.scope`. |
+| `request(host, port, req)` | One-shot client. |
+| `Rest.ok-json` / `not-found` / `path-segments` / `json-body` | REST helpers. |
 
 ## Console
 

@@ -317,7 +317,17 @@ let map-stmt(xs: List Ast, ind: Int) -> List Str =
     | h :: t -> String.concat(pad(ind + 2), print-stmt(h, ind + 2)) :: map-stmt(t, ind)
 
 let print-stmt(a: Ast, ind: Int) -> Str =
-  if (is-head(a, "let")) -> print-form-at(a, ind) | print-expr(a, ind)
+  cond
+    | is-head(a, "let") -> print-form-at(a, ind)
+    | is-head(a, "return") ->
+      match (a)
+        | ParenNode(_ :: e :: _, _) -> String.concat("return ", print-expr(e, ind))
+        | _ -> print-expr(a, ind)
+    | is-head(a, "defer") ->
+      match (a)
+        | ParenNode(_ :: e :: _, _) -> String.concat("defer ", print-expr(e, ind))
+        | _ -> print-expr(a, ind)
+    | else -> print-expr(a, ind)
 
 let print-expr(a: Ast, ind: Int) -> Str =
   match (a)

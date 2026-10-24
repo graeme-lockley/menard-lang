@@ -19,6 +19,12 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import {
+  opensslCflags,
+  opensslLibs,
+  runtimeInclude,
+  runtimeLibSrcs,
+} from "../helpers/runtime-link.ts";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
@@ -39,21 +45,8 @@ function whichTool(name: string): string | null {
 
 const clang = whichTool("clang");
 
-const RUNTIME_LIB_SRCS = [
-  "runtime/src/alloc.c",
-  "runtime/src/gc.c",
-  "runtime/src/panic.c",
-  "runtime/src/print.c",
-  "runtime/src/shadow.c",
-  "runtime/src/variants.c",
-  "runtime/src/str.c",
-  "runtime/src/map.c",
-  "runtime/src/closure.c",
-  "runtime/src/io.c",
-  "runtime/src/equal.c",
-  "runtime/src/task.c",
-].map((rel) => join(ROOT, rel));
-const RUNTIME_INCLUDE = join(ROOT, "runtime/include");
+const RUNTIME_LIB_SRCS = runtimeLibSrcs(ROOT);
+const RUNTIME_INCLUDE = runtimeInclude(ROOT);
 
 const stage1 = process.env.MENARD_STAGE1 ?? "";
 
@@ -95,7 +88,15 @@ function cli(args: string[]): { status: number; stdout: string; stderr: string }
 function compileRuntime(dir: string): { status: number; stderr: string; objs: string[] } {
   const r = spawnSync(
     clang!,
-    ["-std=c11", "-D_DEFAULT_SOURCE", "-I", RUNTIME_INCLUDE, "-c", ...RUNTIME_LIB_SRCS],
+    [
+      "-std=c11",
+      "-D_DEFAULT_SOURCE",
+      "-I",
+      RUNTIME_INCLUDE,
+      ...opensslCflags(),
+      "-c",
+      ...RUNTIME_LIB_SRCS,
+    ],
     { cwd: dir, encoding: "utf-8" },
   );
   const objs = RUNTIME_LIB_SRCS.map((src) => join(dir, basename(src).replace(/\.c$/, ".o")));
@@ -140,10 +141,14 @@ describe.skipIf(clang === null)("hermetic corpus oracle", () => {
               continue;
             }
           }
-          const link = spawnSync(clang!, [bc0, ...runtime.objs, "-lm", "-o", bin], {
-            cwd: ROOT,
-            encoding: "utf-8",
-          });
+          const link = spawnSync(
+            clang!,
+            [bc0, ...runtime.objs, "-lm", ...opensslLibs(), "-o", bin],
+            {
+              cwd: ROOT,
+              encoding: "utf-8",
+            },
+          );
           if ((link.status ?? 1) !== 0) {
             failures.push(`${rel}: link failed\n${link.stderr}`);
             continue;

@@ -491,7 +491,7 @@ class P {
   isBlockStmt(ast: Ast): boolean {
     if (ast.tag !== "list" || ast.elems[0]?.tag !== "sym") return false;
     const n = new TextDecoder().decode(ast.elems[0].name);
-    return n === "let" || n === "return";
+    return n === "let" || n === "return" || n === "defer";
   }
 
   parseMapPair(open: Tok, key: Ast, acc: Ast[]): R {
@@ -541,6 +541,12 @@ class P {
       const e = this.parseExpr();
       if (!e.ok) return e;
       return { ok: true, ast: paren([sym("return", kw.span), e.ast], join(kw.span, e.ast.span)) };
+    }
+    if (this.cur().text === "defer") {
+      const kw = this.toks[this.i++]!;
+      const e = this.parseExpr();
+      if (!e.ok) return e;
+      return { ok: true, ast: paren([sym("defer", kw.span), e.ast], join(kw.span, e.ast.span)) };
     }
     return this.parseExpr();
   }

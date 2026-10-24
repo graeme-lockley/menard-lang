@@ -662,7 +662,7 @@ lowering, the compiler sees this closed set of core heads:
 ```
 defn  defrec  variant  alias  import  pub  extern
 let   do      if       and     or
-loop  recur   while    match   return  panic
+loop  recur   while    match   return  defer  panic
 ref   deref   set!     quote   fn
 ```
 

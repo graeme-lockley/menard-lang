@@ -66,6 +66,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run, formatPanic } from "../../host/src/interp/pipeline.ts";
 import { createLiveHost } from "../../host/src/host/index.ts";
+import {
+  opensslCflags,
+  opensslLibs,
+  runtimeInclude,
+  runtimeLibSrcs,
+} from "../helpers/runtime-link.ts";
 
 const rm = promisify(unlink);
 const mkdtempP = promisify(mkdtemp);
@@ -90,24 +96,9 @@ const clang = whichTool("clang");
 const llvmDis = whichTool("llvm-dis");
 
 // The runtime a compiled Menard program links against (Makefile's
-// RUNTIME_LIB_SRCS — slice 2C): alloc + panic + the fd-1 print helpers +
-// the (stub) shadow-stack rooting ABI. Never smoke_main.c, which defines
-// its own `main` and would collide with the emitted module's.
-const RUNTIME_LIB_SRCS = [
-  "runtime/src/alloc.c",
-  "runtime/src/gc.c",
-  "runtime/src/panic.c",
-  "runtime/src/print.c",
-  "runtime/src/shadow.c",
-  "runtime/src/variants.c",
-  "runtime/src/str.c",
-  "runtime/src/map.c",
-  "runtime/src/closure.c",
-  "runtime/src/io.c",
-  "runtime/src/equal.c",
-  "runtime/src/task.c",
-].map(abs);
-const RUNTIME_INCLUDE = abs("runtime/include");
+// RUNTIME_LIB_SRCS — slice 2C + Build F net/tls). Never smoke_main.c.
+const RUNTIME_LIB_SRCS = runtimeLibSrcs(ROOT);
+const RUNTIME_INCLUDE = runtimeInclude(ROOT);
 
 /** Run `src/mn.mnd emit <entry> <out>` exactly as the CLI would. */
 function emit(entryRelPath: string, outPath: string): { exitCode: number; stderr: string } {
@@ -389,7 +380,17 @@ describe.skipIf(clang === null || llvmDis === null)("interp <-> native oracle (P
         // harmless (clang just adopts its own default triple instead).
         const link = spawnSync(
           clang!,
-          [bcPath, ...RUNTIME_LIB_SRCS, "-I", RUNTIME_INCLUDE, "-lm", "-o", binPath],
+          [
+            bcPath,
+            ...RUNTIME_LIB_SRCS,
+            "-I",
+            RUNTIME_INCLUDE,
+            ...opensslCflags(),
+            "-lm",
+            ...opensslLibs(),
+            "-o",
+            binPath,
+          ],
           { encoding: "utf-8" },
         );
         expect(link.status).toBe(0);

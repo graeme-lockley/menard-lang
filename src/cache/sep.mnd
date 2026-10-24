@@ -26,6 +26,7 @@ import std/list
 import std/path as Path
 import std/proc
 import std/string as String
+import std/sys
 import std/map as Map
 import std/string-buffer as Buf
 import std/time
@@ -634,8 +635,47 @@ let write-if-changed(path: Str, bytes: Str) -> Bool =
 let rt(runtime: Str, name: Str) -> Str =
   Path.join(name, Path.join("src", runtime))
 
+; OpenSSL for `tls.c` (Build F). Prefer Homebrew on macOS; otherwise system
+; `-lssl -lcrypto`. Override with MENARD_OPENSSL_CFLAGS / MENARD_OPENSSL_LIBS
+; (space-separated) when needed.
+let openssl-cflags-default() -> List Str =
+  cond
+    | exists("/opt/homebrew/opt/openssl@3/include") ->
+      ["-I/opt/homebrew/opt/openssl@3/include"]
+    | exists("/usr/local/opt/openssl@3/include") ->
+      ["-I/usr/local/opt/openssl@3/include"]
+    | else -> []
+
+let openssl-libs-default() -> List Str =
+  cond
+    | exists("/opt/homebrew/opt/openssl@3/lib") ->
+      ["-L/opt/homebrew/opt/openssl@3/lib", "-lssl", "-lcrypto"]
+    | exists("/usr/local/opt/openssl@3/lib") ->
+      ["-L/usr/local/opt/openssl@3/lib", "-lssl", "-lcrypto"]
+    | else -> ["-lssl", "-lcrypto"]
+
+let openssl-cflags() -> List Str =
+  match (getenv("MENARD_OPENSSL_CFLAGS"))
+    | Some(s) ->
+      if (String.length(s) == 0) -> [] | String.split(" ", s)
+    | None() -> openssl-cflags-default()
+
+let openssl-libs() -> List Str =
+  match (getenv("MENARD_OPENSSL_LIBS"))
+    | Some(s) ->
+      if (String.length(s) == 0) -> ["-lssl", "-lcrypto"] | String.split(" ", s)
+    | None() -> openssl-libs-default()
+
 let link-argv(cc: Str, runtime: Str, objs: List Str, out: Str) -> List Str =
-  append-strs(append-strs([cc, "-std=c11", "-D_DEFAULT_SOURCE", "-Wall", "-Wextra", "-O2", String.concat("-I", Path.join("include", runtime))], objs), [rt(runtime, "alloc.c"), rt(runtime, "gc.c"), rt(runtime, "panic.c"), rt(runtime, "print.c"), rt(runtime, "shadow.c"), rt(runtime, "variants.c"), rt(runtime, "str.c"), rt(runtime, "map.c"), rt(runtime, "closure.c"), rt(runtime, "io.c"), rt(runtime, "equal.c"), rt(runtime, "task.c"), "-lm", "-o", out])
+  append-strs(
+    append-strs(
+      append-strs(
+        append-strs(
+          [cc, "-std=c11", "-D_DEFAULT_SOURCE", "-Wall", "-Wextra", "-O2", String.concat("-I", Path.join("include", runtime))],
+          openssl-cflags()),
+        objs),
+      [rt(runtime, "alloc.c"), rt(runtime, "gc.c"), rt(runtime, "panic.c"), rt(runtime, "print.c"), rt(runtime, "shadow.c"), rt(runtime, "variants.c"), rt(runtime, "str.c"), rt(runtime, "map.c"), rt(runtime, "closure.c"), rt(runtime, "io.c"), rt(runtime, "equal.c"), rt(runtime, "task.c"), rt(runtime, "net.c"), rt(runtime, "tls.c"), "-lm"]),
+    append-strs(openssl-libs(), ["-o", out]))
 
 let exit-code(st: SpawnStatus) -> Int =
   match (st)

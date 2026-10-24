@@ -39,6 +39,12 @@ typedef struct MnWaitCell {
   struct MnWaitCell *next;
 } MnWaitCell;
 
+typedef struct MnDeferEntry {
+  MnWord clo;
+  int depth;
+  struct MnDeferEntry *next;
+} MnDeferEntry;
+
 typedef struct MnTask {
   int id;
   MnTaskStatus status;
@@ -56,6 +62,9 @@ typedef struct MnTask {
   struct MnTask *join_waiter;
   struct MnTask *next_runnable;
   struct MnTask *all_next;
+  MnDeferEntry *defers; /* newest first */
+  int defer_depth;
+  int running_defers; /* reentrancy guard while applying cleanups */
 } MnTask;
 
 static MnTask *all_tasks = NULL;
@@ -94,6 +103,8 @@ static int is_terminal(MnTask *t);
 static void waiter_enqueue(MnWaitCell *c, MnTask *t);
 static void waiter_unlink(MnWaitCell *c, MnTask *t);
 static int wait_on_cell(MnWaitCell *c);
+static void run_defers_all(MnTask *t);
+static void run_defers_leave(MnTask *t);
 
 static void enqueue(MnTask *t) {
   if (t == NULL) {
@@ -256,7 +267,54 @@ static void notify_cell(MnWaitCell *c) {
   }
 }
 
+static void run_one_defer(MnTask *t, MnDeferEntry *e) {
+  MnWord clo;
+  mn_root_push(&clo);
+  clo = e->clo;
+  (void)mn_apply_0(clo);
+  mn_root_pop();
+  free(e);
+  (void)t;
+}
+
+static void run_defers_leave(MnTask *t) {
+  if (t == NULL || t->running_defers) {
+    return;
+  }
+  t->running_defers = 1;
+  int depth = t->defer_depth;
+  while (t->defers != NULL && t->defers->depth == depth) {
+    MnDeferEntry *e = t->defers;
+    t->defers = e->next;
+    run_one_defer(t, e);
+  }
+  if (t->defer_depth > 0) {
+    t->defer_depth--;
+  }
+  t->running_defers = 0;
+}
+
+static void run_defers_all(MnTask *t) {
+  if (t == NULL || t->running_defers) {
+    return;
+  }
+  t->running_defers = 1;
+  while (t->defers != NULL) {
+    MnDeferEntry *e = t->defers;
+    t->defers = e->next;
+    run_one_defer(t, e);
+  }
+  t->defer_depth = 0;
+  t->running_defers = 0;
+}
+
 static void finish_task(MnTask *t, MnTaskStatus st, MnWord result) {
+  /* Cancel (and any finish) runs remaining defers before notifying joiners.
+   * Activate t so cleanups see the correct mn_task_self / park context. */
+  MnTask *saved = current;
+  current = t;
+  run_defers_all(t);
+  current = saved;
   t->result = result;
   t->status = st;
   t->cancel_requested = 0;
@@ -347,6 +405,9 @@ static void pump(void) {
   for (;;) {
     MnTask *t = dequeue();
     if (t == NULL) {
+      if (mn_net_poll(0) > 0) {
+        continue;
+      }
       return;
     }
     run_one(t);
@@ -373,6 +434,9 @@ static int wait_on_cell(MnWaitCell *c) {
         pump();
         continue;
       }
+      if (mn_net_poll(-1) > 0) {
+        continue;
+      }
       mn_panic("mn_task_wait: main stuck");
     }
     if (self->cancel_requested) {
@@ -396,6 +460,9 @@ void mn_task_visit_roots(mn_root_visit_fn fn, void *ctx) {
   for (MnTask *t = all_tasks; t != NULL; t = t->all_next) {
     fn(&t->closure, ctx);
     fn(&t->result, ctx);
+    for (MnDeferEntry *d = t->defers; d != NULL; d = d->next) {
+      fn(&d->clo, ctx);
+    }
   }
   for (MnDictEntry *e = dict_head; e != NULL; e = e->next) {
     fn(&e->key, ctx);
@@ -557,9 +624,12 @@ static void join_wait_until_terminal(MnTask *target) {
         continue;
       }
       if (target->status == MN_TASK_SUSPENDED && target->waiting_on != NULL) {
-        /* Target is parked on a wait cell — pump others; do not spurious-wake. */
+        /* Target is parked on a wait cell — pump others; drive I/O. */
         if (runnable_head != NULL) {
           pump();
+          continue;
+        }
+        if (mn_net_poll(/* block */ -1) > 0) {
           continue;
         }
         mn_panic("mn_task_join: target waiting on cell");
@@ -692,4 +762,42 @@ MnWord mn_task_dict_get(MnWord key_str) {
     }
   }
   return mn_none();
+}
+
+MnWord mn_task_defer_enter(void) {
+  ensure_main_task();
+  if (current == NULL) {
+    mn_panic("mn_task_defer_enter: no current task");
+  }
+  current->defer_depth++;
+  return MN_UNIT;
+}
+
+MnWord mn_task_defer_push(MnWord clo0) {
+  ensure_main_task();
+  if (current == NULL) {
+    mn_panic("mn_task_defer_push: no current task");
+  }
+  MnWord held;
+  mn_root_push(&held);
+  held = clo0;
+  MnDeferEntry *e = (MnDeferEntry *)calloc(1, sizeof(MnDeferEntry));
+  if (e == NULL) {
+    mn_panic("mn_task_defer_push: oom");
+  }
+  e->clo = held;
+  e->depth = current->defer_depth;
+  e->next = current->defers;
+  current->defers = e;
+  mn_root_pop();
+  return MN_UNIT;
+}
+
+MnWord mn_task_defer_leave(void) {
+  ensure_main_task();
+  if (current == NULL) {
+    mn_panic("mn_task_defer_leave: no current task");
+  }
+  run_defers_leave(current);
+  return MN_UNIT;
 }

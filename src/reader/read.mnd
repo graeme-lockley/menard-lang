@@ -126,7 +126,7 @@ let is-ident-cont(b: Int) -> Bool =
   is-letter(b) || is-digit(b) || b == 95 || b == 45 || b == 43 || b == 42 || b == 47 || b == 37 || b == 60 || b == 62 || b == 58 || b == 64
 
 let is-keyword(s: Str) -> Bool =
-  s == "alias" || s == "cond" || s == "else" || s == "extern" || s == "fn" || s == "if" || s == "import" || s == "let" || s == "loop" || s == "match" || s == "panic" || s == "pub" || s == "record" || s == "recur" || s == "ref" || s == "deref" || s == "return" || s == "set!" || s == "type" || s == "while" || s == "when"
+  s == "alias" || s == "cond" || s == "else" || s == "extern" || s == "fn" || s == "if" || s == "import" || s == "let" || s == "loop" || s == "match" || s == "panic" || s == "pub" || s == "record" || s == "recur" || s == "ref" || s == "deref" || s == "return" || s == "defer" || s == "set!" || s == "type" || s == "while" || s == "when"
 
 let kind-of(text: Str) -> Str =
   cond
@@ -1230,7 +1230,7 @@ let is-block-stmt(a: Ast) -> Bool =
   match (a)
     | ParenNode(h :: _, _) ->
       match (h)
-        | SymNode(n, _) -> n == "let" || n == "return"
+        | SymNode(n, _) -> n == "let" || n == "return" || n == "defer"
         | _ -> false
     | _ -> false
 
@@ -1310,6 +1310,13 @@ let parse-stmt(ps: Ps) -> Result Ast ParseError {
         match (parse-expr(ps))
           | Err(e) -> Err(e)
           | Ok(e) -> Ok(paren-at([sym-at("return", tok-span(t)), e], span-join(tok-span(t), ast-span(e))))
+      }
+    | t.text == "defer" ->
+      {
+        advance(ps)
+        match (parse-expr(ps))
+          | Err(e) -> Err(e)
+          | Ok(e) -> Ok(paren-at([sym-at("defer", tok-span(t)), e], span-join(tok-span(t), ast-span(e))))
       }
     | else -> parse-expr(ps)
 }

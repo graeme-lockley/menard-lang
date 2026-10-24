@@ -48,6 +48,9 @@ import {
   taskNotify,
   taskDictSet,
   taskDictGet,
+  taskDeferEnter,
+  taskDeferPush,
+  taskDeferLeave,
   taskEnsureMain,
 } from "./task.ts";
 
@@ -278,6 +281,24 @@ const EXTERN_BUILTIN: Record<string, string> = {
   mn_task_notify: "mn_task_notify",
   mn_task_dict_set: "mn_task_dict_set",
   mn_task_dict_get: "mn_task_dict_get",
+  mn_task_defer_enter: "mn_task_defer_enter",
+  mn_task_defer_push: "mn_task_defer_push",
+  mn_task_defer_leave: "mn_task_defer_leave",
+  mn_tcp_listen: "mn_tcp_listen",
+  mn_tcp_accept: "mn_tcp_accept",
+  mn_tcp_connect: "mn_tcp_connect",
+  mn_tcp_read: "mn_tcp_read",
+  mn_tcp_write: "mn_tcp_write",
+  mn_tcp_close: "mn_tcp_close",
+  mn_udp_bind: "mn_udp_bind",
+  mn_udp_send: "mn_udp_send",
+  mn_udp_recv: "mn_udp_recv",
+  mn_udp_close: "mn_udp_close",
+  mn_tls_client: "mn_tls_client",
+  mn_tls_server: "mn_tls_server",
+  mn_tls_read: "mn_tls_read",
+  mn_tls_write: "mn_tls_write",
+  mn_tls_close: "mn_tls_close",
 };
 
 function defineTop(ast: Ast, env: Env): void {
@@ -416,6 +437,7 @@ type LoopCtx = { names: string[]; env: Env };
  */
 type Cont =
   | { tag: "seq"; forms: Ast[]; i: number; env: Env; loop: LoopCtx | null }
+  | { tag: "defer-leave" }
   | { tag: "if"; then: Ast; else_: Ast; env: Env; loop: LoopCtx | null }
   | { tag: "let"; binder: Ast; rest: Ast[]; env: Env; loop: LoopCtx | null }
   | {
@@ -803,11 +825,27 @@ function beginEval(
           }
           case Sf.Do: {
             const forms = ast.elems.slice(1);
+            taskDeferEnter();
+            stack.push({ tag: "defer-leave" });
             if (forms.length === 0) return { tag: "value", value: vUnit() };
             if (forms.length > 1) {
               stack.push({ tag: "seq", forms, i: 0, env, loop });
             }
             return { tag: "eval", ast: forms[0]!, env, loop };
+          }
+          case Sf.Defer: {
+            const body = ast.elems[1];
+            if (!body) return { tag: "value", value: vUnit() };
+            const clo: Value = {
+              tag: "fn",
+              params: [],
+              body: [body],
+              env,
+              path: "",
+              name: "",
+            };
+            taskDeferPush(clo);
+            return { tag: "value", value: vUnit() };
           }
           case Sf.Loop:
             return beginLoop(ast, env, stack);
@@ -1011,6 +1049,9 @@ function resume(c: Cont, value: Value, stack: Cont[], host: Host): Step {
       }
       throw new PanicError("? expects a Maybe or Result", c.span);
     }
+    case "defer-leave":
+      taskDeferLeave(host);
+      return { tag: "value", value };
     case "seq": {
       // Finished forms[c.i]. Binding-style (let x e) extends the sequence env.
       let e = c.env;
@@ -1419,6 +1460,10 @@ function installBuiltins(env: Env): void {
     "mn_task_resume", "mn_task_join", "mn_task_cancel",
     "mn_task_yield", "mn_task_wait_new", "mn_task_wait", "mn_task_notify",
     "mn_task_dict_set", "mn_task_dict_get",
+    "mn_task_defer_enter", "mn_task_defer_push", "mn_task_defer_leave",
+    "mn_tcp_listen", "mn_tcp_accept", "mn_tcp_connect", "mn_tcp_read", "mn_tcp_write", "mn_tcp_close",
+    "mn_udp_bind", "mn_udp_send", "mn_udp_recv", "mn_udp_close",
+    "mn_tls_client", "mn_tls_server", "mn_tls_read", "mn_tls_write", "mn_tls_close",
     "NotFound", "Permission", "Exists", "IsADirectory", "NotADirectory",
     "InvalidPath", "TooLarge", "Other", "Unsupported",
     "NotExecutable", "InvalidArgument", "TooManyArguments",
@@ -1837,6 +1882,30 @@ function applyBuiltin(
       if (args.length < 1) throw new PanicError("mn_task_dict_get: arity", span);
       return taskDictGet(args[0]!);
     }
+    case "mn_task_defer_enter":
+      return taskDeferEnter();
+    case "mn_task_defer_push": {
+      if (args.length < 1) throw new PanicError("mn_task_defer_push: arity", span);
+      return taskDeferPush(args[0]!);
+    }
+    case "mn_task_defer_leave":
+      return taskDeferLeave(host);
+    case "mn_tcp_listen":
+    case "mn_tcp_accept":
+    case "mn_tcp_connect":
+    case "mn_tcp_read":
+    case "mn_tcp_write":
+    case "mn_tcp_close":
+    case "mn_udp_bind":
+    case "mn_udp_send":
+    case "mn_udp_recv":
+    case "mn_udp_close":
+    case "mn_tls_client":
+    case "mn_tls_server":
+    case "mn_tls_read":
+    case "mn_tls_write":
+    case "mn_tls_close":
+      throw new PanicError(`native-only networking: ${name} unbound in interpreter`, span);
     default:
       throw new PanicError(`unknown builtin ${name}`, span);
   }
