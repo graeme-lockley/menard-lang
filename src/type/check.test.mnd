@@ -93,3 +93,14 @@ test "TypeDef and constructor ownership use the canonical id" = {
     type-def-id(RecordDef("module-a::T", "T", [], [])) == type-def-id(RecordDef("module-a::T", "Alias.T", [], [])) &&
     type-def-id(RecordDef("module-a::T", "T", [], [])) != type-def-id(RecordDef("module-b::T", "T", [], []))
 }
+
+test "visible type spellings bind to one canonical id" = {
+  let env = empty-env()
+  type-bind!(env, "A", "module-a::T")
+  type-bind!(env, "B", "module-a::T")
+  type-bind!(env, "C", "module-b::T")
+  let a = TNominal(type-resolve(env, "A"), "A", [], "variant")
+  let b = TNominal(type-resolve(env, "B"), "B", [], "variant")
+  let c = TNominal(type-resolve(env, "C"), "C", [], "variant")
+  type-equal(a, b) && (type-equal(a, c) == false)
+}

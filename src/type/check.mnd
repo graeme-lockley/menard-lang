@@ -52,11 +52,12 @@ pub record TypeError {
 ; identical to discarding a fresh `Subst` per body, at the cost of the map
 ; growing monotonically instead of being reclaimed.
 
-record TypeEnv {
+pub record TypeEnv {
   values: Ref (Map Str Scheme)
   types: Ref (Map Str TypeDef)
   ctors: Ref (Map Str CtorInfo)
   aliases: Ref (Map Str Type)
+  type-bindings: Ref (Map Str Str)
   next-var: Ref Int
   diags: Ref (List TypeError)
   subst: Ref (Map Int Type)
@@ -147,11 +148,21 @@ let value-get(env: TypeEnv, name: Str) -> Maybe Scheme =
 let value-set(env: TypeEnv, name: Str, s: Scheme) -> Unit =
   set!(env.values, Map.set(name, s, deref(env.values)))
 
-let type-get(env: TypeEnv, id: Str) -> Maybe TypeDef =
-  Map.lookup(id, deref(env.types))
+pub let type-bind!(env: TypeEnv, spelling: Str, id: Str) -> Unit =
+  set!(env.type-bindings, Map.set(spelling, id, deref(env.type-bindings)))
 
-let type-set(env: TypeEnv, td: TypeDef) -> Unit =
+pub let type-resolve(env: TypeEnv, spelling: Str) -> Str =
+  match (Map.lookup(spelling, deref(env.type-bindings)))
+    | Some(id) -> id
+    | None -> spelling
+
+let type-get(env: TypeEnv, spelling: Str) -> Maybe TypeDef =
+  Map.lookup(type-resolve(env, spelling), deref(env.types))
+
+let type-set(env: TypeEnv, td: TypeDef) -> Unit {
+  type-bind!(env, type-def-name(td), type-def-id(td))
   set!(env.types, Map.set(type-def-id(td), td, deref(env.types)))
+}
 
 let ctor-get(env: TypeEnv, name: Str) -> Maybe CtorInfo =
   Map.lookup(name, deref(env.ctors))
@@ -288,8 +299,8 @@ let install-builtins(env: TypeEnv) -> Unit {
   install-list-type(env)
 }
 
-let empty-env() -> TypeEnv {
-  let env = TypeEnv(ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(0), ref([]), ref(Map.empty()), ref(None()))
+pub let empty-env() -> TypeEnv {
+  let env = TypeEnv(ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(0), ref([]), ref(Map.empty()), ref(None()))
   install-builtins(env)
   env
 }

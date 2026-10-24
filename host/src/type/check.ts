@@ -25,8 +25,10 @@ import type { Span } from "../reader/span.ts";
 export type TypeEnv = {
   /** value bindings: name → scheme */
   values: Map<string, Scheme>;
-  /** type defs by name */
+  /** type defs by canonical id */
   types: Map<string, TypeDef>;
+  /** visible type spelling → canonical type id */
+  typeBindings: Map<string, string>;
   /** variant ctor → type name */
   ctors: Map<string, { typeId?: string; typeName: string; payloads: Type[]; params: string[] }>;
   aliases: Map<string, Type>;
@@ -46,6 +48,7 @@ export function emptyEnv(): TypeEnv {
   const env: TypeEnv = {
     values: new Map(),
     types: new Map(),
+    typeBindings: new Map(),
     ctors: new Map(),
     aliases: new Map(),
     nextVar: 0,
@@ -144,7 +147,7 @@ function installBuiltins(env: TypeEnv): void {
   const tParam: Type = { tag: "param", name: "t" };
   const eParam: Type = { tag: "param", name: "e" };
 
-  env.types.set("Maybe", {
+  addTypeDef(env, "Maybe", {
     kind: "variant",
     id: "Maybe",
     name: "Maybe",
@@ -160,7 +163,7 @@ function installBuiltins(env: TypeEnv): void {
   env.values.set("None", { params: ["a"], type: tFn([], tMaybe(a)) });
   env.values.set("Some", { params: ["a"], type: tFn([a], tMaybe(a)) });
 
-  env.types.set("Result", {
+  addTypeDef(env, "Result", {
     kind: "variant",
     id: "Result",
     name: "Result",
@@ -176,7 +179,7 @@ function installBuiltins(env: TypeEnv): void {
   env.values.set("Ok", { params: ["t", "e"], type: tFn([tParam], tResult(tParam, eParam)) });
   env.values.set("Err", { params: ["t", "e"], type: tFn([eParam], tResult(tParam, eParam)) });
 
-  env.types.set("List", {
+  addTypeDef(env, "List", {
     kind: "variant",
     id: "List",
     name: "List",
@@ -245,6 +248,24 @@ function fieldName(ast: Ast): string | null {
   return s.endsWith(":") ? s.slice(0, -1) : s;
 }
 
+export function bindType(env: TypeEnv, spelling: string, id: string): void {
+  env.typeBindings.set(spelling, id);
+}
+
+export function resolveType(env: TypeEnv, spelling: string): string {
+  return env.typeBindings.get(spelling) ?? spelling;
+}
+
+function addTypeDef(env: TypeEnv, spelling: string, def: TypeDef): void {
+  const id = def.id ?? def.name;
+  env.types.set(id, def);
+  bindType(env, spelling, id);
+}
+
+function typeDefOf(env: TypeEnv, spelling: string): TypeDef | undefined {
+  return env.types.get(resolveType(env, spelling));
+}
+
 /** Parse a type expression Ast into a Type (with env aliases / nominals). */
 export function parseTypeExpr(env: TypeEnv, ast: Ast, params: Set<string>): Type {
   if (ast.tag === "sym") {
@@ -263,8 +284,8 @@ export function parseTypeExpr(env: TypeEnv, ast: Ast, params: Set<string>): Type
       return prim(n);
     }
     if (env.aliases.has(n)) return env.aliases.get(n)!;
-    if (env.types.has(n)) {
-      const def = env.types.get(n)!;
+    const def = typeDefOf(env, n);
+    if (def) {
       return { tag: "nominal", id: def.id ?? def.name, name: def.name, args: [], kind: def.kind };
     }
     err(env, "E_TYPE_UNKNOWN", `unknown type ${n}`, ast.span);
@@ -317,15 +338,15 @@ export function parseTypeExpr(env: TypeEnv, ast: Ast, params: Set<string>): Type
       }
       return tProduct(ast.elems.slice(1).map((e) => parseTypeExpr(env, e, params)));
     }
-    if (hn && env.types.has(hn)) {
-      const def = env.types.get(hn)!;
+    const nominalDef = hn ? typeDefOf(env, hn) : undefined;
+    if (nominalDef) {
       const args = ast.elems.slice(1).map((e) => parseTypeExpr(env, e, params));
       return {
         tag: "nominal",
-        id: def.id ?? def.name,
-        name: def.name,
+        id: nominalDef.id ?? nominalDef.name,
+        name: nominalDef.name,
         args,
-        kind: def.kind,
+        kind: nominalDef.kind,
       };
     }
   }
@@ -657,11 +678,18 @@ function mergeImportBundle(env: TypeEnv, b: ImportBundle): void {
 
 function bindQualified(env: TypeEnv, alias: string, b: ImportBundle): void {
   env.modules.set(alias, b);
+  for (const [k, v] of b.types) {
+    const id = v.id ?? v.name;
+    env.types.set(id, v);
+    bindType(env, `${alias}.${k}`, id);
+  }
 }
 
 function mergeImportTypes(env: TypeEnv, b: ImportBundle): void {
   for (const [k, v] of b.types) {
-    env.types.set(k, v);
+    const id = v.id ?? v.name;
+    env.types.set(id, v);
+    bindType(env, k, id);
     env.importedTypes.add(k);
   }
   for (const [k, v] of b.ctors) env.ctors.set(k, v);
@@ -679,7 +707,7 @@ function bundleExports(env: TypeEnv, exports: Set<string>): ImportBundle {
   for (const name of exports) {
     const s = env.values.get(name);
     if (s) values.set(name, s);
-    const t = env.types.get(name);
+    const t = typeDefOf(env, name);
     if (t) types.set(name, t);
     const c = env.ctors.get(name);
     if (c) ctors.set(name, c);
@@ -711,7 +739,7 @@ function checkPubPrivateTypes(env: TypeEnv, forms: Ast[], exports: Set<string>):
     if (!scheme) continue;
     const leaked = nominalNamesInType(scheme.type).filter(
       (n) =>
-        env.types.has(n) &&
+        typeDefOf(env, n) !== undefined &&
         !exports.has(n) &&
         !env.importedTypes.has(n) &&
         !BUILTIN_NOMINALS.has(n),
@@ -818,16 +846,18 @@ function registerTypeStubs(env: TypeEnv, forms: Ast[], skipDup: Set<Ast>): void 
     }
     seen.add(info.name);
     if (info.kind === "record") {
-      env.types.set(info.name, {
+      addTypeDef(env, info.name, {
         kind: "record",
+        id: info.name,
         name: info.name,
         params: info.params,
         fields: [],
         span: f.span,
       });
     } else {
-      env.types.set(info.name, {
+      addTypeDef(env, info.name, {
         kind: "variant",
+        id: info.name,
         name: info.name,
         params: info.params,
         ctors: [],
@@ -856,7 +886,7 @@ function collectDef(env: TypeEnv, ast: Ast): void {
     if (!name) return;
     const t = parseTypeExpr(env, ast.elems[2]!, new Set());
     env.aliases.set(name, t);
-    env.types.set(name, { kind: "alias", id: name, name, type: t, span: ast.span });
+    addTypeDef(env, name, { kind: "alias", id: name, name, type: t, span: ast.span });
     env.displayAlias.set(name, name);
     return;
   }
@@ -876,7 +906,7 @@ function collectDef(env: TypeEnv, ast: Ast): void {
         span: fe.span,
       });
     }
-    env.types.set(name, { kind: "record", id: name, name, params, fields, span: ast.span });
+    addTypeDef(env, name, { kind: "record", id: name, name, params, fields, span: ast.span });
     // constructor = record name
     env.ctors.set(name, {
       typeId: name,
@@ -898,7 +928,7 @@ function collectDef(env: TypeEnv, ast: Ast): void {
     if (!name) return;
     const paramSet = new Set(params);
     // Register the name before payloads so a variant can mention itself.
-    env.types.set(name, { kind: "variant", id: name, name, params, ctors: [], span: ast.span });
+    addTypeDef(env, name, { kind: "variant", id: name, name, params, ctors: [], span: ast.span });
     const ctors: VariantCtor[] = [];
     for (let i = 2; i < ast.elems.length; i++) {
       const ce = ast.elems[i]!;
@@ -924,7 +954,7 @@ function collectDef(env: TypeEnv, ast: Ast): void {
         ),
       });
     }
-    env.types.set(name, { kind: "variant", id: name, name, params, ctors, span: ast.span });
+    addTypeDef(env, name, { kind: "variant", id: name, name, params, ctors, span: ast.span });
   }
 }
 
@@ -1309,7 +1339,7 @@ function inferProject(
     err(env, "E_TYPE_MISMATCH", `expected a record, found ${typeShow(objTy)}`, obj.span);
     return freshVar(env);
   }
-  const def = env.types.get(objTy.name);
+  const def = env.types.get(objTy.id ?? objTy.name);
   if (!def || def.kind !== "record") {
     err(env, "E_TYPE_UNBOUND", `unknown record ${objTy.name}`, obj.span);
     return freshVar(env);
@@ -1684,7 +1714,7 @@ function inferMatch(
     scrut.tag === "list"
   ) {
     let typeName: string | null = null;
-    if (scrut.tag === "nominal") typeName = scrut.name;
+    if (scrut.tag === "nominal") typeName = scrut.id ?? scrut.name;
     if (scrut.tag === "maybe") typeName = "Maybe";
     if (scrut.tag === "result") typeName = "Result";
     if (scrut.tag === "list") typeName = "List";
@@ -1725,7 +1755,7 @@ function bindRecordPat(
     err(env, "E_TYPE_MISMATCH", "expected a record", pat.span);
     return;
   }
-  const def = env.types.get(name);
+  const def = typeDefOf(env, name);
   if (!def || def.kind !== "record") {
     err(env, "E_TYPE_MISMATCH", `expected a record, found ${name}`, pat.span);
     return;

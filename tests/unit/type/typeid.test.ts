@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { typeDefId, typeEqual, typeShow, type Type, type TypeDef } from "../../../host/src/type/types.ts";
+import { bindType, emptyEnv, parseTypeExpr } from "../../../host/src/type/check.ts";
+import type { Ast } from "../../../host/src/reader/ast.ts";
 
 const nominal = (id: string, name = "T"): Type => ({
   tag: "nominal",
@@ -58,5 +60,33 @@ describe("TypeDef and constructor ownership identity", () => {
     expect(typeEqual(ctor("module-a::T", "T"), ctor("module-b::T", "T"))).toBe(false);
     expect(typeEqual(ctor("module-a::T", "T"), ctor("module-a::T", "Alias.T"))).toBe(true);
     expect(typeShow(ctor("module-a::T", "Alias.T"))).toBe("A");
+  });
+});
+
+describe("visible type spelling bindings", () => {
+  const sym = (name: string): Ast => ({
+    tag: "sym",
+    name: new TextEncoder().encode(name),
+    span: { start: 0, end: 0 },
+  });
+
+  const env = emptyEnv();
+  env.types.set("module-a::T", {
+    kind: "variant",
+    id: "module-a::T",
+    name: "T",
+    params: [],
+    ctors: [],
+    span: { start: 0, end: 0 },
+  });
+  bindType(env, "A", "module-a::T");
+  bindType(env, "B", "module-a::T");
+  bindType(env, "C", "module-b::T");
+
+  test("two visible spellings for one id produce equal nominals", () => {
+    const a = parseTypeExpr(env, sym("A"), new Set());
+    const b = parseTypeExpr(env, sym("B"), new Set());
+    expect(typeEqual(a, b)).toBe(true);
+    expect(typeEqual(a, parseTypeExpr(env, sym("C"), new Set()))).toBe(false);
   });
 });
