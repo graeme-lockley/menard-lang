@@ -53,18 +53,37 @@ pub record VariantCtor {
 }
 
 pub type TypeDef =
-  | RecordDef(Str, List Str, List RecordField)
-  | VariantDef(Str, List Str, List VariantCtor)
+  | RecordDef(Str, Str, List Str, List RecordField)
+  | VariantDef(Str, Str, List Str, List VariantCtor)
 
 ; A constructor's own signature, independent of which TypeDef it belongs
-; to: the nominal type it builds, its payload types (may mention that
-; type's own parameters) and the parameter list itself (for instantiating
-; a pattern's payload types against fresh variables).
+; to: the canonical type id and display name it builds, its payload types
+; (may mention that type's own parameters) and the parameter list itself
+; (for instantiating a pattern's payload types against fresh variables).
 pub record CtorInfo {
+  type-id: Str
   type-name: Str
   payloads: List Type
   params: List Str
 }
+
+pub let type-def-id(td: TypeDef) -> Str =
+  match (td)
+    | RecordDef(id, _, _, _) -> id
+    | VariantDef(id, _, _, _) -> id
+
+pub let type-def-name(td: TypeDef) -> Str =
+  match (td)
+    | RecordDef(_, name, _, _) -> name
+    | VariantDef(_, name, _, _) -> name
+
+pub let ctor-owner-id(c: CtorInfo) -> Str =
+  match (c)
+    | CtorInfo(type-id, _, _, _) -> type-id
+
+pub let ctor-owner-name(c: CtorInfo) -> Str =
+  match (c)
+    | CtorInfo(_, type-name, _, _) -> type-name
 
 ; ---------------------------------------------------------------------------
 ; Constructors — small wrappers so callers read as "the List type of T"

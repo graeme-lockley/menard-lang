@@ -28,7 +28,7 @@ export type TypeEnv = {
   /** type defs by name */
   types: Map<string, TypeDef>;
   /** variant ctor → type name */
-  ctors: Map<string, { typeName: string; payloads: Type[]; params: string[] }>;
+  ctors: Map<string, { typeId?: string; typeName: string; payloads: Type[]; params: string[] }>;
   aliases: Map<string, Type>;
   nextVar: number;
   diagnostics: Diagnostic[];
@@ -146,6 +146,7 @@ function installBuiltins(env: TypeEnv): void {
 
   env.types.set("Maybe", {
     kind: "variant",
+    id: "Maybe",
     name: "Maybe",
     params: ["a"],
     ctors: [
@@ -154,13 +155,14 @@ function installBuiltins(env: TypeEnv): void {
     ],
     span: { start: 0, end: 0 },
   });
-  env.ctors.set("None", { typeName: "Maybe", payloads: [], params: ["a"] });
-  env.ctors.set("Some", { typeName: "Maybe", payloads: [a], params: ["a"] });
+  env.ctors.set("None", { typeId: "Maybe", typeName: "Maybe", payloads: [], params: ["a"] });
+  env.ctors.set("Some", { typeId: "Maybe", typeName: "Maybe", payloads: [a], params: ["a"] });
   env.values.set("None", { params: ["a"], type: tFn([], tMaybe(a)) });
   env.values.set("Some", { params: ["a"], type: tFn([a], tMaybe(a)) });
 
   env.types.set("Result", {
     kind: "variant",
+    id: "Result",
     name: "Result",
     params: ["t", "e"],
     ctors: [
@@ -169,13 +171,14 @@ function installBuiltins(env: TypeEnv): void {
     ],
     span: { start: 0, end: 0 },
   });
-  env.ctors.set("Ok", { typeName: "Result", payloads: [tParam], params: ["t", "e"] });
-  env.ctors.set("Err", { typeName: "Result", payloads: [eParam], params: ["t", "e"] });
+  env.ctors.set("Ok", { typeId: "Result", typeName: "Result", payloads: [tParam], params: ["t", "e"] });
+  env.ctors.set("Err", { typeId: "Result", typeName: "Result", payloads: [eParam], params: ["t", "e"] });
   env.values.set("Ok", { params: ["t", "e"], type: tFn([tParam], tResult(tParam, eParam)) });
   env.values.set("Err", { params: ["t", "e"], type: tFn([eParam], tResult(tParam, eParam)) });
 
   env.types.set("List", {
     kind: "variant",
+    id: "List",
     name: "List",
     params: ["a"],
     ctors: [
@@ -188,8 +191,9 @@ function installBuiltins(env: TypeEnv): void {
     ],
     span: { start: 0, end: 0 },
   });
-  env.ctors.set("Nil", { typeName: "List", payloads: [], params: ["a"] });
+  env.ctors.set("Nil", { typeId: "List", typeName: "List", payloads: [], params: ["a"] });
   env.ctors.set("Cons", {
+    typeId: "List",
     typeName: "List",
     payloads: [a, tList(a)],
     params: ["a"],
@@ -260,7 +264,8 @@ export function parseTypeExpr(env: TypeEnv, ast: Ast, params: Set<string>): Type
     }
     if (env.aliases.has(n)) return env.aliases.get(n)!;
     if (env.types.has(n)) {
-      return { tag: "nominal", name: n, args: [], kind: env.types.get(n)!.kind === "alias" ? "alias" : env.types.get(n)!.kind };
+      const def = env.types.get(n)!;
+      return { tag: "nominal", id: def.id ?? def.name, name: def.name, args: [], kind: def.kind };
     }
     err(env, "E_TYPE_UNKNOWN", `unknown type ${n}`, ast.span);
     return freshVar(env);
@@ -317,9 +322,10 @@ export function parseTypeExpr(env: TypeEnv, ast: Ast, params: Set<string>): Type
       const args = ast.elems.slice(1).map((e) => parseTypeExpr(env, e, params));
       return {
         tag: "nominal",
-        name: hn,
+        id: def.id ?? def.name,
+        name: def.name,
         args,
-        kind: def.kind === "alias" ? "alias" : def.kind,
+        kind: def.kind,
       };
     }
   }
@@ -640,7 +646,7 @@ export function typecheckForms(
 export type ImportBundle = {
   values: Map<string, Scheme>;
   types: Map<string, TypeDef>;
-  ctors: Map<string, { typeName: string; payloads: Type[]; params: string[] }>;
+  ctors: Map<string, { typeId?: string; typeName: string; payloads: Type[]; params: string[] }>;
   aliases: Map<string, Type>;
 };
 
@@ -668,7 +674,7 @@ function mergeImportTypes(env: TypeEnv, b: ImportBundle): void {
 function bundleExports(env: TypeEnv, exports: Set<string>): ImportBundle {
   const values = new Map<string, Scheme>();
   const types = new Map<string, TypeDef>();
-  const ctors = new Map<string, { typeName: string; payloads: Type[]; params: string[] }>();
+  const ctors = new Map<string, { typeId?: string; typeName: string; payloads: Type[]; params: string[] }>();
   const aliases = new Map<string, Type>();
   for (const name of exports) {
     const s = env.values.get(name);
@@ -850,7 +856,7 @@ function collectDef(env: TypeEnv, ast: Ast): void {
     if (!name) return;
     const t = parseTypeExpr(env, ast.elems[2]!, new Set());
     env.aliases.set(name, t);
-    env.types.set(name, { kind: "alias", name, type: t, span: ast.span });
+    env.types.set(name, { kind: "alias", id: name, name, type: t, span: ast.span });
     env.displayAlias.set(name, name);
     return;
   }
@@ -870,9 +876,10 @@ function collectDef(env: TypeEnv, ast: Ast): void {
         span: fe.span,
       });
     }
-    env.types.set(name, { kind: "record", name, params, fields, span: ast.span });
+    env.types.set(name, { kind: "record", id: name, name, params, fields, span: ast.span });
     // constructor = record name
     env.ctors.set(name, {
+      typeId: name,
       typeName: name,
       payloads: fields.map((f) => f.type),
       params,
@@ -881,7 +888,7 @@ function collectDef(env: TypeEnv, ast: Ast): void {
       params,
       type: tFn(
         fields.map((f) => f.type),
-        { tag: "nominal", name, args: params.map((p) => ({ tag: "param" as const, name: p })), kind: "record" },
+        { tag: "nominal", id: name, name, args: params.map((p) => ({ tag: "param" as const, name: p })), kind: "record" },
       ),
     });
     return;
@@ -891,7 +898,7 @@ function collectDef(env: TypeEnv, ast: Ast): void {
     if (!name) return;
     const paramSet = new Set(params);
     // Register the name before payloads so a variant can mention itself.
-    env.types.set(name, { kind: "variant", name, params, ctors: [], span: ast.span });
+    env.types.set(name, { kind: "variant", id: name, name, params, ctors: [], span: ast.span });
     const ctors: VariantCtor[] = [];
     for (let i = 2; i < ast.elems.length; i++) {
       const ce = ast.elems[i]!;
@@ -902,13 +909,14 @@ function collectDef(env: TypeEnv, ast: Ast): void {
       ctors.push({ name: cname, payloads, span: ce.span });
       const existing = env.ctors.get(cname);
       if (existing && existing.typeName !== name) continue;
-      env.ctors.set(cname, { typeName: name, payloads, params });
+      env.ctors.set(cname, { typeId: name, typeName: name, payloads, params });
       env.values.set(cname, {
         params,
         type: tFn(
           payloads,
           {
             tag: "nominal",
+            id: name,
             name,
             args: params.map((p) => ({ tag: "param" as const, name: p })),
             kind: "variant",
@@ -916,7 +924,7 @@ function collectDef(env: TypeEnv, ast: Ast): void {
         ),
       });
     }
-    env.types.set(name, { kind: "variant", name, params, ctors, span: ast.span });
+    env.types.set(name, { kind: "variant", id: name, name, params, ctors, span: ast.span });
   }
 }
 
@@ -1766,6 +1774,7 @@ function bindPattern(
       const ctor = env.ctors.get(n)!;
       const nominal: Type = {
         tag: "nominal",
+        id: ctor.typeId ?? ctor.typeName,
         name: ctor.typeName,
         args: ctor.params.map(() => freshVar(env)),
         kind: "variant",
@@ -1861,7 +1870,7 @@ function bindPattern(
         expectType(
           env,
           scrut,
-          { tag: "nominal", name: ctor.typeName, args: argVars, kind: "variant" },
+          { tag: "nominal", id: ctor.typeId ?? ctor.typeName, name: ctor.typeName, args: argVars, kind: "variant" },
           subst,
           pat.span,
         );

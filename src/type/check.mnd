@@ -147,11 +147,11 @@ let value-get(env: TypeEnv, name: Str) -> Maybe Scheme =
 let value-set(env: TypeEnv, name: Str, s: Scheme) -> Unit =
   set!(env.values, Map.set(name, s, deref(env.values)))
 
-let type-get(env: TypeEnv, name: Str) -> Maybe TypeDef =
-  Map.lookup(name, deref(env.types))
+let type-get(env: TypeEnv, id: Str) -> Maybe TypeDef =
+  Map.lookup(id, deref(env.types))
 
-let type-set(env: TypeEnv, name: Str, td: TypeDef) -> Unit =
-  set!(env.types, Map.set(name, td, deref(env.types)))
+let type-set(env: TypeEnv, td: TypeDef) -> Unit =
+  set!(env.types, Map.set(type-def-id(td), td, deref(env.types)))
 
 let ctor-get(env: TypeEnv, name: Str) -> Maybe CtorInfo =
   Map.lookup(name, deref(env.ctors))
@@ -255,25 +255,25 @@ let install-map-ops(env: TypeEnv) -> Unit {
 }
 
 let install-maybe(env: TypeEnv) -> Unit {
-  type-set(env, "Maybe", VariantDef("Maybe", ["a"], [VariantCtor("None", Nil()), VariantCtor("Some", TParam("a") :: Nil())]))
-  ctor-set(env, "None", CtorInfo("Maybe", [], ["a"]))
-  ctor-set(env, "Some", CtorInfo("Maybe", [TParam("a")], ["a"]))
+  type-set(env, VariantDef("Maybe", "Maybe", ["a"], [VariantCtor("None", Nil()), VariantCtor("Some", TParam("a") :: Nil())]))
+  ctor-set(env, "None", CtorInfo("Maybe", "Maybe", [], ["a"]))
+  ctor-set(env, "Some", CtorInfo("Maybe", "Maybe", [TParam("a")], ["a"]))
   value-set(env, "None", Scheme(["a"], t-fn([], t-maybe(TParam("a")))))
   value-set(env, "Some", Scheme(["a"], t-fn([TParam("a")], t-maybe(TParam("a")))))
 }
 
 let install-result(env: TypeEnv) -> Unit {
-  type-set(env, "Result", VariantDef("Result", ["t", "e"], [VariantCtor("Ok", TParam("t") :: Nil()), VariantCtor("Err", TParam("e") :: Nil())]))
-  ctor-set(env, "Ok", CtorInfo("Result", [TParam("t")], ["t", "e"]))
-  ctor-set(env, "Err", CtorInfo("Result", [TParam("e")], ["t", "e"]))
+  type-set(env, VariantDef("Result", "Result", ["t", "e"], [VariantCtor("Ok", TParam("t") :: Nil()), VariantCtor("Err", TParam("e") :: Nil())]))
+  ctor-set(env, "Ok", CtorInfo("Result", "Result", [TParam("t")], ["t", "e"]))
+  ctor-set(env, "Err", CtorInfo("Result", "Result", [TParam("e")], ["t", "e"]))
   value-set(env, "Ok", Scheme(["t", "e"], t-fn([TParam("t")], t-result(TParam("t"), TParam("e")))))
   value-set(env, "Err", Scheme(["t", "e"], t-fn([TParam("e")], t-result(TParam("t"), TParam("e")))))
 }
 
 let install-list-type(env: TypeEnv) -> Unit {
-  type-set(env, "List", VariantDef("List", ["a"], [VariantCtor("Nil", Nil()), VariantCtor("Cons", TParam("a") :: t-list(TParam("a")) :: Nil())]))
-  ctor-set(env, "Nil", CtorInfo("List", [], ["a"]))
-  ctor-set(env, "Cons", CtorInfo("List", [TParam("a"), t-list(TParam("a"))], ["a"]))
+  type-set(env, VariantDef("List", "List", ["a"], [VariantCtor("Nil", Nil()), VariantCtor("Cons", TParam("a") :: t-list(TParam("a")) :: Nil())]))
+  ctor-set(env, "Nil", CtorInfo("List", "List", [], ["a"]))
+  ctor-set(env, "Cons", CtorInfo("List", "List", [TParam("a"), t-list(TParam("a"))], ["a"]))
   value-set(env, "Nil", Scheme(["a"], t-fn([], t-list(TParam("a")))))
   value-set(env, "Cons", Scheme(["a"], t-fn([TParam("a"), t-list(TParam("a"))], t-list(TParam("a")))))
 }
@@ -557,8 +557,8 @@ let find-arrow-cons-recurse(e: Ast, rest: List Ast) -> Maybe ArrowSplit =
 
 let type-def-kind(td: TypeDef) -> Str =
   match (td)
-    | RecordDef(_, _, _) -> "record"
-    | VariantDef(_, _, _) -> "variant"
+    | RecordDef(_, _, _, _) -> "record"
+    | VariantDef(_, _, _, _) -> "variant"
 
 let parse-type-exprs(env: TypeEnv, asts: List Ast, params: List Str) -> List Type =
   match (asts)
@@ -597,7 +597,7 @@ let parse-type-expr-sym-named(env: TypeEnv, name: Str, sp: Span) -> Type =
 
 let parse-type-expr-sym-nominal(env: TypeEnv, name: Str, sp: Span) -> Type =
   match (type-get(env, name))
-    | Some(td) -> t-nominal(name, [], type-def-kind(td))
+    | Some(td) -> t-nominal-id(type-def-id(td), type-def-name(td), [], type-def-kind(td))
     | None ->
       {
         err!(env, "E_TYPE_UNKNOWN", String.concat("unknown type ", name), sp)
@@ -686,7 +686,7 @@ let parse-type-expr-first(env: TypeEnv, after: List Ast, sp: Span, params: List 
 
 let parse-type-expr-nominal(env: TypeEnv, hn: Str, args: List Ast, sp: Span, params: List Str) -> Type =
   match (type-get(env, hn))
-    | Some(td) -> t-nominal(hn, parse-type-exprs(env, args, params), type-def-kind(td))
+    | Some(td) -> t-nominal-id(type-def-id(td), type-def-name(td), parse-type-exprs(env, args, params), type-def-kind(td))
     | None ->
       {
         err!(env, "E_TYPE_EXPR", "invalid type expression", sp)
@@ -829,9 +829,9 @@ let collect-defrec-fields(env: TypeEnv, np: NameParams, fields: List Ast) -> Uni
   let params = name-params-params(np)
   let rfields = parse-record-fields(env, fields, params)
   let ftypes = record-field-types(rfields)
-  type-set(env, name, RecordDef(name, params, rfields))
-  ctor-set(env, name, CtorInfo(name, ftypes, params))
-  value-set(env, name, Scheme(params, t-fn(ftypes, t-nominal(name, params-to-types(params), "record"))))
+  type-set(env, RecordDef(name, name, params, rfields))
+  ctor-set(env, name, CtorInfo(name, name, ftypes, params))
+  value-set(env, name, Scheme(params, t-fn(ftypes, t-nominal-id(name, name, params-to-types(params), "record"))))
 }
 
 let collect-defrec-named(env: TypeEnv, name-part: Ast, fields: List Ast) -> Unit =
@@ -847,26 +847,25 @@ let collect-defrec(env: TypeEnv, rest: List Ast, sp: Span) -> Unit =
 ; variant
 
 let ctor-owner(c: CtorInfo) -> Str =
-  match (c)
-    | CtorInfo(type-name, _, _) -> type-name
+  ctor-owner-name(c)
 
 ; A constructor already owned by another variant stays there. SpawnError
 ; lists the IoError singletons NotFound and Permission for exhaustiveness
 ; without taking them away from IoError.
-let register-variant-ctor-set(env: TypeEnv, type-name: Str, params: List Str, cname: Str, payloads: List Type) -> Unit {
-  ctor-set(env, cname, CtorInfo(type-name, payloads, params))
-  value-set(env, cname, Scheme(params, t-fn(payloads, t-nominal(type-name, params-to-types(params), "variant"))))
+let register-variant-ctor-set(env: TypeEnv, type-id: Str, type-name: Str, params: List Str, cname: Str, payloads: List Type) -> Unit {
+  ctor-set(env, cname, CtorInfo(type-id, type-name, payloads, params))
+  value-set(env, cname, Scheme(params, t-fn(payloads, t-nominal-id(type-id, type-name, params-to-types(params), "variant"))))
 }
 
-let register-variant-ctor-checked(env: TypeEnv, type-name: Str, params: List Str, cname: Str, payloads: List Type) -> Unit =
+let register-variant-ctor-checked(env: TypeEnv, type-id: Str, type-name: Str, params: List Str, cname: Str, payloads: List Type) -> Unit =
   match (ctor-get(env, cname))
     | Some(info) ->
-      if (ctor-owner(info) == type-name) -> register-variant-ctor-set(env, type-name, params, cname, payloads)
-    | None -> register-variant-ctor-set(env, type-name, params, cname, payloads)
+      if (ctor-owner-id(info) == type-id) -> register-variant-ctor-set(env, type-id, type-name, params, cname, payloads)
+    | None -> register-variant-ctor-set(env, type-id, type-name, params, cname, payloads)
 
-let register-variant-ctor(env: TypeEnv, type-name: Str, params: List Str, vc: VariantCtor) -> Unit =
+let register-variant-ctor(env: TypeEnv, type-id: Str, type-name: Str, params: List Str, vc: VariantCtor) -> Unit =
   match (vc)
-    | VariantCtor(cname, payloads) -> register-variant-ctor-checked(env, type-name, params, cname, payloads)
+    | VariantCtor(cname, payloads) -> register-variant-ctor-checked(env, type-id, type-name, params, cname, payloads)
 
 let parse-variant-ctor-named(env: TypeEnv, cname-ast: Ast, payload-asts: List Ast, params: List Str) -> Maybe VariantCtor =
   match (sym-str(cname-ast))
@@ -883,26 +882,26 @@ let parse-variant-ctor(env: TypeEnv, c: Ast, params: List Str) -> Maybe VariantC
     | ParenNode(celems, _) -> parse-variant-ctor-elems(env, celems, params)
     | _ -> None()
 
-let collect-variant-ctor-list(env: TypeEnv, type-name: Str, params: List Str, ctor-asts: List Ast) -> List VariantCtor =
+let collect-variant-ctor-list(env: TypeEnv, type-id: Str, type-name: Str, params: List Str, ctor-asts: List Ast) -> List VariantCtor =
   match (ctor-asts)
     | [] -> []
-    | c :: rest -> collect-variant-ctor-cons(env, type-name, params, c, rest)
+    | c :: rest -> collect-variant-ctor-cons(env, type-id, type-name, params, c, rest)
 
-let collect-variant-ctor-cons(env: TypeEnv, type-name: Str, params: List Str, c: Ast, rest: List Ast) -> List VariantCtor =
+let collect-variant-ctor-cons(env: TypeEnv, type-id: Str, type-name: Str, params: List Str, c: Ast, rest: List Ast) -> List VariantCtor =
   match (parse-variant-ctor(env, c, params))
-    | None -> collect-variant-ctor-list(env, type-name, params, rest)
+    | None -> collect-variant-ctor-list(env, type-id, type-name, params, rest)
     | Some(vc) ->
       {
-        register-variant-ctor(env, type-name, params, vc)
-        vc :: collect-variant-ctor-list(env, type-name, params, rest)
+        register-variant-ctor(env, type-id, type-name, params, vc)
+        vc :: collect-variant-ctor-list(env, type-id, type-name, params, rest)
       }
 
 let collect-variant-ctors(env: TypeEnv, np: NameParams, ctor-asts: List Ast) -> Unit {
   let name = name-params-name(np)
   let params = name-params-params(np)
-  type-set(env, name, VariantDef(name, params, []))
-  let vctors = collect-variant-ctor-list(env, name, params, ctor-asts)
-  type-set(env, name, VariantDef(name, params, vctors))
+  type-set(env, VariantDef(name, name, params, []))
+  let vctors = collect-variant-ctor-list(env, name, name, params, ctor-asts)
+  type-set(env, VariantDef(name, name, params, vctors))
 }
 
 let collect-variant-named(env: TypeEnv, name-part: Ast, ctors: List Ast) -> Unit =
@@ -1562,8 +1561,8 @@ let check-lambda-against(env: TypeEnv, elems: List Ast, sp: Span, expected: Type
 
 ; -- match --
 
-let nominal-kind-of(env: TypeEnv, type-name: Str) -> Str =
-  match (type-get(env, type-name))
+let nominal-kind-of(env: TypeEnv, type-id: Str) -> Str =
+  match (type-get(env, type-id))
     | Some(td) -> type-def-kind(td)
     | None -> "variant"
 
@@ -1573,7 +1572,7 @@ let nth-or-fresh(xs: List Type, i: Int, env: TypeEnv) -> Type =
     | x :: rest ->
       if (i == 0) -> x | nth-or-fresh(rest, i - 1, env)
 
-let bind-ctor-scrut-specific(env: TypeEnv, type-name: Str, arg-vars: List Type, scrut: Type, sp: Span) -> Unit =
+let bind-ctor-scrut-specific(env: TypeEnv, type-id: Str, type-name: Str, arg-vars: List Type, scrut: Type, sp: Span) -> Unit =
   match (type-name)
     | "Maybe" ->
       {
@@ -1592,7 +1591,7 @@ let bind-ctor-scrut-specific(env: TypeEnv, type-name: Str, arg-vars: List Type, 
       }
     | _ ->
       {
-        unify(env, scrut, t-nominal(type-name, arg-vars, nominal-kind-of(env, type-name)), sp)
+        unify(env, scrut, t-nominal-id(type-id, type-name, arg-vars, nominal-kind-of(env, type-id)), sp)
         ()
       }
 
@@ -1639,7 +1638,7 @@ let bind-nullary-ctor(env: TypeEnv, name: Str, ctor: CtorInfo, scrut: Type, cove
 
 let bind-ctor-scrut(env: TypeEnv, ctor: CtorInfo, scrut: Type, sp: Span) -> Unit =
   match (ctor)
-    | CtorInfo(type-name, _, params) -> bind-ctor-scrut-specific(env, type-name, fresh-vars-for(params, env), scrut, sp)
+    | CtorInfo(type-id, type-name, _, params) -> bind-ctor-scrut-specific(env, type-id, type-name, fresh-vars-for(params, env), scrut, sp)
 
 let is-product-type(t: Type) -> Bool =
   match (t)
@@ -1679,12 +1678,12 @@ let bind-pattern-args(env: TypeEnv, arg-pats: List Ast, payloads: List Type, loc
 
 let bind-pattern-ctor-info(env: TypeEnv, cname: Str, ctor: CtorInfo, arg-pats: List Ast, psp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
   match (ctor)
-    | CtorInfo(type-name, payload-schema, params) ->
+    | CtorInfo(type-id, type-name, payload-schema, params) ->
       {
         set!(covered, cname :: deref(covered))
         let arg-vars = fresh-vars-for(params, env)
         let pmap = zip-param-map(params, arg-vars)
-        bind-ctor-scrut-specific(env, type-name, arg-vars, scrut, psp)
+        bind-ctor-scrut-specific(env, type-id, type-name, arg-vars, scrut, psp)
         bind-pattern-args(env, arg-pats, replace-params-list(payload-schema, pmap), loc)
       }
 
@@ -1750,7 +1749,7 @@ let bind-record-named(env: TypeEnv, name-ast: Ast, fields: List Ast, psp: Span, 
     | None -> err!(env, "E_TYPE_MISMATCH", "expected a record", psp)
     | Some(name) ->
       match (type-get(env, name))
-        | Some(RecordDef(_, _, rfields)) -> bind-record-fields(env, name-ast, fields, rfields, psp, scrut, loc, covered)
+        | Some(RecordDef(_, _, _, rfields)) -> bind-record-fields(env, name-ast, fields, rfields, psp, scrut, loc, covered)
         | _ -> err!(env, "E_TYPE_MISMATCH", String.concat("expected a record, found ", name), psp)
 
 let bind-record-fields(env: TypeEnv, name-ast: Ast, fields: List Ast, rfields: List RecordField, psp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
@@ -1826,8 +1825,8 @@ let check-ctors-covered(env: TypeEnv, ctors: List VariantCtor, covered: List Str
 
 let check-match-exhaustive-def(env: TypeEnv, td: TypeDef, covered: List Str, has-wild: Bool, sp: Span) -> Unit =
   match (td)
-    | RecordDef(_, _, _) -> ()
-    | VariantDef(_, _, ctors) ->
+    | RecordDef(_, _, _, _) -> ()
+    | VariantDef(_, _, _, ctors) ->
       if (has-wild) -> () | check-ctors-covered(env, ctors, covered, sp)
 
 let check-match-exhaustive-named(env: TypeEnv, type-name: Str, covered: List Str, has-wild: Bool, sp: Span) -> Unit =
@@ -2035,7 +2034,7 @@ let bind-type-params(params: List Str, args: List Type, m: Map Str Type) -> Map 
 ; Type of one field, and the slot index to lower later.
 let infer-record-field(env: TypeEnv, def: TypeDef, args: List Type, field: Str, field-ast: Ast, sp: Span) -> Type =
   match (def)
-    | RecordDef(_, params, fields) ->
+    | RecordDef(_, _, params, fields) ->
       match (record-field-at(fields, field, 0))
         | None ->
           {
@@ -2379,7 +2378,7 @@ let note-duplicate-type(env: TypeEnv, name: Str, sp: Span, skip: Ref (List Span)
 
 let note-fresh-type(env: TypeEnv, kind: Str, name: Str, params: List Str, seen: Ref (List Str)) -> Unit {
   set!(seen, name :: deref(seen))
-  if (kind == "defrec") -> type-set(env, name, RecordDef(name, params, [])) | type-set(env, name, VariantDef(name, params, []))
+  if (kind == "defrec") -> type-set(env, RecordDef(name, name, params, [])) | type-set(env, VariantDef(name, name, params, []))
 }
 
 let collect-defs(env: TypeEnv, forms: List Ast) -> Unit =
@@ -2526,9 +2525,9 @@ let print-nominal-body(env: TypeEnv, name: Str, args: List Type) -> Ast =
     | None -> print-error(String.concat("print: missing type ", name))
     | Some(td) ->
       match (td)
-        | RecordDef(_, ps, fs) ->
+        | RecordDef(_, _, ps, fs) ->
           print-call("match", print-sym("v") :: print-ctor-arms(env, [VariantCtor(name, print-field-types(fs))], bind-type-params(ps, args, Map.empty())))
-        | VariantDef(_, ps, cs) ->
+        | VariantDef(_, _, ps, cs) ->
           print-call("match", print-sym("v") :: print-ctor-arms(env, cs, bind-type-params(ps, args, Map.empty())))
 
 let print-map-body(env: TypeEnv, t: Type, k: Type, value: Type) -> Ast {
@@ -2774,7 +2773,7 @@ let expand-recpat(args: List Ast, sp: Span, env: TypeEnv) -> Ast =
 
 let expand-recpat-named(name-ast: Ast, name: Str, fields: List Ast, sp: Span, env: TypeEnv) -> Ast =
   match (type-get(env, name))
-    | Some(RecordDef(_, _, rfields)) -> ParenNode(name-ast :: positional-fields(rfields, sym-names(fields, []), sp), sp)
+    | Some(RecordDef(_, _, _, rfields)) -> ParenNode(name-ast :: positional-fields(rfields, sym-names(fields, []), sp), sp)
     | _ -> ParenNode(mk-recpat(name-ast :: fields, sp), sp)
 
 let mk-recpat(args: List Ast, sp: Span) -> List Ast =

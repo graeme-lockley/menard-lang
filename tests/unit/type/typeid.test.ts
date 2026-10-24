@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { typeEqual, typeShow, type Type } from "../../../host/src/type/types.ts";
+import { typeDefId, typeEqual, typeShow, type Type, type TypeDef } from "../../../host/src/type/types.ts";
 
 const nominal = (id: string, name = "T"): Type => ({
   tag: "nominal",
@@ -29,5 +29,34 @@ describe("canonical nominal identity", () => {
     const a: Type = { tag: "nominal", name: "T", args: [], kind: "variant" };
     const b: Type = { tag: "nominal", name: "T", args: [], kind: "variant" };
     expect(typeEqual(a, b)).toBe(true);
+  });
+});
+
+describe("TypeDef and constructor ownership identity", () => {
+  const def = (id: string, name: string): TypeDef => ({
+    kind: "variant",
+    id,
+    name,
+    params: [],
+    ctors: [],
+    span: { start: 0, end: 0 },
+  });
+
+  test("TypeDef identity follows the id, not the display name", () => {
+    expect(typeDefId(def("module-a::T", "T"))).not.toBe(typeDefId(def("module-b::T", "T")));
+    expect(typeDefId(def("module-a::T", "T"))).toBe(typeDefId(def("module-a::T", "Alias.T")));
+  });
+
+  test("constructor owner identity follows the owner id", () => {
+    const ctor = (typeId: string, typeName: string): Type => ({
+      tag: "ctor",
+      typeId,
+      typeName,
+      ctor: "A",
+      payloads: [],
+    });
+    expect(typeEqual(ctor("module-a::T", "T"), ctor("module-b::T", "T"))).toBe(false);
+    expect(typeEqual(ctor("module-a::T", "T"), ctor("module-a::T", "Alias.T"))).toBe(true);
+    expect(typeShow(ctor("module-a::T", "Alias.T"))).toBe("A");
   });
 });

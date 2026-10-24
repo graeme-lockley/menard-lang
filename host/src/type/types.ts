@@ -14,7 +14,7 @@ export type Type =
   | { tag: "fn"; params: Type[]; ret: Type }
   | { tag: "product"; elems: Type[] }
   | { tag: "nominal"; id?: string; name: string; args: Type[]; kind: "record" | "variant" | "alias" }
-  | { tag: "ctor"; typeName: string; ctor: string; payloads: Type[] }; // for patterns / values
+  | { tag: "ctor"; typeId?: string; typeName: string; ctor: string; payloads: Type[] }; // for patterns / values
 
 export function prim(
   name: "Int" | "Float" | "Bool" | "Char" | "Str" | "Sym" | "Unit" | "StringBuffer",
@@ -95,7 +95,7 @@ export function typeEqual(a: Type, b: Type): boolean {
     case "ctor":
       return (
         b.tag === "ctor" &&
-        a.typeName === b.typeName &&
+        (a.typeId ?? a.typeName) === (b.typeId ?? b.typeName) &&
         a.ctor === b.ctor &&
         a.payloads.length === b.payloads.length &&
         a.payloads.every((t, i) => typeEqual(t, b.payloads[i]!))
@@ -148,6 +148,14 @@ export type RecordField = { name: string; type: Type; span: Span };
 export type VariantCtor = { name: string; payloads: Type[]; span: Span };
 
 export type TypeDef =
-  | { kind: "record"; name: string; params: string[]; fields: RecordField[]; span: Span }
-  | { kind: "variant"; name: string; params: string[]; ctors: VariantCtor[]; span: Span }
-  | { kind: "alias"; name: string; type: Type; span: Span };
+  | { kind: "record"; id?: string; name: string; params: string[]; fields: RecordField[]; span: Span }
+  | { kind: "variant"; id?: string; name: string; params: string[]; ctors: VariantCtor[]; span: Span }
+  | { kind: "alias"; id?: string; name: string; type: Type; span: Span };
+
+export function typeDefId(def: TypeDef): string {
+  return def.id ?? def.name;
+}
+
+export function typeDefName(def: TypeDef): string {
+  return def.name;
+}

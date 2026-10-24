@@ -82,3 +82,14 @@ test "nominal identity compares the canonical id, not the display name" = {
   let c = TNominal("module-a::T", "Alias.T", [], "variant")
   type-equal(a, b) == false && type-equal(a, c) && type-show(c) == "Alias.T"
 }
+
+test "TypeDef and constructor ownership use the canonical id" = {
+  let a = CtorInfo("module-a::T", "T", [], [])
+  let b = CtorInfo("module-b::T", "T", [], [])
+  let c = CtorInfo("module-a::T", "Alias.T", [], [])
+  ctor-owner-id(a) == ctor-owner-id(c) &&
+    ctor-owner-id(a) != ctor-owner-id(b) &&
+    ctor-owner-name(c) == "Alias.T" &&
+    type-def-id(RecordDef("module-a::T", "T", [], [])) == type-def-id(RecordDef("module-a::T", "Alias.T", [], [])) &&
+    type-def-id(RecordDef("module-a::T", "T", [], [])) != type-def-id(RecordDef("module-b::T", "T", [], []))
+}
