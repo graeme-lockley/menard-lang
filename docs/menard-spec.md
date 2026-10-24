@@ -796,11 +796,11 @@ import github:owner/repo@v1.2.0/console ; ~/.menard/deps/owner/repo/v1.2.0/conso
   export, not a method. `pair.fst` is the same `.` on a record value: the
   field is selected by declaration order.
 
-  An aliased import binds values under the alias. **Types and their
-  constructors stay in unqualified scope**, even with `as`; the alias is for
-  function and value access. A constructor is a type-level name, so
-  `import std/json as Json` permits `JsonFloat(1.5)` as well as
-  `Json.encode`.
+  An aliased import binds the module's exports under the alias. **Values,
+  types and constructors are all qualified**: `import std/json as Json` gives
+  `Json.encode`, `Json.Json`, and `Json.JsonFloat(1.5)`. The unqualified
+  `JsonFloat(1.5)` is not in scope; a bare import is how a module's names are
+  merged.
 
   Qualified exports have distinct function bindings in separate compilation,
   so `Maybe.map` can coexist with `map` from a bare `std/list` import.

@@ -460,15 +460,6 @@ function unify(env: TypeEnv, a: Type, b: Type, s: Subst, span: Span): boolean {
   return false;
 }
 
-function ctorScheme(env: TypeEnv, ctor: { typeName: string; payloads: Type[]; params: string[] }): Scheme {
-  const args: Type[] = ctor.params.map((p) => ({ tag: "param", name: p }));
-  const kind = env.types.get(ctor.typeName)?.kind === "record" ? "record" : "variant";
-  return {
-    params: ctor.params,
-    type: tFn(ctor.payloads, { tag: "nominal", name: ctor.typeName, args, kind }),
-  };
-}
-
 function instantiate(env: TypeEnv, scheme: Scheme): Type {
   if (scheme.params.length === 0) return scheme.type;
   const map = new Map<string, Type>();
@@ -656,7 +647,6 @@ function mergeImportBundle(env: TypeEnv, b: ImportBundle): void {
 
 function bindQualified(env: TypeEnv, alias: string, b: ImportBundle): void {
   env.modules.set(alias, b);
-  mergeImportTypes(env, b);
 }
 
 function mergeImportTypes(env: TypeEnv, b: ImportBundle): void {
@@ -1133,12 +1123,13 @@ function infer(
       if (n === "_") return freshVar(env);
       if (local.has(n)) return applySubst(local.get(n)!, subst);
       if (env.values.has(n)) return instantiate(env, env.values.get(n)!);
-      // An aliased import merges the type and its constructors for
-      // matching. Synthesise the constructor's scheme when the import
-      // bundle did not also carry the value binding.
       if (env.ctors.has(n)) {
-        const scheme = env.values.get(n) ?? ctorScheme(env, env.ctors.get(n)!);
-        return instantiate(env, scheme);
+        const scheme = env.values.get(n);
+        if (scheme) return instantiate(env, scheme);
+        // An aliased import keeps constructors under the alias. If one is
+        // reached unqualified, report it rather than dereferencing undefined.
+        err(env, "E_TYPE_UNBOUND", `unbound variable ${n}`, ast.span);
+        return freshVar(env);
       }
       err(env, "E_TYPE_UNBOUND", `unbound variable ${n}`, ast.span);
       return freshVar(env);

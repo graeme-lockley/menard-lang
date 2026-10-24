@@ -44,8 +44,8 @@ let is-negative(n: Int) -> Bool =
 A few things to notice:
 
 - `import … as List` qualifies the exports. `List.map` is a function, not a
-  method. The types the module declares, and their constructors, stay
-  unqualified: `import std/json as Json` still lets you write
+  method. Types and constructors are qualified too: with
+  `import std/json as Json`, write `Json.JsonFloat(1.5)`, not
   `JsonFloat(1.5)`.
 - `|>` passes the value on the left as the **last** argument of the call on
   the right. `tokens |> List.map(Int.parse)` is `List.map(Int.parse, tokens)`.
