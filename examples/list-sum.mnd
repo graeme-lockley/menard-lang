@@ -2,30 +2,16 @@
 ; Prints: 10 + 20 + 30 = 60
 ; Run with: `./mn run examples/list-sum.mnd`
 
+import std/list as List
+import std/string as String
+
 let list-sum(xs: List Int) -> Int =
   match (xs)
     | [] -> 0
     | h :: t -> h + list-sum(t)
 
-let print-summands(xs: List Int) -> Int =
-  match (xs)
-    | [] -> 0
-    | h :: t ->
-      {
-        print(h)
-        match (t)
-          | [] -> 0
-          | _ ->
-            {
-              print(" + ")
-              print-summands(t)
-            }
-      }
-
-let main() -> Int {
+let main() -> Unit {
   let xs = [10, 20, 30]
-  print-summands(xs)
-  print(" = ")
-  println(list-sum(xs))
-  0
+  print(xs |> List.map(String.from-int) |> String.join(" + "))
+  println(" = ", list-sum(xs))
 }

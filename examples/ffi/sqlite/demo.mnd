@@ -37,7 +37,7 @@ let usage() -> Int {
 let show-cell(v: Json) -> Str =
   match (v)
     | JsonNull -> "null"
-    | JsonBool(b) -> if (b) -> "true" | "false"
+    | JsonBool(b) -> show(b)
     | JsonInt(n) -> show(n)
     | JsonFloat(f) -> show(f)
     | JsonStr(s) -> s

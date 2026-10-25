@@ -45,17 +45,15 @@ let step(db: Map Str User, req: UserReq) -> (Map Str User * UserRes) =
         | None() -> (db, Missing())
     | Search(q) -> {
         let users =
-          List.filter-map(
-            fn (id) = {
-              match (Map.lookup(id, db))
-                | None -> None()
-                | Some(u) ->
-                  match (u)
-                    | User(_, name, _) ->
-                      if (name == q) -> Some(u) | None()
-            },
-            Map.keys(db)
-          )
+          Map.keys(db)
+          |> List.filter-map(fn (id) = {
+            match (Map.lookup(id, db))
+              | None -> None()
+              | Some(u) ->
+                match (u)
+                  | User(_, name, _) ->
+                    if (name == q) -> Some(u) | None()
+          })
         (db, OkUsers(users))
       }
 
@@ -85,7 +83,7 @@ let handle(um: Pid (Ask UserReq UserRes), req: Request) -> Response =
             match (Actor.call(um, Search(q)))
               | Err(_) -> Rest.bad-request("actor error")
               | Ok(OkUsers(xs)) ->
-                Rest.ok-json(Json.encode(JsonArray(List.map(user-json, xs))))
+                Rest.ok-json(Json.encode(JsonArray(xs |> List.map(user-json))))
               | Ok(_) -> Rest.bad-request("unexpected")
           }
         | else -> Rest.not-found()

@@ -1,7 +1,6 @@
 ; User record and variant. `show` must print the same text on the
 ; interpreter and on a native binary.
-
-import std/io
+; Run with: `./mn run examples/derive-show.mnd`
 
 record Point {
   x: Int
@@ -12,12 +11,8 @@ type Color =
   | Red
   | Rgb(Int, Int, Int)
 
-let main() -> Int {
-  write(stdout, show(Point(1, 2)))
-  println("")
-  write(stdout, show(Red()))
-  println("")
-  write(stdout, show(Rgb(3, 4, 5)))
-  println("")
-  0
+let main() -> Unit {
+  println(Point(1, 2))
+  println(Red())
+  println(Rgb(3, 4, 5))
 }

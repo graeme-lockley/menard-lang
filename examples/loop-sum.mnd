@@ -6,9 +6,7 @@ let sum-to(n: Int) -> Int =
   loop (i = 0, acc = 0)
     if (i > n) -> acc | recur(i + 1, acc + i)
 
-let main() -> Int {
+let main() -> Unit {
   let n = 10
-  let s = sum-to(n)
-  println("sum of 0 through ", n, " is ", s)
-  0
+  println("sum of 0 through ", n, " is ", sum-to(n))
 }

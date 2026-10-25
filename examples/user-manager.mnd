@@ -36,17 +36,15 @@ let step(db: Map Str User, req: UserReq) -> (Map Str User * UserRes) =
         | None -> (db, NotFound())
     | Search(q) -> {
         let users =
-          List.filter-map(
-            fn (id) = {
-              match (Map.lookup(id, db))
-                | None -> None()
-                | Some(u) ->
-                  match (u)
-                    | User(_, name, _) ->
-                      if (name == q) -> Some(u) | None()
-            },
-            Map.keys(db)
-          )
+          Map.keys(db)
+          |> List.filter-map(fn (id) = {
+            match (Map.lookup(id, db))
+              | None -> None()
+              | Some(u) ->
+                match (u)
+                  | User(_, name, _) ->
+                    if (name == q) -> Some(u) | None()
+          })
         (db, OkUsers(users))
       }
 
@@ -64,7 +62,7 @@ let show-res(r: Result UserRes ActorError) -> Str =
     | Ok(OkUsers(xs)) ->
       String.concat("users:", String.from-int(List.length(xs)))
 
-let main() -> Int {
+let main() -> Unit {
   let um = Actor.serve-state(Map.empty(), step)
   Actor.register("user-manager", um)
 
@@ -80,5 +78,5 @@ let main() -> Int {
 
   Actor.cancel(um)
   let _ = Actor.join(um)
-  0
+  ()
 }

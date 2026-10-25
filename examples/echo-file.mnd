@@ -1,4 +1,4 @@
-; Slice 3G — Tier-0 I/O: `read-file` + `write`.
+; Slice 3G — Tier-0 I/O: `read-file` + `print`.
 ; Prints a label, then the fixture text.
 ; Run with: `./mn run examples/echo-file.mnd` (cwd = repo root).
 
@@ -6,15 +6,13 @@ import std/io
 
 let main() -> Int =
   match (read-file("examples/fixtures/echo-input.txt"))
-    | Ok(s) ->
-      {
+    | Ok(s) -> {
         println("read examples/fixtures/echo-input.txt:")
-        write(stdout, s)
+        print(s)
         println()
         0
       }
-    | Err(_) ->
-      {
+    | Err(_) -> {
         println("could not read examples/fixtures/echo-input.txt")
         1
       }

@@ -1,7 +1,9 @@
 #!/usr/bin/env mn
 
 ; Concatenate files onto standard output, in the order given.
-; Run: ./examples/cat.mnd a.txt b.txt
+; Run:  ./mn examples/cat.mnd a.txt b.txt
+;       ./mn run examples/cat.mnd -- a.txt b.txt
+; (`mn run` forwards only the words after `--`.)
 ; A missing file is reported on standard error and the rest are still copied.
 ; The process exits 1 when any file fails.
 
@@ -20,7 +22,7 @@ let reason(e: IoError) -> Str =
     | Exists -> "File exists"
     | Other(_) -> "Input/output error"
 
-let report(path: Str, e: IoError) -> Unit = {
+let report(path: Str, e: IoError) -> Unit {
   write-line(stderr, String.concat("cat: ", path, ": ", reason(e)))
   ()
 }

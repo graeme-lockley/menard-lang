@@ -7,10 +7,7 @@ let unwrap-or-zero(r: Result Int Str) -> Int =
     | Ok(n) -> n
     | Err(_) -> 0
 
-let main() -> Int {
-  print("Ok 7 unwraps to ")
-  println(unwrap-or-zero(Ok(7)))
-  print("Err \"missing\" unwraps to ")
-  println(unwrap-or-zero(Err("missing")))
-  0
+let main() -> Unit {
+  println("Ok 7 unwraps to ", unwrap-or-zero(Ok(7)))
+  println("Err \"missing\" unwraps to ", unwrap-or-zero(Err("missing")))
 }

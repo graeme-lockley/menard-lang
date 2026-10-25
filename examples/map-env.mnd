@@ -4,28 +4,20 @@
 
 import std/map as Map
 
-let print-got(v: Maybe Int) -> Int =
+let print-got(v: Maybe Int) -> Unit =
   match (v)
-    | Some(n) ->
-      {
-        print(n)
-        0
-      }
-    | None ->
-      {
-        print("none")
-        0
-      }
+    | Some(n) -> print(n)
+    | None -> print("none")
 
-let main() -> Int {
-  let m0 = Map.empty()
-  let m1 = Map.set(1, 10, m0)
-  let m2 = Map.set(2, 20, m1)
+let main() -> Unit {
+  let m =
+    Map.empty()
+    |> Map.set(1, 10)
+    |> Map.set(2, 20)
+
   print("1 -> ")
-  print-got(Map.lookup(1, m2))
+  print-got(Map.lookup(1, m))
   print(", 2 -> ")
-  print-got(Map.lookup(2, m2))
-  print(", size ")
-  println(Map.size(m2))
-  0
+  print-got(Map.lookup(2, m))
+  println(", size ", Map.size(m))
 }

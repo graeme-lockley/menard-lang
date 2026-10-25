@@ -1,36 +1,30 @@
 ; Process seam: exists, getenv, spawn, rename.
 ; Run from the repo root: ./mn run examples/host-seam.mnd
-; `println` only prints string literals, so computed text goes through `write`.
 
 import std/fs
 import std/io
 import std/proc
 import std/sys
-import std/string as String
 
-let line(s: Str) -> Unit {
-  write(stdout, s)
-  write(stdout, "\n")
-  ()
-}
-
-let main() -> Int {
+let main() -> Unit {
   if (exists("examples/fixtures/echo-input.txt")) -> println("fixture exists") | println("fixture missing")
+
   match (getenv("PATH"))
     | Some(_) -> println("PATH is set")
     | None -> println("PATH is unset")
+
   match (spawn(["/usr/bin/true"]))
-    | Ok(st) ->
-      match (st)
-        | Exited(n) -> line(String.concat("true exited ", show(n)))
-        | Signalled(n) -> line(String.concat("true signalled ", show(n)))
+    | Ok(Exited(n)) -> println("true exited ", n)
+    | Ok(Signalled(n)) -> println("true signalled ", n)
     | Err(_) -> println("spawn failed")
+
   match (write-file("build/rename-src.txt", "hi"))
     | Ok(_) -> ()
     | Err(_) -> println("write failed")
+
   match (rename("build/rename-src.txt", "build/rename-dst.txt"))
     | Ok(_) -> println("renamed")
     | Err(_) -> println("rename failed")
+
   if (exists("build/rename-dst.txt")) -> println("renamed file exists") | println("renamed file missing")
-  0
 }

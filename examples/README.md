@@ -15,7 +15,7 @@ Short programs. Each one that defines `main` prints a result and exits 0. Run on
 | `bool-unit.mnd` | `Bool` and `Unit` |
 | `list-sum.mnd` | `List` and `match` on `Cons` / `Nil` |
 | `result-match.mnd` | `Result` and `match` on `Ok` / `Err` |
-| `strings.mnd` | `String.concat`, `Str`, `write` |
+| `strings.mnd` | `String.concat`, `Str`, `println` |
 | `stringbuffer.mnd` | `StringBuffer`: `new`, `append!`, `take-str!` |
 | `ref-counter.mnd` | `Ref`, `deref`, `set!` |
 | `closure-adder.mnd` | A closure returned and mapped over a list |
@@ -25,8 +25,8 @@ Short programs. Each one that defines `main` prints a result and exits 0. Run on
 | `str-order.mnd` | `=` and `compare` on `Str` |
 | `float-ops.mnd` | `Float` arithmetic, including `-0.0` |
 | `derive-show.mnd` | Derived `show` for a record and a variant |
-| `echo-file.mnd` | `read-file`, `write`, `exit` |
-| `cat.mnd` | Concatenate files to standard output. `./examples/cat.mnd a.txt b.txt` |
+| `echo-file.mnd` | `read-file`, `print`, exit status |
+| `cat.mnd` | Concatenate files to stdout. `./mn examples/cat.mnd a.txt` or `./mn run examples/cat.mnd -- a.txt` |
 | `mod-main.mnd`, `mod-util.mnd` | Two modules compiled into one binary |
 | `host-seam.mnd` | `exists`, `getenv`, `spawn`, `rename`. Run it from the repo root |
 | `heap-churn.mnd` | A long list, a large map, a growing buffer, and nested closures |

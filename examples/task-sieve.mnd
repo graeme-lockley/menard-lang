@@ -31,14 +31,12 @@ let sieve(xs: List Int) -> List Int =
         p :: sieve(unwrap(Task.join(filtered)))
       }
 
-let main() -> Int {
+let main() -> Unit {
   let n = 1000
   let primes = sieve(List.range(2, n))
-  print("primes <= ")
-  print(n)
-  print(": ")
-  println(String.join(" ", List.map(String.from-int, primes)))
-  print("count: ")
-  println(List.length(primes))
-  0
+  println(
+    "primes <= ", n, ": ",
+    primes |> List.map(String.from-int) |> String.join(" ")
+  )
+  println("count: ", List.length(primes))
 }

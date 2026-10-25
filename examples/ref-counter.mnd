@@ -2,7 +2,7 @@
 ; Prints: ref sum of 0 through 10 is 55
 ; Run with: `./mn run examples/ref-counter.mnd`
 
-let main() -> Int {
+let main() -> Unit {
   let c = ref(0)
   let total =
     loop (i = 0)
@@ -14,5 +14,4 @@ let main() -> Int {
             recur(i + 1)
           }
   println("ref sum of 0 through 10 is ", total)
-  0
 }

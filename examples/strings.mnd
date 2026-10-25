@@ -2,15 +2,9 @@
 ; Prints: "hel" + "lo" = hello (5 bytes)
 ; Run with: `./mn run examples/strings.mnd`
 
-import std/io
 import std/string as String
 
-let main() -> Int {
+let main() -> Unit {
   let s = String.concat("hel", "lo")
-  print("\"hel\" + \"lo\" = ")
-  write(stdout, s)
-  print(" (")
-  print(String.length(s))
-  println(" bytes)")
-  0
+  println("\"hel\" + \"lo\" = ", s, " (", String.length(s), " bytes)")
 }

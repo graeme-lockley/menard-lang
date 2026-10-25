@@ -4,7 +4,6 @@
 
 import "./mod-util.mnd"
 
-let main() -> Int {
+let main() -> Unit {
   println("double(21) = ", double(21))
-  0
 }
