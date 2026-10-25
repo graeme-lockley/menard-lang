@@ -230,6 +230,33 @@ let n(p: Int) -> Int = (p + 1).fst
     expect(astEqual(forms[0]!, again[0]!)).toBe(true);
   });
 
+  test("qualified type names round-trip", () => {
+    const forms = mustAll(`
+import std/json as Json
+let f(j: Json.Json) -> Int = 0
+`);
+    const printed = text(printAll(forms));
+    expect(printed).toContain("j: Json.Json");
+    const again = mustAll(printed);
+    expect(astEqual(forms[1]!, again[1]!)).toBe(true);
+  });
+
+  test("qualified constructor patterns round-trip", () => {
+    const forms = mustAll(`
+import std/json as Json
+let f(j: Json.Json) -> Int =
+  match (j)
+    | Json.JsonFloat(x) -> 1
+    | Json.JsonNull -> 0
+    | _ -> 2
+`);
+    const printed = text(printAll(forms));
+    expect(printed).toContain("Json.JsonFloat(x)");
+    expect(printed).toContain("Json.JsonNull");
+    const again = mustAll(printed);
+    expect(astEqual(forms[1]!, again[1]!)).toBe(true);
+  });
+
   test("a chained field is nested projection", () => {
     const a = mustRead("o.inner.n");
     expect(text(print(a))).toBe("o.inner.n");

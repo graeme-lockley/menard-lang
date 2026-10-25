@@ -1,0 +1,17 @@
+; LANG-04: qualified constructors, types, and patterns under an aliased import.
+import std/json as Json
+
+let describe(j: Json.Json) -> Str =
+  match (j)
+    | Json.JsonFloat(x) -> "float"
+    | Json.JsonInt(n) -> "int"
+    | Json.JsonNull -> "null"
+    | _ -> "other"
+
+let main() -> Int {
+  println(show(Json.JsonFloat(1.5)))
+  println(describe(Json.JsonFloat(1.5)))
+  println(describe(Json.JsonInt(3)))
+  println(describe(Json.JsonNull()))
+  0
+}

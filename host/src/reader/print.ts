@@ -554,7 +554,14 @@ function printPat(a: Ast): string {
   if (h === "tuple" && a.elems.length >= 3) {
     return `(${a.elems.slice(1).map(printPat).join(", ")})`;
   }
+  if (h === "project" && a.elems.length >= 3) {
+    return printProject(a, 0);
+  }
   if (h) return `${h}(${a.elems.slice(1).map(printPat).join(", ")})`;
+  const callee = a.elems[0]!;
+  if (callee.tag === "list" && txt(callee.elems[0]!) === "project") {
+    return `${printProject(callee, 0)}(${a.elems.slice(1).map(printPat).join(", ")})`;
+  }
   return printExpr(a, 0);
 }
 
@@ -615,6 +622,9 @@ function printType(a: Ast): string {
         return p;
       })
       .join(" * ");
+  }
+  if (h === "project" && a.elems.length >= 3) {
+    return printProject(a as Ast & { tag: "list" }, 0);
   }
   const args = a.elems.slice(1).map((e) => {
     const p = printType(e);

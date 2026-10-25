@@ -716,11 +716,18 @@ let print-pat(a: Ast) -> Str =
     | ParenNode(SymNode("recpat", _) :: name :: fields, _) -> String.concat(print-atom(name), String.concat(" { ", String.concat(join(map-atom(fields), ", "), " }")))
     | ParenNode(SymNode("guard", _) :: pat :: g :: _, _) -> String.concat(print-pat(pat), String.concat(" when ", print-expr(g, 0)))
     | ParenNode(SymNode("tuple", _) :: args, _) -> String.concat("(", String.concat(join(map-pat(args), ", "), ")"))
-    | ParenNode(h :: args, _) ->
-      match (sym-str(h))
-        | Some(n) -> String.concat(n, String.concat("(", String.concat(join(map-pat(args), ", "), ")")))
-        | None -> print-expr(a, 0)
+    | ParenNode(SymNode("project", _) :: rest, _) -> print-project(rest, 0)
+    | ParenNode(h :: args, _) -> print-pat-call(h, args, a)
     | _ -> print-atom(a)
+
+let print-pat-call(h: Ast, args: List Ast, whole: Ast) -> Str =
+  match (sym-str(h))
+    | Some(n) -> String.concat(n, String.concat("(", String.concat(join(map-pat(args), ", "), ")")))
+    | None ->
+      cond
+        | is-head(h, "project") ->
+          String.concat(print-expr(h, 0), String.concat("(", String.concat(join(map-pat(args), ", "), ")")))
+        | else -> print-expr(whole, 0)
 
 let map-pat(xs: List Ast) -> List Str =
   match (xs)
@@ -841,6 +848,7 @@ let print-type(a: Ast) -> Str =
           cond
             | n == "Fn" -> print-fn-type(rest)
             | n == "product" -> print-type-product(rest)
+            | n == "project" -> print-project(rest, 0)
             | else -> print-type-app(n, rest)
         | None -> print-atom(a)
     | _ -> print-atom(a)

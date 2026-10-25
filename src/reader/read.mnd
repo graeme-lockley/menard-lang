@@ -1632,14 +1632,36 @@ let parse-pattern-atom(ps: Ps) -> Result Ast ParseError {
     | t.kind == "ident" ->
       {
         advance(ps)
-        cond
-          | delim(ps, "{") && not((peek(ps)).bol) && is-upper(t.text) -> parse-named-record-pat(ps, sym-at(t.text, tok-span(t)))
-          | delim(ps, "(") && not((peek(ps)).bol) -> parse-pattern-args(ps, sym-at(t.text, tok-span(t)))
-          | is-upper(t.text) -> Ok(paren-at([sym-at(t.text, tok-span(t))], tok-span(t)))
-          | else -> Ok(sym-at(t.text, tok-span(t)))
+        match (parse-pattern-qual(ps, sym-at(t.text, tok-span(t))))
+          | Err(e) -> Err(e)
+          | Ok(head) -> parse-pattern-atom-after(ps, t, head)
       }
     | else -> perr(t, "expected a pattern")
 }
+
+; `Alias.Ctor` in a pattern; rewrite-import-aliases turns the project into
+; `__import_Alias_Ctor` before typechecking.
+let parse-pattern-qual(ps: Ps, left: Ast) -> Result Ast ParseError =
+  cond
+    | (peek(ps)).kind == "punct" && (peek(ps)).text == "." && not((peek(ps)).bol) ->
+      match (parse-project(ps, left))
+        | Err(e) -> Err(e)
+        | Ok(next) -> parse-pattern-qual(ps, next)
+    | else -> Ok(left)
+
+let parse-pattern-atom-after(ps: Ps, first: Tok, head: Ast) -> Result Ast ParseError {
+  let qualified = pattern-is-project(head)
+  cond
+    | delim(ps, "{") && not((peek(ps)).bol) && is-upper(first.text) && not(qualified) -> parse-named-record-pat(ps, head)
+    | delim(ps, "(") && not((peek(ps)).bol) -> parse-pattern-args(ps, head)
+    | not(qualified) && is-upper(first.text) -> Ok(paren-at([head], tok-span(first)))
+    | else -> Ok(head)
+}
+
+let pattern-is-project(head: Ast) -> Bool =
+  match (head)
+    | ParenNode(SymNode(n, _) :: _, _) -> n == "project"
+    | _ -> false
 
 ; `()` unit pattern, `(p)` grouping, or `(p1, p2, …)` (≥2) tuple pattern.
 let parse-pattern-group(ps: Ps) -> Result Ast ParseError {
@@ -2091,11 +2113,21 @@ let parse-type-atom(ps: Ps) -> Result Ast ParseError {
     | t.kind == "ident" ->
       {
         advance(ps)
-        Ok(sym-at(t.text, tok-span(t)))
+        parse-type-atom-project(ps, sym-at(t.text, tok-span(t)))
       }
     | t.kind == "punct" && t.text == "(" -> parse-type-arrow(ps)
     | else -> perr(t, "expected a type")
 }
+
+; `Alias.Name` in a type annotation is the same project shape expressions use,
+; so rewrite-import-aliases can mangle it for separate compilation.
+let parse-type-atom-project(ps: Ps, left: Ast) -> Result Ast ParseError =
+  cond
+    | (peek(ps)).kind == "punct" && (peek(ps)).text == "." && not((peek(ps)).bol) ->
+      match (parse-project(ps, left))
+        | Err(e) -> Err(e)
+        | Ok(next) -> parse-type-atom-project(ps, next)
+    | else -> Ok(left)
 
 let parse-tparams-opt(ps: Ps) -> Result (Maybe Ast) ParseError =
   cond

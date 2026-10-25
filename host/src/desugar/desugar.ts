@@ -840,6 +840,12 @@ function desugarMMatch(ast: Ast & { tag: "list" }, diags: Diagnostic[]): Ast {
 
 let recPatId = 0;
 
+function projectCtorName(ast: Ast): string | null {
+  if (ast.tag !== "list" || ast.elems.length < 3) return null;
+  if (headText(ast.elems[0]!) !== "project") return null;
+  return ast.elems[2]?.tag === "sym" ? headText(ast.elems[2]) : null;
+}
+
 function classifyPat(pat: Ast): PatClass {
   if (pat.tag === "sym") {
     const n = headText(pat) ?? "_";
@@ -851,6 +857,16 @@ function classifyPat(pat: Ast): PatClass {
     return { kind: "ctor", name: `str:${new TextDecoder().decode(pat.bytes)}`, payloads: [], pattern: pat };
   }
   if (pat.tag === "bool") return { kind: "ctor", name: `bool:${pat.value}`, payloads: [], pattern: pat };
+  // Nullary `Alias.Ctor`.
+  if (pat.tag === "list" && headText(pat.elems[0]!) === "project") {
+    const n = projectCtorName(pat);
+    if (n) return { kind: "ctor", name: n, payloads: [], pattern: pat };
+  }
+  // `Alias.Ctor(args…)`.
+  if (pat.tag === "list" && pat.elems[0]?.tag === "list") {
+    const n = projectCtorName(pat.elems[0]);
+    if (n) return { kind: "ctor", name: n, payloads: pat.elems.slice(1), pattern: pat };
+  }
   if (pat.tag === "list" && pat.elems[0]?.tag === "sym") {
     const n = headText(pat.elems[0]) ?? "";
     if (n === "recpat" && pat.elems[1]?.tag === "sym") {
