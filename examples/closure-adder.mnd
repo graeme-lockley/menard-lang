@@ -1,47 +1,28 @@
 ; Slice 3E — heap closures (spec §2.6). Returned `fn` captures `n`,
-; then `map` applies it to every element of a list.
+; then `List.map` applies it to every element of a list.
 ; Prints the list before and after.
 ; Run with: `./mn run examples/closure-adder.mnd`
+
+import std/list as List
+import std/string as String
 
 let adder(n: Int) -> (Int) -> Int =
   fn (m) = n + m
 
-let map[a](f: (a) -> a, xs: List a) -> List a =
-  match (xs)
-    | [] -> []
-    | h :: t -> f(h) :: map(f, t)
+let print-elems(xs: List Int) -> Unit =
+  xs |> List.map(String.from-int) |> String.join(" ") |> print()
 
-let print-elems(xs: List Int) -> Int =
-  match (xs)
-    | [] -> 0
-    | h :: t ->
-      {
-        print(h)
-        match (t)
-          | [] -> 0
-          | _ ->
-            {
-              print(" ")
-              print-elems(t)
-            }
-      }
-
-let print-list(xs: List Int) -> Int {
-  print("(")
+let print-list(msg: Str, xs: List Int) -> Unit {
+  print(msg, ": (")
   print-elems(xs)
-  print(")")
-  0
+  println(")")
 }
 
-let main() -> Int {
+let main() -> Unit {
   let before = [1, 2, 3]
   let add40 = adder(40)
-  let after = map(add40, before)
-  print("before: ")
-  print-list(before)
-  println()
-  print("after:  ")
-  print-list(after)
-  println()
-  0
+  let after = before |> List.map(add40)
+
+  print-list("before", before)
+  print-list("after", after)
 }
