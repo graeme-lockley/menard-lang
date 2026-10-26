@@ -1,0 +1,9 @@
+; An aliased import keeps constructors under the alias. Bare JsonFloat
+; after `import std/json as Json` must be E_TYPE_UNBOUND (LANG-04).
+
+import std/json as Json
+
+let main() -> Int {
+  println(show(JsonFloat(1.5)))
+  0
+}

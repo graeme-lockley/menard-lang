@@ -1361,6 +1361,14 @@ function takeMatch(
   throw new PanicError("match: no clause matched", span);
 }
 
+/** `Alias.Ctor` / `Alias.Ctor(args…)` → bare constructor name for matching. */
+function projectCtorName(ast: Ast): string | null {
+  if (ast.tag !== "list" || ast.elems.length < 3) return null;
+  if (ast.elems[0]!.tag !== "sym" || symName(ast.elems[0]!) !== "project") return null;
+  const field = ast.elems[2]!;
+  return field.tag === "sym" ? symName(field) : null;
+}
+
 function matchPat(pat: Ast, v: Value, env: Env): boolean {
   if (pat.tag === "sym") {
     const n = symName(pat);
@@ -1386,6 +1394,25 @@ function matchPat(pat: Ast, v: Value, env: Env): boolean {
     pat.elems[1]!.tag === "int"
   ) {
     return v.tag === "int" && v.value === pat.elems[1]!.value;
+  }
+  // Nullary `Alias.Ctor` pattern is a bare project form.
+  if (pat.tag === "list" && pat.elems[0]?.tag === "sym" && symName(pat.elems[0]) === "project") {
+    const cn = projectCtorName(pat);
+    return cn !== null && v.tag === "variant" && v.ctor === cn && v.payloads.length === 0;
+  }
+  // `Alias.Ctor(args…)` — head is a project form.
+  if (pat.tag === "list" && pat.elems.length >= 1 && pat.elems[0]!.tag === "list") {
+    const cn = projectCtorName(pat.elems[0]!);
+    if (cn !== null) {
+      if (v.tag === "variant" && v.ctor === cn) {
+        if (v.payloads.length !== pat.elems.length - 1) return false;
+        for (let i = 0; i < v.payloads.length; i++) {
+          if (!matchPat(pat.elems[i + 1]!, v.payloads[i]!, env)) return false;
+        }
+        return true;
+      }
+      return false;
+    }
   }
   if (pat.tag === "list" && pat.elems.length >= 1 && pat.elems[0]!.tag === "sym") {
     const cn = symName(pat.elems[0]!);

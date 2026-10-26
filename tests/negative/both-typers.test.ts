@@ -17,7 +17,14 @@ type Diag = { code: string; message: string };
 
 function hostDiags(path: string): Diag[] {
   const source = readFileSync(path);
-  return diagnose(source, { path }).map((d) => ({ code: d.code, message: d.message }));
+  const text = new TextDecoder().decode(source);
+  // A live host resolves `import` forms; without it, import lines look like
+  // unbound variables and disagree with `mn check`. Pure parse fixtures stay
+  // host-less so their E_PARSE_UNCLOSED codes are unchanged.
+  const opts = /^\s*import\b/m.test(text)
+    ? { path, host: createLiveHost({ realFs: true, argv: [] }) }
+    : { path };
+  return diagnose(source, opts).map((d) => ({ code: d.code, message: d.message }));
 }
 
 function menardDiags(path: string): Diag[] {

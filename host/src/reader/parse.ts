@@ -1048,18 +1048,26 @@ class P {
     }
     if (t.kind === "ident") {
       this.i++;
-      if (this.delim("{") && !this.cur().bol && t.text[0]! >= "A" && t.text[0]! <= "Z") {
-        return this.parseNamedRecordPat(sym(t.text, t.span));
+      let head: Ast = sym(t.text, t.span);
+      let qualified = false;
+      while (this.cur().kind === "punct" && this.cur().text === "." && !this.cur().bol) {
+        const projected = this.parseProject(head);
+        if (!projected.ok) return projected;
+        head = projected.ast;
+        qualified = true;
+      }
+      if (this.delim("{") && !this.cur().bol && t.text[0]! >= "A" && t.text[0]! <= "Z" && !qualified) {
+        return this.parseNamedRecordPat(head);
       }
       if (this.delim("(") && !this.cur().bol) {
-        const call = this.parsePatternArgs(sym(t.text, t.span));
+        const call = this.parsePatternArgs(head);
         if (!call.ok) return call;
         return call;
       }
-      if (t.text[0]! >= "A" && t.text[0]! <= "Z") {
-        return { ok: true, ast: paren([sym(t.text, t.span)], t.span) };
+      if (!qualified && t.text[0]! >= "A" && t.text[0]! <= "Z") {
+        return { ok: true, ast: paren([head], t.span) };
       }
-      return { ok: true, ast: sym(t.text, t.span) };
+      return { ok: true, ast: head };
     }
     return this.err(t, "expected a pattern");
   }
@@ -1345,7 +1353,13 @@ class P {
     const t = this.cur();
     if (t.kind === "ident") {
       this.i++;
-      return { ok: true, ast: sym(t.text, t.span) };
+      let left: Ast = sym(t.text, t.span);
+      while (this.cur().kind === "punct" && this.cur().text === "." && !this.cur().bol) {
+        const projected = this.parseProject(left);
+        if (!projected.ok) return projected;
+        left = projected.ast;
+      }
+      return { ok: true, ast: left };
     }
     if (t.kind === "punct" && t.text === "(") return this.parseTypeArrow();
     return this.err(t, "expected a type");

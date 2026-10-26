@@ -159,13 +159,17 @@ function interpret(
   }
   // An explicit `exit(n)` wins if a fixture ever calls it; these
   // fixtures don't, so this falls through to the auto-called `main`'s
-  // `Int` result instead (see header comment).
+  // result. `Int` mains become the process exit code; `Unit` mains exit 0
+  // (same as native `mn run` after the Unit-main examples refactor).
   if (r.exitCode !== undefined) {
     return { exitCode: r.exitCode, stdout, stderr };
   }
+  if (r.value.tag === "unit") {
+    return { exitCode: 0, stdout, stderr };
+  }
   if (r.value.tag !== "int") {
     throw new Error(
-      `interpreter did not produce an Int main result for ${entryRelPath}: got ${r.value.tag}`,
+      `interpreter did not produce an Int or Unit main result for ${entryRelPath}: got ${r.value.tag}`,
     );
   }
   const exitCode = Number(BigInt.asUintN(8, r.value.value));

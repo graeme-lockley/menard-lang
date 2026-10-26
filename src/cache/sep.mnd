@@ -509,6 +509,19 @@ let bare-import-paths(from: Str, forms: List Ast) -> List Str =
             | spec :: _ -> canonical-path(resolve-import(from, spec)) :: bare-import-paths(from, rest)
             | [] -> bare-import-paths(from, rest)
 
+; `std/basics` is injected by specs-with-basics and is never written as an
+; import form, so bare-import-paths would miss it. Keep its stubs unprefixed.
+let with-basics-bare(deps: List DepRec, bare: List Str) -> List Str =
+  match (deps)
+    | [] -> bare
+    | DepRec(_, p) :: rest ->
+      if (is-basics-path(p) && not(has-str(bare, p))) ->
+        p :: with-basics-bare(rest, bare) |
+        with-basics-bare(rest, bare)
+
+let module-bare-paths(from: Str, forms: List Ast, deps: List DepRec) -> List Str =
+  with-basics-bare(deps, bare-import-paths(from, forms))
+
 ; Direct function signatures and links must override transitive names together.
 let direct-surfaces(paths: List Str, done: Map Str Iface, acc: Surface) -> Surface =
   match (paths)
@@ -564,28 +577,122 @@ let stub-name-shadowed(stub: Ast, names: Map Str Str) -> Bool =
         | None -> false
     | _ -> false
 
-; Alias values use the dependency's own interface, never a transitive namesake.
-let alias-surfaces(from: Str, forms: List Ast, done: Map Str Iface, acc: Surface) -> Surface =
+; Prefixed names for every export an aliased import exposes: values, types,
+; and constructors. Applied to the whole stub AST so signatures stay coherent.
+let alias-export-renames(stubs: List Ast, ctors: List CtorRec, prefix: Str, acc: Map Str Str) -> Map Str Str =
+  alias-ctor-renames(ctors, prefix, qualified-renames(stubs, prefix, acc))
+
+; When the same module is also bare-imported, types/ctors already use their
+; original names. Only value stubs are renamed so `Http.serve` and bare
+; `Request` stay one type.
+let alias-value-renames(stubs: List Ast, prefix: Str, acc: Map Str Str) -> Map Str Str =
+  qualified-renames(value-stubs(stubs), prefix, acc)
+
+let alias-ctor-renames(ctors: List CtorRec, prefix: Str, acc: Map Str Str) -> Map Str Str =
+  match (ctors)
+    | [] -> acc
+    | CtorRec(n, _, _) :: rest ->
+      alias-ctor-renames(rest, prefix, Map.set(n, String.concat(prefix, n), acc))
+
+; Keep the dependency's ctor tags; only the spelling is module-local.
+let qualify-ctor-recs(ctors: List CtorRec, prefix: Str) -> List CtorRec =
+  match (ctors)
+    | [] -> []
+    | CtorRec(n, t, a) :: rest ->
+      CtorRec(String.concat(prefix, n), t, a) :: qualify-ctor-recs(rest, prefix)
+
+; Type names in stubs (defrec / variant / alias) for dual-import aliases.
+let type-stub-name(stub: Ast) -> Maybe Str =
+  match (unwrap-pub(stub))
+    | ParenNode(h :: name :: _, _) ->
+      match (sym-str(h))
+        | Some(k) ->
+          if (k == "defrec" || k == "variant" || k == "alias") -> bare-name(name) | None()
+        | None -> None()
+    | _ -> None()
+
+; `Alias.Type` still rewrites to `__import_Alias_Type` when that name was not
+; in the bare selective list. Point it at the bare type so identity is shared.
+let dual-type-alias(prefix: Str, name: Str) -> Ast =
+  ParenNode([sym("alias"), sym(String.concat(prefix, name)), sym(name)], blank())
+
+let dual-type-aliases(stubs: List Ast, prefix: Str, seen: List Str) -> List Ast =
+  match (stubs)
+    | [] -> []
+    | stub :: rest ->
+      match (type-stub-name(stub))
+        | None -> dual-type-aliases(rest, prefix, seen)
+        | Some(n) ->
+          if (has-str(seen, n)) ->
+            dual-type-aliases(rest, prefix, seen) |
+            dual-type-alias(prefix, n) :: dual-type-aliases(rest, prefix, n :: seen)
+
+; Paths whose type stubs already appear unprefixed: direct bare imports and
+; every module reachable from them. Aliasing one of these must not rename
+; types again (that would fork Pid from __import_Actor_Pid).
+let bare-exposed-paths(paths: List Str, done: Map Str Iface) -> List Str =
+  bare-exposed-walk(paths, done, ref(Map.empty()), [])
+
+let bare-exposed-walk(paths: List Str, done: Map Str Iface, seen: Ref (Map Str Bool), acc: List Str) -> List Str =
+  match (paths)
+    | [] -> acc
+    | path :: rest ->
+      match (Map.lookup(path, deref(seen)))
+        | Some(_) -> bare-exposed-walk(rest, done, seen, acc)
+        | None ->
+          {
+            set!(seen, Map.set(path, true, deref(seen)))
+            match (Map.lookup(path, done))
+              | None -> bare-exposed-walk(rest, done, seen, path :: acc)
+              | Some(Iface(_, deps, _, _, _, _, _, _)) ->
+                bare-exposed-walk(append-strs(dep-paths(deps), rest), done, seen, path :: acc)
+          }
+
+let dep-paths(deps: List DepRec) -> List Str =
+  match (deps)
+    | [] -> []
+    | DepRec(_, p) :: rest -> p :: dep-paths(rest)
+
+let append-strs(xs: List Str, ys: List Str) -> List Str =
+  match (xs)
+    | [] -> ys
+    | x :: rest -> x :: append-strs(rest, ys)
+
+; Alias imports expose `__import_Alias_*` spellings. When the module's types
+; are already bare-exposed, only values are renamed and type aliases keep
+; `Alias.Type` on the same identity; otherwise every export is renamed.
+let alias-surfaces-for(from: Str, forms: List Ast, done: Map Str Iface, bare: List Str, acc: Surface) -> Surface =
+  alias-surfaces-with(from, forms, done, bare-exposed-paths(bare, done), acc)
+
+let alias-surfaces-with(from: Str, forms: List Ast, done: Map Str Iface, exposed: List Str, acc: Surface) -> Surface =
   match (forms)
     | [] -> acc
     | form :: rest ->
       match (module-import-alias(form))
-        | None -> alias-surfaces(from, rest, done, acc)
+        | None -> alias-surfaces-with(from, rest, done, exposed, acc)
         | Some(name) ->
           match (import-specs([form]))
             | spec :: _ ->
-              match (Map.lookup(canonical-path(resolve-import(from, spec)), done))
-                | None -> alias-surfaces(from, rest, done, acc)
-                | Some(Iface(_, _, _, _, _, fns, _, stubs)) ->
-                  match (acc)
-                    | Surface(af, ac, as) ->
-                      {
-                        let prefix = import-alias-prefix(name)
-                        let values = value-stubs(stubs)
-                        let renamed = rename-module-forms(values, qualified-renames(values, prefix, Map.empty()))
-                        alias-surfaces(from, rest, done, Surface(append-fns(qualified-fns(fns, prefix), af), ac, append-asts(as, renamed)))
-                      }
-            | [] -> alias-surfaces(from, rest, done, acc)
+              {
+                let path = canonical-path(resolve-import(from, spec))
+                match (Map.lookup(path, done))
+                  | None -> alias-surfaces-with(from, rest, done, exposed, acc)
+                  | Some(Iface(_, _, _, _, _, fns, ctors, stubs)) ->
+                    match (acc)
+                      | Surface(af, ac, as) ->
+                        {
+                          let prefix = import-alias-prefix(name)
+                          let dual = has-str(exposed, path)
+                          let renamed =
+                            if (dual) ->
+                              rename-module-forms(value-stubs(stubs), alias-value-renames(stubs, prefix, Map.empty())) |
+                              rename-module-forms(stubs, alias-export-renames(stubs, ctors, prefix, Map.empty()))
+                          let aliases = if (dual) -> dual-type-aliases(stubs, prefix, []) | []
+                          let next-ctors = append-ctors(qualify-ctor-recs(ctors, prefix), ac)
+                          alias-surfaces-with(from, rest, done, exposed, Surface(append-fns(qualified-fns(fns, prefix), af), next-ctors, append-asts(as, append-asts(renamed, aliases))))
+                        }
+              }
+            | [] -> alias-surfaces-with(from, rest, done, exposed, acc)
 
 let append-fns(xs: List FnRec, ys: List FnRec) -> List FnRec =
   match (xs)
@@ -723,13 +830,27 @@ let compile-forms(abs: Str, src: Str, display: Str, forms: List Ast, direct: Lis
         Err("")
       }
 
+; Only bare imports (and their transitive deps) contribute unprefixed
+; stubs. Aliased deps are handled solely by alias-surfaces.
+let bare-dep-recs(from: Str, forms: List Ast, deps: List DepRec) -> List DepRec {
+  let bare = module-bare-paths(from, forms, deps)
+  filter-deps-in(deps, bare)
+}
+
+let filter-deps-in(deps: List DepRec, paths: List Str) -> List DepRec =
+  match (deps)
+    | [] -> []
+    | DepRec(h, p) :: rest ->
+      if (has-str(paths, p)) -> DepRec(h, p) :: filter-deps-in(rest, paths) | filter-deps-in(rest, paths)
+
 let compile-forms-open(abs: Str, src: Str, display: Str, forms: List Ast, direct: List DepRec, ctx: Ctx) -> Result Iface Str {
   let started = now-ms()
   let for-test = suite-member(ctx, abs) || ctx-for-test(ctx) && abs == ctx-entry(ctx)
   let exported = collect-exports(forms, abs, [], [], [])
   let body0 = prepare-body(strip-module-forms(forms), for-test)
   let done = deref(ctx-done(ctx))
-  let surface = alias-surfaces(abs, forms, done, direct-surfaces(bare-import-paths(abs, forms), done, surface-of(direct, done)))
+  let bare-paths = module-bare-paths(abs, forms, direct)
+  let surface = alias-surfaces-for(abs, forms, done, bare-paths, direct-surfaces(bare-paths, done, surface-of(bare-dep-recs(abs, forms, direct), done)))
   match (surface)
     | Surface(fns, ctors, stubs) ->
       match (compile-checked(abs, src, display, body0, exported, direct, fns, ctors, stubs, for-test, ctx, started))
@@ -764,6 +885,26 @@ let drop-let-forms(xs: List Ast, acc: List Ast) -> List Ast =
     | f :: rest ->
       if (is-let-form(f)) -> drop-let-forms(rest, acc) | drop-let-forms(rest, f :: acc)
 
+; Typecheck prepends `__print-*` helpers ahead of the surface type stubs.
+; Drop only those stubs so the printers remain for lowering.
+let is-print-defn(form: Ast) -> Bool =
+  match (unwrap-pub(form))
+    | ParenNode(_ :: name :: _, _) ->
+      match (bare-name(name))
+        | Some(n) -> String.length(n) >= 8 && String.slice(0, 8, n) == "__print-"
+        | None -> false
+    | _ -> false
+
+let take-print-defns(forms: List Ast, acc: List Ast) -> (List Ast * List Ast) =
+  match (forms)
+    | [] -> (reverse(acc), [])
+    | f :: rest ->
+      if (is-print-defn(f)) -> take-print-defns(rest, f :: acc) | (reverse(acc), forms)
+
+let drop-surface-types(checked: List Ast, n-types: Int) -> List Ast =
+  match (take-print-defns(checked, []))
+    | (prints, rest) -> append-asts(prints, drop-n(n-types, rest))
+
 let compile-checked(abs: Str, src: Str, display: Str, body: List Ast, exported: Export, direct: List DepRec, fns: List FnRec, ctors: List CtorRec, stubs: List Ast, for-test: Bool, ctx: Ctx, started: Int) -> Result Iface Str {
   let types = drop-let-forms(stubs, [])
   let body1 = append-asts(lets-only(stubs, []), body)
@@ -774,7 +915,7 @@ let compile-checked(abs: Str, src: Str, display: Str, body: List Ast, exported: 
         report-types(abs, src, es)
         Err("")
       }
-    | Ok(checked) -> compile-lower(abs, src, display, drop-n(length(types), checked), exported, direct, fns, ctors, for-test, ctx, started)
+    | Ok(checked) -> compile-lower(abs, src, display, drop-surface-types(checked, length(types)), exported, direct, fns, ctors, for-test, ctx, started)
 }
 
 let compile-lower(abs: Str, src: Str, display: Str, body: List Ast, exported: Export, direct: List DepRec, fns: List FnRec, ctors: List CtorRec, for-test: Bool, ctx: Ctx, started: Int) -> Result Iface Str {

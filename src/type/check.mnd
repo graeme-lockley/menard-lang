@@ -2484,8 +2484,9 @@ let print-pattern(name: Str, ts: List Type, i: Int) -> List Ast =
     | [] -> []
     | _ :: rest -> print-sym(String.concat("p", show(i))) :: print-pattern(name, rest, i + 1)
 
-; A private constructor is renamed to __mN_Name by module flattening. The
-; derived show strips that prefix; the type-directed printer must too.
+; A private constructor is renamed to __mN_Name by module flattening. An
+; aliased import is rewritten to __import_Alias_Name. The derived show and
+; type-directed printer strip both so printed text matches the source spelling.
 let source-name-digits(n: Str, i: Int, len: Int) -> Str =
   cond
     | i >= len -> n
@@ -2498,9 +2499,19 @@ let source-name-digits(n: Str, i: Int, len: Int) -> Str =
           | else -> n
       }
 
+; `__import_Alias_Name` → `Name` (alias names do not contain `_`).
+let source-import-name(n: Str, i: Int, len: Int) -> Str =
+  cond
+    | i >= len -> n
+    | String.byte(i, n) == 95 -> String.slice(i + 1, len - (i + 1), n)
+    | else -> source-import-name(n, i + 1, len)
+
 let source-ctor-name(n: Str) -> Str {
   let len = String.length(n)
-  if (len >= 4 && String.byte(0, n) == 95 && String.byte(1, n) == 95 && String.byte(2, n) == 109) -> source-name-digits(n, 3, len) | n
+  cond
+    | len >= 4 && String.byte(0, n) == 95 && String.byte(1, n) == 95 && String.byte(2, n) == 109 -> source-name-digits(n, 3, len)
+    | len >= 9 && String.slice(0, 9, n) == "__import_" -> source-import-name(n, 9, len)
+    | else -> n
 }
 
 let print-ctor-body(env: TypeEnv, name: Str, ts: List Type) -> Ast =

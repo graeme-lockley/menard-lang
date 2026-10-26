@@ -312,6 +312,9 @@ export function parseTypeExpr(env: TypeEnv, ast: Ast, params: Set<string>): Type
       }
       return tProduct(ast.elems.slice(1).map((e) => parseTypeExpr(env, e, params)));
     }
+    if (hn === "project") {
+      return parseQualifiedType(env, ast, [], params);
+    }
     if (hn && env.types.has(hn)) {
       const def = env.types.get(hn)!;
       const args = ast.elems.slice(1).map((e) => parseTypeExpr(env, e, params));
@@ -322,9 +325,76 @@ export function parseTypeExpr(env: TypeEnv, ast: Ast, params: Set<string>): Type
         kind: def.kind === "alias" ? "alias" : def.kind,
       };
     }
+    // `Alias.Name T` parses as ( (project Alias Name) T … ).
+    if (head.tag === "list" && head.kind === "paren" && symStr(head.elems[0]!) === "project") {
+      return parseQualifiedType(
+        env,
+        head,
+        ast.elems.slice(1).map((e) => parseTypeExpr(env, e, params)),
+        params,
+      );
+    }
   }
   err(env, "E_TYPE_EXPR", "invalid type expression", ast.span);
   return freshVar(env);
+}
+
+type QualCtor = {
+  name: string;
+  ctor: { typeName: string; payloads: Type[]; params: string[] };
+};
+
+/** Look up `Alias.Ctor` in an import bundle. */
+function resolveQualifiedCtor(env: TypeEnv, projectAst: Ast): QualCtor | null {
+  if (projectAst.tag !== "list" || projectAst.elems.length < 3) return null;
+  const obj = projectAst.elems[1]!;
+  const fieldAst = projectAst.elems[2]!;
+  if (obj.tag !== "sym" || fieldAst.tag !== "sym") return null;
+  const bundle = env.modules.get(symStr(obj)!);
+  if (!bundle) return null;
+  const name = symStr(fieldAst)!;
+  const ctor = bundle.ctors.get(name);
+  if (!ctor) return null;
+  return { name, ctor };
+}
+
+/** Resolve `Alias.Name` (and optional type args) via an aliased import bundle. */
+function parseQualifiedType(env: TypeEnv, projectAst: Ast, args: Type[], params: Set<string>): Type {
+  void params;
+  if (projectAst.tag !== "list" || projectAst.elems.length < 3) {
+    err(env, "E_TYPE_EXPR", "invalid type expression", projectAst.span);
+    return freshVar(env);
+  }
+  const obj = projectAst.elems[1]!;
+  const fieldAst = projectAst.elems[2]!;
+  if (obj.tag !== "sym" || fieldAst.tag !== "sym") {
+    err(env, "E_TYPE_EXPR", "invalid type expression", projectAst.span);
+    return freshVar(env);
+  }
+  const alias = symStr(obj)!;
+  const name = symStr(fieldAst)!;
+  const bundle = env.modules.get(alias);
+  if (!bundle) {
+    err(env, "E_TYPE_UNKNOWN", `unknown type ${alias}.${name}`, projectAst.span);
+    return freshVar(env);
+  }
+  if (bundle.aliases.has(name)) {
+    const t = bundle.aliases.get(name)!;
+    if (args.length === 0) return t;
+    err(env, "E_TYPE_EXPR", `type alias ${alias}.${name} does not take arguments`, projectAst.span);
+    return freshVar(env);
+  }
+  const def = bundle.types.get(name);
+  if (!def) {
+    err(env, "E_TYPE_UNKNOWN", `unknown type ${alias}.${name}`, fieldAst.span);
+    return freshVar(env);
+  }
+  return {
+    tag: "nominal",
+    name,
+    args,
+    kind: def.kind === "alias" ? "alias" : def.kind,
+  };
 }
 
 type Subst = Map<number, Type>;
@@ -1489,7 +1559,11 @@ function inferNamedExpr(
   local: Map<string, Type>,
   subst: Subst,
 ): Type {
-  if (expr.tag === "list" && (symStr(expr.elems[0]!) === "fn" || symStr(expr.elems[0]!) === "lambda")) {
+  if (
+    expr.tag === "list" &&
+    expr.elems.length > 0 &&
+    (symStr(expr.elems[0]!) === "fn" || symStr(expr.elems[0]!) === "lambda")
+  ) {
     const tv = freshVar(env, name);
     const loc = new Map(local);
     loc.set(name, tv);
@@ -1795,7 +1869,38 @@ function bindPattern(
     return;
   }
   if (pat.tag === "list" && pat.elems.length >= 1) {
-    const cn = symStr(pat.elems[0]!);
+    const head = pat.elems[0]!;
+    // `Alias.Ctor` or `Alias.Ctor(args…)` — constructor under an aliased import.
+    if (symStr(head) === "project" || (head.tag === "list" && symStr(head.elems[0]!) === "project")) {
+      const projectAst = symStr(head) === "project" ? pat : head;
+      const argPats = symStr(head) === "project" ? [] : pat.elems.slice(1);
+      const resolved = resolveQualifiedCtor(env, projectAst);
+      if (!resolved) {
+        err(env, "E_TYPE_UNBOUND", "unknown constructor", pat.span);
+        return;
+      }
+      const { name: cn, ctor } = resolved;
+      covered.add(cn);
+      const argVars = ctor.params.map(() => freshVar(env));
+      const paramMap = new Map<string, Type>();
+      for (let i = 0; i < ctor.params.length; i++) {
+        paramMap.set(ctor.params[i]!, argVars[i]!);
+      }
+      const payloads = ctor.payloads.map((p) => replaceParams(p, paramMap));
+      expectType(
+        env,
+        scrut,
+        { tag: "nominal", name: ctor.typeName, args: argVars, kind: "variant" },
+        subst,
+        pat.span,
+      );
+      for (let i = 0; i < payloads.length; i++) {
+        const p = argPats[i];
+        if (p) bindPattern(env, p, payloads[i]!, local, subst, new Set());
+      }
+      return;
+    }
+    const cn = symStr(head);
     if (cn === "recpat") {
       bindRecordPat(env, pat, scrut, local, subst, covered);
       return;

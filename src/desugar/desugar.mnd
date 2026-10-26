@@ -778,12 +778,26 @@ let classify-pat(pat: Ast, rec-id: Ref Int) -> PatKind =
     | ParenNode(head :: rest, _) -> classify-paren(head, rest, pat, rec-id)
     | _ -> AnyPat()
 
+; `Alias.Ctor` in a pattern — use the field name as the constructor key.
+let project-ctor-name(ast: Ast) -> Maybe Str =
+  match (ast)
+    | ParenNode(SymNode("project", _) :: _ :: SymNode(field, _) :: _, _) -> Some(field)
+    | _ -> None()
+
 let classify-paren(head: Ast, rest: List Ast, pat: Ast, rec-id: Ref Int) -> PatKind {
   let n = sym-text(head)
   cond
+    | n == "project" ->
+      match (project-ctor-name(pat))
+        | Some(cname) -> CtorPat(cname, [], pat)
+        | None -> AnyPat()
     | n == "recpat" -> classify-recpat(rest, pat, rec-id)
-    | n == "guard" || n == "_" || n == "" || is-lower-start(n) -> AnyPat()
-    | else -> CtorPat(n, rest, pat)
+    | n == "guard" || n == "_" || is-lower-start(n) -> AnyPat()
+    | n != "" -> CtorPat(n, rest, pat)
+    | else ->
+      match (project-ctor-name(head))
+        | Some(cname) -> CtorPat(cname, rest, pat)
+        | None -> AnyPat()
 }
 
 let classify-recpat(rest: List Ast, pat: Ast, rec-id: Ref Int) -> PatKind =

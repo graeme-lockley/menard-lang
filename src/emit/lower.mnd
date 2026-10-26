@@ -416,8 +416,21 @@ let strip-uniq-prefix-digits(n: Str, i: Int, len: Int) -> Str =
           | else -> n
       }
 
+; `__import_Alias_Name` → `Name` so aliased import types stay heap types
+; for the word-ABI filter (LANG-04).
+let strip-import-prefix(n: Str) -> Str {
+  let len = String.length(n)
+  if (len >= 9 && String.slice(0, 9, n) == "__import_") -> strip-import-prefix-alias(n, 9, len) | n
+}
+
+let strip-import-prefix-alias(n: Str, i: Int, len: Int) -> Str =
+  cond
+    | i >= len -> n
+    | String.byte(i, n) == 95 -> String.slice(i + 1, len - (i + 1), n)
+    | else -> strip-import-prefix-alias(n, i + 1, len)
+
 let is-upper-type-name(n: Str) -> Bool =
-  is-raw-upper-name(strip-uniq-prefix(n))
+  is-raw-upper-name(strip-import-prefix(strip-uniq-prefix(n)))
 
 let is-heap-type(ast: Ast) -> Bool =
   match (ast)

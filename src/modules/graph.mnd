@@ -377,7 +377,7 @@ pub let note-versions(versions: Ref (Map Str Str), specs: List Str) -> Result Un
     | [] -> Ok(())
     | spec :: rest -> Result.and-then(fn (_) = note-versions(versions, rest), note-version(versions, spec))
 
-let is-basics-path(path: Str) -> Bool =
+pub let is-basics-path(path: Str) -> Bool =
   path == "stdlib/basics.mnd" || String.ends-with("/stdlib/basics.mnd", path)
 
 let is-basics-spec(spec: Str) -> Bool =
