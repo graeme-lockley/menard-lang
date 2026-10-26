@@ -20,7 +20,7 @@
 | 3 | Operational concurrency | 8 | 0 | 0 | 0 |
 | 4 | Project and ecosystem | 17 | 0 | 0 | 0 |
 | 5 | Later | 9 | 0 | 0 | 0 |
-| **Total** | | **82** | **15** | **1** | **2** |
+| **Total** | | **82** | **14** | **1** | **3** |
 
 Priority mix: P0 = 24, P1 = 34, P2 = 19, P3 = 5.
 
