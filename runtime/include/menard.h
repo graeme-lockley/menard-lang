@@ -251,6 +251,9 @@ MnWord mn_sb_to_str(MnWord sb);
 MnWord mn_slot_get(int64_t key_ptr_bits, int64_t len);
 MnWord mn_slot_set(int64_t key_ptr_bits, int64_t len, MnWord value);
 
+/* Canonical Float text (LANG-02). Writes into buf; returns length, or -1. */
+int mn_format_float(double d, char *buf, size_t n);
+
 /* Loose `show` for diagnostics (Phase 3 slice H) — Int decimal or #<obj>. */
 MnWord mn_show(MnWord v);
 MnWord mn_float_from_str(int64_t ptr_bits, int64_t len);

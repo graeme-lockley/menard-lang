@@ -1,0 +1,29 @@
+; LANG-02: canonical Float text. Printed spellings must agree across
+; interpreter, stage0 and stage1 (see tests/vectors/float-text.jsonl).
+
+let main() -> Int {
+  println(show(0.0))
+  println(show(-0.0))
+  println(show(1.0))
+  println(show(-1.0))
+  println(show(0.1))
+  println(show(f*(0.1, 0.2)))
+  println(show(f/(1.0, 3.0)))
+  println(show(9007199254740992.0))
+  println(show(9223372036854775808.0))
+  println(show(1e-7))
+  println(show(1e-300))
+  println(show(1e21))
+  println(show(1.5e300))
+  println(show(5e-324))
+  println(show(1.7976931348623157e308))
+  println(show(f/(1.0, 0.0)))
+  println(show(f/(-1.0, 0.0)))
+  println(show(f/(0.0, 0.0)))
+  println(show(1.2345678901234567))
+  println(show(9.876543210987654e-5))
+  println(show(3.141592653589793))
+  println(show(2.718281828459045))
+  println(show(1.4142135623730951))
+  0
+}

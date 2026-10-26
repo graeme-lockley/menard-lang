@@ -223,6 +223,18 @@ describe("floats", () => {
     const b = mustRead(print(a));
     expect(astEqual(a, b)).toBe(true);
   });
+
+  test("nan / inf / -inf literals (LANG-02)", () => {
+    const nan = mustRead("nan");
+    expect(nan.tag).toBe("float");
+    if (nan.tag === "float") expect(Number.isNaN(nan.value)).toBe(true);
+    const inf = mustRead("inf");
+    expect(inf.tag).toBe("float");
+    if (inf.tag === "float") expect(inf.value).toBe(Infinity);
+    const ninf = mustRead("-inf");
+    expect(ninf.tag).toBe("float");
+    if (ninf.tag === "float") expect(ninf.value).toBe(-Infinity);
+  });
 });
 
 describe("character literals", () => {

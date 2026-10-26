@@ -1373,11 +1373,11 @@ Every value that is shown must have **exactly one spelling**. The normative
 rules are in §2.13. In particular:
 
 - `Float` is shown in a **single canonical shortest-round-trip decimal form**,
-  and the spelling depends only on the bit pattern.
-- **NaN is not a value in Menard.** Float arithmetic that would produce NaN or
-  an infinity (including float division by zero) is a defined `panic`, not a
-  silently propagated non-value. This removes the largest source of
-  non-canonical float text.
+  and the spelling depends only on the bit pattern (§2.13). The C runtime is
+  the reference; the interpreter mirrors it.
+- Non-finite values are ordinary `Float`s: arithmetic may produce them
+  (including float division by zero). They show as `nan`, `inf`, or `-inf`,
+  and those spellings are literals.
 - `−0.0` and `0.0` are distinct bit patterns and print distinctly; the rule is
   fixed rather than left to the formatter.
 - `Str` is shown with a fixed, minimal escaping, is never normalised, and need
@@ -1569,7 +1569,7 @@ same spelling, because the spelling is defined on bytes alone.
 | `Char` | the scalar value in decimal |
 | `Str` | `"` … `"`, with `\` and `"` backslash-escaped and nothing else escaped; non-ASCII bytes emitted raw |
 | `Sym` | `'` followed by the name bytes, unescaped |
-| `Float` | shortest decimal string that round-trips to the same bit pattern, in a single fixed style; `−0.0` distinct from `0.0` |
+| `Float` | shortest round-trip decimal under a fixed grammar (optional `-`, digits, optional fraction, optional `e`/`E` with a mandatory sign on the exponent); always a float lexeme (contains `.` or `e`); `0.0` / `-0.0` distinct; non-finites are `nan`, `inf`, `-inf`. The C implementation (`mn_format_float`) is normative; the interpreter must match it byte for byte. |
 | record | `(Name f1 f2 …)` in declaration order |
 | variant | `(Con payload…)` |
 | `(List T)` / `(Arr T n)` | `[e1 e2 …]` |
@@ -2927,7 +2927,7 @@ These are the invariants the implementation watches. Each row is a way the repre
 | **`IoError` mapping drifts between the interpreter and the runtime** | Medium | Divergent behaviour on I/O failure; locale-dependent text leaks into compared diagnostics | Closed Menard variant with codes, never `strerror`; per-failure-mode fixtures (§3.7); §2.11.B |
 | **Address or intern-index leakage into output** (§2.11.I) | Medium | Nondeterminism at a site far from the defect | Showable predicate is a compile error (§2.12); debug printing isolated by type (§2.16) |
 | **Alias name leaks into emitted output or a mangled symbol** | Medium | Fixed-point failure caused by a convenience feature | Canonical/display split (§2.3); mangling uses expanded types; determinism row in §3.6 |
-| **Float or Str text drifts between the interpreter and the derive engine** (§2.11.T) | Medium | Fixed-point failure traced to a formatter | Normative text table (§2.13); byte-compared fixtures per entry |
+| **Float or Str text drifts between the interpreter and the derive engine** (§2.11.T) | Medium | Fixed-point failure traced to a formatter | Normative text table (§2.13); C-first `mn_format_float` (Ryu) mirrored in the host; `tests/vectors/float-text.jsonl`, `tests/phase2/float-text.test.ts`, and `tests/corpus/float-text.mnd` |
 | Non-orderable/non-showable type reaches an output path | Medium | Nondeterminism or a crash | Compile error at the point of use; checked at instantiation, so `(Tree (Ref Int))` is rejected where it is shown |
 | **The dual-implemented surface is under-budgeted** (§2.8.2, §2.15) | Medium | The smallest-looking tier is the most expensive per line | Keep the tier rules strict; §7 costs it explicitly; each built-in has an interpreter fixture |
 | **Derive engine larger than budgeted** (parametrised) | Medium | Schedule overrun in phases 2–3 | Costed in §7; own phase-2 acceptance test; memoised per instantiation |

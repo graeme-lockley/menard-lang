@@ -1,15 +1,13 @@
 import type { Value } from "./value.ts";
 import { mapEntries, mapGet, mapSize } from "../builtins/collections.ts";
+import { formatFloat } from "./float-text.ts";
 
 export function showValue(v: Value): string {
   switch (v.tag) {
     case "int":
       return v.value.toString();
     case "float":
-      if (Object.is(v.value, -0)) return "-0.0";
-      if (Object.is(v.value, 0)) return "0.0";
-      if (Number.isInteger(v.value)) return `${v.value}.0`;
-      return String(v.value);
+      return formatFloat(v.value);
     case "bool":
       return v.value ? "true" : "false";
     case "unit":

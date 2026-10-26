@@ -6,6 +6,10 @@ Import a module by name: `import std/list as List`. The value a pipe feeds is th
 
 A missing `Maybe` or a failed `Result` is `?` (the `Err` payload is dropped on the default path). `to-maybe` remains when a real `Maybe` is needed downstream.
 
+`show` of a `Float` uses the canonical shortest-round-trip spelling (see
+[menard-spec.md](menard-spec.md) §2.13): `1.0`, `0.1`, `1e+21`, `nan`, `inf`,
+`-inf`. Non-finite values are ordinary floats, not panics.
+
 ## Basics
 
 In scope without an import.

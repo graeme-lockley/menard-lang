@@ -451,6 +451,29 @@ export function lex(src: Uint8Array): { ok: true; toks: Tok[] } | { ok: false; e
     const prevIdent = isLetter(prev) || isIdentCont(prev) || prev === 0x21;
     if (!prevIdent && (b === 0x2d || b === 0x2b) && isDigit(peek(1))) {
       // signed number glued to the sign
+    } else if (
+      !prevIdent &&
+      b === 0x2d &&
+      peek(1) === 0x69 &&
+      peek(2) === 0x6e &&
+      peek(3) === 0x66 &&
+      !isIdentCont(peek(4))
+    ) {
+      /* LANG-02: `-inf` is one float literal, not unary-minus + ident. */
+      bump();
+      bump();
+      bump();
+      bump();
+      toks.push({
+        kind: "float",
+        text: "-inf",
+        span: { start, end: i },
+        col: tokCol,
+        indent: tokIndent,
+        bol: tokBol,
+        line: tokLine,
+      });
+      continue;
     } else if (!prevIdent && b === 0x2d && (isLetter(peek(1)) || peek(1) === 0x28)) {
       bump();
       toks.push({
@@ -555,7 +578,14 @@ export function lex(src: Uint8Array): { ok: true; toks: Tok[] } | { ok: false; e
       if (text.includes("!") && !text.endsWith("!")) {
         return err(start, i, "'!' may appear only as the final character of an identifier");
       }
-      const kind: TokKind = text === "true" || text === "false" ? "ident" : KEYWORDS.has(text) ? "kw" : "ident";
+      const kind: TokKind =
+        text === "nan" || text === "inf"
+          ? "float"
+          : text === "true" || text === "false"
+            ? "ident"
+            : KEYWORDS.has(text)
+              ? "kw"
+              : "ident";
       toks.push({
         kind,
         text,

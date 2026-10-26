@@ -69,7 +69,9 @@ The smallest pieces are values: `42`, `true`, `"hello"`, `'A'`.
 
 `Int` is one integer type. `Str` is a sequence of bytes, not necessarily
 text. `Char` is one Unicode scalar. `Float` is a boxed floating-point number;
-its arithmetic is spelled `f+`, `f-`, `f*`, `f/`, not infix `+`.
+its arithmetic is spelled `f+`, `f-`, `f*`, `f/`, not infix `+`. `show` of a
+`Float` is a shortest round-trip spelling shared by both hosts (`1.0`, `0.1`,
+`1e+21`, `nan`, `inf`, `-inf`); `-0.0` is distinct from `0.0`.
 
 A function names its arguments and its result.
 

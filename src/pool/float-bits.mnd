@@ -443,12 +443,24 @@ let convert-clean(p: Parsed) -> Result Str Str {
   if (is-empty(digits)) -> Ok(signed-zero(p.neg)) | convert-trimmed(p.neg, digits, p.e10)
 }
 
-; The 8 payload bytes of one literal. `Err` is a non-finite value or a
-; token the lexer would not have produced.
+; Quiet NaN `0x7ff8000000000000`, +inf, -inf (LANG-02 literals).
+let bits-nan() -> Str =
+  encode(0, 2047, 2251799813685248)
+
+let bits-inf(neg: Bool) -> Str =
+  encode(sign-bit(neg), 2047, 0)
+
+; The 8 payload bytes of one literal. Overflowing numeric forms are still
+; `Err`; `nan` / `inf` / `-inf` are defined payloads.
 pub let float-bits(text: Str) -> Result Str Str =
-  match (parse-float(text))
-    | Err(msg) -> Err(msg)
-    | Ok(p) -> convert-clean(p)
+  cond
+    | text == "nan" -> Ok(bits-nan())
+    | text == "inf" -> Ok(bits-inf(false))
+    | text == "-inf" -> Ok(bits-inf(true))
+    | else ->
+      match (parse-float(text))
+        | Err(msg) -> Err(msg)
+        | Ok(p) -> convert-clean(p)
 
 let hex-digit(n: Int) -> Str =
   String.slice(n, 1, "0123456789abcdef")

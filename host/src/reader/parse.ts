@@ -758,8 +758,14 @@ class P {
     }
     if (t.kind === "float") {
       this.i++;
-      const value = Number(t.text);
-      if (!Number.isFinite(value)) return this.err(t, "invalid float");
+      let value: number;
+      if (t.text === "nan") value = NaN;
+      else if (t.text === "inf") value = Infinity;
+      else if (t.text === "-inf") value = -Infinity;
+      else {
+        value = Number(t.text);
+        if (!Number.isFinite(value)) return this.err(t, "invalid float");
+      }
       return { ok: true, ast: { tag: "float", value, span: t.span } };
     }
     if (t.kind === "str") {
