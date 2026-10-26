@@ -142,7 +142,8 @@ pub let receive[a](mb: Mailbox a) -> Result a ActorError {
         }
 }
 
-; Mark dead and poke waiters so receivers observe ActorDead.
+; Mark dead and wake every parked receiver and blocked sender.
+; Each waiter observes Err(ActorDead) once. Idempotent.
 ; @test {
 ;   let mb = mailbox-new()
 ;   close(mb)
@@ -152,12 +153,8 @@ pub let close[a](mb: Mailbox a) -> Unit =
   match (mb)
     | Mailbox(_, _, cell, space, _, _, alive) -> {
         set!(alive, false)
-        loop (n = 0)
-          if (n >= 64) -> () | {
-            Sched.notify(cell)
-            Sched.notify(space)
-            recur(n + 1)
-          }
+        Sched.notify-all(cell)
+        Sched.notify-all(space)
       }
 
 ; task-id is the cooperative task id; scope is the nursery for escalate (or empty).

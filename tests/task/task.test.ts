@@ -62,7 +62,9 @@ function runNative(fixture: string): { status: number | null; stdout: string; st
 
 const BASIC_EXPECTED = "3\n2\n11\n1\n2\n";
 /* notify-before, notify-after+notifier, multi-waiter acc, cancel saw, peer */
-const WAIT_EXPECTED = "7\n7\n1\n11\n3\n7\n";
+/* notify-before, notify-after+notifier, multi-waiter acc, cancel saw, peer,
+ * notify-all sum, late wait on closed cell */
+const WAIT_EXPECTED = "7\n7\n1\n11\n3\n7\n111\n1\n";
 
 describe("Build D tasks", () => {
   test("interpreter: Task spawn/join/yield/cancel/scope", () => {

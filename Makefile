@@ -38,7 +38,7 @@ BUILD_DIR := build
 
 .DEFAULT_GOAL := mn
 
-.PHONY: mn bootstrap test typecheck backlog-check ci memory-checks native-test runtime-smoke runtime-sb-gc runtime-clean hello-native ret-native sqlite-native check-fixed-point float-text-wasm float-text-bench
+.PHONY: mn bootstrap test typecheck backlog-check next ci memory-checks native-test runtime-smoke runtime-sb-gc runtime-clean hello-native ret-native sqlite-native check-fixed-point float-text-wasm float-text-bench
 
 # Build B FFI proving ground: SQLite (cross-platform).
 # Dedicated link target — does not bake libsqlite3 into ./mn.
@@ -84,6 +84,12 @@ typecheck:
 # refuses a missing, duplicate or malformed row.
 backlog-check:
 	bun run tools/backlog-check.ts
+
+# What is safe to start now: every item in a row's `Blocked by` cell is
+# done. The phase gate limits this to the lowest phase with an open item;
+# `make next ARGS=--all` lifts that.
+next:
+	bun run tools/next.ts $(ARGS)
 
 ci: typecheck test backlog-check
 

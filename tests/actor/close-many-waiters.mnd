@@ -1,0 +1,126 @@
+; CONC-01: close wakes every waiter (receivers and blocked senders).
+; Empty and full waiter sets cannot coexist on one queue, so each set uses
+; its own bounded mailbox; both exercise notify-all past the old 64 cap.
+import std/actor as Actor
+pub import std/actor (ActorDead)
+import std/task as Tsk
+
+let n() -> Int =
+  100
+
+let await-count(r: Ref Int, want: Int) -> Unit {
+  loop ()
+    if (deref(r) >= want) -> () | {
+      Tsk.yield()
+      recur()
+    }
+}
+
+let bump(r: Ref Int) -> Unit =
+  set!(r, deref(r) + 1)
+
+let main() -> Int {
+  ; --- 100 receivers on an empty mailbox ---
+  let mb-r = Actor.mailbox-new-bounded(1)
+  let recv-ready = ref(0)
+  let recv-dead = ref(0)
+  let recv-other = ref(0)
+  let recv-done = ref(0)
+  loop (i = 0)
+    if (i >= n()) -> () | {
+      let _ = Tsk.spawn(fn () = {
+        bump(recv-ready)
+        match (Actor.receive(mb-r))
+          | Ok(_) -> {
+              bump(recv-other)
+              bump(recv-done)
+              0
+            }
+          | Err(ActorDead()) -> {
+              bump(recv-dead)
+              bump(recv-done)
+              0
+            }
+          | Err(_) -> {
+              bump(recv-other)
+              bump(recv-done)
+              0
+            }
+      })
+      recur(i + 1)
+    }
+  await-count(recv-ready, n())
+  loop (k = 0)
+    if (k >= 8) -> () | {
+      Tsk.yield()
+      recur(k + 1)
+    }
+  Actor.close(mb-r)
+  Actor.close(mb-r)
+  match (Actor.send(mb-r, 0))
+    | Err(ActorDead()) -> ()
+    | _ -> bump(recv-other)
+  await-count(recv-done, n())
+
+  ; --- 100 blocked senders on a full mailbox ---
+  let mb-s = Actor.mailbox-new-bounded(1)
+  let _ = Actor.send(mb-s, 1)
+  let send-ready = ref(0)
+  let send-dead = ref(0)
+  let send-other = ref(0)
+  let send-done = ref(0)
+  loop (i = 0)
+    if (i >= n()) -> () | {
+      let _ = Tsk.spawn(fn () = {
+        bump(send-ready)
+        match (Actor.send(mb-s, 2))
+          | Ok(_) -> {
+              bump(send-other)
+              bump(send-done)
+              0
+            }
+          | Err(ActorDead()) -> {
+              bump(send-dead)
+              bump(send-done)
+              0
+            }
+          | Err(_) -> {
+              bump(send-other)
+              bump(send-done)
+              0
+            }
+      })
+      recur(i + 1)
+    }
+  await-count(send-ready, n())
+  loop (k = 0)
+    if (k >= 8) -> () | {
+      Tsk.yield()
+      recur(k + 1)
+    }
+  Actor.close(mb-s)
+  await-count(send-done, n())
+
+  ; --- queued messages still drain before ActorDead ---
+  let mb-d = Actor.mailbox-new-bounded(4)
+  let _ = Actor.send(mb-d, 10)
+  let _ = Actor.send(mb-d, 20)
+  Actor.close(mb-d)
+  let a = match (Actor.receive(mb-d))
+    | Ok(v) -> v
+    | Err(_) -> -1
+  let b = match (Actor.receive(mb-d))
+    | Ok(v) -> v
+    | Err(_) -> -1
+  let c = match (Actor.receive(mb-d))
+    | Ok(_) -> -1
+    | Err(ActorDead()) -> 1
+    | Err(_) -> -2
+
+  println(deref(recv-dead))
+  println(deref(recv-other))
+  println(deref(send-dead))
+  println(deref(send-other))
+  println(a + b + c)
+  0
+}

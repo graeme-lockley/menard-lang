@@ -23,6 +23,9 @@ extern mn_task_wait(cell: Int) -> Result Unit Unit
 
 extern mn_task_notify(cell: Int) -> Unit
 
+; Close the cell and wake every waiter (Mailbox.close).
+extern mn_task_notify_all(cell: Int) -> Unit
+
 ; Type-erased process dictionary (Build E registry). Honor-system get typing.
 extern mn_task_dict_set[a](key: Str, value: a) -> Unit
 
@@ -96,6 +99,11 @@ pub let wait(cell: Int) -> Result Unit Unit =
 ; @test notify(wait-new())
 pub let notify(cell: Int) -> Unit =
   mn_task_notify(cell)
+
+; Close a wait cell and wake every waiter. Idempotent. Used by Mailbox.close.
+; @test notify-all(wait-new())
+pub let notify-all(cell: Int) -> Unit =
+  mn_task_notify_all(cell)
 
 ; Process dictionary set (last write wins). Used by std/actor registry.
 ; @test dict-set("docs-dict", 1)

@@ -22,6 +22,8 @@ export type TaskStatus =
 export type InterpWaitCell = {
   id: number;
   notified: boolean;
+  /** Set by notify_all; wait never parks on a closed cell. */
+  closed: boolean;
   waitersHead: InterpTask | null;
   waitersTail: InterpTask | null;
 };
@@ -95,6 +97,7 @@ function allocCell(): InterpWaitCell {
   const c: InterpWaitCell = {
     id: nextCellId++,
     notified: false,
+    closed: false,
     waitersHead: null,
     waitersTail: null,
   };
@@ -198,18 +201,34 @@ function wakeJoiner(done: InterpTask): void {
   enqueue(j);
 }
 
+function wakeOneWaiter(w: InterpTask): void {
+  w.waitNext = null;
+  w.waitingOn = null;
+  /* Cont resume does not re-enter waitOnCell — result is in resumeValue. */
+  w.resumeValue = vVariant("Ok", [vUnit()]);
+  if (!w.isMain) enqueue(w);
+}
+
 function notifyCell(c: InterpWaitCell): void {
   c.notified = true;
   if (c.waitersHead) {
     const w = c.waitersHead;
     c.waitersHead = w.waitNext;
     if (c.waitersHead === null) c.waitersTail = null;
-    w.waitNext = null;
-    w.waitingOn = null;
     c.notified = false; /* consumed by woken waiter */
-    /* Cont resume does not re-enter waitOnCell — result is in resumeValue. */
-    w.resumeValue = vVariant("Ok", [vUnit()]);
-    if (!w.isMain) enqueue(w);
+    wakeOneWaiter(w);
+  }
+}
+
+/** Close the cell and wake every waiter (Mailbox.close). */
+function notifyAllCell(c: InterpWaitCell): void {
+  c.closed = true;
+  c.notified = true;
+  while (c.waitersHead) {
+    const w = c.waitersHead;
+    c.waitersHead = w.waitNext;
+    if (c.waitersHead === null) c.waitersTail = null;
+    wakeOneWaiter(w);
   }
 }
 
@@ -337,12 +356,15 @@ function waitOnCell(c: InterpWaitCell, host: Host): Value {
   if (self.cancelRequested || self.status === "cancelled") {
     return vVariant("Err", [vUnit()]);
   }
+  if (c.closed) {
+    return vVariant("Ok", [vUnit()]);
+  }
   if (c.notified) {
     c.notified = false;
     return vVariant("Ok", [vUnit()]);
   }
   if (self.isMain) {
-    while (!c.notified) {
+    while (!c.notified && !c.closed) {
       if (self.cancelRequested) {
         return vVariant("Err", [vUnit()]);
       }
@@ -354,6 +376,9 @@ function waitOnCell(c: InterpWaitCell, host: Host): Value {
     }
     if (self.cancelRequested) {
       return vVariant("Err", [vUnit()]);
+    }
+    if (c.closed) {
+      return vVariant("Ok", [vUnit()]);
     }
     c.notified = false;
     return vVariant("Ok", [vUnit()]);
@@ -443,6 +468,17 @@ export function taskNotify(cellId: bigint, host: Host): Value {
   const c = findCell(Number(cellId));
   if (!c) throw new Error("mn_task_notify: bad cell");
   notifyCell(c);
+  if (current?.isMain) {
+    pump(host);
+  }
+  return vUnit();
+}
+
+export function taskNotifyAll(cellId: bigint, host: Host): Value {
+  taskEnsureMain();
+  const c = findCell(Number(cellId));
+  if (!c) throw new Error("mn_task_notify_all: bad cell");
+  notifyAllCell(c);
   if (current?.isMain) {
     pump(host);
   }

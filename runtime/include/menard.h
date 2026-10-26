@@ -345,6 +345,7 @@ MnWord mn_task_yield(void);                    /* → Unit; cooperative */
 MnWord mn_task_wait_new(void);                 /* → Int wait-cell id */
 MnWord mn_task_wait(MnWord cell_tagged);       /* → Result Unit Unit (Err = cancelled) */
 MnWord mn_task_notify(MnWord cell_tagged);     /* → Unit; wake ≤1 waiter; sticky */
+MnWord mn_task_notify_all(MnWord cell_tagged); /* → Unit; close cell; wake every waiter */
 /* Type-erased process dictionary (Build E registry); honor-system get typing. */
 MnWord mn_task_dict_set(MnWord key_str, MnWord value); /* → Unit */
 MnWord mn_task_dict_get(MnWord key_str);               /* → Maybe a */

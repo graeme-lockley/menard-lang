@@ -9,18 +9,19 @@
 - **Statuses:** `todo` (not scheduled), `ready` (can start; see *Blocked by* for slices that must wait), `in-progress`, `blocked` (no useful slice can start), `review` (PR open), `done`, `wontfix`.
 - **Definition of done:** every acceptance criterion in the linked review item is satisfied, `make test` and `make check-fixed-point` are green, the named docs are updated, and this row is `done` in the same PR that closes the issue.
 - **Update rule:** a PR that closes an item updates its row here and uses `Closes #<issue>`; `make backlog-check` verifies that every review ID has exactly one row.
+- **Next up:** `make next` prints the items whose every blocker is `done` — safe to start — plus what is in progress and one blocker away. `make next ARGS=--all` ignores the phase gate; the cycles it reports are missing from `make backlog-check`.
 
 ## Summary
 
 | Phase | Theme | Items | Ready | In progress | Done |
 | --- | --- | ---: | ---: | ---: | ---: |
-| 0 | Truth, trust and the unsafe edges | 18 | 14 | 1 | 3 |
+| 0 | Truth, trust and the unsafe edges | 18 | 13 | 1 | 4 |
 | 1 | Daily loop and language decisions | 18 | 0 | 0 | 0 |
 | 2 | Standard library | 12 | 0 | 0 | 0 |
 | 3 | Operational concurrency | 8 | 0 | 0 | 0 |
 | 4 | Project and ecosystem | 17 | 0 | 0 | 0 |
 | 5 | Later | 9 | 0 | 0 | 0 |
-| **Total** | | **82** | **14** | **1** | **3** |
+| **Total** | | **82** | **13** | **1** | **4** |
 
 Priority mix: P0 = 24, P1 = 34, P2 = 19, P3 = 5.
 
@@ -35,7 +36,7 @@ Rows are ordered by phase, then priority, then area, then ID.
 | [LANG-03](reviews/2026-10-24-build-f.md#lang-03) | Make `Float` orderable with one consistent total order | Language | P0 | 0 | ready | LANG-02, LIB-01 | [#14](https://github.com/graeme-lockley/menard-lang/issues/14) | — |
 | [LANG-04](reviews/2026-10-24-build-f.md#lang-04) | The host typer still crashes on a qualified-import constructor, and still duplicates some diagnostics | Language | P0 | 0 | done | — | [#15](https://github.com/graeme-lockley/menard-lang/issues/15) | [#38](https://github.com/graeme-lockley/menard-lang/pull/38) |
 | [LIB-06](reviews/2026-10-24-build-f.md#lib-06) | `Map` keys beyond `Int`/`Str` are silently wrong natively | Libraries | P0 | 0 | ready | LANG-03 (Float keys) | [#17](https://github.com/graeme-lockley/menard-lang/issues/17) | — |
-| [CONC-01](reviews/2026-10-24-build-f.md#conc-01) | `Mailbox.close` must wake every waiter, including blocked senders | Concurrency | P0 | 0 | ready | — | [#18](https://github.com/graeme-lockley/menard-lang/issues/18) | — |
+| [CONC-01](reviews/2026-10-24-build-f.md#conc-01) | `Mailbox.close` must wake every waiter, including blocked senders | Concurrency | P0 | 0 | done | — | [#18](https://github.com/graeme-lockley/menard-lang/issues/18) | — |
 | [CONC-02](reviews/2026-10-24-build-f.md#conc-02) | Deadlines for every blocking operation | Concurrency | P0 | 0 | ready | CONC-01 | [#19](https://github.com/graeme-lockley/menard-lang/issues/19) | — |
 | [CONC-03](reviews/2026-10-24-build-f.md#conc-03) | TLS must verify the peer, send SNI, and not block the mutator | Concurrency | P0 | 0 | ready | CONC-02, CONC-10 | [#20](https://github.com/graeme-lockley/menard-lang/issues/20) | — |
 | [CONC-04](reviews/2026-10-24-build-f.md#conc-04) | HTTP limits, header correctness, and connection hygiene | Concurrency | P0 | 0 | ready | CONC-02 | [#21](https://github.com/graeme-lockley/menard-lang/issues/21) | — |
