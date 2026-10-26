@@ -509,6 +509,19 @@ let bare-import-paths(from: Str, forms: List Ast) -> List Str =
             | spec :: _ -> canonical-path(resolve-import(from, spec)) :: bare-import-paths(from, rest)
             | [] -> bare-import-paths(from, rest)
 
+; `std/basics` is injected by specs-with-basics and is never written as an
+; import form, so bare-import-paths would miss it. Keep its stubs unprefixed.
+let with-basics-bare(deps: List DepRec, bare: List Str) -> List Str =
+  match (deps)
+    | [] -> bare
+    | DepRec(_, p) :: rest ->
+      if (is-basics-path(p) && not(has-str(bare, p))) ->
+        p :: with-basics-bare(rest, bare) |
+        with-basics-bare(rest, bare)
+
+let module-bare-paths(from: Str, forms: List Ast, deps: List DepRec) -> List Str =
+  with-basics-bare(deps, bare-import-paths(from, forms))
+
 ; Direct function signatures and links must override transitive names together.
 let direct-surfaces(paths: List Str, done: Map Str Iface, acc: Surface) -> Surface =
   match (paths)
@@ -648,10 +661,8 @@ let append-strs(xs: List Str, ys: List Str) -> List Str =
 ; Alias imports expose `__import_Alias_*` spellings. When the module's types
 ; are already bare-exposed, only values are renamed and type aliases keep
 ; `Alias.Type` on the same identity; otherwise every export is renamed.
-let alias-surfaces(from: Str, forms: List Ast, done: Map Str Iface, acc: Surface) -> Surface {
-  let bare = bare-import-paths(from, forms)
+let alias-surfaces-for(from: Str, forms: List Ast, done: Map Str Iface, bare: List Str, acc: Surface) -> Surface =
   alias-surfaces-with(from, forms, done, bare-exposed-paths(bare, done), acc)
-}
 
 let alias-surfaces-with(from: Str, forms: List Ast, done: Map Str Iface, exposed: List Str, acc: Surface) -> Surface =
   match (forms)
@@ -822,7 +833,7 @@ let compile-forms(abs: Str, src: Str, display: Str, forms: List Ast, direct: Lis
 ; Only bare imports (and their transitive deps) contribute unprefixed
 ; stubs. Aliased deps are handled solely by alias-surfaces.
 let bare-dep-recs(from: Str, forms: List Ast, deps: List DepRec) -> List DepRec {
-  let bare = bare-import-paths(from, forms)
+  let bare = module-bare-paths(from, forms, deps)
   filter-deps-in(deps, bare)
 }
 
@@ -838,8 +849,8 @@ let compile-forms-open(abs: Str, src: Str, display: Str, forms: List Ast, direct
   let exported = collect-exports(forms, abs, [], [], [])
   let body0 = prepare-body(strip-module-forms(forms), for-test)
   let done = deref(ctx-done(ctx))
-  let bare-paths = bare-import-paths(abs, forms)
-  let surface = alias-surfaces(abs, forms, done, direct-surfaces(bare-paths, done, surface-of(bare-dep-recs(abs, forms, direct), done)))
+  let bare-paths = module-bare-paths(abs, forms, direct)
+  let surface = alias-surfaces-for(abs, forms, done, bare-paths, direct-surfaces(bare-paths, done, surface-of(bare-dep-recs(abs, forms, direct), done)))
   match (surface)
     | Surface(fns, ctors, stubs) ->
       match (compile-checked(abs, src, display, body0, exported, direct, fns, ctors, stubs, for-test, ctx, started))
