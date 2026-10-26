@@ -773,15 +773,18 @@ let openssl-libs() -> List Str =
       if (String.length(s) == 0) -> ["-lssl", "-lcrypto"] | String.split(" ", s)
     | None() -> openssl-libs-default()
 
+let rt-third-party(runtime: Str, name: Str) -> Str =
+  Path.join(name, Path.join("third_party", runtime))
+
 let link-argv(cc: Str, runtime: Str, objs: List Str, out: Str) -> List Str =
   append-strs(
     append-strs(
       append-strs(
         append-strs(
-          [cc, "-std=c11", "-D_DEFAULT_SOURCE", "-Wall", "-Wextra", "-O2", String.concat("-I", Path.join("include", runtime))],
+          [cc, "-std=c11", "-D_DEFAULT_SOURCE", "-Wall", "-Wextra", "-O2", String.concat("-I", Path.join("include", runtime)), String.concat("-I", Path.join("third_party", runtime))],
           openssl-cflags()),
         objs),
-      [rt(runtime, "alloc.c"), rt(runtime, "gc.c"), rt(runtime, "panic.c"), rt(runtime, "print.c"), rt(runtime, "shadow.c"), rt(runtime, "variants.c"), rt(runtime, "str.c"), rt(runtime, "map.c"), rt(runtime, "closure.c"), rt(runtime, "io.c"), rt(runtime, "equal.c"), rt(runtime, "task.c"), rt(runtime, "net.c"), rt(runtime, "tls.c"), "-lm"]),
+      [rt(runtime, "alloc.c"), rt(runtime, "gc.c"), rt(runtime, "panic.c"), rt(runtime, "print.c"), rt(runtime, "shadow.c"), rt(runtime, "variants.c"), rt(runtime, "str.c"), rt(runtime, "float_text.c"), rt-third-party(runtime, "ryu/d2s.c"), rt(runtime, "map.c"), rt(runtime, "closure.c"), rt(runtime, "io.c"), rt(runtime, "equal.c"), rt(runtime, "task.c"), rt(runtime, "net.c"), rt(runtime, "tls.c"), "-lm"]),
     append-strs(openssl-libs(), ["-o", out]))
 
 let exit-code(st: SpawnStatus) -> Int =

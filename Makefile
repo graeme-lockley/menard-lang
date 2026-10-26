@@ -30,13 +30,15 @@ RUNTIME_SRCS := $(RUNTIME_DIR)/src/alloc.c $(RUNTIME_DIR)/src/gc.c $(RUNTIME_DIR
 # shadow stack, and the fd-1 print helpers. Deliberately excludes
 # smoke_main.c: that file defines its own `main`, which would collide with
 # the `main` an emitted `.bc` module already defines.
-RUNTIME_LIB_SRCS := $(RUNTIME_DIR)/src/alloc.c $(RUNTIME_DIR)/src/gc.c $(RUNTIME_DIR)/src/panic.c $(RUNTIME_DIR)/src/print.c $(RUNTIME_DIR)/src/shadow.c $(RUNTIME_DIR)/src/variants.c $(RUNTIME_DIR)/src/str.c $(RUNTIME_DIR)/src/map.c $(RUNTIME_DIR)/src/closure.c $(RUNTIME_DIR)/src/io.c $(RUNTIME_DIR)/src/equal.c $(RUNTIME_DIR)/src/task.c $(RUNTIME_DIR)/src/net.c $(RUNTIME_DIR)/src/tls.c
+# Ryu lives under third_party/ryu/; -I third_party makes #include "ryu/…" work.
+CFLAGS += -I$(RUNTIME_DIR)/third_party
+RUNTIME_LIB_SRCS := $(RUNTIME_DIR)/src/alloc.c $(RUNTIME_DIR)/src/gc.c $(RUNTIME_DIR)/src/panic.c $(RUNTIME_DIR)/src/print.c $(RUNTIME_DIR)/src/shadow.c $(RUNTIME_DIR)/src/variants.c $(RUNTIME_DIR)/src/str.c $(RUNTIME_DIR)/src/float_text.c $(RUNTIME_DIR)/third_party/ryu/d2s.c $(RUNTIME_DIR)/src/map.c $(RUNTIME_DIR)/src/closure.c $(RUNTIME_DIR)/src/io.c $(RUNTIME_DIR)/src/equal.c $(RUNTIME_DIR)/src/task.c $(RUNTIME_DIR)/src/net.c $(RUNTIME_DIR)/src/tls.c
 
 BUILD_DIR := build
 
 .DEFAULT_GOAL := mn
 
-.PHONY: mn bootstrap test typecheck backlog-check ci memory-checks native-test runtime-smoke runtime-sb-gc runtime-clean hello-native ret-native sqlite-native check-fixed-point
+.PHONY: mn bootstrap test typecheck backlog-check ci memory-checks native-test runtime-smoke runtime-sb-gc runtime-clean hello-native ret-native sqlite-native check-fixed-point float-text-wasm float-text-bench
 
 # Build B FFI proving ground: SQLite (cross-platform).
 # Dedicated link target — does not bake libsqlite3 into ./mn.
@@ -113,6 +115,35 @@ runtime-sb-gc:
 
 runtime-clean:
 	rm -rf $(RUNTIME_BUILD)
+
+# Rebuild the host's WASM mirror of mn_format_float (LANG-02). Requires zig.
+float-text-wasm:
+	@mkdir -p /tmp/mn-float-wasm/inc
+	@printf '%s\n' '#ifndef MENARD_MIN_H' '#define MENARD_MIN_H' '#include <stddef.h>' 'int mn_format_float(double d, char *buf, size_t n);' '#endif' > /tmp/mn-float-wasm/menard_min.h
+	@printf '%s\n' '#include <stddef.h>' '#include <stdint.h>' 'void *memcpy(void *d,const void *s,size_t n){unsigned char *D=d;const unsigned char *S=s;for(size_t i=0;i<n;i++)D[i]=S[i];return d;}' 'void *memset(void *d,int c,size_t n){unsigned char *D=d;for(size_t i=0;i<n;i++)D[i]=(unsigned char)c;return d;}' 'void *memmove(void *d,const void *s,size_t n){unsigned char *D=d;const unsigned char *S=s;if(D<S)for(size_t i=0;i<n;i++)D[i]=S[i];else for(size_t i=n;i>0;i--)D[i-1]=S[i-1];return d;}' 'size_t strlen(const char *s){size_t n=0;while(s[n])n++;return n;}' > /tmp/mn-float-wasm/stubs.c
+	@for h in stdint.h stddef.h stdbool.h assert.h string.h stdlib.h inttypes.h; do \
+	  case $$h in \
+	    stdint.h) printf '%s\n' 'typedef unsigned long long uint64_t;typedef unsigned uint32_t;typedef unsigned short uint16_t;typedef unsigned char uint8_t;typedef long long int64_t;typedef int int32_t;typedef short int16_t;typedef signed char int8_t;typedef unsigned long size_t;' > /tmp/mn-float-wasm/inc/$$h ;; \
+	    stddef.h) printf '%s\n' 'typedef unsigned long size_t;typedef long ptrdiff_t;#define NULL ((void*)0)' > /tmp/mn-float-wasm/inc/$$h ;; \
+	    stdbool.h) printf '%s\n' '#define bool _Bool#define true 1#define false 0' > /tmp/mn-float-wasm/inc/$$h ;; \
+	    assert.h) printf '%s\n' '#define assert(x) ((void)0)' > /tmp/mn-float-wasm/inc/$$h ;; \
+	    string.h) printf '%s\n' '#include <stddef.h>void *memcpy(void*,const void*,size_t);void *memset(void*,int,size_t);void *memmove(void*,const void*,size_t);size_t strlen(const char*);' > /tmp/mn-float-wasm/inc/$$h ;; \
+	    stdlib.h) printf '%s\n' '#include <stddef.h>void *malloc(size_t);void free(void*);' > /tmp/mn-float-wasm/inc/$$h ;; \
+	    inttypes.h) printf '%s\n' '#include <stdint.h>' > /tmp/mn-float-wasm/inc/$$h ;; \
+	  esac; \
+	done
+	sed 's|#include "menard.h"|#include "menard_min.h"|' $(RUNTIME_DIR)/src/float_text.c > /tmp/mn-float-wasm/float_text.c
+	zig cc -target wasm32-freestanding -Os -I/tmp/mn-float-wasm -I/tmp/mn-float-wasm/inc -I$(RUNTIME_DIR)/third_party \
+		-Wl,--no-entry -Wl,--export=mn_format_float -fno-builtin \
+		/tmp/mn-float-wasm/float_text.c $(RUNTIME_DIR)/third_party/ryu/d2s.c /tmp/mn-float-wasm/stubs.c \
+		-o host/src/interp/float_text.wasm
+
+float-text-bench:
+	@mkdir -p $(RUNTIME_BUILD)
+	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(RUNTIME_DIR)/fixtures/format_float_bench.c \
+		$(RUNTIME_DIR)/src/float_text.c $(RUNTIME_DIR)/third_party/ryu/d2s.c \
+		-o $(RUNTIME_BUILD)/format_float_bench $(LDLIBS)
+	$(RUNTIME_BUILD)/format_float_bench
 
 # Phase 2, Goal B: emit a bitcode module for hello.mnd with the (stage0)
 # compiler, link it with $(CC) — never `llvm-as` (ADR 40) — and run the

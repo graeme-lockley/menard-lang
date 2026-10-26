@@ -130,6 +130,7 @@ let is-keyword(s: Str) -> Bool =
 
 let kind-of(text: Str) -> Str =
   cond
+    | text == "nan" || text == "inf" -> "float"
     | text == "true" || text == "false" -> "ident"
     | is-keyword(text) -> "kw"
     | else -> "ident"
@@ -695,6 +696,15 @@ let scan-real(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError)) -> 
       {
         lex-bump(lx)
         push-tok(toks, make-tok("punct", ":", start, deref(lx.pos), col, ind, bol, line))
+      }
+    | not(prev-ident(prev)) && b == 45 && lex-peek(lx, 1) == 105 && lex-peek(lx, 2) == 110 && lex-peek(lx, 3) == 102 && not(is-ident-cont(lex-peek(lx, 4))) ->
+      {
+        ; LANG-02: `-inf` is one float literal.
+        lex-bump(lx)
+        lex-bump(lx)
+        lex-bump(lx)
+        lex-bump(lx)
+        push-tok(toks, make-tok("float", "-inf", start, deref(lx.pos), col, ind, bol, line))
       }
     | not(prev-ident(prev)) && b == 45 && (is-letter(lex-peek(lx, 1)) || lex-peek(lx, 1) == 40) && not(is-digit(lex-peek(lx, 1))) ->
       {

@@ -70,6 +70,7 @@ import {
   opensslCflags,
   opensslLibs,
   runtimeInclude,
+  runtimeThirdPartyInclude,
   runtimeLibSrcs,
 } from "../helpers/runtime-link.ts";
 
@@ -99,6 +100,7 @@ const llvmDis = whichTool("llvm-dis");
 // RUNTIME_LIB_SRCS — slice 2C + Build F net/tls). Never smoke_main.c.
 const RUNTIME_LIB_SRCS = runtimeLibSrcs(ROOT);
 const RUNTIME_INCLUDE = runtimeInclude(ROOT);
+const RUNTIME_THIRD_PARTY = runtimeThirdPartyInclude(ROOT);
 
 /** Run `src/mn.mnd emit <entry> <out>` exactly as the CLI would. */
 function emit(entryRelPath: string, outPath: string): { exitCode: number; stderr: string } {
@@ -389,6 +391,8 @@ describe.skipIf(clang === null || llvmDis === null)("interp <-> native oracle (P
             ...RUNTIME_LIB_SRCS,
             "-I",
             RUNTIME_INCLUDE,
+            "-I",
+            RUNTIME_THIRD_PARTY,
             ...opensslCflags(),
             "-lm",
             ...opensslLibs(),

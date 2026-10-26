@@ -99,7 +99,7 @@ There is no overloading.
 | Literal | Spelling |
 |---|---|
 | `Int` | decimal, optional leading `-` or `+` glued to the digits |
-| `Float` | the same, with `.` or an exponent (`e` / `E`, optional sign) |
+| `Float` | the same, with `.` or an exponent (`e` / `E`, optional sign); also the literals `nan`, `inf`, and `-inf` |
 | `Bool` | `true`, `false` |
 | `Str` | `"` … `"`, with the escapes below |
 | `Sym` | `'` glued to an identifier (`'red`) |

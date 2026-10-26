@@ -23,6 +23,7 @@ import {
   opensslCflags,
   opensslLibs,
   runtimeInclude,
+  runtimeThirdPartyInclude,
   runtimeLibSrcs,
 } from "../helpers/runtime-link.ts";
 
@@ -47,6 +48,7 @@ const clang = whichTool("clang");
 
 const RUNTIME_LIB_SRCS = runtimeLibSrcs(ROOT);
 const RUNTIME_INCLUDE = runtimeInclude(ROOT);
+const RUNTIME_THIRD_PARTY = runtimeThirdPartyInclude(ROOT);
 
 const stage1 = process.env.MENARD_STAGE1 ?? "";
 
@@ -93,6 +95,8 @@ function compileRuntime(dir: string): { status: number; stderr: string; objs: st
       "-D_DEFAULT_SOURCE",
       "-I",
       RUNTIME_INCLUDE,
+      "-I",
+      RUNTIME_THIRD_PARTY,
       ...opensslCflags(),
       "-c",
       ...RUNTIME_LIB_SRCS,

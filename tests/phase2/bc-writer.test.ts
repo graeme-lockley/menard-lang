@@ -29,6 +29,7 @@ import {
   opensslCflags,
   opensslLibs,
   runtimeInclude,
+  runtimeThirdPartyInclude,
   runtimeLibSrcs,
 } from "../helpers/runtime-link.ts";
 
@@ -50,6 +51,7 @@ const clang = Bun.which("clang");
 // against the same runtime `oracle.test.ts` does.
 const RUNTIME_LIB_SRCS = runtimeLibSrcs(ROOT);
 const RUNTIME_INCLUDE = runtimeInclude(ROOT);
+const RUNTIME_THIRD_PARTY = runtimeThirdPartyInclude(ROOT);
 
 /** Run `src/mn.mnd emit <entry> <out>` exactly as the CLI would. */
 function emit(entryRelPath: string, outPath: string): { exitCode: number; stderr: string } {
@@ -107,6 +109,8 @@ describe.skipIf(clang === null)("src/emit/bc-writer.mnd — a real bitcode encod
           ...RUNTIME_LIB_SRCS,
           "-I",
           RUNTIME_INCLUDE,
+          "-I",
+          RUNTIME_THIRD_PARTY,
           ...opensslCflags(),
           "-lm",
           ...opensslLibs(),

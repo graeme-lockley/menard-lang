@@ -1,4 +1,5 @@
 import type { Ast } from "./ast.ts";
+import { formatFloat } from "../interp/float-text.ts";
 
 const dec = new TextDecoder();
 
@@ -217,11 +218,7 @@ function printStmt(a: Ast, ind: number): string {
 
 function printExpr(a: Ast, ind: number): string {
   if (a.tag === "int") return a.value.toString();
-  if (a.tag === "float") {
-    if (Object.is(a.value, -0)) return "-0.0";
-    const t = String(a.value);
-    return t.includes(".") || t.includes("e") || t.includes("E") ? t : `${t}.0`;
-  }
+  if (a.tag === "float") return formatFloat(a.value);
   if (a.tag === "bool") return a.value ? "true" : "false";
   if (a.tag === "str") return quoteStr(a.bytes);
   if (a.tag === "sym") return nameText(dec.decode(a.name));

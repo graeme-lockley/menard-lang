@@ -11,7 +11,6 @@
 #include "gc_internal.h"
 #include "menard.h"
 
-#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -450,14 +449,7 @@ MnWord mn_fmul(MnWord a, MnWord b) { return box_float(unbox_float(a) * unbox_flo
 MnWord mn_fdiv(MnWord a, MnWord b) { return box_float(unbox_float(a) / unbox_float(b)); }
 
 static int format_float(double d, char *buf, size_t n) {
-  if (d == 0.0) {
-    if (signbit(d)) return snprintf(buf, n, "-0.0");
-    return snprintf(buf, n, "0.0");
-  }
-  if (isfinite(d) && d == trunc(d) && d < 1e15 && d > -1e15) {
-    return snprintf(buf, n, "%.1f", d);
-  }
-  return snprintf(buf, n, "%.15g", d);
+  return mn_format_float(d, buf, n);
 }
 
 MnWord mn_show(MnWord v) {

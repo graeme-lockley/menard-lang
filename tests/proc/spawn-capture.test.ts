@@ -14,6 +14,7 @@ import {
   opensslCflags,
   opensslLibs,
   runtimeInclude,
+  runtimeThirdPartyInclude,
   runtimeLibSrcs,
 } from "../helpers/runtime-link.ts";
 
@@ -40,6 +41,7 @@ const llvmDis = whichTool("llvm-dis");
 
 const RUNTIME_LIB_SRCS = runtimeLibSrcs(ROOT);
 const RUNTIME_INCLUDE = runtimeInclude(ROOT);
+const RUNTIME_THIRD_PARTY = runtimeThirdPartyInclude(ROOT);
 const entry = "tests/phase2/oracle/spawn-capture.mnd";
 
 function emit(outPath: string): { exitCode: number; stderr: string } {
@@ -113,6 +115,8 @@ describe.skipIf(clang === null || llvmDis === null)("spawn-capture oracle", () =
           ...RUNTIME_LIB_SRCS,
           "-I",
           RUNTIME_INCLUDE,
+          "-I",
+          RUNTIME_THIRD_PARTY,
           ...opensslCflags(),
           "-lm",
           ...opensslLibs(),

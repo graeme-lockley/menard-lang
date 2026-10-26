@@ -28,6 +28,42 @@ specification. Where a name changed, the entry that changed it says so.
 
 ---
 
+## 2026-10-26 — Canonical Float text: Ryu in C, mirrored in the host (LANG-02)
+
+### The decision
+
+`show` of a `Float` is the shortest round-trip decimal under a fixed Menard
+grammar. The **C runtime is the reference** (`mn_format_float` in
+`runtime/src/float_text.c`), built on vendored [Ryu](https://github.com/ulfjack/ryu)
+(`d2s_buffered`, Boost Software License 1.0, under `runtime/third_party/ryu/`).
+The interpreter loads the same object code as WebAssembly
+(`host/src/interp/float_text.wasm`) so it cannot drift via `String()` or
+`toPrecision()`.
+
+Presentation rules: `nan` / `inf` / `-inf` for non-finites; `0.0` / `-0.0`
+for zeros; prefer the shorter of fixed and scientific; scientific uses
+lowercase `e` with a mandatory exponent sign; every spelling is a float
+lexeme. Those three non-finite spellings are literals. Arithmetic may produce
+non-finites (IEEE); NaN bit canonicalisation is LANG-03.
+
+A micro-benchmark of `mn_format_float` against `snprintf("%.17g")` over the
+LANG-02 vector set measured **ratio ≈ 0.14** (Menard / `snprintf`; Menard
+faster, not materially slower).
+
+### Why
+
+§2.13 called Float the most likely host divergence. `%.15g` and JavaScript
+`String()` disagreed on almost every non-trivial value, and some spellings
+failed to re-parse. C-first shortest round-trip closes that hole before
+LANG-01's scalar half and LANG-03's total order.
+
+### Rejected
+
+Keeping `%g` / locale formatting; using JS `String()` as the host formatter;
+panicking on non-finite arithmetic (supersedes the old §2.11.T panic rule).
+
+---
+
 ## 2026-10-24 — MIT licence
 
 ### The decision

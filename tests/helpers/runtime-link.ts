@@ -12,6 +12,8 @@ const RUNTIME_RELS = [
   "runtime/src/shadow.c",
   "runtime/src/variants.c",
   "runtime/src/str.c",
+  "runtime/src/float_text.c",
+  "runtime/third_party/ryu/d2s.c",
   "runtime/src/map.c",
   "runtime/src/closure.c",
   "runtime/src/io.c",
@@ -27,6 +29,11 @@ export function runtimeLibSrcs(root: string): string[] {
 
 export function runtimeInclude(root: string): string {
   return join(root, "runtime/include");
+}
+
+/** Parent of `ryu/` so `#include "ryu/ryu.h"` resolves. */
+export function runtimeThirdPartyInclude(root: string): string {
+  return join(root, "runtime/third_party");
 }
 
 /** Compile-time `-I` for OpenSSL headers. */
