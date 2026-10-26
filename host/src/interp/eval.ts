@@ -46,6 +46,7 @@ import {
   taskWaitNew,
   taskWait,
   taskNotify,
+  taskNotifyAll,
   taskDictSet,
   taskDictGet,
   taskDeferEnter,
@@ -279,6 +280,7 @@ const EXTERN_BUILTIN: Record<string, string> = {
   mn_task_wait_new: "mn_task_wait_new",
   mn_task_wait: "mn_task_wait",
   mn_task_notify: "mn_task_notify",
+  mn_task_notify_all: "mn_task_notify_all",
   mn_task_dict_set: "mn_task_dict_set",
   mn_task_dict_get: "mn_task_dict_get",
   mn_task_defer_enter: "mn_task_defer_enter",
@@ -1485,7 +1487,7 @@ function installBuiltins(env: Env): void {
     "spawn", "spawn-capture",
     "mn_task_spawn", "mn_task_self", "mn_task_suspend_for_test",
     "mn_task_resume", "mn_task_join", "mn_task_cancel",
-    "mn_task_yield", "mn_task_wait_new", "mn_task_wait", "mn_task_notify",
+    "mn_task_yield", "mn_task_wait_new", "mn_task_wait", "mn_task_notify", "mn_task_notify_all",
     "mn_task_dict_set", "mn_task_dict_get",
     "mn_task_defer_enter", "mn_task_defer_push", "mn_task_defer_leave",
     "mn_tcp_listen", "mn_tcp_accept", "mn_tcp_connect", "mn_tcp_read", "mn_tcp_write", "mn_tcp_close",
@@ -1900,6 +1902,11 @@ function applyBuiltin(
       const id = args[0]!;
       if (id.tag !== "int") throw new PanicError("mn_task_notify: expected Int", span);
       return taskNotify(id.value, host);
+    }
+    case "mn_task_notify_all": {
+      const id = args[0]!;
+      if (id.tag !== "int") throw new PanicError("mn_task_notify_all: expected Int", span);
+      return taskNotifyAll(id.value, host);
     }
     case "mn_task_dict_set": {
       if (args.length < 2) throw new PanicError("mn_task_dict_set: arity", span);

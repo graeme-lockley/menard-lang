@@ -7,6 +7,7 @@
  *
  * Wait cells provide the atomic-wait guarantee (notify-before-wait does
  * not lose a wakeup). Multi-waiter FIFO; notify wakes at most one.
+ * notify_all marks the cell closed and wakes every waiter (Mailbox.close).
  * Cancel of a wait-cell waiter soft-resumes so mn_task_wait returns Err.
  * Public Platform API is std/task; this file is the Runtime ABI behind it.
  */
@@ -34,6 +35,7 @@ typedef enum {
 typedef struct MnWaitCell {
   int id;
   int notified;
+  int closed; /* set by notify_all; wait never parks on a closed cell */
   struct MnTask *waiters_head;
   struct MnTask *waiters_tail;
   struct MnWaitCell *next;
@@ -98,6 +100,7 @@ static void pump(void);
 static void run_task_body(void);
 static void park_current(void);
 static void notify_cell(MnWaitCell *c);
+static void notify_all_cell(MnWaitCell *c);
 static void finish_task(MnTask *t, MnTaskStatus st, MnWord result);
 static int is_terminal(MnTask *t);
 static void waiter_enqueue(MnWaitCell *c, MnTask *t);
@@ -247,6 +250,15 @@ static void waiter_unlink(MnWaitCell *c, MnTask *t) {
   }
 }
 
+static void wake_one_waiter(MnWaitCell *c, MnTask *w) {
+  (void)c;
+  w->wait_next = NULL;
+  w->waiting_on = NULL;
+  if (!w->is_main) {
+    enqueue(w);
+  }
+}
+
 static void notify_cell(MnWaitCell *c) {
   if (c == NULL) {
     return;
@@ -258,12 +270,26 @@ static void notify_cell(MnWaitCell *c) {
     if (c->waiters_head == NULL) {
       c->waiters_tail = NULL;
     }
-    w->wait_next = NULL;
-    w->waiting_on = NULL;
     c->notified = 0; /* consumed by the woken waiter */
-    if (!w->is_main) {
-      enqueue(w);
+    wake_one_waiter(c, w);
+  }
+}
+
+/* Close the cell and wake every waiter. Sticky/closed stay set so a late
+ * wait after an alive-check/park race returns without parking. */
+static void notify_all_cell(MnWaitCell *c) {
+  if (c == NULL) {
+    return;
+  }
+  c->closed = 1;
+  c->notified = 1;
+  while (c->waiters_head != NULL) {
+    MnTask *w = c->waiters_head;
+    c->waiters_head = w->wait_next;
+    if (c->waiters_head == NULL) {
+      c->waiters_tail = NULL;
     }
+    wake_one_waiter(c, w);
   }
 }
 
@@ -415,18 +441,21 @@ static void pump(void) {
 }
 
 /* Atomic wait: 0 = notified, 1 = cancelled. Single-mutator — no Menard
- * between check and park. */
+ * between check and park. A closed cell never parks. */
 static int wait_on_cell(MnWaitCell *c) {
   MnTask *self = current;
   if (self->cancel_requested || self->status == MN_TASK_CANCELLED) {
     return 1;
+  }
+  if (c->closed) {
+    return 0;
   }
   if (c->notified) {
     c->notified = 0;
     return 0;
   }
   if (self->is_main) {
-    while (!c->notified) {
+    while (!c->notified && !c->closed) {
       if (self->cancel_requested) {
         return 1;
       }
@@ -442,6 +471,9 @@ static int wait_on_cell(MnWaitCell *c) {
     if (self->cancel_requested) {
       return 1;
     }
+    if (c->closed) {
+      return 0;
+    }
     c->notified = 0;
     return 0;
   }
@@ -451,6 +483,9 @@ static int wait_on_cell(MnWaitCell *c) {
   self->waiting_on = NULL;
   if (self->cancel_requested || self->status == MN_TASK_CANCELLED) {
     return 1;
+  }
+  if (c->closed) {
+    return 0;
   }
   c->notified = 0;
   return 0;
@@ -578,6 +613,20 @@ MnWord mn_task_notify(MnWord cell_tagged) {
     mn_panic("mn_task_notify: bad cell");
   }
   notify_cell(c);
+  if (current != NULL && current->is_main && host_ctx == NULL) {
+    pump();
+  }
+  return MN_UNIT;
+}
+
+MnWord mn_task_notify_all(MnWord cell_tagged) {
+  ensure_main_task();
+  int id = (int)mn_word_to_int(cell_tagged);
+  MnWaitCell *c = cell_by_id(id);
+  if (c == NULL) {
+    mn_panic("mn_task_notify_all: bad cell");
+  }
+  notify_all_cell(c);
   if (current != NULL && current->is_main && host_ctx == NULL) {
     pump();
   }

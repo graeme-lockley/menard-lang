@@ -45,6 +45,7 @@ make test            # host unit, corpus, fuzz, semantic, and negative tests
 make memory-checks   # collector bound and StringBuffer reclaim
 make typecheck       # tsc --noEmit
 make backlog-check   # review items and backlog rows agree
+make next            # items whose backlog blockers are all done
 make native-test     # ./mn test
 make bootstrap       # interpreter, stage0, stage1, stage2, and the fixed point
 ```

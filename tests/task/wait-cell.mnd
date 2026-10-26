@@ -85,5 +85,52 @@ let main() -> Int {
   Sched.notify(cell4)
   let peer = Sched.spawn(fn () = wait-ok(cell4))
   println(unwrap(Sched.join(peer)))
+
+  ; notify-all wakes every waiter and leaves the cell closed.
+  let cell5 = Sched.wait-new()
+  let all-acc = ref(0)
+  let all-ready = ref(0)
+  let a1 = Sched.spawn(fn () = {
+    set!(all-ready, deref(all-ready) + 1)
+    match (Sched.wait(cell5))
+      | Ok(_) -> {
+          set!(all-acc, deref(all-acc) + 1)
+          1
+        }
+      | Err(_) -> 0
+  })
+  let a2 = Sched.spawn(fn () = {
+    set!(all-ready, deref(all-ready) + 1)
+    match (Sched.wait(cell5))
+      | Ok(_) -> {
+          set!(all-acc, deref(all-acc) + 10)
+          1
+        }
+      | Err(_) -> 0
+  })
+  let a3 = Sched.spawn(fn () = {
+    set!(all-ready, deref(all-ready) + 1)
+    match (Sched.wait(cell5))
+      | Ok(_) -> {
+          set!(all-acc, deref(all-acc) + 100)
+          1
+        }
+      | Err(_) -> 0
+  })
+  loop ()
+    if (deref(all-ready) < 3) -> {
+      Sched.yield()
+      recur()
+    } | ()
+  Sched.yield()
+  Sched.notify-all(cell5)
+  let _ = Sched.join(a1)
+  let _ = Sched.join(a2)
+  let _ = Sched.join(a3)
+  println(deref(all-acc))
+  ; Late wait on a closed cell returns without parking.
+  match (Sched.wait(cell5))
+    | Ok(_) -> println(1)
+    | Err(_) -> println(0)
   0
 }

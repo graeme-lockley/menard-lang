@@ -16,7 +16,7 @@
 | 5 | Post-death send/cast/call → `Err(ActorDead)`. |
 | 6 | Cancel during receive → `Err(ActorCancelled)`; message not dequeued. On actor cancel/failure, escalate by cancelling nursery task ids. |
 | 7 | Simple name registry: `register` / `whereis` via type-erased process dict (`mn_task_dict_*`); honor-system typing. |
-| 8 | Multi-waiter mailboxes; `notify` wakes ≤1 (FIFO). Close pokes up to 64 waiters. |
+| 8 | Multi-waiter mailboxes; `notify` wakes ≤1 (FIFO). `Mailbox.close` uses `notify-all` on both cells so every parked receiver and blocked sender resumes. |
 | 9 | `mn_task_wait` → `Result Unit Unit` (Err = cancelled soft-resume). |
 
 ## Layering

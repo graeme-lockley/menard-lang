@@ -28,6 +28,29 @@ specification. Where a name changed, the entry that changed it says so.
 
 ---
 
+## 2026-10-26 — Wait-cell `notify-all` + closed cell (CONC-01)
+
+### The decision
+
+`mn_task_notify_all` marks a wait cell **closed**, wakes **every** FIFO waiter
+(each resumes `Ok`), and leaves the cell closed so a late `wait` after an
+alive-check/park race returns immediately without parking. Ordinary
+`mn_task_notify` still wakes ≤1 (sticky if none). `Mailbox.close` sets
+`alive := false` then `notify-all` on both the receive cell and the space cell.
+
+### Why
+
+A fixed 64-iteration `notify` loop left waiter #65 parked forever; bounded
+mailboxes make blocked senders common. Notify-all + closed is O(waiters) and
+covers the check-then-park race without timeouts (CONC-02).
+
+### Rejected
+
+Changing normal `notify` to wake-all; a draining loop of single notifies
+without a closed bit (still races with late parkers).
+
+---
+
 ## 2026-10-26 — Canonical Float text: Ryu in C, mirrored in the host (LANG-02)
 
 ### The decision

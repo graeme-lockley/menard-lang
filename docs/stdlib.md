@@ -359,7 +359,7 @@ isolation boundary — shared `Ref` across tasks is allowed. See
 | `mailbox-new()` / `mailbox-new-bounded(n)` | Empty live mailbox. |
 | `send(mb, msg)` | Enqueue; **parks when full**; `Err` on cancel/death. |
 | `receive(mb)` | Dequeue or wait; `Err` on cancel/death (no lost message on cancel). |
-| `close(mb)` | Mark dead; wake waiters. |
+| `close(mb)` | Mark dead; wake **every** parked receiver and blocked sender (`notify-all`). Each sees `Err(ActorDead)` once. Idempotent. |
 | `Pid a` | Actor identity (mailbox + task id + nursery scope). |
 | `spawn` / `spawn-in` | Task + mailbox; body runs the receive loop. |
 | `cast(pid, msg)` | Send to an actor. |
