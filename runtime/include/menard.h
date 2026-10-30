@@ -72,6 +72,7 @@ extern MnNullary mn_static_is_a_directory;
 extern MnNullary mn_static_not_a_directory;
 extern MnNullary mn_static_invalid_path;
 extern MnNullary mn_static_too_large;
+extern MnNullary mn_static_timeout;
 extern MnNullary mn_static_not_executable;
 extern MnNullary mn_static_invalid_argument;
 extern MnNullary mn_static_too_many_arguments;
@@ -328,6 +329,7 @@ MnWord mn_ensure_dir(MnWord path_str);         /* → Bool; mkdir -p */
 MnWord mn_list_dir(MnWord path_str);           /* → Str; newline-separated */
 MnWord mn_realpath(MnWord path_str);           /* → Str; empty on failure */
 MnWord mn_now_ms(void);                        /* → Int */
+MnWord mn_mono_ms(void);                       /* → Int; CLOCK_MONOTONIC */
 MnWord mn_remove(MnWord path_str);             /* → Bool */
 MnWord mn_is_dir(MnWord path_str);             /* → Bool */
 
@@ -340,10 +342,15 @@ MnWord mn_task_self(void);                     /* → Int */
 MnWord mn_task_suspend_for_test(void);         /* → Unit; synthetic park */
 MnWord mn_task_resume(MnWord id_tagged);       /* → Unit; internal enqueue */
 MnWord mn_task_join(MnWord id_tagged);         /* → Result a Unit (Err = cancelled) */
+MnWord mn_task_join_timeout(MnWord id_tagged, MnWord ms_tagged);
+/* → Result (Result a Unit) Unit; outer Err = Timeout, inner Err = cancelled */
 MnWord mn_task_cancel(MnWord id_tagged);       /* → Unit */
 MnWord mn_task_yield(void);                    /* → Unit; cooperative */
 MnWord mn_task_wait_new(void);                 /* → Int wait-cell id */
 MnWord mn_task_wait(MnWord cell_tagged);       /* → Result Unit Unit (Err = cancelled) */
+MnWord mn_task_wait_until(MnWord cell_tagged, MnWord deadline_mono);
+/* → Result Unit Int; Err(0)=cancel, Err(1)=timeout */
+MnWord mn_task_sleep_ms(MnWord ms_tagged);     /* → Result Unit Unit (Err = cancelled) */
 MnWord mn_task_notify(MnWord cell_tagged);     /* → Unit; wake ≤1 waiter; sticky */
 MnWord mn_task_notify_all(MnWord cell_tagged); /* → Unit; close cell; wake every waiter */
 /* Type-erased process dictionary (Build E registry); honor-system get typing. */
@@ -360,9 +367,13 @@ MnWord mn_task_defer_leave(void);              /* → Unit */
 /* Parkable TCP/UDP (Build F). Interpreter unbound. */
 MnWord mn_tcp_listen(MnWord port_tagged);      /* → Result Int IoError */
 MnWord mn_tcp_accept(MnWord fd_tagged);        /* → Result Int IoError */
+MnWord mn_tcp_accept_timeout(MnWord fd_tagged, MnWord ms_tagged);
 MnWord mn_tcp_connect(MnWord host_str, MnWord port_tagged); /* → Result Int IoError */
+MnWord mn_tcp_connect_timeout(MnWord host_str, MnWord port_tagged, MnWord ms_tagged);
 MnWord mn_tcp_read(MnWord fd_tagged, MnWord max_tagged);    /* → Result Str IoError */
+MnWord mn_tcp_read_timeout(MnWord fd_tagged, MnWord max_tagged, MnWord ms_tagged);
 MnWord mn_tcp_write(MnWord fd_tagged, MnWord data);         /* → Result Unit IoError */
+MnWord mn_tcp_write_timeout(MnWord fd_tagged, MnWord data, MnWord ms_tagged);
 MnWord mn_tcp_close(MnWord fd_tagged);         /* → Unit */
 MnWord mn_udp_bind(MnWord port_tagged);        /* → Result Int IoError */
 MnWord mn_udp_send(MnWord fd_tagged, MnWord host_str, MnWord port_tagged, MnWord data);
@@ -371,9 +382,14 @@ MnWord mn_udp_close(MnWord fd_tagged);         /* → Unit */
 
 /* OpenSSL TLS over an existing TCP fd (Build F). Handle is an Int id. */
 MnWord mn_tls_client(MnWord fd_tagged);        /* → Result Int IoError */
+MnWord mn_tls_client_timeout(MnWord fd_tagged, MnWord ms_tagged);
 MnWord mn_tls_server(MnWord fd_tagged, MnWord cert_path, MnWord key_path);
+MnWord mn_tls_server_timeout(MnWord fd_tagged, MnWord cert_path, MnWord key_path,
+                             MnWord ms_tagged);
 MnWord mn_tls_read(MnWord id_tagged, MnWord max_tagged); /* → Result Str IoError */
+MnWord mn_tls_read_timeout(MnWord id_tagged, MnWord max_tagged, MnWord ms_tagged);
 MnWord mn_tls_write(MnWord id_tagged, MnWord data);      /* → Result Unit IoError */
+MnWord mn_tls_write_timeout(MnWord id_tagged, MnWord data, MnWord ms_tagged);
 MnWord mn_tls_close(MnWord id_tagged);         /* → Unit */
 
 #ifdef __cplusplus

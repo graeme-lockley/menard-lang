@@ -45,10 +45,14 @@ Public façade: `stdlib/task.mnd` (no `extern`; wraps `std/sched`).
 | `mn_task_suspend_for_test` | `Sched.suspend-for-test` | Synthetic park (harness) |
 | `mn_task_resume` | `Sched.resume` | Internal enqueue — not public wake |
 | `mn_task_join` | `Sched.join` | → `Result a Unit` (`Err` = cancelled) |
+| `mn_task_join_timeout` | `Sched.join-timeout` | → `Result (Result a Unit) Unit`; outer `Err` = timed out (task still running) |
 | `mn_task_cancel` | `Sched.cancel` | Cooperative cancel |
 | `mn_task_yield` | `Sched.yield` | Cooperative yield |
 | `mn_task_wait_new` | `Sched.wait-new` | Wait-cell id |
 | `mn_task_wait` | `Sched.wait` | → `Result Unit Unit` (`Err` = cancelled soft-resume); multi-waiter FIFO |
+| `mn_task_wait_until` | `Sched.wait-until` | → `Result Unit Int`; `Err(0)` = cancel, `Err(1)` = timeout; deadline is mono ms |
+| `mn_task_sleep_ms` | `Sched.sleep-ms` | → `Result Unit Unit` (`Err` = cancelled) |
+| `mn_mono_ms` | `Sched.mono-ms` | Monotonic clock (`CLOCK_MONOTONIC`); host virtual clock |
 | `mn_task_notify` | `Sched.notify` | Wake ≤1 waiter; sticky if none |
 | `mn_task_notify_all` | `Sched.notify-all` | Mark cell closed; wake every waiter; late `wait` returns without parking |
 | `mn_task_dict_set` | `Sched.dict-set` | Type-erased process dict (Build E registry) |
@@ -65,8 +69,10 @@ Native only — interpreter stubs throw unbound.
 | Symbol | Notes |
 |---|---|
 | `mn_tcp_listen` / `accept` / `connect` / `read` / `write` / `close` | Non-blocking; park via wait cells + `mn_net_poll` |
+| `mn_tcp_accept_timeout` / `connect_timeout` / `read_timeout` / `write_timeout` | Relative ms; `Err(Timeout)` leaves the fd open (except connect, which closes) |
 | `mn_udp_bind` / `send` / `recv` / `close` | Same parking model |
-| `mn_tls_client` / `server` / `read` / `write` / `close` | OpenSSL over an existing TCP fd |
+| `mn_tls_client` / `server` / `read` / `write` / `close` | OpenSSL over an existing TCP fd; handshake parks cooperatively (no mutator `poll(-1)`) |
+| `mn_tls_*_timeout` | Relative-ms TLS handshake / read / write |
 
 ## App-facing seam symbols
 
@@ -88,7 +94,7 @@ Native only — interpreter stubs throw unbound.
 | `mn_write_file` | `Io.write-file` | `Result Unit IoError` |
 
 `IoError`: `NotFound`, `Permission`, `Exists`, `IsADirectory`, `NotADirectory`,
-`InvalidPath`, `TooLarge`, `Other(Int)`.
+`InvalidPath`, `TooLarge`, `Other(Int)`, `Timeout`.
 
 ### `std/fs`
 
@@ -112,8 +118,10 @@ Wall clock is **not** on `Fs`; see `std/time`.
 | Symbol | Platform wrapper | Notes |
 |---|---|---|
 | `mn_now_ms` | `Time.now-ms` | `CLOCK_REALTIME` epoch milliseconds |
+| `mn_mono_ms` | `Sched.mono-ms` | `CLOCK_MONOTONIC` (native); virtual clock in the interpreter |
 
 Durations, civil time, offsets, and formatting are pure Menard in `std/time`.
+Deadlines and sleeps use `mn_mono_ms`, not wall time.
 
 ### `std/proc`
 

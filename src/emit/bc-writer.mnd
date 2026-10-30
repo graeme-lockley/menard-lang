@@ -616,6 +616,19 @@ let write-extern-decls!(m: BitSink, ma: Int) -> Unit {
   write-extern-decl!(m, func-type-idx-for-arity(1))
   ; CONC-01: mn_task_notify_all (abs +125; after tls_close)
   write-extern-decl!(m, func-type-idx-for-arity(1))
+  ; CONC-02: timers + timeout seams (abs +126 .. +137)
+  write-extern-decl!(m, func-type-idx-for-arity(0)) ; mn_mono_ms
+  write-extern-decl!(m, func-type-idx-for-arity(2)) ; mn_task_wait_until
+  write-extern-decl!(m, func-type-idx-for-arity(1)) ; mn_task_sleep_ms
+  write-extern-decl!(m, func-type-idx-for-arity(2)) ; mn_task_join_timeout
+  write-extern-decl!(m, func-type-idx-for-arity(2)) ; mn_tcp_accept_timeout
+  write-extern-decl!(m, func-type-idx-for-arity(3)) ; mn_tcp_connect_timeout
+  write-extern-decl!(m, func-type-idx-for-arity(3)) ; mn_tcp_read_timeout
+  write-extern-decl!(m, func-type-idx-for-arity(3)) ; mn_tcp_write_timeout
+  write-extern-decl!(m, func-type-idx-for-arity(2)) ; mn_tls_client_timeout
+  write-extern-decl!(m, func-type-idx-for-arity(4)) ; mn_tls_server_timeout
+  write-extern-decl!(m, func-type-idx-for-arity(3)) ; mn_tls_read_timeout
+  write-extern-decl!(m, func-type-idx-for-arity(3)) ; mn_tls_write_timeout
 }
 
  ; mn_char_to_str, mn_sb_clear, mn_apply_3..8, mn_task_*, mn_tcp_*, mn_tls_*
@@ -976,6 +989,18 @@ let write-extern-vst-entries!(v: BitSink, num-strings: Int) -> Unit {
   write-record!(v, vst-code-entry, extern-tls-write-abs(num-strings) :: str-byte-ops("mn_tls_write"))
   write-record!(v, vst-code-entry, extern-tls-close-abs(num-strings) :: str-byte-ops("mn_tls_close"))
   write-record!(v, vst-code-entry, extern-task-notify-all-abs(num-strings) :: str-byte-ops("mn_task_notify_all"))
+  write-record!(v, vst-code-entry, extern-mono-ms-abs(num-strings) :: str-byte-ops("mn_mono_ms"))
+  write-record!(v, vst-code-entry, extern-task-wait-until-abs(num-strings) :: str-byte-ops("mn_task_wait_until"))
+  write-record!(v, vst-code-entry, extern-task-sleep-ms-abs(num-strings) :: str-byte-ops("mn_task_sleep_ms"))
+  write-record!(v, vst-code-entry, extern-task-join-timeout-abs(num-strings) :: str-byte-ops("mn_task_join_timeout"))
+  write-record!(v, vst-code-entry, extern-tcp-accept-timeout-abs(num-strings) :: str-byte-ops("mn_tcp_accept_timeout"))
+  write-record!(v, vst-code-entry, extern-tcp-connect-timeout-abs(num-strings) :: str-byte-ops("mn_tcp_connect_timeout"))
+  write-record!(v, vst-code-entry, extern-tcp-read-timeout-abs(num-strings) :: str-byte-ops("mn_tcp_read_timeout"))
+  write-record!(v, vst-code-entry, extern-tcp-write-timeout-abs(num-strings) :: str-byte-ops("mn_tcp_write_timeout"))
+  write-record!(v, vst-code-entry, extern-tls-client-timeout-abs(num-strings) :: str-byte-ops("mn_tls_client_timeout"))
+  write-record!(v, vst-code-entry, extern-tls-server-timeout-abs(num-strings) :: str-byte-ops("mn_tls_server_timeout"))
+  write-record!(v, vst-code-entry, extern-tls-read-timeout-abs(num-strings) :: str-byte-ops("mn_tls_read_timeout"))
+  write-record!(v, vst-code-entry, extern-tls-write-timeout-abs(num-strings) :: str-byte-ops("mn_tls_write_timeout"))
 }
 
 let lfunc-list-length(fs: List LFunc) -> Int =

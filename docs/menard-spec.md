@@ -1716,7 +1716,15 @@ Foreign FFI may declare non-`mn_*` `extern` only in modules whose path contains
 `/ffi/` (not under `stdlib/`). So the boundary is **structural and enforceable**:
 a module cannot reach `write(2)` without importing a seam module, and a CI lint
 can refuse a misplaced `extern`. `std/time` wraps the wall clock (`mn_now_ms`);
-filesystem metadata such as `mtime` stays on `std/fs`.
+filesystem metadata such as `mtime` stays on `std/fs`. Cooperative task
+deadlines use a separate monotonic clock (`mn_mono_ms`) and
+`mn_task_wait_until` / `mn_task_sleep_ms` on the internal task seam
+(`std/sched`) — not process-child timeouts (still refused in Tier 2).
+Public timeout wrappers live on `std/task`, `std/actor`, `std/net`, and
+`std/http`. On timeout, mailbox queues and TCP fds stay intact unless a
+documented rule says otherwise (e.g. a failed `connect-timeout` closes the
+socket). The interpreter advances a virtual monotonic clock to the next
+deadline when idle so tests stay deterministic.
 
 One thing is given up, and it should be stated plainly: one-glyph greppability
 for "can touch the outside world". The replacement is a grep for `extern`, or
@@ -1981,6 +1989,7 @@ type IoError =
   | NotADirectory
   | InvalidPath
   | TooLarge
+  | Timeout        ; deadline on a parkable wait (task / net)
   | Other(Int)     ; Int is a Menard code, never errno
 ```
 

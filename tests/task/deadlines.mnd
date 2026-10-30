@@ -1,0 +1,31 @@
+; CONC-02: sleep-ms, join-timeout, virtual/native timers.
+import std/task as Task
+pub import std/task (JoinTimeout)
+
+let main() -> Int {
+  ; sleep-ms(0) completes immediately.
+  match (Task.sleep-ms(0))
+    | Ok(_) -> println(1)
+    | Err(_) -> println(0)
+
+  ; join-timeout: child sleeps longer than the wait → Timeout; child still runs.
+  let t = Task.spawn(fn () = {
+    let _ = Task.sleep-ms(40)
+    7
+  })
+  match (Task.join-timeout(t, 5))
+    | Err(JoinTimeout()) -> println(2)
+    | Ok(_) -> println(0)
+  match (Task.join(t))
+    | Ok(7) -> println(3)
+    | Ok(_) -> println(0)
+    | Err(_) -> println(0)
+
+  ; join-timeout succeeds when the child finishes in time.
+  let t2 = Task.spawn(fn () = 9)
+  match (Task.join-timeout(t2, 50))
+    | Ok(Ok(9)) -> println(4)
+    | _ -> println(0)
+
+  0
+}

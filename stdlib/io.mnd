@@ -16,7 +16,7 @@ pub let stdout = 1
 pub let stderr = 2
 
 ; IoError is the closed taxonomy the runtime and the interpreter both
-; return. Tags are the C statics: 20–26 nullary, 27 (Other Int).
+; return. Tags are the C statics: 20–26 nullary, 27 (Other Int), 28 Timeout.
 
 pub type IoError =
   | NotFound
@@ -26,6 +26,7 @@ pub type IoError =
   | NotADirectory
   | InvalidPath
   | TooLarge
+  | Timeout
   | Other(Int)
 
 extern mn_write(fd: Int, data: Str) -> Result Unit IoError

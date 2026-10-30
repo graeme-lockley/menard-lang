@@ -329,11 +329,14 @@ happens inside join, yield, mailbox receive, and (later) parkable I/O.
 | Name | |
 | --- | --- |
 | `Cancelled` | Unit error from a cancelled join. |
+| `JoinTimeout` | Outer error from `join-timeout` (child keeps running). |
 | `Task a` | Opaque handle (`Tid` constructor); phantom result type `a`. |
 | `Scope` | `Ref (List Int)` of child ids for structured lifetimes. |
 | `spawn(thunk)` | Start a zero-argument thunk; returns `Task a`. |
 | `spawn-in(scope, thunk)` | Spawn and register the child on `scope`. |
 | `join(t)` | `Result a Cancelled` — wait until done or cancelled. |
+| `join-timeout(t, ms)` | `Result (Result a Cancelled) JoinTimeout` — relative deadline; does not cancel the child. |
+| `sleep-ms(ms)` | `Result Unit Cancelled` — real timer natively; virtual clock in the interpreter. |
 | `yield()` | Cooperative yield (may suspend). |
 | `cancel(t)` | Request cancellation. |
 | `scope(body)` | Run `body(scope)`; on exit cancel and join children. |
@@ -354,11 +357,13 @@ isolation boundary — shared `Ref` across tasks is allowed. See
 
 | Name | |
 | --- | --- |
-| `ActorError` | `ActorCancelled` \| `ActorDead`. |
+| `ActorError` | `ActorCancelled` \| `ActorDead` \| `ActorTimeout`. |
 | `Mailbox a` | Two-list queue; receive + space wait cells; **bounded** (default 1024). |
 | `mailbox-new()` / `mailbox-new-bounded(n)` | Empty live mailbox. |
 | `send(mb, msg)` | Enqueue; **parks when full**; `Err` on cancel/death. |
+| `send-timeout(mb, msg, ms)` | Like `send`; `Err(ActorTimeout)` if still full after `ms`; nothing enqueued. |
 | `receive(mb)` | Dequeue or wait; `Err` on cancel/death (no lost message on cancel). |
+| `receive-timeout(mb, ms)` | Like `receive`; `Err(ActorTimeout)` leaves the queue unchanged. |
 | `close(mb)` | Mark dead; wake **every** parked receiver and blocked sender (`notify-all`). Each sees `Err(ActorDead)` once. Idempotent. |
 | `Pid a` | Actor identity (mailbox + task id + nursery scope). |
 | `spawn` / `spawn-in` | Task + mailbox; body runs the receive loop. |
@@ -394,11 +399,15 @@ Parkable TCP/UDP and OpenSSL TLS. **Native only** (interpreter unbound).
 
 | Name | |
 | --- | --- |
-| `listen` / `accept` / `connect` / `read` / `write` / `close` | TCP. |
+| `listen` / `accept` / `connect` / `read` / `write` / `close` | TCP (unbounded park). |
+| `accept-timeout` / `connect-timeout` / `read-timeout` / `write-timeout` | Relative ms; `Err(Timeout)`; on timeout the fd stays open and usable (connect closes the half-open socket). |
 | `with-connection(fd, body)` | `defer` close around `body`. |
 | `udp-bind` / `udp-send` / `udp-recv` / `udp-close` | UDP. |
-| `tls-client` / `tls-server` / `tls-read` / `tls-write` / `tls-close` | TLS over a TCP fd. |
+| `tls-client` / `tls-server` / `tls-read` / `tls-write` / `tls-close` | TLS over a TCP fd (cooperative park). |
+| `tls-*-timeout` | Relative-ms TLS handshake / I/O. |
 | `with-tls(id, body)` | `defer` tls-close. |
+
+`IoError` includes `Timeout` (tag 28).
 
 ## Http / Rest
 
@@ -410,8 +419,10 @@ Menard HTTP/1.1 (request line + headers + Content-Length) and small REST helpers
 | --- | --- |
 | `Request` / `Response` / `Method` / `HttpError` | Core types. |
 | `read-request` / `write-response` | Per-connection. |
-| `serve(port, handler)` | Accept loop under `Task.scope`. |
-| `request(host, port, req)` | One-shot client. |
+| `serve(port, handler)` | Accept loop under `Task.scope` with a default per-connection deadline (30s). |
+| `serve-timeout(port, conn-ms, handler)` | Same, with an explicit per-connection deadline. |
+| `request(host, port, req)` | One-shot client (unbounded). |
+| `request-timeout(host, port, req, ms)` | One-shot client under a relative deadline. |
 | `Rest.ok-json` / `not-found` / `path-segments` / `json-body` | REST helpers. |
 
 ## Console

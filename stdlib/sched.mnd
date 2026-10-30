@@ -21,6 +21,17 @@ extern mn_task_wait_new() -> Int
 ; Ok(()) when notified; Err(()) when cancelled while waiting (soft resume).
 extern mn_task_wait(cell: Int) -> Result Unit Unit
 
+; Ok(()) when notified/closed; Err(0)=cancel, Err(1)=timeout. deadline is mono ms.
+extern mn_task_wait_until(cell: Int, deadline: Int) -> Result Unit Int
+
+; Sleep until ms elapses or the sleeper is cancelled. Err(()) = cancelled.
+extern mn_task_sleep_ms(ms: Int) -> Result Unit Unit
+
+; Ok(inner) when joined; Err(()) = Timeout (task still running). Inner Err = cancelled.
+extern mn_task_join_timeout[a](id: Int, ms: Int) -> Result (Result a Unit) Unit
+
+extern mn_mono_ms() -> Int
+
 extern mn_task_notify(cell: Int) -> Unit
 
 ; Close the cell and wake every waiter (Mailbox.close).
@@ -94,6 +105,47 @@ pub let wait-new() -> Int =
 ; } => Ok(())
 pub let wait(cell: Int) -> Result Unit Unit =
   mn_task_wait(cell)
+
+pub type WaitError =
+  | WaitCancelled
+  | WaitTimeout
+
+; Park until notified, cancelled, or the monotonic deadline.
+; @test {
+;   let c = wait-new()
+;   notify(c)
+;   wait-until(c, mono-ms() + 1000)
+; } => Ok(())
+pub let wait-until(cell: Int, deadline: Int) -> Result Unit WaitError =
+  match (mn_task_wait_until(cell, deadline))
+    | Ok(u) -> Ok(u)
+    | Err(0) -> Err(WaitCancelled())
+    | Err(_) -> Err(WaitTimeout())
+
+; True when wait-until failed because the deadline passed.
+; @test is-timeout(WaitTimeout()) => true
+pub let is-timeout(e: WaitError) -> Bool =
+  match (e)
+    | WaitTimeout() -> true
+    | WaitCancelled() -> false
+
+; Monotonic clock in milliseconds.
+; @test mono-ms() >= 0
+pub let mono-ms() -> Int =
+  mn_mono_ms()
+
+; Sleep for ms milliseconds. Err(()) if cancelled while sleeping.
+; @test sleep-ms(0) => Ok(())
+pub let sleep-ms(ms: Int) -> Result Unit Unit =
+  mn_task_sleep_ms(ms)
+
+; Join with a relative timeout. Outer Err = timed out (task still running).
+; @test {
+;   let t = spawn(fn () = 1)
+;   join-timeout(t, 50)
+; } => Ok(Ok(1))
+pub let join-timeout[a](id: Int, ms: Int) -> Result (Result a Unit) Unit =
+  mn_task_join_timeout(id, ms)
 
 ; Notify a wait cell; wakes at most one waiter. Sticky if no waiter yet.
 ; @test notify(wait-new())

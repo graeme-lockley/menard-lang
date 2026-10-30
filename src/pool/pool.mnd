@@ -101,11 +101,12 @@ let builtin-ctor-arities() -> Map Str Int {
   let m11 = Map.set("NotADirectory", 0, m10)
   let m12 = Map.set("InvalidPath", 0, m11)
   let m13 = Map.set("TooLarge", 0, m12)
-  let m14 = Map.set("NotExecutable", 0, m13)
-  let m15 = Map.set("InvalidArgument", 0, m14)
-  let m16 = Map.set("TooManyArguments", 0, m15)
-  let m17 = Map.set("Unsupported", 0, m16)
-  Map.set("Other", 1, m17)
+  let m14 = Map.set("Timeout", 0, m13)
+  let m15 = Map.set("NotExecutable", 0, m14)
+  let m16 = Map.set("InvalidArgument", 0, m15)
+  let m17 = Map.set("TooManyArguments", 0, m16)
+  let m18 = Map.set("Unsupported", 0, m17)
+  Map.set("Other", 1, m18)
 }
 
 let register-ctor-arity(cname-ast: Ast, arity: Int, acc: Map Str Int) -> Map Str Int =

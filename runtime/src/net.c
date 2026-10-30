@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
 
 #define HDR ((int64_t)sizeof(void *))
@@ -123,6 +124,13 @@ int mn_net_poll(int timeout_ms) {
     n++;
   }
   if (n == 0) {
+    /* No FDs: still honour a finite timeout so timers can sleep. */
+    if (timeout_ms > 0) {
+      struct timespec ts;
+      ts.tv_sec = (time_t)(timeout_ms / 1000);
+      ts.tv_nsec = (long)(timeout_ms % 1000) * 1000000L;
+      nanosleep(&ts, NULL);
+    }
     return 0;
   }
   int pr = poll(pfds, (nfds_t)n, timeout_ms);
@@ -143,23 +151,43 @@ int mn_net_poll(int timeout_ms) {
   return notified;
 }
 
-static int wait_cancelled(MnWord result) {
+static int wait_is_err(MnWord result) {
   return mn_tag(result) == TAG_RESULT_ERR;
 }
 
-/* Park until fd ready. Returns MN_EMPTY to retry, or Err Result on cancel/fail. */
-static MnWord park_io(int fd, short events) {
+/* Park until fd ready. deadline_mono < 0 = forever.
+ * Returns MN_EMPTY to retry, or Err Result on cancel/timeout/fail. */
+MnWord mn_park_fd(int fd, short events, int64_t deadline_mono) {
   MnWord cell = mn_task_wait_new();
   int cid = (int)mn_word_to_int(cell);
   if (register_wait(fd, events, cid) != 0) {
     return io_other(ENOMEM);
   }
-  MnWord w = mn_task_wait(cell);
-  clear_wait_cell(cid);
-  if (wait_cancelled(w)) {
-    return io_other(-1); /* cancelled */
+  MnWord w;
+  if (deadline_mono < 0) {
+    w = mn_task_wait(cell);
+  } else {
+    w = mn_task_wait_until(cell, mn_int_to_word(deadline_mono));
   }
-  return MN_EMPTY;
+  clear_wait_cell(cid);
+  if (!wait_is_err(w)) {
+    return MN_EMPTY;
+  }
+  if (deadline_mono >= 0) {
+    MnWord e = mn_slot(w, 0);
+    if (mn_is_immediate(e) && mn_word_to_int(e) == 1) {
+      return mn_err((MnWord)&mn_static_timeout);
+    }
+  }
+  return io_other(-1); /* cancelled */
+}
+
+static MnWord park_io(int fd, short events) {
+  return mn_park_fd(fd, events, -1);
+}
+
+static MnWord park_io_until(int fd, short events, int64_t deadline_mono) {
+  return mn_park_fd(fd, events, deadline_mono);
 }
 
 MnWord mn_tcp_listen(MnWord port_tagged) {
@@ -193,8 +221,7 @@ MnWord mn_tcp_listen(MnWord port_tagged) {
   return mn_ok(mn_int_to_word((int64_t)fd));
 }
 
-MnWord mn_tcp_accept(MnWord fd_tagged) {
-  int lfd = (int)mn_word_to_int(fd_tagged);
+static MnWord tcp_accept_deadline(int lfd, int64_t deadline_mono) {
   for (;;) {
     int cfd = accept(lfd, NULL, NULL);
     if (cfd >= 0) {
@@ -205,7 +232,7 @@ MnWord mn_tcp_accept(MnWord fd_tagged) {
       continue;
     }
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      MnWord p = park_io(lfd, POLLIN);
+      MnWord p = park_io_until(lfd, POLLIN, deadline_mono);
       if (p != MN_EMPTY) {
         return p;
       }
@@ -215,9 +242,20 @@ MnWord mn_tcp_accept(MnWord fd_tagged) {
   }
 }
 
-MnWord mn_tcp_connect(MnWord host_str, MnWord port_tagged) {
+MnWord mn_tcp_accept(MnWord fd_tagged) {
+  return tcp_accept_deadline((int)mn_word_to_int(fd_tagged), -1);
+}
+
+MnWord mn_tcp_accept_timeout(MnWord fd_tagged, MnWord ms_tagged) {
+  int64_t ms = mn_word_to_int(ms_tagged);
+  if (ms < 0) {
+    ms = 0;
+  }
+  return tcp_accept_deadline((int)mn_word_to_int(fd_tagged), mn_mono_now_ms() + ms);
+}
+
+static MnWord tcp_connect_deadline(MnWord host_str, int port, int64_t deadline_mono) {
   char *host = str_to_cstr(host_str);
-  int port = (int)mn_word_to_int(port_tagged);
   char portbuf[16];
   snprintf(portbuf, sizeof(portbuf), "%d", port);
   struct addrinfo hints;
@@ -248,7 +286,7 @@ MnWord mn_tcp_connect(MnWord host_str, MnWord port_tagged) {
     return io_err_errno(e);
   }
   for (;;) {
-    MnWord p = park_io(fd, POLLOUT);
+    MnWord p = park_io_until(fd, POLLOUT, deadline_mono);
     if (p != MN_EMPTY) {
       close(fd);
       return p;
@@ -268,9 +306,20 @@ MnWord mn_tcp_connect(MnWord host_str, MnWord port_tagged) {
   }
 }
 
-MnWord mn_tcp_read(MnWord fd_tagged, MnWord max_tagged) {
-  int fd = (int)mn_word_to_int(fd_tagged);
-  int64_t max = mn_word_to_int(max_tagged);
+MnWord mn_tcp_connect(MnWord host_str, MnWord port_tagged) {
+  return tcp_connect_deadline(host_str, (int)mn_word_to_int(port_tagged), -1);
+}
+
+MnWord mn_tcp_connect_timeout(MnWord host_str, MnWord port_tagged, MnWord ms_tagged) {
+  int64_t ms = mn_word_to_int(ms_tagged);
+  if (ms < 0) {
+    ms = 0;
+  }
+  return tcp_connect_deadline(host_str, (int)mn_word_to_int(port_tagged),
+                              mn_mono_now_ms() + ms);
+}
+
+static MnWord tcp_read_deadline(int fd, int64_t max, int64_t deadline_mono) {
   if (max <= 0) {
     max = 4096;
   }
@@ -296,7 +345,7 @@ MnWord mn_tcp_read(MnWord fd_tagged, MnWord max_tagged) {
       continue;
     }
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      MnWord p = park_io(fd, POLLIN);
+      MnWord p = park_io_until(fd, POLLIN, deadline_mono);
       if (p != MN_EMPTY) {
         free(buf);
         return p;
@@ -309,8 +358,20 @@ MnWord mn_tcp_read(MnWord fd_tagged, MnWord max_tagged) {
   }
 }
 
-MnWord mn_tcp_write(MnWord fd_tagged, MnWord data) {
-  int fd = (int)mn_word_to_int(fd_tagged);
+MnWord mn_tcp_read(MnWord fd_tagged, MnWord max_tagged) {
+  return tcp_read_deadline((int)mn_word_to_int(fd_tagged), mn_word_to_int(max_tagged), -1);
+}
+
+MnWord mn_tcp_read_timeout(MnWord fd_tagged, MnWord max_tagged, MnWord ms_tagged) {
+  int64_t ms = mn_word_to_int(ms_tagged);
+  if (ms < 0) {
+    ms = 0;
+  }
+  return tcp_read_deadline((int)mn_word_to_int(fd_tagged), mn_word_to_int(max_tagged),
+                           mn_mono_now_ms() + ms);
+}
+
+static MnWord tcp_write_deadline(int fd, MnWord data, int64_t deadline_mono) {
   size_t n = (size_t)str_len(data);
   size_t off = 0;
   uint8_t *bytes = str_bytes(data);
@@ -324,7 +385,7 @@ MnWord mn_tcp_write(MnWord fd_tagged, MnWord data) {
       continue;
     }
     if (w < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-      MnWord p = park_io(fd, POLLOUT);
+      MnWord p = park_io_until(fd, POLLOUT, deadline_mono);
       if (p != MN_EMPTY) {
         return p;
       }
@@ -333,6 +394,18 @@ MnWord mn_tcp_write(MnWord fd_tagged, MnWord data) {
     return io_err_errno(errno);
   }
   return mn_ok(MN_UNIT);
+}
+
+MnWord mn_tcp_write(MnWord fd_tagged, MnWord data) {
+  return tcp_write_deadline((int)mn_word_to_int(fd_tagged), data, -1);
+}
+
+MnWord mn_tcp_write_timeout(MnWord fd_tagged, MnWord data, MnWord ms_tagged) {
+  int64_t ms = mn_word_to_int(ms_tagged);
+  if (ms < 0) {
+    ms = 0;
+  }
+  return tcp_write_deadline((int)mn_word_to_int(fd_tagged), data, mn_mono_now_ms() + ms);
 }
 
 MnWord mn_tcp_close(MnWord fd_tagged) {

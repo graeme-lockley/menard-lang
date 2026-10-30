@@ -50,4 +50,11 @@ describe("Build F net", () => {
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("ping");
   });
+
+  test.skipIf(!Bun.which("clang"))("native: Net timeouts (CONC-02)", () => {
+    const r = runNative("tests/net/timeouts.mnd");
+    expect(r.stderr).not.toContain("panic");
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe("1\n2\n3\n");
+  }, { timeout: 180_000 });
 });

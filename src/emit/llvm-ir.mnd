@@ -239,7 +239,7 @@ pub let pool-extra-constants(objs: List PoolObj) -> Int =
 ; How many module-scope value ids the fixed runtime externs occupy.
 ; Defined here so the id helpers below can see it. The order those
 ; externs are declared in is documented with `extern-write-stdout-abs`.
-pub let extern-count = 126
+pub let extern-count = 138
 
 ; Cstring globals, then two globals per emitted object (shape, object),
 ; then the fixed runtime singletons. Function externs begin at this id.
@@ -267,7 +267,8 @@ pub let singleton-symbol(i: Int) -> Str =
     | i == 8 -> "mn_static_too_large"
     | i == 9 -> "mn_static_not_executable"
     | i == 10 -> "mn_static_invalid_argument"
-    | else -> "mn_static_too_many_arguments"
+    | i == 11 -> "mn_static_too_many_arguments"
+    | else -> "mn_static_timeout"
 
 pub record LlvmModule {
   funcs: List LFunc
@@ -683,6 +684,43 @@ pub let extern-tls-close-abs(num-strings: Int) -> Int =
 
 pub let extern-task-notify-all-abs(num-strings: Int) -> Int =
   num-strings + 125
+
+; CONC-02 timers and timeout seams.
+pub let extern-mono-ms-abs(num-strings: Int) -> Int =
+  num-strings + 126
+
+pub let extern-task-wait-until-abs(num-strings: Int) -> Int =
+  num-strings + 127
+
+pub let extern-task-sleep-ms-abs(num-strings: Int) -> Int =
+  num-strings + 128
+
+pub let extern-task-join-timeout-abs(num-strings: Int) -> Int =
+  num-strings + 129
+
+pub let extern-tcp-accept-timeout-abs(num-strings: Int) -> Int =
+  num-strings + 130
+
+pub let extern-tcp-connect-timeout-abs(num-strings: Int) -> Int =
+  num-strings + 131
+
+pub let extern-tcp-read-timeout-abs(num-strings: Int) -> Int =
+  num-strings + 132
+
+pub let extern-tcp-write-timeout-abs(num-strings: Int) -> Int =
+  num-strings + 133
+
+pub let extern-tls-client-timeout-abs(num-strings: Int) -> Int =
+  num-strings + 134
+
+pub let extern-tls-server-timeout-abs(num-strings: Int) -> Int =
+  num-strings + 135
+
+pub let extern-tls-read-timeout-abs(num-strings: Int) -> Int =
+  num-strings + 136
+
+pub let extern-tls-write-timeout-abs(num-strings: Int) -> Int =
+  num-strings + 137
 
 ; Builtin constructor tags — must match runtime/src/variants.c.
 pub let tag-nil = 0

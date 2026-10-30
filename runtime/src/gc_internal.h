@@ -71,6 +71,14 @@ void mn_task_visit_roots(mn_root_visit_fn fn, void *ctx);
 
 /* Drive parkable socket completions (Build F). Returns # notified. */
 int mn_net_poll(int timeout_ms);
+/* Monotonic clock (ms) and timer helpers used by the task pump. */
+int64_t mn_mono_now_ms(void);
+void mn_timers_fire_due(void);
+/* Milliseconds until the next armed timer, or -1 if none. */
+int mn_timers_delay_ms(void);
+/* Park until fd is ready. deadline_mono < 0 = forever.
+ * Returns MN_EMPTY to retry, or Err(IoError) on cancel/timeout/fail. */
+MnWord mn_park_fd(int fd, short events, int64_t deadline_mono);
 
 int mn_gc_stress(void);
 int mn_gc_verify(void);

@@ -132,7 +132,8 @@ let builtin-ctor-metas() -> Map Str CtorMeta {
   let m11 = Map.set("NotADirectory", CtorMeta("IoError", 0), m10)
   let m12 = Map.set("InvalidPath", CtorMeta("IoError", 0), m11)
   let m13 = Map.set("TooLarge", CtorMeta("IoError", 0), m12)
-  Map.set("Other", CtorMeta("IoError", 1), m13)
+  let m14 = Map.set("Timeout", CtorMeta("IoError", 0), m13)
+  Map.set("Other", CtorMeta("IoError", 1), m14)
 }
 
 let register-one-variant-ctor(type-name: Str, c: Ast, acc: Map Str CtorMeta) -> Map Str CtorMeta =

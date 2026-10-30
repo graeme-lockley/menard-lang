@@ -31,7 +31,7 @@ describe("backlog next", () => {
     expect(close?.issue).toBe("#18");
 
     const deadlines = rows.find((r) => r.id === "CONC-02");
-    expect(deadlines?.status).toBe("ready");
+    expect(deadlines?.status).toBe("done");
     expect(deadlines?.blockers).toEqual(["CONC-01"]);
 
     const show = rows.find((r) => r.id === "LANG-01");
