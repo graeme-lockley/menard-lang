@@ -1,0 +1,9 @@
+; LIB-06: Fn is not an orderable Map key (compile error, both typers).
+
+let id(x: Int) -> Int =
+  x
+
+let main() -> Int {
+  map-set(map-new(), id, 1)
+  0
+}

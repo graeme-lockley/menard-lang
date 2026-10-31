@@ -1,0 +1,6 @@
+; LIB-06: Ref is not an orderable Map key (compile error, both typers).
+
+let main() -> Int {
+  map-set(map-new(), ref(1), 1)
+  0
+}

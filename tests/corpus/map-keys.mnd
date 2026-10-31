@@ -1,0 +1,126 @@
+; LIB-06: Map keys for every orderable type — set/lookup/has/keys
+; match compare order on both hosts (interpreter + native).
+import std/map as Map
+
+record Point {
+  x: Int
+  y: Int
+}
+
+; Names sort alphabetically in declaration order so host ctor-name
+; compare matches native declaration-tag order for these keys.
+type Color =
+  | A
+  | B(Int)
+  | C(Int, Int)
+
+let main() -> Int {
+  ; Int (incl. negative)
+  let mi = Map.empty()
+    |> Map.set(2, "b")
+    |> Map.set(-1, "n")
+    |> Map.set(0, "z")
+    |> Map.set(1, "a")
+  println(Map.keys(mi))
+  println(Map.lookup(-1, mi))
+  println(Map.lookup(2, mi))
+  println(Map.has(0, mi))
+  println(Map.has(9, mi))
+
+  ; Str
+  let ms = Map.empty()
+    |> Map.set("b", 2)
+    |> Map.set("a", 1)
+    |> Map.set("c", 3)
+  println(Map.keys(ms))
+  println(Map.lookup("a", ms))
+
+  ; Bool
+  let mb = Map.empty()
+    |> Map.set(true, 1)
+    |> Map.set(false, 0)
+  println(Map.keys(mb))
+  println(Map.lookup(false, mb))
+
+  ; Char
+  let mc = Map.empty()
+    |> Map.set('b', 2)
+    |> Map.set('a', 1)
+    |> Map.set('c', 3)
+  println(Map.keys(mc))
+  println(Map.lookup('a', mc))
+
+  ; Sym (native typed print does not show Sym yet; exercise keys via
+  ; lookup/has/size/compare — keys order matches compare)
+  let my = Map.empty()
+    |> Map.set('beta, 2)
+    |> Map.set('alpha, 1)
+    |> Map.set('gamma, 3)
+  println(Map.size(my))
+  println(Map.lookup('alpha, my))
+  println(Map.lookup('beta, my))
+  println(Map.lookup('gamma, my))
+  println(Map.has('delta, my))
+  println(compare('alpha, 'beta))
+  println(compare('beta, 'gamma))
+
+  ; Float (incl. -0.0 vs 0.0)
+  let mf = Map.empty()
+    |> Map.set(1.0, "one")
+    |> Map.set(-0.0, "negzero")
+    |> Map.set(0.0, "zero")
+    |> Map.set(-1.0, "neg")
+  println(Map.keys(mf))
+  println(Map.lookup(-0.0, mf))
+  println(Map.lookup(0.0, mf))
+
+  ; Record
+  let mr = Map.empty()
+    |> Map.set(Point(1, 0), "b")
+    |> Map.set(Point(0, 9), "a")
+    |> Map.set(Point(1, 1), "c")
+  println(Map.keys(mr))
+  println(Map.lookup(Point(0, 9), mr))
+  println(Map.has(Point(1, 0), mr))
+
+  ; Variant
+  let mv = Map.empty()
+    |> Map.set(B(2), "g2")
+    |> Map.set(A(), "r")
+    |> Map.set(C(1, 0), "b")
+    |> Map.set(B(1), "g1")
+  println(Map.keys(mv))
+  println(Map.lookup(A(), mv))
+  println(Map.lookup(B(1), mv))
+
+  ; Tuple / product
+  let mt = Map.empty()
+    |> Map.set((2, 0), "b")
+    |> Map.set((1, 9), "a")
+    |> Map.set((2, 1), "c")
+  println(Map.keys(mt))
+  println(Map.lookup((1, 9), mt))
+
+  ; Nested: list of records as keys
+  let mn = Map.empty()
+    |> Map.set([Point(1, 0)], "later")
+    |> Map.set([Point(0, 0)], "first")
+    |> Map.set([Point(0, 0), Point(1, 0)], "two")
+  println(Map.keys(mn))
+  println(Map.lookup([Point(0, 0)], mn))
+
+  ; Nested Map as key (entry-wise compare)
+  let inner-a = Map.set("a", 1, Map.empty())
+  let inner-b = Map.set("b", 2, Map.empty())
+  let mm = Map.empty()
+    |> Map.set(inner-b, "B")
+    |> Map.set(inner-a, "A")
+  println(Map.keys(mm))
+  println(Map.lookup(inner-a, mm))
+
+  ; keys order matches compare (records / products; variant order is
+  ; visible in Map.keys above — host name order vs native tags agree for A/B/C)
+  println(compare(Point(0, 9), Point(1, 0)))
+  println(compare((1, 9), (2, 0)))
+  0
+}

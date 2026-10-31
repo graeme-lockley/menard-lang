@@ -16,7 +16,7 @@
 
 | Phase | Theme | Items | Ready | In progress | Done |
 | --- | --- | ---: | ---: | ---: | ---: |
-| 0 | Truth, trust and the unsafe edges | 20 | 12 | 1 | 7 |
+| 0 | Truth, trust and the unsafe edges | 20 | 10 | 1 | 9 |
 | 1 | Daily loop and language decisions | 16 | 0 | 0 | 0 |
 | 2 | Standard library | 12 | 0 | 0 | 0 |
 | 3 | Operational concurrency | 8 | 0 | 0 | 0 |
@@ -36,7 +36,7 @@ Rows are ordered by phase, then priority, then area, then ID.
 | [LANG-02](reviews/2026-10-24-build-f.md#lang-02) | Canonical `Float` text: shortest round-trip, implemented in C first | Language | P0 | 0 | done | — | [#13](https://github.com/graeme-lockley/menard-lang/issues/13) | — |
 | [LANG-03](reviews/2026-10-24-build-f.md#lang-03) | Make `Float` orderable with one consistent total order | Language | P0 | 0 | done | — | [#14](https://github.com/graeme-lockley/menard-lang/issues/14) | — |
 | [LANG-04](reviews/2026-10-24-build-f.md#lang-04) | The host typer still crashes on a qualified-import constructor, and still duplicates some diagnostics | Language | P0 | 0 | done | — | [#15](https://github.com/graeme-lockley/menard-lang/issues/15) | [#38](https://github.com/graeme-lockley/menard-lang/pull/38) |
-| [LIB-06](reviews/2026-10-24-build-f.md#lib-06) | `Map` keys beyond `Int`/`Str` are silently wrong natively | Libraries | P0 | 0 | ready | LANG-03 (Float keys) | [#17](https://github.com/graeme-lockley/menard-lang/issues/17) | — |
+| [LIB-06](reviews/2026-10-24-build-f.md#lib-06) | `Map` keys beyond `Int`/`Str` are silently wrong natively | Libraries | P0 | 0 | done | LANG-03 (Float keys) | [#17](https://github.com/graeme-lockley/menard-lang/issues/17) | — |
 | [CONC-01](reviews/2026-10-24-build-f.md#conc-01) | `Mailbox.close` must wake every waiter, including blocked senders | Concurrency | P0 | 0 | done | — | [#18](https://github.com/graeme-lockley/menard-lang/issues/18) | — |
 | [CONC-02](reviews/2026-10-24-build-f.md#conc-02) | Deadlines for every blocking operation | Concurrency | P0 | 0 | done | CONC-01 | [#19](https://github.com/graeme-lockley/menard-lang/issues/19) | — |
 | [CONC-03](reviews/2026-10-24-build-f.md#conc-03) | TLS must verify the peer, send SNI, and not block the mutator | Concurrency | P0 | 0 | ready | CONC-02, CONC-10 | [#20](https://github.com/graeme-lockley/menard-lang/issues/20) | — |

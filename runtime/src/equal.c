@@ -131,6 +131,7 @@ static int ident_tag(int64_t tag) {
 }
 
 static int mn_equal_raw(MnWord a, MnWord b);
+static int cmp_raw(MnWord a, MnWord b);
 
 /* Entry-wise, inorder. Tree shape does not matter. */
 static int map_equal(MnWord a, MnWord b) {
@@ -165,6 +166,58 @@ static int map_equal(MnWord a, MnWord b) {
   free(pa);
   free(pb);
   return ok;
+}
+
+/* Lexicographic over inorder entries (§2.12). Tree shape does not matter. */
+static int map_cmp(MnWord a, MnWord b) {
+  MnWord ra = slot_at(a, 0);
+  MnWord rb = slot_at(b, 0);
+  int64_t na = node_size(ra);
+  int64_t nb = node_size(rb);
+  if (na == 0 && nb == 0) {
+    return 0;
+  }
+  MapPair *pa = NULL;
+  MapPair *pb = NULL;
+  if (na > 0) {
+    pa = (MapPair *)malloc((size_t)na * sizeof(MapPair));
+    if (pa == NULL) {
+      mn_panic("mn_compare: map malloc failed");
+    }
+    int64_t ia = 0;
+    map_collect(ra, pa, &ia);
+  }
+  if (nb > 0) {
+    pb = (MapPair *)malloc((size_t)nb * sizeof(MapPair));
+    if (pb == NULL) {
+      free(pa);
+      mn_panic("mn_compare: map malloc failed");
+    }
+    int64_t ib = 0;
+    map_collect(rb, pb, &ib);
+  }
+  int64_t m = na < nb ? na : nb;
+  int c = 0;
+  for (int64_t i = 0; i < m; i++) {
+    c = cmp_raw(pa[i].key, pb[i].key);
+    if (c != 0) {
+      break;
+    }
+    c = cmp_raw(pa[i].val, pb[i].val);
+    if (c != 0) {
+      break;
+    }
+  }
+  if (c == 0) {
+    if (na < nb) {
+      c = -1;
+    } else if (na > nb) {
+      c = 1;
+    }
+  }
+  free(pa);
+  free(pb);
+  return c;
 }
 
 static int mn_equal_raw(MnWord a, MnWord b) {
@@ -242,6 +295,9 @@ static int cmp_raw(MnWord a, MnWord b) {
   }
   if (ta == TAG_FLOAT) {
     return cmp_float(a, b);
+  }
+  if (ta == TAG_MAP) {
+    return map_cmp(a, b);
   }
   int64_t n = slot_count(a);
   int64_t nb = slot_count(b);

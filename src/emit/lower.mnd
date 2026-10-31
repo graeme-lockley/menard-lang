@@ -1463,8 +1463,10 @@ let str-in-list(s: Str, xs: List Str) -> Bool =
     | x :: rest ->
       if (s == x) -> true | str-in-list(s, rest)
 
+; `quote` of a symbol is lowered (Sym as static name bytes). Other quote
+; forms remain unsupported.
 let unsupported-form-names() -> List Str =
-  ["quote"]
+  []
 
 let is-unsupported-form(s: Str) -> Bool =
   str-in-list(s, unsupported-form-names())
@@ -1624,6 +1626,7 @@ let lower-apply-clo(clo: Int, args: List Ast, sp: Span, env: Map Str Int, b: Bui
 
 let lower-named(hn: Str, rest: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   cond
+    | hn == "quote" -> lower-quote(rest, b, pool)
     | hn == "char" -> lower-char-lit(rest, b)
     | hn == "if" -> lower-if(rest, env, b, funcs, noop, pool)
     | hn == "let" -> lower-let-inline(rest, env, b, funcs, noop, pool)
@@ -1651,6 +1654,12 @@ let lower-char-lit(rest: List Ast, b: Builder) -> Result Int Str =
   match (rest)
     | IntNode(n, _) :: _ -> Ok(const-tagged!(b, n))
     | _ -> Err("char literal requires a code point")
+
+; Sym literal: name bytes in the static pool (same object shape as Str).
+let lower-quote(rest: List Ast, b: Builder, pool: StrPool) -> Result Int Str =
+  match (rest)
+    | SymNode(name, _) :: _ -> Ok(emit-str-lit!(b, pool, name))
+    | _ -> Err("cannot lower `quote` with the real instruction lowerer yet")
 
 ; -- if --
 

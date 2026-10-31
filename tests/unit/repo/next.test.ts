@@ -41,9 +41,9 @@ describe("backlog next", () => {
     const report = buildReport(rows);
     expect(report.cycles).toEqual([]);
     expect(report.startNow.map((r) => r.id)).toContain("CONC-10");
-    // LANG-03 merged after this assertion was written; a P0 that is still ready
+    // LIB-06 merged after this assertion was written; a ready Phase 0 item
     // keeps the same point: the cycle fix leaves real work startable.
-    expect(report.startNow.map((r) => r.id)).toContain("LIB-06");
+    expect(report.startNow.map((r) => r.id)).toContain("LANG-07");
   });
 
   test("starts only fully unblocked rows in the current phase", () => {

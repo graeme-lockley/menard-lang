@@ -28,6 +28,31 @@ specification. Where a name changed, the entry that changed it says so.
 
 ---
 
+## 2026-10-31 — Map keys use `compare`; AVL not HAMT (LIB-06)
+
+### The decision
+
+`(Map K V)` accepts every orderable `K`. Native `key_cmp` and the host Map
+comparator both use language `compare` (structural for composites; Float via
+the LANG-03 bit order). `Map.keys` order is that same order. The persistent map
+remains an AVL tree on both hosts — not a HAMT. `compare` of two maps is
+entry-wise over the in-order entries. `Ref` / `Fn` / `StringBuffer` keys stay
+compile errors; the runtime panics if one reaches `key_cmp`.
+
+### Why
+
+The C `key_cmp` treated non-Float heap keys as `Str` bytes, so record and
+variant keys silently disagreed with the interpreter. Reusing `compare` closes
+that hole and matches `List.sort`. Documenting AVL corrects the cost model that
+still said HAMT.
+
+### Rejected
+
+Restricting keys to `Int`/`Str` at the typer; panicking instead of structural
+compare for composites; replacing AVL with a HAMT.
+
+---
+
 ## 2026-10-31 — Per-Pid pending reply hooks (CONC-05)
 
 ### The decision
@@ -166,7 +191,8 @@ Native `Map` accepts `Float` keys under the same order.
 
 §2.12 previously excluded `Float` while both hosts still sorted floats and
 disagreed (`memcmp` vs numeric). A single endian-safe total order closes that
-hole before `std/float` (LIB-01) and full Map-key structural compare (LIB-06).
+hole before `std/float` (LIB-01). Full Map-key structural compare landed as
+LIB-06.
 
 ### Rejected
 
@@ -493,7 +519,7 @@ bearing choices; everything in the specification follows from them.
 | 28 | **The surface is four tiers, with a placement rule** | Compiler-known iff it needs per-type synthesis; runtime-backed iff it needs mutation or an opaque representation **and the compiler is a client on a hot path**; else prelude | Adding an operation means knowing which tier it belongs to |
 | 29 | **Aliases are nullary and transparent** | Parameters would make them type-level functions, i.e. the higher-kinded feature that is out | Cannot abstract over container shape with an alias |
 | 30 | **`!` marks observable mutation only; the OS boundary is marked by `extern`, not by a name** | One glyph for two ideas meant neither was reliable, and `!`-for-purity was a gesture at effects the language refuses (no propagation, no effect system) | The convention covers one special form and four functions and is still unchecked; the ambient audit moves from a naming habit to a lintable module boundary |
-| 31 | **`Map` requires orderable keys and is persistent** | Deterministic iteration by construction; value semantics preserved; deletes hash from the agreement surface | HAMT in the runtime (~300 lines ×2); no `Ref`/`Fn` keys |
+| 31 | **`Map` requires orderable keys and is persistent** | Deterministic iteration by construction; value semantics preserved; deletes hash from the agreement surface | AVL in the runtime (~300 lines ×2); key order = `compare`; no `Ref`/`Fn` keys |
 | 32 | **No `Byte` type; `Char` is a scalar value; `Str` is arbitrary bytes** | A `Byte` is a second integer type with the same agreement cost as `Int32`; bytes are small `Int`s with a documented range | Byte/character confusion is a documented-range question, not a type error |
 | 33 | **`StringBuffer` is a built-in reference type** (§2.8.2) | It needs in-place mutation, and the compiler is its hot-path client; `Buf.take-str!` is free because `Str` and the buffer share one payload shape | ~200 lines of C and ~200 of TS, implemented twice; a second mutation path to keep out of output |
 | 34 | **Copy-on-write after a non-destructive `Buf.to-str`** | A shared backing store means an append could otherwise mutate an immutable `Str` already held by a caller | One extra copy on the first append after a conversion; a rule the interpreter and the runtime must both implement |
