@@ -17,5 +17,5 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["src/**/*.ts", "../tests/**/*.ts", "../tools/next.ts"]
+  "include": ["src/**/*.ts", "../tests/**/*.ts", "../tools/next.ts", "../tools/loop/**/*.ts"]
 }

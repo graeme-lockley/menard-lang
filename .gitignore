@@ -15,3 +15,6 @@ build/
 *.swp
 .idea/
 out.txt
+
+# Backlog loop run artifacts (make loop)
+.loop/
