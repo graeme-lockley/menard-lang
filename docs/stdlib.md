@@ -365,14 +365,28 @@ isolation boundary — shared `Ref` across tasks is allowed. See
 | `receive(mb)` | Dequeue or wait; `Err` on cancel/death (no lost message on cancel). |
 | `receive-timeout(mb, ms)` | Like `receive`; `Err(ActorTimeout)` leaves the queue unchanged. |
 | `close(mb)` | Mark dead; wake **every** parked receiver and blocked sender (`notify-all`). Each sees `Err(ActorDead)` once. Idempotent. |
-| `Pid a` | Actor identity (mailbox + task id + nursery scope). |
+| `Pid a` | Actor identity (mailbox + task id + nursery scope + pending reply hooks). |
 | `spawn` / `spawn-in` | Task + mailbox; body runs the receive loop. |
 | `cast(pid, msg)` | Send to an actor. |
 | `Ask[req, res]` | Envelope for typed request/response. |
-| `call(pid, req)` | Reply mailbox + park; protocols need no reply Pid fields. |
+| `call(pid, req)` | Reply mailbox + park; protocols need no reply Pid fields. See failure semantics below. |
 | `serve` / `serve-state` | Request/response server helpers (and `*-in` for scopes). |
-| `cancel` / `join` / `id` | Lifecycle; cancel escalates the nursery. |
+| `cancel` / `join` / `id` | Lifecycle; cancel closes pending replies then escalates the nursery. |
 | `register` / `whereis` | Process-local name → Pid (honor-system typing). |
+
+**`call` failure semantics.** `Ok(res)` on a normal reply. `Err(ActorDead)` when the
+target is already dead, dies (normal return) between dequeue and reply, or is
+**cancelled** during the request — cancel clears `alive` and closes every pending
+reply mailbox (`notify-all`), so waiters observe death, not `ActorCancelled`.
+`Err(ActorCancelled)` when the **caller** is cancelled while waiting on the reply;
+`call` then closes the reply, unregisters its pending hook, and drops any still-queued
+`Ask` whose reply mailbox is this one. Default `call` has no deadline —
+`ActorTimeout` comes only from mailbox `*-timeout` helpers. Panic inside a handler
+is process-fatal — there is no cleanup obligation for pending replies (the process
+is gone). Prefer `call` / `serve*`: they register reply-close hooks on the Pid so
+exit and cancel cannot leave a caller parked. A custom `spawn` body that dequeues
+an `Ask` and returns (or is cancelled) still closes those hooks via `finish-actor`;
+a body that neither replies nor exits can leave a caller waiting.
 
 **Suspend points:** `receive`, `call`, `send` (when full).
 

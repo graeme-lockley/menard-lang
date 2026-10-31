@@ -203,37 +203,63 @@ pub let close[a](mb: Mailbox a) -> Unit =
       }
 
 ; task-id is the cooperative task id; scope is the nursery for escalate (or empty).
+; pending holds reply-close hooks for in-flight Actor.call (CONC-05).
 pub record Pid[a] {
   mb: Mailbox a
   task-id: Int
   scope: Ref (List Int)
+  pending: Ref (List (() -> Unit))
 }
 
 ; Mailbox of a Pid.
 let pid-mb[a](pid: Pid a) -> Mailbox a =
   match (pid)
-    | Pid(mb, _, _) -> mb
+    | Pid(mb, _, _, _) -> mb
 
 ; Cooperative task id of a Pid.
 let pid-task-id[a](pid: Pid a) -> Int =
   match (pid)
-    | Pid(_, tid, _) -> tid
+    | Pid(_, tid, _, _) -> tid
 
 ; Nursery scope ref held by a Pid.
 let pid-scope[a](pid: Pid a) -> Ref (List Int) =
   match (pid)
-    | Pid(_, _, s) -> s
+    | Pid(_, _, s, _) -> s
+
+; Pending reply-close hooks for a Pid.
+let pid-pending[a](pid: Pid a) -> Ref (List (() -> Unit)) =
+  match (pid)
+    | Pid(_, _, _, pending) -> pending
 
 ; Cancel every task id registered on a scope (nursery escalate).
 ; @test escalate(ref([]))
 pub let escalate(scope: Ref (List Int)) -> Unit =
   List.for-each(fn (id) = Sched.cancel(id), deref(scope))
 
-; Close the mailbox; escalate the nursery when failed.
-let finish-actor[a](mb: Mailbox a, scope: Ref (List Int), failed: Bool) -> Unit {
+; Run and clear pending reply-close hooks (idempotent when already empty).
+let run-pending(pending: Ref (List (() -> Unit))) -> Unit {
+  let hooks = deref(pending)
+  set!(pending, [])
+  List.for-each(fn (h) = h(), hooks)
+}
+
+; Run pending reply hooks, close the mailbox; escalate the nursery when failed.
+let finish-actor[a](mb: Mailbox a, scope: Ref (List Int), pending: Ref (List (() -> Unit)), failed: Bool) -> Unit {
+  run-pending(pending)
   close(mb)
   if (failed) -> escalate(scope) | ()
 }
+
+; Register a reply-close hook on the actor (same Fn identity to unregister).
+let register-pending[a](pid: Pid a, hook: () -> Unit) -> Unit =
+  match (pid)
+    | Pid(_, _, _, pending) -> set!(pending, hook :: deref(pending))
+
+; Remove a previously registered hook (Fn identity).
+let unregister-pending[a](pid: Pid a, hook: () -> Unit) -> Unit =
+  match (pid)
+    | Pid(_, _, _, pending) ->
+      set!(pending, List.filter(fn (h) = h != hook, deref(pending)))
 
 ; Spawn a receive-loop body. Serialisation is the body's responsibility.
 ; @test {
@@ -243,11 +269,12 @@ let finish-actor[a](mb: Mailbox a, scope: Ref (List Int), failed: Bool) -> Unit 
 pub let spawn[a](body: (Mailbox a) -> Unit) -> Pid a {
   let mb = mailbox-new()
   let scope = ref([])
+  let pending = ref([])
   let t = Tsk.spawn(fn () = {
     body(mb)
-    finish-actor(mb, scope, false)
+    finish-actor(mb, scope, pending, false)
   })
-  Pid(mb, Tsk.id(t), scope)
+  Pid(mb, Tsk.id(t), scope, pending)
 }
 
 ; Spawn into a scope so failure can escalate (cancel siblings).
@@ -258,14 +285,15 @@ pub let spawn[a](body: (Mailbox a) -> Unit) -> Pid a {
 ; } => Ok(())
 pub let spawn-in[a](scope: Ref (List Int), body: (Mailbox a) -> Unit) -> Pid a {
   let mb = mailbox-new()
+  let pending = ref([])
   let t = Tsk.spawn(fn () = {
     body(mb)
-    finish-actor(mb, scope, false)
+    finish-actor(mb, scope, pending, false)
   })
   let tid = Tsk.id(t)
   let tail = deref(scope)
   set!(scope, tid :: tail)
-  Pid(mb, tid, scope)
+  Pid(mb, tid, scope, pending)
 }
 
 ; Send to an actor's mailbox.
@@ -291,8 +319,14 @@ pub let cast[a](pid: Pid a, msg: a) -> Result Unit ActorError =
 ;   join(p)
 ; } => Err(Cancelled())
 pub let cancel[a](pid: Pid a) -> Unit {
+  ; Close pending replies first so a mid-handle body cannot send Ok when
+  ; soft-cancel pumps the actor. Then cancel (so join sees Cancelled), then
+  ; close the actor mailbox and escalate — do not close the mb before cancel,
+  ; or a woken body can finish as done and join returns Ok.
+  run-pending(pid-pending(pid))
   Sched.cancel(pid-task-id(pid))
-  finish-actor(pid-mb(pid), pid-scope(pid), true)
+  close(pid-mb(pid))
+  escalate(pid-scope(pid))
 }
 
 ; Wait for the actor task to finish.
@@ -313,7 +347,28 @@ pub let id[a](pid: Pid a) -> Int =
 pub type Ask[req, res] =
   | Ask(req, Mailbox (Result res ActorError))
 
+; Drop queued Ask messages whose reply mailbox is `reply` (caller cancel).
+let drop-ask-for-reply[req, res](mb: Mailbox (Ask req res), reply: Mailbox (Result res ActorError)) -> Unit =
+  match (mb)
+    | Mailbox(front, back, _, space, count, _, _) -> {
+        let keep = fn (msg) =
+          match (msg)
+            | Ask(_, r) -> r != reply
+        let f0 = deref(front)
+        let b0 = deref(back)
+        let f1 = List.filter(keep, f0)
+        let b1 = List.filter(keep, b0)
+        let removed =
+          (List.length(f0) + List.length(b0)) - (List.length(f1) + List.length(b1))
+        set!(front, f1)
+        set!(back, b1)
+        set!(count, deref(count) - removed)
+        if (removed > 0) -> Sched.notify(space) | ()
+      }
+
 ; Typed request/response; protocols need no reply Pid fields.
+; On actor exit/cancel, pending hooks close the reply → Err(ActorDead).
+; Caller cancel while waiting → Err(ActorCancelled); Ask is dropped; reply closed.
 ; @test {
 ;   let p = serve(fn (n) = n + 1)
 ;   let r = call(p, 40)
@@ -323,23 +378,39 @@ pub type Ask[req, res] =
 ; } => Ok(41)
 pub let call[req, res](pid: Pid (Ask req res), req: req) -> Result res ActorError {
   let reply = mailbox-new()
+  let hook = fn () = close(reply)
+  register-pending(pid, hook)
   match (cast(pid, Ask(req, reply)))
-    | Err(e) -> Err(e)
+    | Err(e) -> {
+        unregister-pending(pid, hook)
+        Err(e)
+      }
     | Ok(_) ->
       match (receive(reply))
-        | Err(e) -> Err(e)
-        | Ok(r) -> r
+        | Err(e) -> {
+            close(reply)
+            unregister-pending(pid, hook)
+            drop-ask-for-reply(pid-mb(pid), reply)
+            Err(e)
+          }
+        | Ok(r) -> {
+            unregister-pending(pid, hook)
+            r
+          }
 }
 
 ; Receive loop for a request/response server.
-let serve-loop[req, res](mb: Mailbox (Ask req res), scope: Ref (List Int), handle: req -> res) -> Unit {
+let serve-loop[req, res](mb: Mailbox (Ask req res), scope: Ref (List Int), pending: Ref (List (() -> Unit)), handle: req -> res) -> Unit {
   loop ()
     match (receive(mb))
-      | Err(ActorCancelled()) -> finish-actor(mb, scope, true)
-      | Err(ActorDead()) -> ()
+      | Err(ActorCancelled()) -> finish-actor(mb, scope, pending, true)
+      | Err(ActorDead()) -> finish-actor(mb, scope, pending, false)
       | Ok(Ask(req, reply)) -> {
+          let hook = fn () = close(reply)
+          set!(pending, hook :: deref(pending))
           let out = handle(req)
           let _ = send(reply, Ok(out))
+          set!(pending, List.filter(fn (h) = h != hook, deref(pending)))
           recur()
         }
 }
@@ -355,8 +426,9 @@ let serve-loop[req, res](mb: Mailbox (Ask req res), scope: Ref (List Int), handl
 pub let serve[req, res](handle: req -> res) -> Pid (Ask req res) {
   let mb = mailbox-new()
   let scope = ref([])
-  let t = Tsk.spawn(fn () = serve-loop(mb, scope, handle))
-  Pid(mb, Tsk.id(t), scope)
+  let pending = ref([])
+  let t = Tsk.spawn(fn () = serve-loop(mb, scope, pending, handle))
+  Pid(mb, Tsk.id(t), scope, pending)
 }
 
 ; Stateless server registered on a Task scope nursery.
@@ -368,20 +440,30 @@ pub let serve[req, res](handle: req -> res) -> Pid (Ask req res) {
 ;   let _ = join(p)
 ;   r
 ; } => Ok(3)
-pub let serve-in[req, res](scope: Ref (List Int), handle: req -> res) -> Pid (Ask req res) =
-  spawn-in(scope, fn (mb) = serve-loop(mb, scope, handle))
+pub let serve-in[req, res](scope: Ref (List Int), handle: req -> res) -> Pid (Ask req res) {
+  let mb = mailbox-new()
+  let pending = ref([])
+  let t = Tsk.spawn(fn () = serve-loop(mb, scope, pending, handle))
+  let tid = Tsk.id(t)
+  let tail = deref(scope)
+  set!(scope, tid :: tail)
+  Pid(mb, tid, scope, pending)
+}
 
 ; Stateful receive loop for serve-state.
-let serve-state-loop[req, res, s](mb: Mailbox (Ask req res), scope: Ref (List Int), init: s, step: (s, req) -> (s * res)) -> Unit {
+let serve-state-loop[req, res, s](mb: Mailbox (Ask req res), scope: Ref (List Int), pending: Ref (List (() -> Unit)), init: s, step: (s, req) -> (s * res)) -> Unit {
   loop (st = init)
     match (receive(mb))
-      | Err(ActorCancelled()) -> finish-actor(mb, scope, true)
-      | Err(ActorDead()) -> ()
+      | Err(ActorCancelled()) -> finish-actor(mb, scope, pending, true)
+      | Err(ActorDead()) -> finish-actor(mb, scope, pending, false)
       | Ok(Ask(req, reply)) -> {
+          let hook = fn () = close(reply)
+          set!(pending, hook :: deref(pending))
           let pair = step(st, req)
           match (pair)
             | (st2, out) -> {
                 let _ = send(reply, Ok(out))
+                set!(pending, List.filter(fn (h) = h != hook, deref(pending)))
                 recur(st2)
               }
         }
@@ -398,8 +480,9 @@ let serve-state-loop[req, res, s](mb: Mailbox (Ask req res), scope: Ref (List In
 pub let serve-state[req, res, s](init: s, step: (s, req) -> (s * res)) -> Pid (Ask req res) {
   let mb = mailbox-new()
   let scope = ref([])
-  let t = Tsk.spawn(fn () = serve-state-loop(mb, scope, init, step))
-  Pid(mb, Tsk.id(t), scope)
+  let pending = ref([])
+  let t = Tsk.spawn(fn () = serve-state-loop(mb, scope, pending, init, step))
+  Pid(mb, Tsk.id(t), scope, pending)
 }
 
 ; Stateful server registered on a Task scope nursery.
@@ -411,8 +494,15 @@ pub let serve-state[req, res, s](init: s, step: (s, req) -> (s * res)) -> Pid (A
 ;   let _ = join(p)
 ;   r
 ; } => Ok(9)
-pub let serve-state-in[req, res, s](scope: Ref (List Int), init: s, step: (s, req) -> (s * res)) -> Pid (Ask req res) =
-  spawn-in(scope, fn (mb) = serve-state-loop(mb, scope, init, step))
+pub let serve-state-in[req, res, s](scope: Ref (List Int), init: s, step: (s, req) -> (s * res)) -> Pid (Ask req res) {
+  let mb = mailbox-new()
+  let pending = ref([])
+  let t = Tsk.spawn(fn () = serve-state-loop(mb, scope, pending, init, step))
+  let tid = Tsk.id(t)
+  let tail = deref(scope)
+  set!(scope, tid :: tail)
+  Pid(mb, tid, scope, pending)
+}
 
 ; Bind a name to a Pid in the process dictionary (last write wins).
 ; @test {
