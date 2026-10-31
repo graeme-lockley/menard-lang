@@ -37,6 +37,11 @@ describe("backlog next", () => {
     const show = rows.find((r) => r.id === "LANG-01");
     expect(show?.blockers).toEqual(["LANG-07", "LANG-02", "LANG-10"]);
     expect(rows.every((r) => Number.isInteger(r.phase))).toBe(true);
+
+    const report = buildReport(rows);
+    expect(report.cycles).toEqual([]);
+    expect(report.startNow.map((r) => r.id)).toContain("CONC-10");
+    expect(report.startNow.map((r) => r.id)).toContain("LANG-03");
   });
 
   test("starts only fully unblocked rows in the current phase", () => {

@@ -6,11 +6,13 @@
  * the acceptance criteria. The backlog (`docs/backlog.md`) is the live status
  * table. Every review item needs exactly one backlog row, and every row must
  * name a real item with a valid status, priority, phase and (for Phase 0) an
- * issue.
+ * issue. `Blocked by` must form a DAG: cycles can never reach "all blockers
+ * done".
  *
  * Run: `bun run tools/backlog-check.ts`, or `make backlog-check`.
  */
 import { readFileSync } from "node:fs";
+import { findCycles, parseBacklog } from "./next.ts";
 
 const REVIEW = "docs/reviews/2026-10-24-build-f.md";
 const BACKLOG = "docs/backlog.md";
@@ -33,7 +35,8 @@ for (const m of review.matchAll(/^### ((?:LANG|LIB|CONC|TOOL|DOC|OTH)-\d+) — /
   ids.push(m[1]!);
 }
 
-const lines = readFileSync(BACKLOG, "utf8").split("\n");
+const backlogText = readFileSync(BACKLOG, "utf8");
+const lines = backlogText.split("\n");
 const rows: Row[] = [];
 const errors: string[] = [];
 
@@ -81,6 +84,11 @@ for (const row of rows) {
 }
 for (const id of ids) if (!seen.has(id)) errors.push(`${id}: missing backlog row`);
 for (const row of rows) if (!ids.includes(row.id)) errors.push(`${row.id}: row has no review item`);
+
+const cycles = findCycles(parseBacklog(backlogText));
+for (const cycle of cycles) {
+  errors.push(`dependency cycle: ${cycle.join(" ↔ ")}`);
+}
 
 if (errors.length > 0) {
   for (const e of errors) console.error(`backlog: ${e}`);
