@@ -43,18 +43,31 @@ lands in the middle of another item, not for skipping the queue.
 
 ## The gate
 
-The gate is exactly the sequence in the PR template, in order, each step run
-from a clean cache:
+The gate is exactly the sequence in the PR template, in order:
 
 ```
 rm -rf ~/.menard && make && make ci && ./mn test
 ```
 
-Each step is a separate command so a failure names itself, and every log is
-kept under `.loop/<item>/gate-*.log`. `--fixed-point` adds
-`make check-fixed-point` for changes that touch the compiler or the runtime
-ABI; it is off by default because it is slow, not because it is optional when
-the item calls for it.
+Each step is a separate command so a failure names itself, with one log per
+step per attempt (`gate-1-make-ci.log`, `gate-2-make-ci.log`). `make
+check-fixed-point` is added automatically when the diff touches `src/` or
+`runtime/`; `--fixed-point` forces it and `--no-fixed-point` never runs it.
+
+Two things keep it from being paid twice:
+
+- **The cache is cleared once per run.** A cold build proves the tree from
+  nothing, but a fix round does not need to recompile the compiler to test the
+  fix; retries reuse `~/.menard`. `--cold` forces a cold gate.
+- **A green gate is stamped against the tree.** `gate.stamp.json` records the
+  tree hash and the gate's steps; if the tree has not changed since a green
+  run, the gate is skipped and says so. A fix changes the tree, so a real
+  second attempt still runs.
+
+The implementer and fixer are told that the gate belongs to the driver and are
+told not to run `make test`, `make ci`, `./mn test` or `make check-fixed-point`
+themselves. When they do anyway, the driver notices on the event stream and
+logs it as a warning under the step.
 
 The gate is not the whole of "production quality" — a green suite that tests
 the wrong thing is still green. That is what the review pass is for.
@@ -62,10 +75,12 @@ the wrong thing is still green. That is what the review pass is for.
 ## The review pass
 
 After the gate is green, a second Cursor session gets the item's specification
-section, the list of changed paths, and one instruction: decide, criterion by
-criterion, whether the work is real. It reads the code and the tests, not the
-implementation summary. It looks for the specific ways this kind of work is
-usually faked:
+section, the changed files, the diffstat, and the diff itself (truncated at
+24k characters), with one instruction: decide, criterion by criterion, whether
+the work is real. It reads the code and the tests, not the implementation
+summary. The session is read-only — `--plan` rejects shell commands — so the
+prompt says so, and the verdict rests on inspection rather than a second test
+run. It looks for the specific ways this kind of work is usually faked:
 
 - stubs, `TODO`, dead code, `@test true`, skipped tests, or a fallback that
   hides a failure;
@@ -111,7 +126,8 @@ step that can fail. `make loop ARGS=--resume`:
   that must never be assumed.
 
 If the run had already reached the commit or PR step, it resumes there instead
-of repeating the gate. On success the state file is removed, so the next
+of repeating the gate. A resumed run whose tree matches the last green gate
+skips the gate as well. On success the state file is removed, so the next
 `make loop` starts clean. The per-item artifacts stay.
 
 ## Watching a run
@@ -121,13 +137,15 @@ Everything the loop does is streamed to stdout and appended to
 
 - each gate command's output as it runs, not after it finishes;
 - `cursor-agent`'s event stream — the model, the assistant's text, tool calls
-  as `→ shellToolCall: make ci`, and the final `result`;
+  as `→ shell: make typecheck`, `→ read: stdlib/actor.mnd`, `→ edit: …`, and the
+  final `result`;
 - a heartbeat every 20 seconds when nothing has arrived, so a long tool call
-  never looks like a hang.
+  never looks like a hang;
+- structural lines stamped `[09:41:12 +00:14:03]`, and a closing summary with
+  the time each stage took.
 
 The driver runs the agent with `--output-format stream-json` for this reason.
-The raw NDJSON is kept in `cursor-plan.log` and `cursor-write.log` beside the
-rendered text.
+The raw NDJSON is kept in `cursor-<stage>.log` beside the rendered text.
 
 ## Artifacts
 
@@ -135,14 +153,18 @@ rendered text.
 .loop/
   state.json            run state; removed on success
   <item>/
-    run.log             every command and decision, in order
-    plan.md             the plan the implementation followed
-    summary.md          the implementer's account of what changed
-    fix-1.md            repair notes, one per round
-    gate-make.log       one log per gate step
-    review.raw.md       the reviewer's raw output
-    review.json         its parsed verdict
-    pr.md               the PR body that was submitted
+    run.log               every command and decision, in order, stamped
+    plan.md               the plan the implementation followed
+    summary.md            the implementer's account of what changed
+    fix-<n>.md            repair notes, one per round
+    cursor-<stage>.log    raw NDJSON, one per agent session
+    gate-<n>-<step>.log   one log per gate step per attempt
+    gate.stamp.json       tree hash + steps of the last green gate
+    cache-cleared         when ~/.menard was last cleared
+    review-<n>.raw.md     the reviewer's raw output, per attempt
+    review-<n>.json       its parsed verdict, per attempt
+    review.json           the latest verdict
+    pr.md                 the PR body that was submitted
   <item>-dry/           the same, for --dry-run
 ```
 
@@ -158,7 +180,9 @@ make loop ARGS="--dry-run"         # resolve the item and print the loop; no sid
 make loop ARGS="--item CONC-05"    # start a named item
 make loop ARGS="--resume"          # continue after a stop
 make loop ARGS="--no-review"       # gate only; the review pass is the point, so justify this
-make loop ARGS="--fixed-point"     # add make check-fixed-point to the gate
+make loop ARGS="--fixed-point"     # force make check-fixed-point into the gate
+make loop ARGS="--no-fixed-point"  # never run it (it is automatic for src/ and runtime/)
+make loop ARGS="--cold"            # clear ~/.menard again instead of reusing it
 make loop ARGS="--model gpt-5"     # choose the Cursor model
 ```
 

@@ -137,6 +137,7 @@ export function git(args: string[], options: RunOptions = {}): string {
 /** Everything a run leaves behind, under `.loop/<item>/`. */
 export class Journal {
   readonly dir: string;
+  private readonly startedAt = Date.now();
 
   constructor(dir: string) {
     this.dir = dir;
@@ -151,6 +152,14 @@ export class Journal {
     const line = message.endsWith("\n") ? message : `${message}\n`;
     appendFileSync(this.path("run.log"), line);
     process.stdout.write(line);
+  }
+
+  /** A structural line: clock time plus elapsed, so the log can be read back. */
+  mark(message: string): void {
+    const clock = new Date().toTimeString().slice(0, 8);
+    const elapsed = Math.floor((Date.now() - this.startedAt) / 1000);
+    const stamp = `+${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
+    this.log(`[${clock} ${stamp}] ${message}`);
   }
 
   banner(title: string): void {

@@ -13,7 +13,7 @@ import { join } from "node:path";
 
 import { extractReviewSection, readState, runStreaming, slug, tail, writeState } from "../../tools/loop/lib.ts";
 import { executePrompt, reviewPrompt } from "../../tools/loop/prompts.ts";
-import { renderCursorEvent } from "../../tools/loop/run.ts";
+import { auditAgentCommands, describeToolCall, issueRef, renderCursorEvent } from "../../tools/loop/run.ts";
 import type { Row } from "../../tools/next.ts";
 
 const REVIEW = join(import.meta.dir, "..", "..", "docs", "reviews", "2026-10-24-build-f.md");
@@ -121,7 +121,7 @@ describe("renderCursorEvent", () => {
       trace,
     );
     renderCursorEvent(
-      JSON.stringify({ type: "tool_call", subtype: "started", tool_call: { tool: { case: "shellToolCall", value: { args: { command: "make ci" } } } } }),
+      JSON.stringify({ type: "tool_call", subtype: "started", tool_call: { shellToolCall: { args: { command: "make typecheck" } } } }),
       log,
       trace,
     );
@@ -129,8 +129,7 @@ describe("renderCursorEvent", () => {
 
     expect(out[0]).toContain("Auto");
     expect(out[1]).toContain("Reading the actor.");
-    expect(out[2]).toContain("shellToolCall");
-    expect(out[2]).toContain("make ci");
+    expect(out[2]).toBe("  → shell: make typecheck");
     expect(out[3]).toContain("success");
     expect(trace.text).toContain("Reading the actor.");
     expect(trace.result).toBe("the plan");
@@ -144,6 +143,37 @@ describe("renderCursorEvent", () => {
     renderCursorEvent(JSON.stringify({ type: "thinking", subtype: "delta", text: "hmm" }), log, trace);
     expect(out).toEqual(["warning: something"]);
     expect(trace.text).toBe("");
+  });
+});
+
+describe("issueRef", () => {
+  test("never doubles the hash, whatever the backlog cell holds", () => {
+    expect(issueRef({ ...row, issue: "#22" })).toBe("#22");
+    expect(issueRef({ ...row, issue: "22" })).toBe("#22");
+    expect(issueRef({ ...row, issue: "" })).toBe("");
+  });
+});
+
+describe("describeToolCall", () => {
+  test("labels the tool-call shapes the CLI emits", () => {
+    expect(describeToolCall({ readToolCall: { args: { path: "/repo/stdlib/actor.mnd" } } }, "/repo")).toBe("read: stdlib/actor.mnd");
+    expect(describeToolCall({ shellToolCall: { args: { command: "make typecheck" } } })).toBe("shell: make typecheck");
+    expect(describeToolCall({ editToolCall: { args: { path: "/repo/tests/a.mnd" } } }, "/repo")).toBe("edit: tests/a.mnd");
+    expect(describeToolCall({ grepToolCall: { args: { pattern: "finish-actor" } } })).toBe("grep: finish-actor");
+  });
+});
+
+describe("auditAgentCommands", () => {
+  const event = (command: string): string =>
+    JSON.stringify({ type: "tool_call", subtype: "started", tool_call: { shellToolCall: { args: { command } } } });
+
+  test("flags the full gate and leaves targeted checks alone", () => {
+    expect(auditAgentCommands(event("make test"))).toEqual(["make test"]);
+    expect(auditAgentCommands(event("cd repo && make check-fixed-point"))).toEqual(["cd repo && make check-fixed-point"]);
+    expect(auditAgentCommands(event("./mn test"))).toEqual(["./mn test"]);
+    expect(auditAgentCommands(event("./mn test stdlib/actor.mnd"))).toEqual([]);
+    expect(auditAgentCommands(event("bun test ../tests/actor/actor.test.ts"))).toEqual([]);
+    expect(auditAgentCommands(event("make typecheck"))).toEqual([]);
   });
 });
 
@@ -179,12 +209,13 @@ describe("prompt contracts", () => {
       row,
       specification: "### CONC-05\n- [ ] a criterion",
       base: "main",
-      status: " M stdlib/actor.mnd",
       stat: "1 file changed",
+      changed: "stdlib/actor.mnd",
+      diff: "diff --git a/stdlib/actor.mnd b/stdlib/actor.mnd",
     });
     expect(prompt).toContain('"satisfied"');
     expect(prompt).toContain("Output JSON only");
     expect(prompt).toContain("a criterion");
-    expect(prompt).toContain("Do not modify files");
+    expect(prompt).toContain("do not modify files");
   });
 });
