@@ -222,6 +222,10 @@ const PIPE_BLOCKED = new Set([
   "f-",
   "f*",
   "f/",
+  "f<",
+  "f<=",
+  "f>",
+  "f>=",
   "::",
 ]);
 

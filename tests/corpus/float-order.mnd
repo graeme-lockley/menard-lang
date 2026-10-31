@@ -1,0 +1,44 @@
+; LANG-03: Float total order — compare, List.sort, Map keys, records,
+; f</f<=/f>/f>=, NaN canonicalisation, and -0.0 vs 0.0.
+import std/list as List
+import std/map as Map
+
+record Point {
+  x: Float
+  y: Float
+}
+
+let main() -> Int {
+  println(compare(1.0, 2.0))
+  println(compare(-1.0, 1.0))
+  println(compare(-0.0, 0.0))
+  println(compare(nan, nan))
+  println(compare(inf, nan))
+  println(List.sort([-1.0, 0.0, 1.0, -2.0, 2.0]))
+  println(List.sort([1.0, 2.0]))
+  println(List.sort([nan, 1.0, -inf]))
+  let m = Map.empty()
+    |> Map.set(2.0, "b")
+    |> Map.set(-0.0, "z")
+    |> Map.set(0.0, "a")
+    |> Map.set(1.0, "c")
+    |> Map.set(nan, "n")
+    |> Map.set(-inf, "i")
+  println(Map.keys(m))
+  println(compare(Point(-1.0, 9.0), Point(0.0, 0.0)))
+  println(compare(Point(1.0, 0.0), Point(1.0, 1.0)))
+  println(show(nan))
+  let arith-nan = f/(0.0, 0.0)
+  println(show(arith-nan))
+  println(nan == arith-nan)
+  let z = 0.0
+  let nz = -0.0
+  println(nz == z)
+  println(show(nz))
+  println(show(z))
+  println(f<(1.0, 2.0))
+  println(f<=(2.0, 2.0))
+  println(f>(nan, inf))
+  println(f>=(nz, nz))
+  0
+}

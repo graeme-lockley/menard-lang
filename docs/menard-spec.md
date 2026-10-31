@@ -1459,7 +1459,7 @@ parameterised type satisfies a predicate exactly when its instantiation does.
 | `Unit` | yes | trivial |
 | `Str` | yes | raw bytes, lexicographic, no normalisation |
 | `Sym` | yes | **by name, byte-wise** — never by address or slot index |
-| `Float` | **no** | see below |
+| `Float` | **yes** | monotonic bit order (below) |
 | `Ref`, `StringBuffer` | **no** | mutable, identity-bearing, hence run-dependent |
 | record | if all fields orderable | lexicographic, declaration order |
 | variant | if all payloads orderable | constructor tag, then payload |
@@ -1524,11 +1524,16 @@ print a heap address, the interpreter and the native compiler would print
 different ones, and `bc0 != bc1` — with the defect occurring nowhere near the
 gate that catches it.
 
-**Float is unorderable by choice.** A total order on floats is possible once NaN
-is excluded (§2.11.T), so this is a deliberate exclusion rather than a forced
-consequence: float keys are a trap (equality semantics, `−0.0`, the distinction
-between a key that is epsilon-equal and one that is bit-equal), and no part of a
-compiler ever wants to key a map by a float.
+**Float is orderable under a monotonic bit transform.** Every NaN produced by
+arithmetic, parsing, or JSON decode is canonicalised to one quiet NaN bit
+pattern (`0x7FF8000000000000`), so `nan = nan` and `compare(nan, nan) = 0`. An
+IEEE-754 binary64 value maps to an unsigned key
+`if (sign) ~bits else bits | 0x8000000000000000`, compared as `uint64`. That
+gives `-inf < finite < +inf < nan` and `-0.0 < 0.0`. Equality is bit equality
+and agrees with `compare` exactly: `-0.0 = 0.0` is false. This is not IEEE 754
+`totalOrder` (which orders NaN sign/payload); the simpler rule is deliberate
+because all NaNs are canonicalised. The predicates `f<` / `f<=` / `f>` / `f>=`
+agree with `compare`; infix `<=` is not an operator on `Float`.
 
 **Ties and consistency.** The order must be *total on distinct values*, because
 ties reintroduce nondeterminism. Two rules secure this:
@@ -1537,8 +1542,8 @@ ties reintroduce nondeterminism. Two rules secure this:
    same equivalence — which is why `Str` equality and `Str` order are both
    defined over unnormalised bytes, and why `Sym` is compared by name rather than
    by the identity of its intern slot.
-2. `Float` is excluded, which removes the only primitive whose equality is
-   coarser than any sane order.
+2. `Float` uses the same bits for equality and for the order key above, so
+   `x = y` exactly when `compare(x, y) = 0`.
 
 **Termination.** The predicates are structural over a finite type DAG (recursive
 types are permitted; the type graph is finite and its cycles are nominal).
@@ -1569,7 +1574,7 @@ same spelling, because the spelling is defined on bytes alone.
 | `Char` | the scalar value in decimal |
 | `Str` | `"` … `"`, with `\` and `"` backslash-escaped and nothing else escaped; non-ASCII bytes emitted raw |
 | `Sym` | `'` followed by the name bytes, unescaped |
-| `Float` | shortest round-trip decimal under a fixed grammar (optional `-`, digits, optional fraction, optional `e`/`E` with a mandatory sign on the exponent); always a float lexeme (contains `.` or `e`); `0.0` / `-0.0` distinct; non-finites are `nan`, `inf`, `-inf`. The C implementation (`mn_format_float`) is normative; the interpreter must match it byte for byte. |
+| `Float` | shortest round-trip decimal under a fixed grammar (optional `-`, digits, optional fraction, optional `e`/`E` with a mandatory sign on the exponent); always a float lexeme (contains `.` or `e`); `0.0` / `-0.0` distinct in text and under `=`; non-finites are `nan`, `inf`, `-inf`; every NaN is one quiet payload so `nan = nan` (§2.12). The C implementation (`mn_format_float`) is normative; the interpreter must match it byte for byte. |
 | record | `(Name f1 f2 …)` in declaration order |
 | variant | `(Con payload…)` |
 | `(List T)` / `(Arr T n)` | `[e1 e2 …]` |
@@ -2937,6 +2942,7 @@ These are the invariants the implementation watches. Each row is a way the repre
 | **Address or intern-index leakage into output** (§2.11.I) | Medium | Nondeterminism at a site far from the defect | Showable predicate is a compile error (§2.12); debug printing isolated by type (§2.16) |
 | **Alias name leaks into emitted output or a mangled symbol** | Medium | Fixed-point failure caused by a convenience feature | Canonical/display split (§2.3); mangling uses expanded types; determinism row in §3.6 |
 | **Float or Str text drifts between the interpreter and the derive engine** (§2.11.T) | Medium | Fixed-point failure traced to a formatter | Normative text table (§2.13); C-first `mn_format_float` (Ryu) mirrored in the host; `tests/vectors/float-text.jsonl`, `tests/phase2/float-text.test.ts`, and `tests/corpus/float-text.mnd` |
+| **`cmp_float` uses host-endian `memcmp` on the f64 payload** (§2.12) | Medium | `List.sort` / `Map` Float keys disagree across endianness and with numeric intent (`[2.0, 1.0]` natively vs `[1.0, 2.0]` interpreted) | Monotonic uint64 bit transform in `runtime/src/equal.c`; equality stays bit equality; NaN canonicalised at boxing; host `compareValue` mirrors the keys; `tests/corpus/float-order.mnd` |
 | Non-orderable/non-showable type reaches an output path | Medium | Nondeterminism or a crash | Compile error at the point of use; checked at instantiation, so `(Tree (Ref Int))` is rejected where it is shown |
 | **The dual-implemented surface is under-budgeted** (§2.8.2, §2.15) | Medium | The smallest-looking tier is the most expensive per line | Keep the tier rules strict; §7 costs it explicitly; each built-in has an interpreter fixture |
 | **Derive engine larger than budgeted** (parametrised) | Medium | Schedule overrun in phases 2–3 | Costed in §7; own phase-2 acceptance test; memoised per instantiation |

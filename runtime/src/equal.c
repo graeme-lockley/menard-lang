@@ -41,15 +41,33 @@ static const uint8_t *str_bytes(MnWord s) {
   return (const uint8_t *)(((MnWord *)(uintptr_t)s) + 2);
 }
 
-/* Eight payload bytes. `-0.0` and `0.0` differ, matching the interpreter. */
-static int cmp_float(MnWord a, MnWord b) {
+/* Bit equality: `-0.0` ≠ `0.0`; after NaN canonicalisation, `nan` = `nan`. */
+static int eq_float(MnWord a, MnWord b) {
   const uint8_t *pa = (const uint8_t *)(((MnWord *)(uintptr_t)a) + 1);
   const uint8_t *pb = (const uint8_t *)(((MnWord *)(uintptr_t)b) + 1);
-  int c = memcmp(pa, pb, 8);
-  if (c < 0) {
+  return memcmp(pa, pb, 8) == 0;
+}
+
+/* Monotonic total order (LANG-03): sign-magnitude bit transform to uint64.
+ * Gives `-inf < finite < +inf < NaN` and `-0.0 < 0.0`. Not endian-sensitive. */
+static uint64_t float_order_key(uint64_t bits) {
+  if (bits & UINT64_C(0x8000000000000000)) {
+    return ~bits;
+  }
+  return bits | UINT64_C(0x8000000000000000);
+}
+
+static int cmp_float(MnWord a, MnWord b) {
+  uint64_t ba = 0;
+  uint64_t bb = 0;
+  memcpy(&ba, &((MnWord *)(uintptr_t)a)[1], sizeof(ba));
+  memcpy(&bb, &((MnWord *)(uintptr_t)b)[1], sizeof(bb));
+  uint64_t ka = float_order_key(ba);
+  uint64_t kb = float_order_key(bb);
+  if (ka < kb) {
     return -1;
   }
-  if (c > 0) {
+  if (ka > kb) {
     return 1;
   }
   return 0;
@@ -168,7 +186,7 @@ static int mn_equal_raw(MnWord a, MnWord b) {
     return cmp_str(a, b) == 0;
   }
   if (ta == TAG_FLOAT) {
-    return cmp_float(a, b) == 0;
+    return eq_float(a, b);
   }
   if (ident_tag(ta)) {
     return 0;

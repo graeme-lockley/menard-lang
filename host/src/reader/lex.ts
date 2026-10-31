@@ -566,6 +566,13 @@ export function lex(src: Uint8Array): { ok: true; toks: Tok[] } | { ok: false; e
         }
         bump();
       }
+      // `f<=` / `f>=`: `=` is not ident-cont, but completes a float-order name.
+      if (
+        (src[i - 1] === 0x3c || src[i - 1] === 0x3e) &&
+        peek() === 0x3d
+      ) {
+        bump();
+      }
       if (peek() === 0x21) {
         const bangAt = i;
         bump();

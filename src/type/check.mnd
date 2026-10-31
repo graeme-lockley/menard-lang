@@ -223,6 +223,10 @@ let install-arith(env: TypeEnv) -> Unit {
   value-set(env, "f-", Scheme([], t-fn([t-float(), t-float()], t-float())))
   value-set(env, "f*", Scheme([], t-fn([t-float(), t-float()], t-float())))
   value-set(env, "f/", Scheme([], t-fn([t-float(), t-float()], t-float())))
+  value-set(env, "f<", Scheme([], t-fn([t-float(), t-float()], t-bool())))
+  value-set(env, "f<=", Scheme([], t-fn([t-float(), t-float()], t-bool())))
+  value-set(env, "f>", Scheme([], t-fn([t-float(), t-float()], t-bool())))
+  value-set(env, "f>=", Scheme([], t-fn([t-float(), t-float()], t-bool())))
   value-set(env, "<", Scheme([], t-fn([t-int(), t-int()], t-bool())))
   value-set(env, ">", Scheme([], t-fn([t-int(), t-int()], t-bool())))
   value-set(env, "<=", Scheme([], t-fn([t-int(), t-int()], t-bool())))
@@ -1943,6 +1947,55 @@ let check-predicate-arg(env: TypeEnv, arg-types: List Type, args: List Ast, sp: 
   if (pred(t)) -> () | err!(env, code, String.concat("type ", type-show(t), " is ", label), first-span-or(args, sp))
 }
 
+; Bare name, or the field of `(project Alias Name)`.
+let call-head-name(head: Ast) -> Maybe Str =
+  match (sym-str(head))
+    | Some(n) -> Some(n)
+    | None ->
+      match (head)
+        | ParenNode(SymNode("project", _) :: _ :: SymNode(field, _) :: _, _) -> Some(field)
+        | _ -> None()
+
+let nth-type(xs: List Type, i: Int) -> Maybe Type =
+  match (xs)
+    | [] -> None()
+    | x :: rest -> if (i == 0) -> Some(x) | nth-type(rest, i - 1)
+
+let nth-ast(xs: List Ast, i: Int) -> Maybe Ast =
+  match (xs)
+    | [] -> None()
+    | x :: rest -> if (i == 0) -> Some(x) | nth-ast(rest, i - 1)
+
+let type-still-open(t: Type) -> Bool =
+  match (t)
+    | TVar(_, _) -> true
+    | TParam(_) -> true
+    | _ -> false
+
+; Map keys must be orderable once the key type is known (not a free var/param).
+let check-map-key-orderable(env: TypeEnv, head: Ast, arg-types: List Type, args: List Ast, sp: Span) -> Unit =
+  match (call-head-name(head))
+    | Some("map-set") -> check-map-key-at(env, arg-types, args, sp, 1)
+    | Some("set") -> check-map-key-at(env, arg-types, args, sp, 0)
+    | Some("lookup") -> check-map-key-at(env, arg-types, args, sp, 0)
+    | Some("has") -> check-map-key-at(env, arg-types, args, sp, 0)
+    | _ -> ()
+
+let check-map-key-at(env: TypeEnv, arg-types: List Type, args: List Ast, sp: Span, idx: Int) -> Unit =
+  match (nth-type(arg-types, idx))
+    | None -> ()
+    | Some(raw) ->
+      {
+        let t = apply-subst(env, raw)
+        cond
+          | type-still-open(t) -> ()
+          | is-orderable(t) -> ()
+          | else ->
+            match (nth-ast(args, idx))
+              | Some(a) -> err!(env, "E_TYPE_ORDERABLE", String.concat("type ", type-show(t), " is not orderable"), ast-span(a))
+              | None -> err!(env, "E_TYPE_ORDERABLE", String.concat("type ", type-show(t), " is not orderable"), sp)
+      }
+
 let check-show-compare(env: TypeEnv, head: Ast, arg-types: List Type, args: List Ast, sp: Span) -> Unit =
   cond
     | is-sym(head, "show") ->
@@ -1951,6 +2004,7 @@ let check-show-compare(env: TypeEnv, head: Ast, arg-types: List Type, args: List
         check-predicate-arg(env, arg-types, args, sp, is-showable, "E_TYPE_SHOWABLE", "not showable")
       }
     | is-sym(head, "compare") -> check-predicate-arg(env, arg-types, args, sp, is-orderable, "E_TYPE_ORDERABLE", "not orderable")
+    | else -> check-map-key-orderable(env, head, arg-types, args, sp)
 
 let is-lambda-ast(a: Ast) -> Bool =
   match (a)

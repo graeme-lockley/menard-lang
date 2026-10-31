@@ -1,0 +1,4 @@
+; Ref is not orderable — compare must reject it (LANG-03 negative).
+
+let main() -> Int =
+  compare(ref(1), ref(2))

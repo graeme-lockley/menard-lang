@@ -2,6 +2,7 @@ import type { Ast } from "./ast.ts";
 import { symName } from "./ast.ts";
 import type { Span } from "./span.ts";
 import { lex, type Tok } from "./lex.ts";
+import { canonicalFloat } from "../interp/float-order.ts";
 
 export type ParseErr = { span: Span; message: string };
 
@@ -766,7 +767,7 @@ class P {
         value = Number(t.text);
         if (!Number.isFinite(value)) return this.err(t, "invalid float");
       }
-      return { ok: true, ast: { tag: "float", value, span: t.span } };
+      return { ok: true, ast: { tag: "float", value: canonicalFloat(value), span: t.span } };
     }
     if (t.kind === "str") {
       this.i++;

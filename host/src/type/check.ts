@@ -69,6 +69,7 @@ function installBuiltins(env: TypeEnv): void {
   const binInt = tFn([I, I], I);
   const binIntB = tFn([I, I], B);
   const binFloat = tFn([F, F], F);
+  const binFloatB = tFn([F, F], B);
 
   for (const [n, t] of [
     ["+", binInt],
@@ -84,6 +85,10 @@ function installBuiltins(env: TypeEnv): void {
     ["f-", binFloat],
     ["f*", binFloat],
     ["f/", binFloat],
+    ["f<", binFloatB],
+    ["f<=", binFloatB],
+    ["f>", binFloatB],
+    ["f>=", binFloatB],
   ] as const) {
     env.values.set(n, { params: [], type: t });
   }
@@ -1975,13 +1980,28 @@ function bindPattern(
   }
 }
 
+/** Bare name, or the field of `(project Alias Name)`. */
+function callHeadName(head: Ast): string | null {
+  const s = symStr(head);
+  if (s !== null) return s;
+  if (
+    head.tag === "list" &&
+    head.kind === "paren" &&
+    symStr(head.elems[0]!) === "project" &&
+    head.elems.length >= 3
+  ) {
+    return symStr(head.elems[2]!);
+  }
+  return null;
+}
+
 function inferApp(
   env: TypeEnv,
   ast: Ast & { tag: "list" },
   local: Map<string, Type>,
   subst: Subst,
 ): Type {
-  const hn = symStr(ast.elems[0]!);
+  const hn = callHeadName(ast.elems[0]!) ?? symStr(ast.elems[0]!);
 
   // Variadic print / println: Str raw; other args must be showable
   if (hn === "print" || hn === "println") {
@@ -2063,8 +2083,19 @@ function inferApp(
       );
     }
   }
-  if (hn === "empty" || hn === "set" || hn === "lookup") {
-    // Map keys must be orderable — checked when key type known
+  // Map keys must be orderable once the key type is known (not a free var).
+  const mapKeyIdx =
+    hn === "map-set" ? 1 : hn === "set" ? 0 : hn === "lookup" || hn === "has" ? 0 : -1;
+  if (mapKeyIdx >= 0 && args[mapKeyIdx]) {
+    const keyT = applySubst(args[mapKeyIdx]!, subst);
+    if (keyT.tag !== "var" && keyT.tag !== "param" && !isOrderable(keyT)) {
+      err(
+        env,
+        "E_TYPE_ORDERABLE",
+        `type ${typeShow(keyT)} is not orderable`,
+        ast.elems[mapKeyIdx + 1]?.span ?? ast.span,
+      );
+    }
   }
   return applySubst(ret, subst);
 }
