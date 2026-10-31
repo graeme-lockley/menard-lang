@@ -11,9 +11,9 @@
 |---|---|
 | 1 | One Platform module: `std/actor` (Mailbox + Actor; no separate `std/mailbox`). |
 | 2 | Two-list unbounded queue in Menard; wait cell for empty receive. |
-| 3 | `Pid[a]` phantom message type (record: mailbox, task id, scope ref). |
+| 3 | `Pid[a]` phantom message type (record: mailbox, task id, scope ref, pending reply hooks). |
 | 4 | Typed `Actor.call` via `Ask[req, res]`; user protocols omit reply Pids. |
-| 5 | Post-death send/cast/call → `Err(ActorDead)`. |
+| 5 | Post-death send/cast/call → `Err(ActorDead)`. Actor cancel mid-request also → `Err(ActorDead)` on the caller's reply (pending hooks). |
 | 6 | Cancel during receive → `Err(ActorCancelled)`; message not dequeued. On actor cancel/failure, escalate by cancelling nursery task ids. |
 | 7 | Simple name registry: `register` / `whereis` via type-erased process dict (`mn_task_dict_*`); honor-system typing. |
 | 8 | Multi-waiter mailboxes; `notify` wakes ≤1 (FIFO). `Mailbox.close` uses `notify-all` on both cells so every parked receiver and blocked sender resumes. |
@@ -34,10 +34,11 @@ Actors are **not** an isolation boundary; shared `Ref` across tasks remains allo
 
 | Event | Behaviour |
 |---|---|
-| Normal body return | Mailbox closed; later sends → `ActorDead` |
-| `Actor.cancel` / receive cancel | Soft `ActorCancelled`; close; escalate nursery ids |
+| Normal body return | Run pending reply-close hooks; mailbox closed; later sends → `ActorDead` |
+| `Actor.cancel` / receive cancel | Pending reply hooks first (callers see `ActorDead`); then soft-cancel the task; then close mailbox and escalate nursery ids |
+| In-flight `call` reply | Registered on the Pid's `pending` hook list; closed on exit/cancel so `call` cannot hang |
 | Message after death | `Err(ActorDead)` to sender |
-| Process-fatal panic | Still process-fatal (document); prefer cooperative exit + escalate |
+| Process-fatal panic | Still process-fatal — no pending-reply cleanup obligation; prefer cooperative exit + escalate |
 
 ## Suspend catalogue (additions)
 

@@ -2,7 +2,7 @@
 
 **Source of truth for status.** The specification and acceptance criteria are the [Build F review](reviews/2026-10-24-build-f.md); this file is the live work queue. GitHub issues are the public work items and discussion, linked by the same ID. The review is deliberately not the tracker: do not tick its checkboxes.
 
-- **First item:** [CONC-05](reviews/2026-10-24-build-f.md#conc-05) after CONC-02, or continue [LANG-01](reviews/2026-10-24-build-f.md#lang-01); see `make next`.
+- **First item:** continue [LANG-01](reviews/2026-10-24-build-f.md#lang-01), or [CONC-03](reviews/2026-10-24-build-f.md#conc-03) / [CONC-06](reviews/2026-10-24-build-f.md#conc-06); see `make next`.
 - **Phase 0 epic:** [#30](https://github.com/graeme-lockley/menard-lang/issues/30) — the 18 Phase 0 items as a checklist.
 - **Opened:** the 18 Phase 0 issues were opened on 2026-10-24, all in the `v0.6 — Truth and trust` milestone.
 - **Phase 0** is the current focus. Everything else is `todo` until its phase opens.
@@ -15,13 +15,13 @@
 
 | Phase | Theme | Items | Ready | In progress | Done |
 | --- | --- | ---: | ---: | ---: | ---: |
-| 0 | Truth, trust and the unsafe edges | 18 | 11 | 1 | 6 |
+| 0 | Truth, trust and the unsafe edges | 18 | 10 | 1 | 7 |
 | 1 | Daily loop and language decisions | 18 | 0 | 0 | 0 |
 | 2 | Standard library | 12 | 0 | 0 | 0 |
 | 3 | Operational concurrency | 8 | 0 | 0 | 0 |
 | 4 | Project and ecosystem | 17 | 0 | 0 | 0 |
 | 5 | Later | 9 | 0 | 0 | 0 |
-| **Total** | | **82** | **11** | **1** | **6** |
+| **Total** | | **82** | **10** | **1** | **7** |
 
 Priority mix: P0 = 24, P1 = 34, P2 = 19, P3 = 5.
 
@@ -40,7 +40,7 @@ Rows are ordered by phase, then priority, then area, then ID.
 | [CONC-02](reviews/2026-10-24-build-f.md#conc-02) | Deadlines for every blocking operation | Concurrency | P0 | 0 | done | CONC-01 | [#19](https://github.com/graeme-lockley/menard-lang/issues/19) | — |
 | [CONC-03](reviews/2026-10-24-build-f.md#conc-03) | TLS must verify the peer, send SNI, and not block the mutator | Concurrency | P0 | 0 | ready | CONC-02, CONC-10 | [#20](https://github.com/graeme-lockley/menard-lang/issues/20) | — |
 | [CONC-04](reviews/2026-10-24-build-f.md#conc-04) | HTTP limits, header correctness, and connection hygiene | Concurrency | P0 | 0 | done | CONC-02 | [#21](https://github.com/graeme-lockley/menard-lang/issues/21) | — |
-| [CONC-05](reviews/2026-10-24-build-f.md#conc-05) | An actor's death must not hang its callers | Concurrency | P0 | 0 | ready | CONC-01, CONC-02 | [#22](https://github.com/graeme-lockley/menard-lang/issues/22) | — |
+| [CONC-05](reviews/2026-10-24-build-f.md#conc-05) | An actor's death must not hang its callers | Concurrency | P0 | 0 | done | CONC-01, CONC-02 | [#22](https://github.com/graeme-lockley/menard-lang/issues/22) | — |
 | [DOC-01](reviews/2026-10-24-build-f.md#doc-01) | Truth pass on the guide, with executable snippets | Documentation | P0 | 0 | ready | LANG-01, LANG-03, LANG-06, LANG-07, LANG-15, LIB-08, CONC-10 | [#28](https://github.com/graeme-lockley/menard-lang/issues/28) | — |
 | [DOC-02](reviews/2026-10-24-build-f.md#doc-02) | Specification conformance, the new language decisions, and honest sizing | Documentation | P0 | 0 | ready | LANG-01, LANG-02, LANG-03, LANG-06, LANG-07, LANG-11, LANG-15, CONC-01, CONC-03, CONC-04, CONC-10, DOC-01 | [#29](https://github.com/graeme-lockley/menard-lang/issues/29) | — |
 | [OTH-01](reviews/2026-10-24-build-f.md#oth-01) | Add an MIT licence | Other | P0 | 0 | done | — | [#24](https://github.com/graeme-lockley/menard-lang/issues/24) | [#34](https://github.com/graeme-lockley/menard-lang/pull/34) |

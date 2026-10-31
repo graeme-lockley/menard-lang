@@ -1,0 +1,169 @@
+; CONC-05: actor death / cancel must not hang Actor.call.
+; Synchronise with Sched wait cells (not sleep / yield-n races).
+; Cancel during a request → Err(ActorDead) (alive cleared + notify-all).
+; Notify-then-park: after Sched.wait(ready) returns, the peer has continued
+; into its next park (receive / wait) — same pattern as tests/defer/basic.mnd.
+import std/actor as Actor
+pub import std/actor (Ask, ActorDead, ActorCancelled, ActorError)
+import std/task as Tsk
+import std/sched as Sched
+
+let flag-dead(r: Result Int ActorError) -> Int =
+  match (r)
+    | Err(ActorDead()) -> 1
+    | _ -> 0
+
+let flag-cancelled(r: Result Int ActorError) -> Int =
+  match (r)
+    | Err(ActorCancelled()) -> 1
+    | _ -> 0
+
+let main() -> Int {
+  ; --- die-after-receive: normal death mid-request → ActorDead ---
+  let die-ready = Sched.wait-new()
+  let die-got = ref(-1)
+  let die-pid =
+    Actor.spawn(fn (mb) = {
+      match (Actor.receive(mb))
+        | Ok(Ask(_, _)) -> {
+            Sched.notify(die-ready)
+            ()
+          }
+        | Err(_) -> ()
+    })
+  let die-caller =
+    Tsk.spawn(fn () = {
+      let r = Actor.call(die-pid, 1)
+      set!(die-got, flag-dead(r))
+      r
+    })
+  let _ = Sched.wait(die-ready)
+  let _ = Actor.join(die-pid)
+  let _ = Tsk.join(die-caller)
+  println(deref(die-got))
+
+  ; --- cancel-actor-mid-request (serve) → ActorDead ---
+  ; Handler notifies then parks on a fresh cell; main waits, then cancels.
+  let serve-ready = Sched.wait-new()
+  let serve-gate = Sched.wait-new()
+  let serve-got = ref(-1)
+  let serve-pid =
+    Actor.serve(fn (n) = {
+      Sched.notify(serve-ready)
+      let _ = Sched.wait(serve-gate)
+      n
+    })
+  let serve-caller =
+    Tsk.spawn(fn () = {
+      let r = Actor.call(serve-pid, 7)
+      set!(serve-got, flag-dead(r))
+      r
+    })
+  let _ = Sched.wait(serve-ready)
+  Actor.cancel(serve-pid)
+  let _ = Tsk.join(serve-caller)
+  let _ = Actor.join(serve-pid)
+  println(deref(serve-got))
+
+  ; --- cancel-actor-mid-request (serve-state) → ActorDead ---
+  let state-ready = Sched.wait-new()
+  let state-gate = Sched.wait-new()
+  let state-got = ref(-1)
+  let state-pid =
+    Actor.serve-state(0, fn (st, n) = {
+      Sched.notify(state-ready)
+      let _ = Sched.wait(state-gate)
+      (st, n)
+    })
+  let state-caller =
+    Tsk.spawn(fn () = {
+      let r = Actor.call(state-pid, 9)
+      set!(state-got, flag-dead(r))
+      r
+    })
+  let _ = Sched.wait(state-ready)
+  Actor.cancel(state-pid)
+  let _ = Tsk.join(state-caller)
+  let _ = Actor.join(state-pid)
+  println(deref(state-got))
+
+  ; --- cancel-caller-waiting (Ask still queued) ---
+  ; Actor parks before dequeue; caller notify-then-call so after wait the
+  ; caller is parked on receive(reply). Cancel → ActorCancelled; Ask dropped.
+  let hold-gate = Sched.wait-new()
+  let hold-actor-ready = Sched.wait-new()
+  let hold-pid =
+    Actor.spawn(fn (mb) = {
+      Sched.notify(hold-actor-ready)
+      let _ = Sched.wait(hold-gate)
+      match (Actor.receive(mb))
+        | Ok(Ask(tag, reply)) -> {
+            let _ = Actor.send(reply, Ok(tag))
+            ()
+          }
+        | Err(_) -> ()
+    })
+  let _ = Sched.wait(hold-actor-ready)
+  let hold-call-ready = Sched.wait-new()
+  let hold-got = ref(-1)
+  let hold-caller =
+    Tsk.spawn(fn () = {
+      Sched.notify(hold-call-ready)
+      let r = Actor.call(hold-pid, 1)
+      set!(hold-got, flag-cancelled(r))
+      r
+    })
+  let _ = Sched.wait(hold-call-ready)
+  Tsk.cancel(hold-caller)
+  let _ = Tsk.join(hold-caller)
+  println(deref(hold-got))
+  Sched.notify(hold-gate)
+  let probe-reply = Actor.mailbox-new()
+  let _ = Actor.cast(hold-pid, Ask(2, probe-reply))
+  let dropped-ok =
+    match (Actor.receive(probe-reply))
+      | Ok(Ok(2)) -> 1
+      | _ -> 0
+  println(dropped-ok)
+  let _ = Actor.join(hold-pid)
+
+  ; --- cancel-caller-waiting (actor holds reply): reply send → ActorDead ---
+  ; Actor notifies after dequeue (Ask in hand, reply held); caller already
+  ; parked on receive(reply). Cancel caller; direct send sees ActorDead.
+  let held-reply = ref(Actor.mailbox-new())
+  let got-ask = Sched.wait-new()
+  let reply-gate = Sched.wait-new()
+  let inflight-got = ref(-1)
+  let inflight-pid =
+    Actor.spawn(fn (mb) = {
+      match (Actor.receive(mb))
+        | Ok(Ask(_, reply)) -> {
+            set!(held-reply, reply)
+            Sched.notify(got-ask)
+            let _ = Sched.wait(reply-gate)
+            ()
+          }
+        | Err(_) -> ()
+    })
+  let inflight-call-ready = Sched.wait-new()
+  let inflight-caller =
+    Tsk.spawn(fn () = {
+      Sched.notify(inflight-call-ready)
+      let r = Actor.call(inflight-pid, 3)
+      set!(inflight-got, flag-cancelled(r))
+      r
+    })
+  let _ = Sched.wait(inflight-call-ready)
+  let _ = Sched.wait(got-ask)
+  Tsk.cancel(inflight-caller)
+  let _ = Tsk.join(inflight-caller)
+  println(deref(inflight-got))
+  let direct =
+    match (Actor.send(deref(held-reply), Ok(0)))
+      | Err(ActorDead()) -> 1
+      | _ -> 0
+  println(direct)
+  Sched.notify(reply-gate)
+  let _ = Actor.join(inflight-pid)
+  0
+}

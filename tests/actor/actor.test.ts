@@ -64,6 +64,8 @@ const BOUNDED_EXPECTED = "1\n1\n5\n";
 /* recv-dead, recv-other, send-dead, send-other, drain sum 10+20+1 */
 const CLOSE_MANY_EXPECTED = "100\n0\n100\n0\n31\n";
 const TIMEOUTS_EXPECTED = "1\n2\n3\n4\n5\n";
+/* die-after-receive; cancel serve; cancel serve-state; caller-cancel; Ask dropped; caller-cancel inflight; reply dead */
+const CALL_DEATH_EXPECTED = "1\n1\n1\n1\n1\n1\n1\n";
 
 describe("Build E actors", () => {
   test("interpreter: mailbox + Actor.call + death + registry + escalate", () => {
@@ -139,5 +141,37 @@ describe("Build E actors", () => {
       expect(r.stdout).toBe(TIMEOUTS_EXPECTED);
     },
     { timeout: 180_000 },
+  );
+
+  test("interpreter: call does not hang on actor death (CONC-05)", () => {
+    const r = runInterpreter("tests/actor/call-death.mnd");
+    expect(r.stderr).not.toContain("panic");
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe(CALL_DEATH_EXPECTED);
+  }, 120_000);
+
+  test.skipIf(!Bun.which("clang"))(
+    "native: call does not hang on actor death (CONC-05)",
+    () => {
+      const r = runNative("tests/actor/call-death.mnd");
+      expect(r.stderr).toBe("");
+      expect(r.status).toBe(0);
+      expect(r.stdout).toBe(CALL_DEATH_EXPECTED);
+    },
+    { timeout: 180_000 },
+  );
+
+  test.skipIf(!Bun.which("clang"))(
+    "native: call death under GC stress (CONC-05)",
+    () => {
+      const r = runNative("tests/actor/call-death.mnd", {
+        MENARD_GC_STRESS: "1",
+        MENARD_HEAP_VERIFY: "1",
+      });
+      expect(r.stderr).toBe("");
+      expect(r.status).toBe(0);
+      expect(r.stdout).toBe(CALL_DEATH_EXPECTED);
+    },
+    { timeout: 300_000 },
   );
 });

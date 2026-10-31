@@ -28,6 +28,34 @@ specification. Where a name changed, the entry that changed it says so.
 
 ---
 
+## 2026-10-31 — Per-Pid pending reply hooks (CONC-05)
+
+### The decision
+
+Each `Pid` carries a `pending: Ref (List (() -> Unit))` of reply-close hooks.
+`Actor.call` registers `close(reply)` on the target before `cast` and unregisters
+after a successful reply; on wait failure it closes the reply, unregisters, and
+drops any still-queued `Ask` whose reply mailbox is this one. `serve` /
+`serve-state` register the same close around handle+send. `finish-actor` runs the
+hooks then closes the actor mailbox / escalates. `Actor.cancel` runs pending hooks
+first, then soft-cancels the task, then closes the mailbox and escalates — so
+mid-request callers see **`Err(ActorDead)`** (not `ActorCancelled`) and `join`
+still reports `Cancelled`. Caller cancel while waiting is **`Err(ActorCancelled)`**.
+Panic in a handler remains process-fatal with no cleanup obligation.
+
+### Why
+
+Without pending closes, an actor that returns or is cancelled between dequeue and
+reply leaves the caller's reply mailbox open forever; a timeout is a mitigation,
+not a fix. Hooks on the Pid are local to the actor that owns the request turn.
+
+### Rejected
+
+A global caller registry or OTP-style link/monitor table (cross-cutting identity
+and GC surface). Relying on `call-timeout` / CONC-02 deadlines as the death fix.
+
+---
+
 ## 2026-10-30 — HTTP limits, lowercase headers, last-wins (CONC-04)
 
 ### The decision
