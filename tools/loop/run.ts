@@ -27,7 +27,7 @@ import { join } from "node:path";
 
 import { buildReport, parseBacklog } from "../next.ts";
 import type { Row } from "../next.ts";
-import { extractReviewSection, git, Journal, readState, run, slug, tail, writeState } from "./lib.ts";
+import { extractReviewSection, git, Journal, readState, run, runStreaming, slug, tail, writeState } from "./lib.ts";
 import type { State } from "./lib.ts";
 import { executePrompt, fixPrompt, planPrompt, reviewPrompt } from "./prompts.ts";
 
@@ -149,11 +149,11 @@ function gateSteps(options: Options): GateStep[] {
   return steps;
 }
 
-function runGate(journal: Journal, options: Options): GateResult {
+async function runGate(journal: Journal, options: Options): Promise<GateResult> {
   for (const step of gateSteps(options)) {
     journal.log(`$ ${step.command} ${step.args.join(" ")}`.trimEnd());
     if (options.dryRun) continue;
-    const result = run(step.command, step.args, { cwd: ROOT });
+    const result = await runStreaming(step.command, step.args, { cwd: ROOT, echo: true });
     const output = `${result.stdout}\n${result.stderr}`;
     journal.save(`gate-${slug(step.label, 4)}.log`, `${output}\n# exit ${result.code}${result.timedOut ? " (timed out)" : ""}`);
     if (result.timedOut) return { ok: false, failed: `${step.label} (timed out)`, output: tail(output) };
@@ -166,42 +166,115 @@ function runGate(journal: Journal, options: Options): GateResult {
   return { ok: true, failed: null, output: "" };
 }
 
-/** cursor-agent's JSON envelope, with a text fallback for older builds. */
-function unwrapCursor(raw: string): string {
-  const text = raw.trim();
-  if (!text.startsWith("{") && !text.startsWith("[")) return text;
+export type CursorTrace = { result: string | null; text: string };
+
+/** The part of a Journal the renderer needs, so it can be tested without one. */
+type Log = { log(message: string): void };
+
+/** Find the first non-empty string under any of `keys`, at any depth. */
+function findString(value: unknown, keys: readonly string[], depth = 0): string | null {
+  if (depth > 6 || typeof value !== "object" || value === null) return null;
+  const record = value as Record<string, unknown>;
+  for (const key of keys) {
+    const found = record[key];
+    if (typeof found === "string" && found !== "") return found;
+  }
+  for (const nested of Object.values(record)) {
+    const found = findString(nested, keys, depth + 1);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+/** `shellToolCall: make ci`, `editToolCall: src/emit/lower.mnd`. */
+function describeToolCall(toolCall: unknown): string {
+  const kind = findString(toolCall, ["case", "name"]) ?? "tool";
+  const detail = findString(toolCall, ["command", "path", "query"]) ?? "";
+  const cleaned = detail.replace(/\s+/g, " ").trim();
+  if (cleaned === "") return kind;
+  return `${kind}: ${cleaned.length > 140 ? `${cleaned.slice(0, 140)}…` : cleaned}`;
+}
+
+/** The text blocks of an assistant event. */
+function assistantText(event: Record<string, unknown>): string {
+  const message = event["message"];
+  if (typeof message !== "object" || message === null) return "";
+  const content = (message as Record<string, unknown>)["content"];
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const part of content) {
+    if (typeof part !== "object" || part === null) continue;
+    const record = part as Record<string, unknown>;
+    if (record["type"] === "text" && typeof record["text"] === "string") parts.push(record["text"]);
+  }
+  return parts.join("");
+}
+
+/**
+ * Render one NDJSON event from `cursor-agent --output-format stream-json`.
+ * Anything that is not an event (a warning, a stray line) is printed as-is.
+ */
+export function renderCursorEvent(line: string, log: Log, trace: CursorTrace): void {
+  const trimmed = line.trim();
+  if (trimmed === "") return;
+  let parsed: unknown;
   try {
-    const data: unknown = JSON.parse(text);
-    const fromRecord = (value: unknown): string | null => {
-      if (typeof value !== "object" || value === null) return null;
-      const record = value as Record<string, unknown>;
-      const result = record["result"];
-      if (typeof result === "string" && result !== "") return result;
-      const message = record["message"];
-      if (typeof message === "string" && message !== "") return message;
-      return null;
-    };
-    if (Array.isArray(data)) {
-      for (let index = data.length - 1; index >= 0; index -= 1) {
-        const found = fromRecord(data[index]);
-        if (found !== null) return found;
-      }
-      return text;
-    }
-    return fromRecord(data) ?? text;
+    parsed = JSON.parse(trimmed);
   } catch {
-    return text;
+    log.log(trimmed);
+    return;
+  }
+  if (typeof parsed !== "object" || parsed === null) {
+    log.log(trimmed);
+    return;
+  }
+  const event = parsed as Record<string, unknown>;
+  const type = typeof event["type"] === "string" ? event["type"] : "";
+  switch (type) {
+    case "system": {
+      if (event["subtype"] !== "init") return;
+      const model = typeof event["model"] === "string" ? event["model"] : "unknown";
+      log.log(`  [cursor] model ${model}`);
+      return;
+    }
+    case "assistant": {
+      const text = assistantText(event);
+      if (text.trim() === "") return;
+      trace.text += text;
+      log.log(text.trimEnd());
+      return;
+    }
+    case "tool_call": {
+      if (event["subtype"] === "started") log.log(`  → ${describeToolCall(event["tool_call"])}`);
+      return;
+    }
+    case "thinking":
+      return;
+    case "retry":
+    case "connection": {
+      const subtype = typeof event["subtype"] === "string" ? `: ${event["subtype"]}` : "";
+      log.log(`  ! ${type}${subtype}`);
+      return;
+    }
+    case "result": {
+      if (typeof event["result"] === "string") trace.result = event["result"];
+      const duration = typeof event["duration_ms"] === "number" ? Math.round(event["duration_ms"] / 1000) : null;
+      log.log(`  ← ${typeof event["subtype"] === "string" ? event["subtype"] : "done"}${duration === null ? "" : ` in ${duration}s`}`);
+      return;
+    }
+    default:
+      return;
   }
 }
 
-function askCursor(
+async function askCursor(
   prompt: string,
   mode: "plan" | "write",
   journal: Journal,
   options: Options,
   timeoutMinutes: number,
-): string {
-  const args = ["-p", "--output-format", "json", "--trust", "--workspace", ROOT];
+): Promise<string> {
+  const args = ["-p", "--output-format", "stream-json", "--trust", "--workspace", ROOT];
   if (options.model !== null) args.push("--model", options.model);
   args.push(mode === "plan" ? "--plan" : "--force");
   args.push(prompt);
@@ -209,10 +282,31 @@ function askCursor(
   journal.log(`$ cursor-agent -p ${mode === "plan" ? "--plan" : "--force"} <${prompt.length} char prompt>`);
   if (options.dryRun) return "(dry run: cursor-agent not invoked)";
 
-  const result = run("cursor-agent", args, { cwd: ROOT, timeoutMs: timeoutMinutes * 60_000 });
+  const trace: CursorTrace = { result: null, text: "" };
+  let lastEvent = Date.now();
+  const heartbeat = setInterval(() => {
+    const idle = Math.round((Date.now() - lastEvent) / 1000);
+    if (idle >= 20) journal.log(`  … still running (${Math.floor(idle / 60)}m${String(idle % 60).padStart(2, "0")}s)`);
+  }, 20_000);
+
+  const result = await (async () => {
+    try {
+      return await runStreaming("cursor-agent", args, {
+        cwd: ROOT,
+        timeoutMs: timeoutMinutes * 60_000,
+        onLine: (line) => {
+          lastEvent = Date.now();
+          renderCursorEvent(line, journal, trace);
+        },
+      });
+    } finally {
+      clearInterval(heartbeat);
+    }
+  })();
+
   journal.save(
     mode === "plan" ? "cursor-plan.log" : "cursor-write.log",
-    `# exit ${result.code}${result.timedOut ? " (timed out)" : ""}\n\n# stdout\n${result.stdout}\n\n# stderr\n${result.stderr}`,
+    `# exit ${result.code}${result.timedOut ? " (timed out)" : ""}\n\n# events\n${result.stdout}\n\n# stderr\n${result.stderr}`,
   );
   if (result.timedOut) {
     throw new Error(`cursor-agent (${mode}) timed out after ${timeoutMinutes} minutes; see ${journal.path("run.log")}`);
@@ -220,7 +314,7 @@ function askCursor(
   if (result.code !== 0) {
     throw new Error(`cursor-agent (${mode}) exited ${result.code}:\n${tail(result.stderr || result.stdout, 4000)}`);
   }
-  const text = unwrapCursor(result.stdout);
+  const text = trace.result ?? trace.text;
   if (text.trim() === "") throw new Error(`cursor-agent (${mode}) returned no text; see ${journal.path("cursor-plan.log")}`);
   return text;
 }
@@ -263,13 +357,13 @@ function parseVerdict(raw: string): Verdict | null {
   };
 }
 
-function runReview(
+async function runReview(
   journal: Journal,
   options: Options,
   row: Row,
   specification: string,
   state: State,
-): Verdict {
+): Promise<Verdict> {
   if (!options.review) return { satisfied: true, criteria: [], gaps: [], notes: "(review disabled)" };
   if (options.dryRun) {
     journal.log("$ cursor-agent -p --plan <review prompt>");
@@ -278,7 +372,7 @@ function runReview(
 
   const status = run("git", ["status", "--porcelain"], { cwd: ROOT }).stdout.trimEnd();
   const stat = run("git", ["diff", "--stat", state.base], { cwd: ROOT }).stdout.trim();
-  const raw = askCursor(
+  const raw = await askCursor(
     reviewPrompt({ row, specification, base: state.base, status, stat }),
     "plan",
     journal,
@@ -420,7 +514,7 @@ function preflight(options: Options): void {
   }
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   process.chdir(ROOT);
   preflight(options);
@@ -486,14 +580,14 @@ function main(): void {
   let plan = journal.read("plan.md");
   if (plan === null) {
     journal.banner("plan");
-    plan = askCursor(planPrompt({ row, specification, reviewFile: REVIEW_FILE }), "plan", journal, options, 20);
+    plan = await askCursor(planPrompt({ row, specification, reviewFile: REVIEW_FILE }), "plan", journal, options, 20);
     journal.save("plan.md", plan);
   }
 
   let summary = journal.read("summary.md");
   if (summary === null) {
     journal.banner("implement");
-    summary = askCursor(executePrompt({ row, plan, reviewFile: REVIEW_FILE }), "write", journal, options, 90);
+    summary = await askCursor(executePrompt({ row, plan, reviewFile: REVIEW_FILE }), "write", journal, options, 90);
     journal.save("summary.md", summary);
     saveState({ phase: "gate" });
   }
@@ -506,8 +600,8 @@ function main(): void {
   } else {
     while (true) {
       journal.banner(`gate + review (attempt ${round + 1})`);
-      const gate = runGate(journal, options);
-      const verdict = gate.ok ? runReview(journal, options, row, specification, state) : null;
+      const gate = await runGate(journal, options);
+      const verdict = gate.ok ? await runReview(journal, options, row, specification, state) : null;
       if (gate.ok && (verdict === null || verdict.satisfied)) break;
 
       if (round >= options.maxRounds) {
@@ -518,7 +612,7 @@ function main(): void {
       }
 
       journal.banner(`fix (attempt ${round + 2})`);
-      const fixSummary = askCursor(
+      const fixSummary = await askCursor(
         fixPrompt({
           row,
           plan,
@@ -591,11 +685,9 @@ function main(): void {
 }
 
 if (import.meta.main) {
-  try {
-    main();
-  } catch (error) {
+  main().catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`\nloop: ${message}\n`);
     process.exit(1);
-  }
+  });
 }

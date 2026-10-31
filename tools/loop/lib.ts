@@ -40,6 +40,90 @@ export function run(command: string, args: string[], options: RunOptions = {}): 
   };
 }
 
+export type StreamOptions = RunOptions & {
+  /** Receive stdout line by line instead of echoing it raw. */
+  onLine?: (line: string) => void;
+  /** Echo both streams to the terminal as they arrive. */
+  echo?: boolean;
+};
+
+/**
+ * Run a command and stream its output as it arrives.
+ *
+ * `run()` buffers, which is right for `git` and `gh` and wrong for anything a
+ * person is waiting on: an agent session can run for an hour, and a gate step
+ * for minutes. This tees the child's streams to the terminal and still returns
+ * the captured text.
+ */
+export async function runStreaming(
+  command: string,
+  args: string[],
+  options: StreamOptions = {},
+): Promise<RunResult> {
+  const proc = Bun.spawn([command, ...args], {
+    cwd: options.cwd,
+    env: options.env ?? process.env,
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+  let timedOut = false;
+  let terminator: ReturnType<typeof setTimeout> | null = null;
+  let killer: ReturnType<typeof setTimeout> | null = null;
+  if (options.timeoutMs !== undefined) {
+    terminator = setTimeout(() => {
+      timedOut = true;
+      proc.kill("SIGTERM");
+    }, options.timeoutMs);
+    killer = setTimeout(() => {
+      if (proc.exitCode === null) proc.kill("SIGKILL");
+    }, options.timeoutMs + 5000);
+  }
+
+  let lineBuffer = "";
+  const onStdout = (text: string): void => {
+    if (options.onLine === undefined) {
+      if (options.echo === true) process.stdout.write(text);
+      return;
+    }
+    lineBuffer += text;
+    let index = lineBuffer.indexOf("\n");
+    while (index !== -1) {
+      const line = lineBuffer.slice(0, index).replace(/\r$/, "");
+      lineBuffer = lineBuffer.slice(index + 1);
+      options.onLine(line);
+      index = lineBuffer.indexOf("\n");
+    }
+  };
+  const onStderr = (text: string): void => {
+    if (options.echo === true || options.onLine !== undefined) process.stderr.write(text);
+  };
+
+  const pump = async (stream: ReadableStream<Uint8Array>, sink: (text: string) => void): Promise<string> => {
+    const decoder = new TextDecoder();
+    let collected = "";
+    for await (const chunk of stream) {
+      const text = decoder.decode(chunk, { stream: true });
+      collected += text;
+      sink(text);
+    }
+    const rest = decoder.decode();
+    collected += rest;
+    sink(rest);
+    return collected;
+  };
+
+  const [stdout, stderr] = await Promise.all([pump(proc.stdout, onStdout), pump(proc.stderr, onStderr)]);
+  const code = await proc.exited;
+  if (lineBuffer !== "") options.onLine?.(lineBuffer);
+
+  if (terminator !== null) clearTimeout(terminator);
+  if (killer !== null) clearTimeout(killer);
+
+  return { code: code ?? (timedOut ? 124 : 1), stdout, stderr, timedOut };
+}
+
 /** Run git, and throw with git's own message when it fails. */
 export function git(args: string[], options: RunOptions = {}): string {
   const result = run("git", args, options);

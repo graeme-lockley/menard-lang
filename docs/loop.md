@@ -114,6 +114,21 @@ If the run had already reached the commit or PR step, it resumes there instead
 of repeating the gate. On success the state file is removed, so the next
 `make loop` starts clean. The per-item artifacts stay.
 
+## Watching a run
+
+Everything the loop does is streamed to stdout and appended to
+`.loop/<item>/run.log`:
+
+- each gate command's output as it runs, not after it finishes;
+- `cursor-agent`'s event stream — the model, the assistant's text, tool calls
+  as `→ shellToolCall: make ci`, and the final `result`;
+- a heartbeat every 20 seconds when nothing has arrived, so a long tool call
+  never looks like a hang.
+
+The driver runs the agent with `--output-format stream-json` for this reason.
+The raw NDJSON is kept in `cursor-plan.log` and `cursor-write.log` beside the
+rendered text.
+
 ## Artifacts
 
 ```

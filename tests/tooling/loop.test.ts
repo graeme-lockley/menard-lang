@@ -11,8 +11,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { extractReviewSection, readState, slug, tail, writeState } from "../../tools/loop/lib.ts";
+import { extractReviewSection, readState, runStreaming, slug, tail, writeState } from "../../tools/loop/lib.ts";
 import { executePrompt, reviewPrompt } from "../../tools/loop/prompts.ts";
+import { renderCursorEvent } from "../../tools/loop/run.ts";
 import type { Row } from "../../tools/next.ts";
 
 const REVIEW = join(import.meta.dir, "..", "..", "docs", "reviews", "2026-10-24-build-f.md");
@@ -105,6 +106,63 @@ describe("state", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("renderCursorEvent", () => {
+  test("renders the system, assistant, tool-call and result events", () => {
+    const trace = { result: null as string | null, text: "" };
+    const out: string[] = [];
+    const log = { log: (message: string) => out.push(message) };
+    renderCursorEvent(JSON.stringify({ type: "system", subtype: "init", model: "Auto" }), log, trace);
+    renderCursorEvent(
+      JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "Reading the actor." }] } }),
+      log,
+      trace,
+    );
+    renderCursorEvent(
+      JSON.stringify({ type: "tool_call", subtype: "started", tool_call: { tool: { case: "shellToolCall", value: { args: { command: "make ci" } } } } }),
+      log,
+      trace,
+    );
+    renderCursorEvent(JSON.stringify({ type: "result", subtype: "success", duration_ms: 4200, result: "the plan" }), log, trace);
+
+    expect(out[0]).toContain("Auto");
+    expect(out[1]).toContain("Reading the actor.");
+    expect(out[2]).toContain("shellToolCall");
+    expect(out[2]).toContain("make ci");
+    expect(out[3]).toContain("success");
+    expect(trace.text).toContain("Reading the actor.");
+    expect(trace.result).toBe("the plan");
+  });
+
+  test("passes non-JSON lines through and ignores thinking", () => {
+    const out: string[] = [];
+    const log = { log: (message: string) => out.push(message) };
+    const trace = { result: null as string | null, text: "" };
+    renderCursorEvent("warning: something", log, trace);
+    renderCursorEvent(JSON.stringify({ type: "thinking", subtype: "delta", text: "hmm" }), log, trace);
+    expect(out).toEqual(["warning: something"]);
+    expect(trace.text).toBe("");
+  });
+});
+
+describe("runStreaming", () => {
+  test("streams stdout line by line, keeps stderr, and returns the exit code", async () => {
+    const lines: string[] = [];
+    const result = await runStreaming(
+      process.execPath,
+      ["-e", "console.log('one'); console.log('two'); console.error('oops'); process.exit(3)"],
+      { onLine: (line) => lines.push(line) },
+    );
+    expect(lines).toEqual(["one", "two"]);
+    expect(result.code).toBe(3);
+    expect(result.stderr).toContain("oops");
+  });
+
+  test("kills a command that overruns its timeout", async () => {
+    const result = await runStreaming(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { timeoutMs: 300 });
+    expect(result.timedOut).toBe(true);
   });
 });
 
