@@ -1,6 +1,7 @@
 import type { Value } from "./value.ts";
 import { mapEntries, mapGet, mapSize } from "../builtins/collections.ts";
 import { formatFloat } from "./float-text.ts";
+import { compareFloat } from "./float-order.ts";
 
 export function showValue(v: Value): string {
   switch (v.tag) {
@@ -149,12 +150,8 @@ export function compareValue(a: Value, b: Value): number {
       const y = (b as typeof a).value;
       return x < y ? -1 : x > y ? 1 : 0;
     }
-    case "float": {
-      const x = a.value;
-      const y = (b as typeof a).value;
-      if (Object.is(x, y)) return 0;
-      return x < y ? -1 : 1;
-    }
+    case "float":
+      return compareFloat(a.value, (b as typeof a).value);
     case "bool":
       return Number(a.value) - Number((b as typeof a).value);
     case "unit":

@@ -1,6 +1,6 @@
 /*
  * Persistent ordered Map (AVL) — Phase 3 slice F.
- * Int and Str keys only for now (enough for examples + src patterns).
+ * Int, Str, and Float keys (LANG-03). Other orderable composites are LIB-06.
  * Values are opaque MnWords. Structural sharing on set.
  */
 #include "menard.h"
@@ -12,6 +12,7 @@
 #define HDR ((int64_t)sizeof(void *))
 #define TAG_MAP 20
 #define TAG_MAP_NODE 21
+#define TAG_FLOAT 13
 
 static MnShape shape_map = {.tag = TAG_MAP, .nbytes = 16, .layout = MN_LAYOUT_ORDINARY};
 
@@ -64,8 +65,12 @@ static int str_cmp_bytes(MnWord a, MnWord b) {
   return 0;
 }
 
+static int64_t obj_tag(MnWord obj) {
+  return (int64_t)mn_obj_shape((void *)(uintptr_t)obj)->tag;
+}
+
 static int key_cmp(MnWord a, MnWord b) {
-  /* Both Int immediates, or both Str objects. */
+  /* Both Int immediates, both Float (LANG-03 total order), or both Str. */
   if (mn_is_immediate(a) && mn_is_immediate(b)) {
     int64_t ia = mn_word_to_int(a);
     int64_t ib = mn_word_to_int(b);
@@ -78,7 +83,14 @@ static int key_cmp(MnWord a, MnWord b) {
     return 0;
   }
   if (!mn_is_immediate(a) && !mn_is_immediate(b)) {
-    return str_cmp_bytes(a, b);
+    int64_t ta = obj_tag(a);
+    int64_t tb = obj_tag(b);
+    if (ta == TAG_FLOAT && tb == TAG_FLOAT) {
+      return (int)mn_word_to_int(mn_compare(a, b));
+    }
+    if (ta != TAG_FLOAT && tb != TAG_FLOAT) {
+      return str_cmp_bytes(a, b);
+    }
   }
   mn_panic("mn_map: mixed or unsupported key types");
   return 0;

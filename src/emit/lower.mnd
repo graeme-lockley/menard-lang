@@ -1446,6 +1446,17 @@ let is-arith-binop(s: Str) -> Bool =
 let is-cmp-op(s: Str) -> Bool =
   s == "<" || s == ">" || s == "<=" || s == ">=" || s == "="
 
+; LANG-03 total-order predicates on Float — lower via `compare` then Int icmp.
+let is-float-cmp-op(s: Str) -> Bool =
+  s == "f<" || s == "f>" || s == "f<=" || s == "f>="
+
+let float-cmp-int-op(s: Str) -> Str =
+  cond
+    | s == "f<" -> "<"
+    | s == "f>" -> ">"
+    | s == "f<=" -> "<="
+    | else -> ">="
+
 let str-in-list(s: Str, xs: List Str) -> Bool =
   match (xs)
     | [] -> false
@@ -1623,6 +1634,7 @@ let lower-named(hn: Str, rest: List Ast, sp: Span, env: Map Str Int, b: Builder,
     | hn == "slot" -> lower-slot(rest, env, b, funcs, noop, pool)
     | hn == "tuple" -> lower-tuple(rest, env, b, funcs, noop, pool)
     | is-arith-binop(hn) -> lower-arith(rest, hn, sp, env, b, funcs, noop, pool)
+    | is-float-cmp-op(hn) -> lower-float-cmp(rest, hn, env, b, funcs, noop, pool)
     | is-cmp-op(hn) -> lower-cmp-value(rest, hn, env, b, funcs, noop, pool)
     | is-ctor-name(hn, pool) -> lower-ctor(hn, rest, env, b, funcs, noop, pool)
     | else ->
@@ -2500,6 +2512,24 @@ let lower-cmp-value(args: List Ast, op: Str, env: Map Str Int, b: Builder, funcs
 let lower-cmp-word!(op: Str, av: Int, cv: Int, b: Builder, pool: StrPool) -> Int =
   if (op == "=") -> emit-call!(b, extern-equal-abs(str-pool-extern-base(pool)), [get!(b, av), get!(b, cv)]) | bool-from-i1!(b, emit-cmp2!(b, cmp-pred-for(op), get!(b, av), get!(b, cv)))
 
+; `f<(a,b)` → `compare(a,b) < 0` (tagged Int icmp; agrees with host).
+let lower-float-cmp(args: List Ast, op: Str, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
+  match (args)
+    | [a-ast, c-ast] ->
+      Result.and-then(
+        fn (av) =
+          Result.and-then(
+            fn (cv) {
+              let cmpw = emit-call!(b, extern-compare-abs(str-pool-extern-base(pool)), [get!(b, av), get!(b, cv)])
+              let zero = const-tagged!(b, 0)
+              Ok(bool-from-i1!(b, emit-cmp2!(b, cmp-pred-for(float-cmp-int-op(op)), cmpw, zero)))
+            },
+            lower-expr(c-ast, env, b, funcs, noop, pool)
+          ),
+        lower-expr(a-ast, env, b, funcs, noop, pool)
+      )
+    | _ -> Err(String.concat("comparison `", op, "` expects exactly 2 arguments"))
+
 let cmp-pred-for(op: Str) -> Int =
   cond
     | op == "<" -> icmp-slt
@@ -3102,7 +3132,7 @@ let mc-pure(hn: Str) -> Bool =
   mc-pure-body(effect-alias(seam-menard-name(hn)))
 
 let mc-pure-body(hn: Str) -> Bool =
-  str-in-list(hn, ["isatty", "mtime", "now-ms", "ensure-dir", "remove", "is-dir"]) || hn == "if" || hn == "let" || hn == "do" || hn == "loop" || hn == "recur" || hn == "match" || hn == "println" || hn == "print" || hn == "shadow-push" || hn == "shadow-pop" || hn == "exit" || hn == "deref" || hn == "set!" || hn == "str-byte" || hn == "str-byte-length" || hn == "sb-clear!" || hn == "map-has" || hn == "map-size" || hn == "mn-env-get" || hn == "arg-count" || hn == "exists" || hn == "sb-length" || hn == "sb-to-str" || hn == "dump" || hn == "+" || hn == "-" || hn == "*" || hn == "/" || hn == "%" || hn == "<" || hn == ">" || hn == "<=" || hn == ">=" || hn == "=" || hn == "compare"
+  str-in-list(hn, ["isatty", "mtime", "now-ms", "ensure-dir", "remove", "is-dir"]) || hn == "if" || hn == "let" || hn == "do" || hn == "loop" || hn == "recur" || hn == "match" || hn == "println" || hn == "print" || hn == "shadow-push" || hn == "shadow-pop" || hn == "exit" || hn == "deref" || hn == "set!" || hn == "str-byte" || hn == "str-byte-length" || hn == "sb-clear!" || hn == "map-has" || hn == "map-size" || hn == "mn-env-get" || hn == "arg-count" || hn == "exists" || hn == "sb-length" || hn == "sb-to-str" || hn == "dump" || hn == "+" || hn == "-" || hn == "*" || hn == "/" || hn == "%" || hn == "<" || hn == ">" || hn == "<=" || hn == ">=" || hn == "=" || hn == "compare" || hn == "f<" || hn == "f>" || hn == "f<=" || hn == "f>="
 
 let mc-alloc-name(hn: Str) -> Bool =
   mc-alloc-body(seam-menard-name(hn))

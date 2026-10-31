@@ -197,8 +197,8 @@ let type-show-list(xs: List Type) -> Str =
 
 ; ---------------------------------------------------------------------------
 ; Showable / orderable (§2.12), evaluated on expanded types. `Ref`,
-; `StringBuffer` and `Fn` are neither; `Float` is showable but not
-; orderable (§2.12's deliberate exclusion). Equatable(T) is not needed by
+; `StringBuffer` and `Fn` are neither; `Float` is showable and orderable
+; under the monotonic bit order (LANG-03). Equatable(T) is not needed by
 ; this slice — every builtin and user type this typer ever unifies against
 ; is equatable, so no caller needs to ask.
 ;
@@ -234,7 +234,7 @@ pub let is-orderable(t: Type) -> Bool =
     | TStr -> true
     | TSym -> true
     | TUnit -> true
-    | TFloat -> false
+    | TFloat -> true
     | TStringBuffer -> false
     | TRef(_) -> false
     | TFn(_, _) -> false

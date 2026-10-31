@@ -235,6 +235,18 @@ describe("floats", () => {
     expect(ninf.tag).toBe("float");
     if (ninf.tag === "float") expect(ninf.value).toBe(-Infinity);
   });
+
+  test("f< / f<= / f> / f>= are single idents (LANG-03)", () => {
+    for (const name of ["f<", "f<=", "f>", "f>="]) {
+      const a = mustRead(`${name}(1.0, 2.0)`);
+      expect(a.tag).toBe("list");
+      if (a.tag !== "list") continue;
+      expect(a.elems[0]?.tag).toBe("sym");
+      if (a.elems[0]?.tag === "sym") {
+        expect(new TextDecoder().decode(a.elems[0].name)).toBe(name);
+      }
+    }
+  });
 });
 
 describe("character literals", () => {

@@ -30,6 +30,7 @@ import {
 import type { Host } from "../host/host.ts";
 import { ExitSignal, type IoError, type SpawnError, type SpawnStatus } from "../host/host.ts";
 import { showValue, equalValue, compareValue, dumpValue } from "./derive.ts";
+import { canonicalFloat } from "./float-order.ts";
 import { decodeSymBytes, specialFormOf, Sf } from "./resolve.ts";
 import { accelFor, getAccel, runAccel, setAccel } from "./accel.ts";
 import {
@@ -782,7 +783,7 @@ function beginEval(
     case "int":
       return { tag: "value", value: vInt(ast.value) };
     case "float":
-      return { tag: "value", value: { tag: "float", value: ast.value } };
+      return { tag: "value", value: { tag: "float", value: canonicalFloat(ast.value) } };
     case "bool":
       return { tag: "value", value: vBool(ast.value) };
     case "str":
@@ -1470,7 +1471,7 @@ function quoteValue(ast: Ast): Value {
     case "int":
       return vInt(ast.value);
     case "float":
-      return { tag: "float", value: ast.value };
+      return { tag: "float", value: canonicalFloat(ast.value) };
     case "bool":
       return vBool(ast.value);
     case "str":
@@ -1485,7 +1486,7 @@ function quoteValue(ast: Ast): Value {
 function installBuiltins(env: Env): void {
   const names = [
     "+", "-", "*", "/", "%", "<", ">", "<=", ">=",
-    "f+", "f-", "f*", "f/",
+    "f+", "f-", "f*", "f/", "f<", "f<=", "f>", "f>=",
     "show", "print", "println", "=", "compare", "dump",
     "ref", "deref",
     "map-new", "map-set", "map-get", "map-has", "map-keys",
@@ -1778,7 +1779,16 @@ function applyBuiltin(
       const x = (args[0] as { value: number }).value;
       const y = (args[1] as { value: number }).value;
       const value = name === "f+" ? x + y : name === "f-" ? x - y : name === "f*" ? x * y : x / y;
-      return { tag: "float", value };
+      return { tag: "float", value: canonicalFloat(value) };
+    }
+    case "f<":
+    case "f<=":
+    case "f>":
+    case "f>=": {
+      const c = compareValue(args[0]!, args[1]!);
+      const ok =
+        name === "f<" ? c < 0 : name === "f<=" ? c <= 0 : name === "f>" ? c > 0 : c >= 0;
+      return vBool(ok);
     }
     case "write-file": {
       const path = new TextDecoder().decode((args[0] as { bytes: Uint8Array }).bytes);

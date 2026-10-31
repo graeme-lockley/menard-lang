@@ -411,7 +411,23 @@ MnWord mn_sb_to_str(MnWord sb) {
   return obj[SB_DATA];
 }
 
+/* Quiet NaN canonical bits (LANG-03). Every NaN creation path goes through
+ * box_float, so equality and compare see one payload. */
+#define MN_CANON_NAN_BITS UINT64_C(0x7FF8000000000000)
+
+static double canonical_float(double d) {
+  uint64_t bits = 0;
+  memcpy(&bits, &d, sizeof(bits));
+  if ((bits & UINT64_C(0x7FF0000000000000)) == UINT64_C(0x7FF0000000000000) &&
+      (bits & UINT64_C(0x000FFFFFFFFFFFFF)) != 0) {
+    bits = MN_CANON_NAN_BITS;
+    memcpy(&d, &bits, sizeof(d));
+  }
+  return d;
+}
+
 static MnWord box_float(double d) {
+  d = canonical_float(d);
   MnWord *obj = (MnWord *)mn_alloc(16, &shape_float);
   memcpy(&obj[1], &d, sizeof(d));
   return (MnWord)obj;

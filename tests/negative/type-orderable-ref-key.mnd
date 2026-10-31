@@ -1,0 +1,6 @@
+; Ref is not an orderable Map key (LANG-03 negative).
+
+let main() -> Int {
+  map-set(map-new(), ref(1), 1)
+  0
+}

@@ -649,6 +649,19 @@ let scan-ident(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), st
             }
       | else -> set!(go, false)
   }
+  ; `f<=` / `f>=`: `=` is not ident-cont, but completes a float-order name.
+  cond
+    | is-none(deref(failed)) && deref(lx.pos) > start ->
+      {
+        let last = String.byte(deref(lx.pos) - 1, lx.src)
+        cond
+          | (last == 60 || last == 62) && lex-peek(lx, 0) == 61 ->
+            {
+              lex-bump(lx)
+              ()
+            }
+          | else -> ()
+      }
   cond
     | is-none(deref(failed)) && lex-peek(lx, 0) == 33 ->
       {

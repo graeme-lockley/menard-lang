@@ -122,6 +122,31 @@ without a closed bit (still races with late parkers).
 
 ---
 
+## 2026-10-31 — Float total order: monotonic bits, one quiet NaN (LANG-03)
+
+### The decision
+
+`Float` is orderable. Every NaN is canonicalised to quiet
+`0x7FF8000000000000` at boxing (arithmetic, parse, literals). Ordering uses the
+sign-magnitude bit transform `if (sign) ~bits else bits | sign-bit`, compared as
+`uint64`, giving `-inf < finite < +inf < nan` and `-0.0 < 0.0`. Equality is bit
+equality and agrees with `compare`. The predicates `f<` / `f<=` / `f>` / `f>=`
+are language builtins that agree with `compare`; infix `<=` stays Int-only.
+Native `Map` accepts `Float` keys under the same order.
+
+### Why
+
+§2.12 previously excluded `Float` while both hosts still sorted floats and
+disagreed (`memcmp` vs numeric). A single endian-safe total order closes that
+hole before `std/float` (LIB-01) and full Map-key structural compare (LIB-06).
+
+### Rejected
+
+IEEE 754 `totalOrder` (orders NaN payloads); leaving `Float` unorderable;
+endian-sensitive `memcmp` ordering.
+
+---
+
 ## 2026-10-26 — Canonical Float text: Ryu in C, mirrored in the host (LANG-02)
 
 ### The decision

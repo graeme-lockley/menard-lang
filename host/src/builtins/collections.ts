@@ -1,4 +1,5 @@
 import type { Value } from "../interp/value.ts";
+import { compareFloat } from "../interp/float-order.ts";
 
 /**
  * Persistent ordered map (AVL tree) with value semantics.
@@ -134,12 +135,8 @@ function compareValues(a: Value, b: Value): number {
   switch (a.tag) {
     case "int":
       return a.value < (b as typeof a).value ? -1 : a.value > (b as typeof a).value ? 1 : 0;
-    case "float": {
-      const x = a.value;
-      const y = (b as typeof a).value;
-      if (Object.is(x, y)) return 0;
-      return x < y ? -1 : 1;
-    }
+    case "float":
+      return compareFloat(a.value, (b as typeof a).value);
     case "bool":
       return Number(a.value) - Number((b as typeof a).value);
     case "str":
