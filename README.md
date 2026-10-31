@@ -46,9 +46,14 @@ make memory-checks   # collector bound and StringBuffer reclaim
 make typecheck       # tsc --noEmit
 make backlog-check   # review items and backlog rows agree
 make next            # items whose backlog blockers are all done
+make loop            # one backlog item end to end, to an open PR (docs/loop.md)
 make native-test     # ./mn test
 make bootstrap       # interpreter, stage0, stage1, stage2, and the fixed point
 ```
+
+`make loop` drives the whole backlog loop — pick, branch, plan, implement, gate,
+review, commit, PR — with [Cursor](https://cursor.com) as the implementer and
+`docs/loop.md` as the contract. It needs `cursor-agent` and `gh` on `PATH`.
 
 ```bash
 ./mn run examples/sc.mnd

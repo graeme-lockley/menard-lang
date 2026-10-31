@@ -38,7 +38,7 @@ BUILD_DIR := build
 
 .DEFAULT_GOAL := mn
 
-.PHONY: mn bootstrap test typecheck backlog-check next ci memory-checks native-test runtime-smoke runtime-sb-gc runtime-clean hello-native ret-native sqlite-native check-fixed-point float-text-wasm float-text-bench
+.PHONY: mn bootstrap test typecheck backlog-check next loop ci memory-checks native-test runtime-smoke runtime-sb-gc runtime-clean hello-native ret-native sqlite-native check-fixed-point float-text-wasm float-text-bench
 
 # Build B FFI proving ground: SQLite (cross-platform).
 # Dedicated link target — does not bake libsqlite3 into ./mn.
@@ -90,6 +90,12 @@ backlog-check:
 # `make next ARGS=--all` lifts that.
 next:
 	bun run tools/next.ts $(ARGS)
+
+# The whole backlog loop, codified: next ready item -> branch -> plan with
+# cursor-agent -> implement -> gate -> independent review -> commit -> PR.
+# See docs/loop.md. Preview with `make loop ARGS=--dry-run`.
+loop:
+	bun run tools/loop/run.ts $(ARGS)
 
 ci: typecheck test backlog-check
 

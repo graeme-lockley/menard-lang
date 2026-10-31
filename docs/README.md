@@ -18,6 +18,7 @@ What to read when. Living language docs stay at this root so paths cited by the 
 | --- | --- |
 | [decisions.md](decisions.md) | Dated decisions and rejected alternatives |
 | [backlog.md](backlog.md) | Live work queue and status for every review item |
+| [loop.md](loop.md) | The codified backlog loop: `make loop`, and what it will not skip |
 
 ## Design history
 
