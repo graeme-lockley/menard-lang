@@ -416,6 +416,21 @@ MnWord mn_tcp_close(MnWord fd_tagged) {
   return MN_UNIT;
 }
 
+/* Bound TCP port for a listening (or connected) socket — enables listen(0). */
+MnWord mn_tcp_local_port(MnWord fd_tagged) {
+  int fd = (int)mn_word_to_int(fd_tagged);
+  struct sockaddr_in addr;
+  socklen_t len = sizeof(addr);
+  memset(&addr, 0, sizeof(addr));
+  if (getsockname(fd, (struct sockaddr *)&addr, &len) != 0) {
+    return io_err_errno(errno);
+  }
+  if (addr.sin_family != AF_INET) {
+    return io_other(EINVAL);
+  }
+  return mn_ok(mn_int_to_word((int64_t)ntohs(addr.sin_port)));
+}
+
 MnWord mn_udp_bind(MnWord port_tagged) {
   int port = (int)mn_word_to_int(port_tagged);
   int fd = socket(AF_INET, SOCK_DGRAM, 0);

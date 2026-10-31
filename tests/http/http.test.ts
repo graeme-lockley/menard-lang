@@ -1,5 +1,5 @@
 /**
- * Build F — HTTP server + client round-trip (native only).
+ * Build F / CONC-04 — HTTP round-trip and hygiene (native only).
  */
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
@@ -45,12 +45,25 @@ function runNative(fixture: string): { status: number | null; stdout: string; st
 
 describe("Build F http", () => {
   test.skipIf(!Bun.which("clang"))(
-    "native: HTTP server + client round-trip",
+    "native: HTTP server + client round-trip (ephemeral port)",
     () => {
       const r = runNative("tests/http/roundtrip.mnd");
       expect(r.stderr).not.toContain("panic");
       expect(r.status).toBe(0);
       expect(r.stdout).toBe("200\n/hi\n");
+    },
+    { timeout: 180_000 },
+  );
+
+  test.skipIf(!Bun.which("clang"))(
+    "native: HTTP hygiene (headers, limits, ports, deadlines)",
+    () => {
+      const r = runNative("tests/http/hygiene.mnd");
+      expect(r.stderr).not.toContain("panic");
+      expect(r.status).toBe(0);
+      // 1 happy, 3 CL spellings, missing Host, conflicting CL,
+      // 431, 413, distinct ports, client timeout → ten ones
+      expect(r.stdout).toBe("1\n1\n1\n1\n1\n1\n1\n1\n1\n1\n");
     },
     { timeout: 180_000 },
   );

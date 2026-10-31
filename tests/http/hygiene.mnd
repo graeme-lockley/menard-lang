@@ -1,0 +1,212 @@
+; CONC-04: header case, Host/CL validation, limits, ephemeral ports, deadlines.
+import std/http as Http
+pub import std/http (Request, Response, Method, GET, Limits, NetErr)
+import std/map as Map
+import std/task as Task
+import std/net as Net
+import std/sched as Sched
+import std/string as String
+import std/int as Int
+pub import std/io (Timeout)
+
+; Read until we have a status line (or timeout/EOF). Returns the status code, or -1.
+let read-status(fd: Int, acc: Str, deadline: Int) -> Int =
+  match (String.index-of("\r\n", acc))
+    | Some(at) -> {
+        let line = String.slice(0, at, acc)
+        match (String.split(" ", line))
+          | _ :: code :: _ ->
+            match (Int.from-str(code))
+              | Some(n) -> n
+              | None -> -1
+          | _ -> -1
+      }
+    | None -> {
+        let left = deadline - Sched.mono-ms()
+        let ms = if (left < 0) -> 0 | left
+        match (Net.read-timeout(fd, 512, ms))
+          | Err(_) -> -1
+          | Ok("") -> -1
+          | Ok(chunk) -> read-status(fd, String.concat(acc, chunk), deadline)
+      }
+
+; Send a raw request and return the response status (or -1).
+let raw-status(host: Str, port: Int, raw: Str, ms: Int) -> Int =
+  match (Net.connect-timeout(host, port, ms))
+    | Err(_) -> -1
+    | Ok(fd) -> {
+        defer Net.close(fd)
+        let deadline = Sched.mono-ms() + ms
+        match (Net.write-timeout(fd, raw, ms))
+          | Err(_) -> -1
+          | Ok(_) -> read-status(fd, "", deadline)
+      }
+
+let echo-handler(req: Request) -> Response =
+  match (req)
+    | Request(_, path, _, body) -> {
+        let out = if (body == "") -> path | body
+        Response(200, Map.set("Content-Type", "text/plain", Map.empty()), out)
+      }
+
+; Start a server with limits; notify `ready` after listen; store port in `port-cell`.
+let start-server(ready: Int, port-cell: Ref Int, conn-ms: Int, limits: Limits) -> Task Int =
+  Task.spawn(fn () = {
+    match (Net.listen(0))
+      | Err(_) -> 1
+      | Ok(listener) -> {
+          defer Net.close(listener)
+          match (Net.local-port(listener))
+            | Err(_) -> 1
+            | Ok(port) -> {
+                set!(port-cell, port)
+                Sched.notify(ready)
+                match (Http.serve-on(listener, conn-ms, limits, echo-handler))
+                  | Ok(_) -> 0
+                  | Err(_) -> 1
+              }
+        }
+  })
+
+let stop(server: Task Int) -> Unit {
+  Task.cancel(server)
+  let _ = Task.join(server)
+  ()
+}
+
+; POST with a given Content-Length header spelling; expect body "abc" echoed.
+let check-cl(port: Int, name: Str) -> Int {
+  let raw = String.concat(
+    "POST /echo HTTP/1.1\r\nHost: 127.0.0.1\r\n",
+    name,
+    ": 3\r\n\r\nabc"
+  )
+  match (Net.connect-timeout("127.0.0.1", port, 2000))
+    | Err(_) -> 0
+    | Ok(fd) -> {
+        defer Net.close(fd)
+        match (Net.write-timeout(fd, raw, 2000))
+          | Err(_) -> 0
+          | Ok(_) ->
+            match (Net.read-timeout(fd, 4096, 2000))
+              | Err(_) -> 0
+              | Ok(buf) ->
+                if (String.contains("abc", buf)) -> 1 | 0
+      }
+}
+
+let main() -> Int {
+  ; --- Happy path + header case table + Host/CL on default limits ---
+  let ready1 = Sched.wait-new()
+  let port1 = ref(0)
+  let s1 = start-server(ready1, port1, 3000, Http.default-limits())
+  let _ = Sched.wait(ready1)
+  let p1 = deref(port1)
+
+  ; 1) Happy path via Http.request-timeout
+  let ok-happy =
+    match (Http.request-timeout("127.0.0.1", p1, Request(GET(), "/hi", Map.empty(), ""), 2000))
+      | Ok(Response(200, _, "/hi")) -> 1
+      | _ -> 0
+  println(ok-happy)
+
+  ; 2–4) Content-Length spellings
+  println(check-cl(p1, "Content-Length"))
+  println(check-cl(p1, "content-length"))
+  println(check-cl(p1, "CONTENT-LENGTH"))
+
+  ; 5) Missing Host → 400
+  println(
+    if (raw-status("127.0.0.1", p1, "GET / HTTP/1.1\r\n\r\n", 2000) == 400) -> 1 | 0
+  )
+
+  ; 6) Conflicting Content-Length → 400
+  println(
+    if (raw-status(
+      "127.0.0.1",
+      p1,
+      "POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n",
+      2000
+    ) == 400) -> 1 | 0
+  )
+
+  stop(s1)
+
+  ; --- Tight limits: 431 / 413 ---
+  let ready2 = Sched.wait-new()
+  let port2 = ref(0)
+  let tight = Limits(64, 256, 20, 32)
+  let s2 = start-server(ready2, port2, 3000, tight)
+  let _ = Sched.wait(ready2)
+  let p2 = deref(port2)
+
+  ; 7) Request line too long → 431
+  let long-path = String.repeat(80, "a")
+  let long-line = String.concat("GET /", long-path, " HTTP/1.1\r\nHost: h\r\n\r\n")
+  println(
+    if (raw-status("127.0.0.1", p2, long-line, 2000) == 431) -> 1 | 0
+  )
+
+  ; 8) Body Content-Length over max-body → 413 (no body bytes required)
+  println(
+    if (raw-status(
+      "127.0.0.1",
+      p2,
+      "POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 100\r\n\r\n",
+      2000
+    ) == 413) -> 1 | 0
+  )
+
+  stop(s2)
+
+  ; --- Two ephemeral listeners do not collide ---
+  let ready-a = Sched.wait-new()
+  let ready-b = Sched.wait-new()
+  let pa = ref(0)
+  let pb = ref(0)
+  let sa = start-server(ready-a, pa, 3000, Http.default-limits())
+  let sb = start-server(ready-b, pb, 3000, Http.default-limits())
+  let _ = Sched.wait(ready-a)
+  let _ = Sched.wait(ready-b)
+  let ok-ports =
+    if (deref(pa) != 0 && deref(pb) != 0 && deref(pa) != deref(pb)) -> 1 | 0
+  println(ok-ports)
+  stop(sa)
+  stop(sb)
+
+  ; --- Client deadline: stalled peer cannot hang forever ---
+  let ready3 = Sched.wait-new()
+  let port3 = ref(0)
+  let s3 = Task.spawn(fn () = {
+    match (Net.listen(0))
+      | Err(_) -> 1
+      | Ok(listener) -> {
+          defer Net.close(listener)
+          match (Net.local-port(listener))
+            | Err(_) -> 1
+            | Ok(port) -> {
+                set!(port3, port)
+                Sched.notify(ready3)
+                ; Accept once and never reply — client should time out.
+                match (Net.accept(listener))
+                  | Err(_) -> 1
+                  | Ok(conn) -> {
+                      defer Net.close(conn)
+                      let _ = Task.sleep-ms(500)
+                      0
+                    }
+              }
+        }
+  })
+  let _ = Sched.wait(ready3)
+  let p3 = deref(port3)
+  let ok-timeout =
+    match (Http.request-timeout("127.0.0.1", p3, Request(GET(), "/", Map.empty(), ""), 50))
+      | Err(NetErr(Timeout())) -> 1
+      | Err(_) -> 1
+      | Ok(_) -> 0
+  println(ok-timeout)
+  stop(s3)
+
+  0
+}

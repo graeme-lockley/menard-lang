@@ -28,6 +28,39 @@ specification. Where a name changed, the entry that changed it says so.
 
 ---
 
+## 2026-10-30 — HTTP limits, lowercase headers, last-wins (CONC-04)
+
+### The decision
+
+`std/http` normalises header names to ASCII lowercase on parse and keeps
+`Map Str Str` with **last-wins** duplicates (documented for `Set-Cookie`).
+Default size caps are request line 8 KiB, header block 64 KiB, 100 headers,
+body 8 MiB (`Limits` / `default-limits`), configurable per serve/request.
+Limit breaches answer **431** / **413** and close; protocol errors answer
+**400** as `BadRequest`. `Content-Length` is validated before body allocation;
+conflicting CL values and a missing HTTP/1.1 `Host` are rejected. Connections
+are one-shot — leftover bytes are not a second request. Public APIs take
+relative-ms deadlines (CONC-02); `request` defaults to the same 30s budget as
+`serve`. `Net.local-port` exposes `getsockname` so tests can `listen(0)`.
+
+### Why
+
+The previous layer trusted CL, matched only two spellings, dropped duplicates
+silently, unboundedly buffered headers, used fixed test ports and `Task.yield`
+races, and had no DoS model. Caps plus deadlines make a stalled or malicious
+client a bounded problem; lowercase + last-wins is the smallest honest header
+policy without a multi-map.
+
+### Rejected
+
+Multi-value header maps / `List (Str * Str)` for Phase 0 (larger API break;
+revisit if `Set-Cookie` fidelity becomes required). A new `Deadline` type
+(CONC-02 already standardised relative ms). Keep-alive / pipelining (smuggling
+surface). Inventing `??` before LANG-06 — invalid CL is a hard `BadRequest`
+via `Maybe` match instead of silent `? 0`.
+
+---
+
 ## 2026-10-26 — Deadlines: timer heap, wait-until, virtual clock (CONC-02)
 
 ### The decision
