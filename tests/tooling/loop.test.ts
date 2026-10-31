@@ -13,7 +13,7 @@ import { join } from "node:path";
 
 import { extractReviewSection, readState, runStreaming, slug, tail, writeState } from "../../tools/loop/lib.ts";
 import { executePrompt, reviewPrompt } from "../../tools/loop/prompts.ts";
-import { auditAgentCommands, describeToolCall, issueRef, renderCursorEvent } from "../../tools/loop/run.ts";
+import { auditAgentCommands, describeToolCall, issueRef, planFromToolCall, renderCursorEvent } from "../../tools/loop/run.ts";
 import type { Row } from "../../tools/next.ts";
 
 const REVIEW = join(import.meta.dir, "..", "..", "docs", "reviews", "2026-10-24-build-f.md");
@@ -111,7 +111,7 @@ describe("state", () => {
 
 describe("renderCursorEvent", () => {
   test("renders the system, assistant, tool-call and result events", () => {
-    const trace = { result: null as string | null, text: "" };
+    const trace = { result: null as string | null, text: "", plan: null };
     const out: string[] = [];
     const log = { log: (message: string) => out.push(message) };
     renderCursorEvent(JSON.stringify({ type: "system", subtype: "init", model: "Auto" }), log, trace);
@@ -138,7 +138,7 @@ describe("renderCursorEvent", () => {
   test("passes non-JSON lines through and ignores thinking", () => {
     const out: string[] = [];
     const log = { log: (message: string) => out.push(message) };
-    const trace = { result: null as string | null, text: "" };
+    const trace = { result: null as string | null, text: "", plan: null };
     renderCursorEvent("warning: something", log, trace);
     renderCursorEvent(JSON.stringify({ type: "thinking", subtype: "delta", text: "hmm" }), log, trace);
     expect(out).toEqual(["warning: something"]);
@@ -151,6 +151,29 @@ describe("issueRef", () => {
     expect(issueRef({ ...row, issue: "#22" })).toBe("#22");
     expect(issueRef({ ...row, issue: "22" })).toBe("#22");
     expect(issueRef({ ...row, issue: "" })).toBe("");
+  });
+});
+
+describe("planFromToolCall", () => {
+  test("returns the plan payload the CLI writes", () => {
+    const plan = planFromToolCall({ createPlanToolCall: { args: { plan: "## Scope\nreal plan" } } });
+    expect(plan).toBe("## Scope\nreal plan");
+    expect(planFromToolCall({ readToolCall: { args: { path: "x" } } })).toBeNull();
+    expect(planFromToolCall({ createPlanToolCall: { args: { plan: "   " } } })).toBeNull();
+  });
+
+  test("renderCursorEvent keeps the plan and the narration apart", () => {
+    const trace = { result: null as string | null, text: "", plan: null as string | null };
+    const out: string[] = [];
+    const log = { log: (message: string) => out.push(message) };
+    renderCursorEvent(
+      JSON.stringify({ type: "tool_call", subtype: "started", tool_call: { createPlanToolCall: { args: { plan: "## Scope\nthe real plan" } } } }),
+      log,
+      trace,
+    );
+    renderCursorEvent(JSON.stringify({ type: "result", subtype: "success", result: "I'll research the files." }), log, trace);
+    expect(trace.plan).toBe("## Scope\nthe real plan");
+    expect(trace.result).toBe("I'll research the files.");
   });
 });
 
@@ -198,10 +221,15 @@ describe("runStreaming", () => {
 
 describe("prompt contracts", () => {
   test("the implement prompt carries the plan and forbids committing", () => {
-    const prompt = executePrompt({ row, plan: "## Scope\nactor.mnd", reviewFile: "docs/reviews/x.md" });
+    const prompt = executePrompt({ row, plan: "## Scope\nactor.mnd", reviewFile: "docs/reviews/x.md", summaryPath: "/tmp/loop/agent-summary.md" });
     expect(prompt).toContain("## Scope");
     expect(prompt).toContain("Do not commit");
     expect(prompt).toContain("docs/reviews/x.md#conc-05");
+  });
+
+  test("the implement prompt sends the summary to a file", () => {
+    const prompt = executePrompt({ row, plan: "## Scope", reviewFile: "docs/reviews/x.md", summaryPath: "/tmp/loop/agent-summary.md" });
+    expect(prompt).toContain("/tmp/loop/agent-summary.md");
   });
 
   test("the review prompt demands the JSON verdict and no edits", () => {

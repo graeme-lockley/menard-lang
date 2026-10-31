@@ -183,6 +183,7 @@ export type State = {
   phase: string;
   rounds: number;
   startedAt: string;
+  lastError?: string;
 };
 
 export function readState(path: string): State | null {
@@ -201,6 +202,7 @@ export function readState(path: string): State | null {
       phase: record["phase"] as string,
       rounds: typeof record["rounds"] === "number" ? record["rounds"] : 0,
       startedAt: record["startedAt"] as string,
+      lastError: typeof record["lastError"] === "string" ? record["lastError"] : undefined,
     };
   } catch {
     return null;

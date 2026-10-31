@@ -52,6 +52,7 @@ type Options = {
   review: boolean;
   fixedPoint: boolean | null;
   cold: boolean;
+  allowStaleBase: boolean;
   maxRounds: number;
   model: string | null;
 };
@@ -65,6 +66,7 @@ type Verdict = { satisfied: boolean; criteria: Criterion[]; gaps: string[]; note
 
 const timings: { stage: string; ms: number }[] = [];
 let currentJournal: Journal | null = null;
+let currentState: State | null = null;
 
 function die(message: string): never {
   process.stderr.write(`loop: ${message}\n`);
@@ -80,6 +82,7 @@ function parseArgs(argv: string[]): Options {
     review: true,
     fixedPoint: null,
     cold: false,
+    allowStaleBase: false,
     maxRounds: 2,
     model: null,
   };
@@ -128,6 +131,9 @@ function parseArgs(argv: string[]): Options {
       case "--cold":
         options.cold = true;
         break;
+      case "--allow-stale-base":
+        options.allowStaleBase = true;
+        break;
       case "--help":
       case "-h":
         printHelp();
@@ -152,6 +158,7 @@ function printHelp(): void {
   --fixed-point      force 'make check-fixed-point' into the gate
   --no-fixed-point   never run 'make check-fixed-point'
   --cold             clear ~/.menard before the gate (the first attempt does this anyway)
+  --allow-stale-base accept a base that is behind origin (default: refuse)
   --model NAME       pass --model to cursor-agent
 `);
 }
@@ -184,6 +191,33 @@ function touchesCompiler(base: string): boolean {
   return changed.stdout
     .split("\n")
     .some((path) => path.startsWith("src/") || path.startsWith("runtime/"));
+}
+
+/** Prefer origin/main: a stale local main silently branches from old history. */
+function resolveBase(base: string): string {
+  if (base !== "main") return base;
+  return run("git", ["rev-parse", "--verify", "--quiet", "origin/main"], { cwd: ROOT }).code === 0 ? "origin/main" : "main";
+}
+
+/** A base behind its upstream drags old history into the PR. */
+function checkBaseFresh(base: string, allowStale: boolean, strict: boolean): string | null {
+  if (base.startsWith("origin/")) return null;
+  if (run("git", ["rev-parse", "--verify", "--quiet", `origin/${base}`], { cwd: ROOT }).code !== 0) return null;
+  const behind = Number(run("git", ["rev-list", "--count", `${base}..origin/${base}`], { cwd: ROOT }).stdout.trim());
+  if (!Number.isFinite(behind) || behind === 0) return null;
+  const message = `base ${base} is ${behind} commit(s) behind origin/${base}`;
+  if (!allowStale && strict) die(`${message} — update it, or pass --allow-stale-base`);
+  return message;
+}
+
+/** The blob hash of this file: the console says which harness is running. */
+function driverId(): string {
+  const blob = run("git", ["hash-object", "tools/loop/run.ts"], { cwd: ROOT }).stdout.trim();
+  return blob === "" ? "unknown" : blob.slice(0, 8);
+}
+
+function hasPlanSections(text: string): boolean {
+  return text.includes("## Scope") && text.includes("## Steps");
 }
 
 function readStamp(journal: Journal): GateStamp | null {
@@ -229,6 +263,9 @@ async function runGate(
   state: State,
   attempt: number,
 ): Promise<GateResult> {
+  // Stage first: touchesCompiler() reads the index, and the index only reflects
+  // the worktree after `git add -A`.
+  const tree = options.dryRun ? "" : treeHash();
   const fixedPoint = options.fixedPoint ?? (options.dryRun ? false : touchesCompiler(state.base));
   const steps = gateSteps(fixedPoint);
 
@@ -238,7 +275,6 @@ async function runGate(
     return { ok: true, failed: null, output: "", skipped: false, fixedPoint };
   }
 
-  const tree = treeHash();
   const signature = gateSignature(steps);
   const stamp = readStamp(journal);
   if (stamp !== null && stamp.tree === tree && stamp.signature === signature) {
@@ -313,7 +349,20 @@ export function auditAgentCommands(events: string): string[] {
   return found;
 }
 
-export type CursorTrace = { result: string | null; text: string };
+export type CursorTrace = { result: string | null; text: string; plan: string | null };
+export type AgentReply = { text: string; plan: string | null };
+
+/** The plan payload from a createPlanToolCall event, if there is one. */
+export function planFromToolCall(toolCall: unknown): string | null {
+  if (typeof toolCall !== "object" || toolCall === null) return null;
+  const record = toolCall as Record<string, unknown>;
+  const call = record["createPlanToolCall"];
+  if (typeof call !== "object" || call === null) return null;
+  const args = (call as Record<string, unknown>)["args"];
+  if (typeof args !== "object" || args === null) return null;
+  const plan = (args as Record<string, unknown>)["plan"];
+  return typeof plan === "string" && plan.trim() !== "" ? plan : null;
+}
 
 /** The part of a Journal the renderer needs, so it can be tested without one. */
 type Log = { log(message: string): void };
@@ -407,7 +456,10 @@ export function renderCursorEvent(line: string, log: Log, trace: CursorTrace): v
       return;
     }
     case "tool_call": {
-      if (event["subtype"] === "started") log.log(`  → ${describeToolCall(event["tool_call"], ROOT)}`);
+      if (event["subtype"] !== "started") return;
+      const plan = planFromToolCall(event["tool_call"]);
+      if (plan !== null) trace.plan = plan;
+      log.log(`  → ${describeToolCall(event["tool_call"], ROOT)}`);
       return;
     }
     case "thinking":
@@ -431,21 +483,24 @@ export function renderCursorEvent(line: string, log: Log, trace: CursorTrace): v
 
 async function askCursor(
   prompt: string,
-  mode: "plan" | "write",
+  mode: "plan" | "ask" | "write",
   journal: Journal,
   options: Options,
   timeoutMinutes: number,
   label: string,
-): Promise<string> {
+): Promise<AgentReply> {
   const args = ["-p", "--output-format", "stream-json", "--trust", "--workspace", ROOT];
   if (options.model !== null) args.push("--model", options.model);
-  args.push(mode === "plan" ? "--plan" : "--force");
+  if (mode === "plan") args.push("--plan");
+  else if (mode === "ask") args.push("--mode", "ask");
+  else args.push("--force");
   args.push(prompt);
 
-  journal.mark(`$ cursor-agent -p ${mode === "plan" ? "--plan" : "--force"} <${prompt.length} char prompt>`);
-  if (options.dryRun) return "(dry run: cursor-agent not invoked)";
+  const flag = mode === "plan" ? "--plan" : mode === "ask" ? "--mode ask" : "--force";
+  journal.mark(`$ cursor-agent -p ${flag} <${prompt.length} char prompt>`);
+  if (options.dryRun) return { text: "(dry run: cursor-agent not invoked)", plan: null };
 
-  const trace: CursorTrace = { result: null, text: "" };
+  const trace: CursorTrace = { result: null, text: "", plan: null };
   let lastEvent = Date.now();
   const heartbeat = setInterval(() => {
     const idle = Math.round((Date.now() - lastEvent) / 1000);
@@ -483,8 +538,10 @@ async function askCursor(
     throw new Error(`cursor-agent (${mode}) exited ${result.code}:\n${tail(result.stderr || result.stdout, 4000)}`);
   }
   const text = trace.result ?? trace.text;
-  if (text.trim() === "") throw new Error(`cursor-agent (${mode}) returned no text; see ${journal.path(`cursor-${label}.log`)}`);
-  return text;
+  if (text.trim() === "" && (trace.plan ?? "").trim() === "") {
+    throw new Error(`cursor-agent (${mode}) returned no text; see ${journal.path(`cursor-${label}.log`)}`);
+  }
+  return { text, plan: trace.plan };
 }
 
 /** Parse the reviewer's verdict, tolerating a stray code fence around it. */
@@ -535,7 +592,7 @@ async function runReview(
 ): Promise<Verdict> {
   if (!options.review) return { satisfied: true, criteria: [], gaps: [], notes: "(review disabled)" };
   if (options.dryRun) {
-    journal.mark("$ cursor-agent -p --plan <review prompt>");
+    journal.mark("$ cursor-agent -p --mode ask <review prompt>");
     return { satisfied: true, criteria: [], gaps: [], notes: "(dry run)" };
   }
 
@@ -544,18 +601,37 @@ async function runReview(
   const rawDiff = run("git", ["diff", "--cached", state.base], { cwd: ROOT }).stdout;
   const diff = rawDiff.length > DIFF_LIMIT ? `${rawDiff.slice(0, DIFF_LIMIT)}\n… truncated at ${DIFF_LIMIT} characters` : rawDiff;
 
-  const raw = await askCursor(
+  const reply = await askCursor(
     reviewPrompt({ row, specification, base: state.base, stat, changed, diff }),
-    "plan",
+    "ask",
     journal,
     options,
     20,
     `review-${attempt}`,
   );
-  journal.save(`review-${attempt}.raw.md`, raw);
-  const verdict = parseVerdict(raw);
+  journal.save(`review-${attempt}.raw.md`, reply.plan ?? reply.text);
+
+  // The verdict can arrive as the final message, in a plan payload, or not at
+  // all (plan mode used to write it into a plan document). Harvest, then ask
+  // once, cheaply, for the JSON only.
+  let verdict = parseVerdict(reply.text) ?? (reply.plan === null ? null : parseVerdict(reply.plan));
   if (verdict === null) {
-    throw new Error(`reviewer output was not valid JSON; read ${journal.path(`review-${attempt}.raw.md`)} and rerun with --resume`);
+    const notes = [reply.text, reply.plan ?? ""].filter((part) => part.trim() !== "").join("\n\n");
+    journal.mark("! no JSON verdict in the review reply — asking it to format one");
+    const formatted = await askCursor(
+      `Convert the review notes below into exactly this JSON object, with no other text:\n{"satisfied": boolean, "criteria": [{"criterion": "...", "status": "met|partial|missing", "evidence": "path:line or test name"}], "gaps": ["..."], "notes": "one paragraph"}\n\n<notes>\n${notes}\n</notes>`,
+      "ask",
+      journal,
+      options,
+      5,
+      `review-${attempt}-format`,
+    );
+    verdict = parseVerdict(formatted.text) ?? (formatted.plan === null ? null : parseVerdict(formatted.plan));
+  }
+  if (verdict === null) {
+    throw new Error(
+      `reviewer produced no JSON verdict after a formatting retry; artifacts in ${journal.dir}. Commit the green tree without a verdict with: make loop ARGS="--resume --no-review"`,
+    );
   }
   journal.save(`review-${attempt}.json`, JSON.stringify(verdict, null, 2));
   journal.save("review.json", JSON.stringify(verdict, null, 2));
@@ -697,6 +773,7 @@ function preflight(options: Options): void {
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   process.chdir(ROOT);
+  options.base = resolveBase(options.base);
   preflight(options);
 
   const rows = parseBacklog(readFileSync(BACKLOG, "utf8"));
@@ -738,14 +815,19 @@ async function main(): Promise<void> {
   if (options.dryRun) rmSync(artifactDir, { recursive: true, force: true });
   const journal = new Journal(artifactDir);
   currentJournal = journal;
+  currentState = options.dryRun ? null : state;
 
   const saveState = (patch: Partial<State> = {}): void => {
     state = { ...state, ...patch };
+    currentState = state;
     if (!options.dryRun) writeState(STATE, state);
   };
 
   journal.mark(`Menard loop — ${row.id}: ${cleanTitle(row)}`);
-  journal.mark(`branch ${state.branch} from ${state.base}${options.dryRun ? " (dry run)" : ""}`);
+  journal.mark(`driver ${driverId()} · base ${state.base}${options.dryRun ? " (dry run)" : ""}`);
+  const baseWarning = checkBaseFresh(state.base, options.allowStaleBase, !options.dryRun);
+  if (baseWarning !== null) journal.mark(`! ${baseWarning}`);
+  if (resuming && state.lastError !== undefined) journal.mark(`previous failure: ${state.lastError}`);
 
   const specification = extractReviewSection(readFileSync(REVIEW, "utf8"), row.id);
   if (specification === null) die(`could not find ${row.id} in ${REVIEW}`);
@@ -761,16 +843,47 @@ async function main(): Promise<void> {
   let plan = journal.read("plan.md");
   if (plan === null) {
     journal.banner("plan");
-    plan = await timed("plan", () => askCursor(planPrompt({ row, specification, reviewFile: REVIEW_FILE }), "plan", journal, options, 20, "plan"));
+    const first = await timed("plan", () =>
+      askCursor(planPrompt({ row, specification, reviewFile: REVIEW_FILE }), "plan", journal, options, 20, "plan"),
+    );
+    let captured = first.plan ?? first.text;
+    if (!options.dryRun && !hasPlanSections(captured)) {
+      journal.mark("! captured plan is missing ## Scope / ## Steps — asking once more");
+      const retry = await timed("plan retry", () =>
+        askCursor(
+          `${planPrompt({ row, specification, reviewFile: REVIEW_FILE })}\n\nYour previous reply was not a plan with the required sections. Return the plan itself, with its headings, as your final message.`,
+          "plan",
+          journal,
+          options,
+          20,
+          "plan-retry",
+        ),
+      );
+      const retried = retry.plan ?? retry.text;
+      if (hasPlanSections(retried)) captured = retried;
+    }
+    if (!options.dryRun && !hasPlanSections(captured)) {
+      journal.mark("! plan still lacks ## Scope / ## Steps; continuing with what was captured");
+    }
+    plan = captured;
     journal.save("plan.md", plan);
   }
+
+  const agentSummaryPath = journal.path("agent-summary.md");
+  const readAgentSummary = (fallback: string): string => {
+    if (!existsSync(agentSummaryPath)) return fallback;
+    const written = readFileSync(agentSummaryPath, "utf8").trim();
+    return written === "" ? fallback : written;
+  };
 
   let summary = journal.read("summary.md");
   if (summary === null) {
     journal.banner("implement");
-    summary = await timed("implement", () =>
-      askCursor(executePrompt({ row, plan, reviewFile: REVIEW_FILE }), "write", journal, options, 90, "implement"),
+    rmSync(agentSummaryPath, { force: true });
+    const reply = await timed("implement", () =>
+      askCursor(executePrompt({ row, plan, reviewFile: REVIEW_FILE, summaryPath: agentSummaryPath }), "write", journal, options, 90, "implement"),
     );
+    summary = readAgentSummary(reply.text);
     journal.save("summary.md", summary);
     saveState({ phase: "gate" });
   }
@@ -800,7 +913,8 @@ async function main(): Promise<void> {
       }
 
       journal.banner(`fix (attempt ${attempt + 1})`);
-      const fixSummary = await timed(`fix ${attempt}`, () =>
+      rmSync(agentSummaryPath, { force: true });
+      const fixReply = await timed(`fix ${attempt}`, () =>
         askCursor(
           fixPrompt({
             row,
@@ -809,6 +923,7 @@ async function main(): Promise<void> {
             failedGate: gate.ok ? null : gate.failed,
             gateOutput: gate.ok ? "" : gate.output,
             gaps: verdict?.gaps ?? [],
+            summaryPath: agentSummaryPath,
           }),
           "write",
           journal,
@@ -817,7 +932,7 @@ async function main(): Promise<void> {
           `fix-${attempt}`,
         ),
       );
-      journal.save(`fix-${attempt}.md`, fixSummary);
+      journal.save(`fix-${attempt}.md`, readAgentSummary(fixReply.text));
       round += 1;
       saveState({ rounds: round, phase: "gate" });
     }
@@ -886,8 +1001,17 @@ async function main(): Promise<void> {
 if (import.meta.main) {
   main().catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`\nloop: ${message}\n`);
     if (currentJournal !== null) printTimeline(currentJournal);
+    process.stderr.write(`\nloop: ${message}\n`);
+    if (currentJournal !== null) currentJournal.mark(`FAILED: ${message}`);
+    const saved = readState(STATE) ?? currentState;
+    if (saved !== null) {
+      try {
+        writeState(STATE, { ...saved, lastError: message });
+      } catch {
+        /* the failure is already on screen and in run.log */
+      }
+    }
     process.exit(1);
   });
 }

@@ -64,8 +64,8 @@ Rules:
 Output only the plan. Do not edit files.`;
 }
 
-export function executePrompt(input: { row: Row; plan: string; reviewFile: string }): string {
-  const { row, plan, reviewFile } = input;
+export function executePrompt(input: { row: Row; plan: string; reviewFile: string; summaryPath: string }): string {
+  const { row, plan, reviewFile, summaryPath } = input;
   return `You are implementing ${row.id} in the Menard repository. The working directory is the repo root.
 
 Follow this plan:
@@ -80,10 +80,12 @@ ${HOUSE_RULES}
 
 ${GATE_OWNERSHIP}
 
-When you are done, reply with:
+Before you finish, write your summary to ${summaryPath} (create the file):
 - Files changed, grouped by purpose.
 - A criterion-by-criterion statement of what satisfies each one.
-- Anything you could not do, and why. Do not claim success you have not verified.`;
+- Anything you could not do, and why. Do not claim success you have not verified.
+
+The driver reads that file for the commit message and PR body, so write it there rather than only replying in chat.`;
 }
 
 export function fixPrompt(input: {
@@ -93,8 +95,9 @@ export function fixPrompt(input: {
   failedGate: string | null;
   gateOutput: string;
   gaps: string[];
+  summaryPath: string;
 }): string {
-  const { row, plan, reviewFile, failedGate, gateOutput, gaps } = input;
+  const { row, plan, reviewFile, failedGate, gateOutput, gaps, summaryPath } = input;
   const gate =
     failedGate === null
       ? "The gate passed, but an independent review found the work incomplete."
@@ -122,7 +125,7 @@ ${HOUSE_RULES}
 
 ${GATE_OWNERSHIP}
 
-When you are done, reply with what you changed, and how each failing check is now satisfied.`;
+Before you finish, write your summary to ${summaryPath} (overwrite it): what you changed, and how each failing check is now satisfied.`;
 }
 
 export function reviewPrompt(input: {
@@ -137,6 +140,8 @@ export function reviewPrompt(input: {
   return `You are an adversarial reviewer with fresh context. Assume nothing the implementer wrote; check the repository itself. The working directory is the repo root.
 
 This session is read-only: shell commands are rejected, so you cannot run the suite. The driver has already run the gate and it passed. Judge from the diff, the code, and the tests.
+
+You are not planning work: do not create a plan and do not call any plan tool. Answer in your final message, and make that message the JSON verdict described at the end.
 
 Item: ${row.id} — ${row.title}
 Change: uncommitted work in the working tree, on top of ${base}.

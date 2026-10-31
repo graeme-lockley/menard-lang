@@ -41,6 +41,12 @@ phase gate instead of quietly working ahead.
 `make loop ARGS="--item CONC-05"` overrides the choice. That is for when a P0
 lands in the middle of another item, not for skipping the queue.
 
+The base defaults to `origin/main`, not local `main`: a stale local main silently
+branches from old history and, worse, runs whatever driver that old tree had. The
+driver refuses a base that is behind its upstream unless you pass
+`--allow-stale-base`, and prints its own blob hash at startup so you can see which
+harness is running.
+
 ## The gate
 
 The gate is exactly the sequence in the PR template, in order:
@@ -78,9 +84,14 @@ After the gate is green, a second Cursor session gets the item's specification
 section, the changed files, the diffstat, and the diff itself (truncated at
 24k characters), with one instruction: decide, criterion by criterion, whether
 the work is real. It reads the code and the tests, not the implementation
-summary. The session is read-only — `--plan` rejects shell commands — so the
-prompt says so, and the verdict rests on inspection rather than a second test
-run. It looks for the specific ways this kind of work is usually faked:
+summary. The session is read-only (`--mode ask`; shell commands are rejected), so
+the prompt says so, and the verdict rests on inspection rather than a second test
+run. It is told not to write a plan, because plan mode turns the verdict into a
+plan document. The verdict is harvested from the final message or any plan
+payload; if no JSON is found, the driver makes one cheap formatting call before
+failing with the command that commits the green tree anyway
+(`--resume --no-review`). It looks for the specific ways this kind of work is
+usually faked:
 
 - stubs, `TODO`, dead code, `@test true`, skipped tests, or a fallback that
   hides a failure;
@@ -127,7 +138,8 @@ step that can fail. `make loop ARGS=--resume`:
 
 If the run had already reached the commit or PR step, it resumes there instead
 of repeating the gate. A resumed run whose tree matches the last green gate
-skips the gate as well. On success the state file is removed, so the next
+skips the gate as well. A failure is stored as `lastError` in the state file and
+reported when the run resumes. On success the state file is removed, so the next
 `make loop` starts clean. The per-item artifacts stay.
 
 ## Watching a run
@@ -141,8 +153,9 @@ Everything the loop does is streamed to stdout and appended to
   final `result`;
 - a heartbeat every 20 seconds when nothing has arrived, so a long tool call
   never looks like a hang;
-- structural lines stamped `[09:41:12 +00:14:03]`, and a closing summary with
-  the time each stage took.
+- structural lines stamped `[09:41:12 +00:14:03]`, the driver's hash, and a
+  closing summary with the time each stage took;
+- a `FAILED:` line as the last thing printed, also written to `run.log`.
 
 The driver runs the agent with `--output-format stream-json` for this reason.
 The raw NDJSON is kept in `cursor-<stage>.log` beside the rendered text.
@@ -154,8 +167,10 @@ The raw NDJSON is kept in `cursor-<stage>.log` beside the rendered text.
   state.json            run state; removed on success
   <item>/
     run.log               every command and decision, in order, stamped
-    plan.md               the plan the implementation followed
+    plan.md               the plan the implementation followed (captured from
+                          the plan artifact, not the chat narration)
     summary.md            the implementer's account of what changed
+    agent-summary.md      where the implementer writes that account
     fix-<n>.md            repair notes, one per round
     cursor-<stage>.log    raw NDJSON, one per agent session
     gate-<n>-<step>.log   one log per gate step per attempt
@@ -183,6 +198,7 @@ make loop ARGS="--no-review"       # gate only; the review pass is the point, so
 make loop ARGS="--fixed-point"     # force make check-fixed-point into the gate
 make loop ARGS="--no-fixed-point"  # never run it (it is automatic for src/ and runtime/)
 make loop ARGS="--cold"            # clear ~/.menard again instead of reusing it
+make loop ARGS="--allow-stale-base" # branch from a base that is behind origin
 make loop ARGS="--model gpt-5"     # choose the Cursor model
 ```
 
