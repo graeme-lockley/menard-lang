@@ -16,6 +16,10 @@ const HOUSE_RULES = `Non-negotiable rules:
 6. Docs are part of the change: update exactly the documents the review names, and docs/backlog.md as its "Definition of done" requires.
 7. Do not commit, amend, push, stage, or open a pull request. Leave the working tree dirty for the driver.`;
 
+const GATE_OWNERSHIP = `The driver owns the full gate. It runs 'make', 'make ci', './mn test', and 'make check-fixed-point' when the change needs it, immediately after you finish.
+Do not run those yourself, and do not run 'make test' or 'make bootstrap': repeating the suite only duplicates the driver's run.
+Iterate with the narrowest targeted check instead: 'bun test <file>', './mn run <fixture>', 'make typecheck'.`;
+
 export function planPrompt(input: { row: Row; specification: string; reviewFile: string }): string {
   const { row, specification, reviewFile } = input;
   return `You are planning one item of the Menard backlog. The repository is the working directory.
@@ -60,8 +64,8 @@ Rules:
 Output only the plan. Do not edit files.`;
 }
 
-export function executePrompt(input: { row: Row; plan: string; reviewFile: string }): string {
-  const { row, plan, reviewFile } = input;
+export function executePrompt(input: { row: Row; plan: string; reviewFile: string; summaryPath: string }): string {
+  const { row, plan, reviewFile, summaryPath } = input;
   return `You are implementing ${row.id} in the Menard repository. The working directory is the repo root.
 
 Follow this plan:
@@ -74,12 +78,14 @@ The contract is the acceptance criteria at ${reviewFile}#${row.id.toLowerCase()}
 
 ${HOUSE_RULES}
 
-Work incrementally and run the relevant checks as you go. The full gate is 'make', 'make ci', and './mn test'; while iterating, run the narrowest check that covers the change (host unit tests, a single .mnd test, the corpus).
+${GATE_OWNERSHIP}
 
-When you are done, reply with:
+Before you finish, write your summary to ${summaryPath} (create the file):
 - Files changed, grouped by purpose.
 - A criterion-by-criterion statement of what satisfies each one.
-- Anything you could not do, and why. Do not claim success you have not verified.`;
+- Anything you could not do, and why. Do not claim success you have not verified.
+
+The driver reads that file for the commit message and PR body, so write it there rather than only replying in chat.`;
 }
 
 export function fixPrompt(input: {
@@ -89,8 +95,9 @@ export function fixPrompt(input: {
   failedGate: string | null;
   gateOutput: string;
   gaps: string[];
+  summaryPath: string;
 }): string {
-  const { row, plan, reviewFile, failedGate, gateOutput, gaps } = input;
+  const { row, plan, reviewFile, failedGate, gateOutput, gaps, summaryPath } = input;
   const gate =
     failedGate === null
       ? "The gate passed, but an independent review found the work incomplete."
@@ -116,31 +123,43 @@ The contract is still the acceptance criteria at ${reviewFile}#${row.id.toLowerC
 
 ${HOUSE_RULES}
 
-When you are done, reply with what you changed, and how each failing check is now satisfied.`;
+${GATE_OWNERSHIP}
+
+Before you finish, write your summary to ${summaryPath} (overwrite it): what you changed, and how each failing check is now satisfied.`;
 }
 
 export function reviewPrompt(input: {
   row: Row;
   specification: string;
   base: string;
-  status: string;
   stat: string;
+  changed: string;
+  diff: string;
 }): string {
-  const { row, specification, base, status, stat } = input;
+  const { row, specification, base, stat, changed, diff } = input;
   return `You are an adversarial reviewer with fresh context. Assume nothing the implementer wrote; check the repository itself. The working directory is the repo root.
+
+This session is read-only: shell commands are rejected, so you cannot run the suite. The driver has already run the gate and it passed. Judge from the diff, the code, and the tests.
+
+You are not planning work: do not create a plan and do not call any plan tool. Answer in your final message, and make that message the JSON verdict described at the end.
 
 Item: ${row.id} — ${row.title}
 Change: uncommitted work in the working tree, on top of ${base}.
 
-Changed paths:
-<status>
-${status}
-</status>
+Changed files:
+<changed>
+${changed}
+</changed>
 
 Diffstat:
 <stat>
 ${stat}
 </stat>
+
+Diff (truncated when long):
+<diff>
+${diff}
+</diff>
 
 The specification:
 <specification>
@@ -154,7 +173,7 @@ For every acceptance criterion, decide met / partial / missing by reading the co
 - documentation claims the code does not support;
 - a docs/backlog.md row marked done for a criterion that is not actually met.
 
-You may read files and run read-only commands (builds and tests are fine). Do not modify files, do not commit, do not push.
+Read the files you need; do not modify files, do not commit, do not push.
 
 Output JSON only, with no prose before or after:
 {"satisfied": true, "criteria": [{"criterion": "...", "status": "met|partial|missing", "evidence": "path:line or test name"}], "gaps": ["..."], "notes": "one paragraph"}`;

@@ -71,7 +71,7 @@ export function parseBacklog(text: string): Row[] {
  * every other, so none can ever reach "all blockers done". Only open rows
  * take part; a done row terminates a path.
  */
-function findCycles(rows: Row[]): string[][] {
+export function findCycles(rows: Row[]): string[][] {
   const openIds = new Set(rows.filter((row) => !isSatisfied(row)).map((row) => row.id));
   const adj = new Map<string, string[]>();
   for (const row of rows) {
@@ -195,7 +195,7 @@ export function formatReport(report: Report, opts: { color?: boolean } = {}): st
   if (report.cycles.length > 0) {
     lines.push("", bold("Dependency cycles — these can never satisfy every blocker"));
     for (const cycle of report.cycles) lines.push(`  ${cycle.join(" ↔ ")}`);
-    lines.push(dim("  fix the Blocked by column in docs/backlog.md; make backlog-check does not see cycles"));
+    lines.push(dim("  fix the Blocked by column in docs/backlog.md; make backlog-check rejects cycles"));
   }
 
   if (!report.allPhases) lines.push("", dim("Ignore the phase gate: make next ARGS=--all"));
