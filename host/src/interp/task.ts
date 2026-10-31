@@ -52,6 +52,15 @@ export type InterpTask = {
   defers: InterpDeferEntry[];
   deferDepth: number;
   runningDefers: boolean;
+  /** Set by timer fire; consumed by waitUntil. */
+  waitTimedOut: boolean;
+};
+
+type InterpTimer = {
+  deadline: bigint;
+  task: InterpTask;
+  cell: InterpWaitCell;
+  alive: boolean;
 };
 
 export class TaskPark extends Error {
@@ -67,6 +76,9 @@ let all: InterpTask[] = [];
 let allCells: InterpWaitCell[] = [];
 let current: InterpTask | null = null;
 let runnable: InterpTask[] = [];
+/** Virtual monotonic clock (ms). Advances to the next deadline when idle. */
+let monoMs = 0n;
+let timers: InterpTimer[] = [];
 /** Type-erased process dictionary (Build E registry). */
 let processDict = new Map<string, Value>();
 
@@ -151,6 +163,7 @@ export function taskEnsureMain(): InterpTask {
     defers: [],
     deferDepth: 0,
     runningDefers: false,
+    waitTimedOut: false,
   };
   all.push(t);
   current = t;
@@ -204,9 +217,51 @@ function wakeJoiner(done: InterpTask): void {
 function wakeOneWaiter(w: InterpTask): void {
   w.waitNext = null;
   w.waitingOn = null;
+  timerDisarmTask(w);
   /* Cont resume does not re-enter waitOnCell — result is in resumeValue. */
   w.resumeValue = vVariant("Ok", [vUnit()]);
   if (!w.isMain) enqueue(w);
+}
+
+function timerDisarmTask(t: InterpTask): void {
+  timers = timers.filter((tm) => !(tm.alive && tm.task === t));
+}
+
+function timerArm(t: InterpTask, c: InterpWaitCell, deadline: bigint): void {
+  timerDisarmTask(t);
+  timers.push({ deadline, task: t, cell: c, alive: true });
+  timers.sort((a, b) => (a.deadline < b.deadline ? -1 : a.deadline > b.deadline ? 1 : 0));
+}
+
+function timersFireDue(): void {
+  while (timers.length > 0 && timers[0]!.alive && timers[0]!.deadline <= monoMs) {
+    const fired = timers.shift()!;
+    const t = fired.task;
+    const c = fired.cell;
+    if (t.waitingOn !== c) continue;
+    waiterUnlink(c, t);
+    t.waitingOn = null;
+    t.waitTimedOut = true;
+    t.resumeValue = vVariant("Err", [vInt(1n)]);
+    if (!t.isMain) enqueue(t);
+  }
+}
+
+/** When the scheduler is idle, jump virtual time to the next deadline. */
+function advanceToNextDeadline(): boolean {
+  timersFireDue();
+  if (timers.length === 0) return false;
+  const next = timers[0]!;
+  if (!next.alive) return false;
+  if (next.deadline > monoMs) {
+    monoMs = next.deadline;
+  }
+  timersFireDue();
+  return true;
+}
+
+export function taskMonoMs(): Value {
+  return vInt(monoMs);
 }
 
 function notifyCell(c: InterpWaitCell): void {
@@ -368,8 +423,12 @@ function waitOnCell(c: InterpWaitCell, host: Host): Value {
       if (self.cancelRequested) {
         return vVariant("Err", [vUnit()]);
       }
+      timersFireDue();
       if (runnable.length > 0) {
         pump(host);
+        continue;
+      }
+      if (advanceToNextDeadline()) {
         continue;
       }
       throw new Error("mn_task_wait: main stuck");
@@ -391,6 +450,69 @@ function waitOnCell(c: InterpWaitCell, host: Host): Value {
   return vVariant("Ok", [vUnit()]);
 }
 
+/** Ok / Err(0)=cancel / Err(1)=timeout. */
+function waitOnCellUntil(c: InterpWaitCell, deadline: bigint, host: Host): Value {
+  const self = current!;
+  self.waitTimedOut = false;
+  if (self.cancelRequested || self.status === "cancelled") {
+    return vVariant("Err", [vInt(0n)]);
+  }
+  if (c.closed) {
+    return vVariant("Ok", [vUnit()]);
+  }
+  if (c.notified) {
+    c.notified = false;
+    return vVariant("Ok", [vUnit()]);
+  }
+  if (monoMs >= deadline) {
+    return vVariant("Err", [vInt(1n)]);
+  }
+  if (self.isMain) {
+    while (!c.notified && !c.closed) {
+      if (self.cancelRequested) {
+        return vVariant("Err", [vInt(0n)]);
+      }
+      if (monoMs >= deadline) {
+        return vVariant("Err", [vInt(1n)]);
+      }
+      timersFireDue();
+      if (self.waitTimedOut) {
+        self.waitTimedOut = false;
+        return vVariant("Err", [vInt(1n)]);
+      }
+      if (runnable.length > 0) {
+        pump(host);
+        continue;
+      }
+      /* Arm a timer for this wait so idle advance reaches our deadline. */
+      timerArm(self, c, deadline);
+      if (!advanceToNextDeadline()) {
+        timerDisarmTask(self);
+        return vVariant("Err", [vInt(1n)]);
+      }
+      timerDisarmTask(self);
+      if (self.waitTimedOut) {
+        self.waitTimedOut = false;
+        return vVariant("Err", [vInt(1n)]);
+      }
+    }
+    timerDisarmTask(self);
+    if (self.cancelRequested) {
+      return vVariant("Err", [vInt(0n)]);
+    }
+    if (c.closed) {
+      return vVariant("Ok", [vUnit()]);
+    }
+    c.notified = false;
+    return vVariant("Ok", [vUnit()]);
+  }
+  waiterEnqueue(c, self);
+  self.waitingOn = c;
+  timerArm(self, c, deadline);
+  parkCurrent(vVariant("Ok", [vUnit()]));
+  return vVariant("Ok", [vUnit()]);
+}
+
 export function taskSpawn(thunk: Value): Value {
   taskEnsureMain();
   const t: InterpTask = {
@@ -409,6 +531,7 @@ export function taskSpawn(thunk: Value): Value {
     defers: [],
     deferDepth: 0,
     runningDefers: false,
+    waitTimedOut: false,
   };
   all.push(t);
   enqueue(t);
@@ -461,6 +584,73 @@ export function taskWait(cellId: bigint, host: Host): Value {
   const c = findCell(Number(cellId));
   if (!c) throw new Error("mn_task_wait: bad cell");
   return waitOnCell(c, host);
+}
+
+export function taskWaitUntil(cellId: bigint, deadline: bigint, host: Host): Value {
+  taskEnsureMain();
+  const c = findCell(Number(cellId));
+  if (!c) throw new Error("mn_task_wait_until: bad cell");
+  return waitOnCellUntil(c, deadline, host);
+}
+
+export function taskSleepMs(ms: bigint, host: Host): Value {
+  taskEnsureMain();
+  let m = ms;
+  if (m < 0n) m = 0n;
+  const c = allocCell();
+  const deadline = monoMs + m;
+  const r = waitOnCellUntil(c, deadline, host);
+  if (r.tag === "variant" && r.ctor === "Err") {
+    const payload = r.payloads[0];
+    if (payload && payload.tag === "int" && payload.value === 0n) {
+      return vVariant("Err", [vUnit()]);
+    }
+  }
+  return vVariant("Ok", [vUnit()]);
+}
+
+export function taskJoinTimeout(id: bigint, ms: bigint, host: Host): Value {
+  taskEnsureMain();
+  const target = find(Number(id));
+  if (!target) throw new Error("mn_task_join_timeout: bad id");
+  let m = ms;
+  if (m < 0n) m = 0n;
+  const deadline = monoMs + m;
+
+  const wrapInner = (): Value => {
+    if (target.status === "cancelled") {
+      return vVariant("Ok", [vVariant("Err", [vUnit()])]);
+    }
+    return vVariant("Ok", [vVariant("Ok", [target.result])]);
+  };
+
+  if (isTerminal(target)) {
+    return wrapInner();
+  }
+
+  const r = waitOnCellUntil(target.doneCell, deadline, host);
+  if (r.tag === "variant" && r.ctor === "Err") {
+    const payload = r.payloads[0];
+    if (payload && payload.tag === "int" && payload.value === 1n && !isTerminal(target)) {
+      return vVariant("Err", [vVariant("JoinTimeout")]);
+    }
+  }
+  if (!isTerminal(target)) {
+    /* Still need to wait out — pump until terminal or give timeout. */
+    while (!isTerminal(target)) {
+      if (monoMs >= deadline) {
+        return vVariant("Err", [vVariant("JoinTimeout")]);
+      }
+      if (runnable.length > 0) {
+        pump(host);
+        continue;
+      }
+      if (!advanceToNextDeadline()) {
+        return vVariant("Err", [vVariant("JoinTimeout")]);
+      }
+    }
+  }
+  return wrapInner();
 }
 
 export function taskNotify(cellId: bigint, host: Host): Value {
@@ -519,6 +709,9 @@ export function taskJoin(id: bigint, host: Host): Value {
           pump(host);
           continue;
         }
+        if (advanceToNextDeadline()) {
+          continue;
+        }
         throw new Error("mn_task_join: target waiting on cell");
       }
       throw new Error("mn_task_join: stuck");
@@ -562,8 +755,10 @@ export function taskCancel(id: bigint, host: Host): Value {
     const c = t.waitingOn;
     waiterUnlink(c, t);
     t.waitingOn = null;
-    /* Soft cancel: resume wait with Err; do not consume sticky notify. */
-    t.resumeValue = vVariant("Err", [vUnit()]);
+    timerDisarmTask(t);
+    /* Soft cancel: resume wait with Err; do not consume sticky notify.
+     * Err(0) so wait_until can distinguish cancel from timeout. */
+    t.resumeValue = vVariant("Err", [vInt(0n)]);
     if (!t.isMain) enqueue(t);
     if (current?.isMain) {
       pump(host);
@@ -623,6 +818,8 @@ export function taskResetForTests(): void {
   allCells = [];
   current = null;
   runnable = [];
+  timers = [];
+  monoMs = 0n;
   activeStack = null;
   processDict = new Map();
 }

@@ -7,8 +7,13 @@ pub import std/io (IoError)
 import std/int as Int
 import std/list as List
 import std/map as Map
+import std/sched as Sched
 import std/string as String
 import std/task as Task
+
+; Default per-connection I/O budget for serve (ms).
+let default-conn-deadline-ms() -> Int =
+  30000
 
 pub type Method =
   | GET
@@ -69,7 +74,24 @@ let content-length(headers: Map Str Str) -> Int =
         | Some(s) -> Int.from-str(s) ? 0
         | None -> 0
 
-; Read until the header/body separator appears (or EOF/error).
+; Remaining relative ms until an absolute mono deadline (clamped ≥ 0).
+let ms-left(deadline: Int) -> Int {
+  let left = deadline - Sched.mono-ms()
+  if (left < 0) -> 0 | left
+}
+
+; Read until the header/body separator appears (or EOF/error/deadline).
+let read-headers-until(fd: Int, acc: Str, deadline: Int) -> Result Str HttpError =
+  match (String.index-of("\r\n\r\n", acc))
+    | Some(_) -> Ok(acc)
+    | None ->
+      match (Net.read-timeout(fd, 4096, ms-left(deadline)))
+        | Err(e) -> Err(NetErr(e))
+        | Ok("") ->
+          if (acc == "") -> Err(Closed()) | Err(Incomplete())
+        | Ok(chunk) -> read-headers-until(fd, String.concat(acc, chunk), deadline)
+
+; Read until the header/body separator (unbounded).
 let read-headers(fd: Int, acc: Str) -> Result Str HttpError =
   match (String.index-of("\r\n\r\n", acc))
     | Some(_) -> Ok(acc)
@@ -94,6 +116,17 @@ let parse-header-lines(lines: List Str, headers: Map Str Str) -> Map Str Str =
               if (String.starts-with(" ", raw)) -> String.drop(1, raw) | raw
             parse-header-lines(rest, Map.set(name, val, headers))
           }
+
+; Read until `need` body bytes are accumulated (with deadline).
+let read-body-until(fd: Int, need: Int, acc: Str, deadline: Int) -> Result Str HttpError =
+  cond
+    | need <= 0 -> Ok(acc)
+    | String.length(acc) >= need -> Ok(String.slice(0, need, acc))
+    | else ->
+      match (Net.read-timeout(fd, need - String.length(acc), ms-left(deadline)))
+        | Err(e) -> Err(NetErr(e))
+        | Ok("") -> Err(Incomplete())
+        | Ok(chunk) -> read-body-until(fd, need, String.concat(acc, chunk), deadline)
 
 ; Read until `need` body bytes are accumulated.
 let read-body(fd: Int, need: Int, acc: Str) -> Result Str HttpError =
@@ -193,9 +226,26 @@ pub let write-response(fd: Int, res: Response) -> Result Unit HttpError =
     | Err(e) -> Err(NetErr(e))
     | Ok(_) -> Ok(())
 
-; Accept loop under Task.scope; defer closes the listener. Native only.
+; Handle one connection under a per-connection deadline.
+let handle-conn(conn: Int, deadline: Int, handler: (Request) -> Response) -> Int {
+  defer Net.close(conn)
+  match (read-headers-until(conn, "", deadline))
+    | Err(_) -> 0
+    | Ok(raw) ->
+      match (parse-request(raw))
+        | Err(_) -> 0
+        | Ok((req, _)) -> {
+            let _ =
+              match (Net.write-timeout(conn, format-response(handler(req)), ms-left(deadline)))
+                | Err(_) -> ()
+                | Ok(_) -> ()
+            0
+          }
+}
+
+; Accept loop under Task.scope; each connection has a deadline. Native only.
 ; @test true
-pub let serve(port: Int, handler: (Request) -> Response) -> Result Unit HttpError =
+pub let serve-timeout(port: Int, conn-ms: Int, handler: (Request) -> Response) -> Result Unit HttpError =
   match (Net.listen(port))
     | Err(e) -> Err(NetErr(e))
     | Ok(listener) -> {
@@ -205,16 +255,9 @@ pub let serve(port: Int, handler: (Request) -> Response) -> Result Unit HttpErro
             match (Net.accept(listener))
               | Err(_) -> ()
               | Ok(conn) -> {
+                  let deadline = Sched.mono-ms() + conn-ms
                   let _ =
-                    Task.spawn-in(scope, fn () = {
-                      defer Net.close(conn)
-                      match (read-request(conn))
-                        | Err(_) -> 0
-                        | Ok(req) -> {
-                            let _ = write-response(conn, handler(req))
-                            0
-                          }
-                    })
+                    Task.spawn-in(scope, fn () = handle-conn(conn, deadline, handler))
                   recur()
                 }
           }
@@ -222,7 +265,54 @@ pub let serve(port: Int, handler: (Request) -> Response) -> Result Unit HttpErro
         Ok(())
       }
 
-; One-shot HTTP client request. Native only.
+; Accept loop with the default per-connection deadline. Native only.
+; @test true
+pub let serve(port: Int, handler: (Request) -> Response) -> Result Unit HttpError =
+  serve-timeout(port, default-conn-deadline-ms(), handler)
+
+; Parse a response buffer under a deadline (shared by request helpers).
+let finish-response(fd: Int, raw: Str, deadline: Int) -> Result Response HttpError =
+  match (String.index-of("\r\n\r\n", raw))
+    | None -> Err(Incomplete())
+    | Some(at) -> {
+        let head = String.slice(0, at, raw)
+        let rest = String.drop(at + 4, raw)
+        let lines = String.split("\r\n", head)
+        match (lines)
+          | [] -> Err(BadRequest("empty response"))
+          | status-line :: hdrs -> {
+              let headers = parse-header-lines(hdrs, Map.empty())
+              let n = content-length(headers)
+              match (read-body-until(fd, n, rest, deadline))
+                | Err(e) -> Err(e)
+                | Ok(body) -> {
+                    let code =
+                      match (String.split(" ", status-line))
+                        | _ :: c :: _ -> Int.from-str(c) ? 0
+                        | _ -> 0
+                    Ok(Response(code, headers, body))
+                  }
+            }
+      }
+
+; One-shot HTTP client request with a relative timeout. Native only.
+; @test true
+pub let request-timeout(host: Str, port: Int, req: Request, ms: Int) -> Result Response HttpError {
+  let deadline = Sched.mono-ms() + ms
+  match (Net.connect-timeout(host, port, ms-left(deadline)))
+    | Err(e) -> Err(NetErr(e))
+    | Ok(fd) -> {
+        defer Net.close(fd)
+        match (Net.write-timeout(fd, format-request(host, req), ms-left(deadline)))
+          | Err(e) -> Err(NetErr(e))
+          | Ok(_) ->
+            match (read-headers-until(fd, "", deadline))
+              | Err(e) -> Err(e)
+              | Ok(raw) -> finish-response(fd, raw, deadline)
+      }
+}
+
+; One-shot HTTP client request (unbounded). Native only.
 ; @test true
 pub let request(host: Str, port: Int, req: Request) -> Result Response HttpError =
   match (Net.connect(host, port))

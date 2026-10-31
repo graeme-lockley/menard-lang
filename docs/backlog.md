@@ -2,7 +2,7 @@
 
 **Source of truth for status.** The specification and acceptance criteria are the [Build F review](reviews/2026-10-24-build-f.md); this file is the live work queue. GitHub issues are the public work items and discussion, linked by the same ID. The review is deliberately not the tracker: do not tick its checkboxes.
 
-- **First item:** [LANG-01](reviews/2026-10-24-build-f.md#lang-01) — the native `show` fix first (the canonical-text half is blocked by LANG-07/02/10).
+- **First item:** [CONC-04](reviews/2026-10-24-build-f.md#conc-04) / [CONC-05](reviews/2026-10-24-build-f.md#conc-05) after CONC-02, or continue [LANG-01](reviews/2026-10-24-build-f.md#lang-01); see `make next`.
 - **Phase 0 epic:** [#30](https://github.com/graeme-lockley/menard-lang/issues/30) — the 18 Phase 0 items as a checklist.
 - **Opened:** the 18 Phase 0 issues were opened on 2026-10-24, all in the `v0.6 — Truth and trust` milestone.
 - **Phase 0** is the current focus. Everything else is `todo` until its phase opens.
@@ -15,13 +15,13 @@
 
 | Phase | Theme | Items | Ready | In progress | Done |
 | --- | --- | ---: | ---: | ---: | ---: |
-| 0 | Truth, trust and the unsafe edges | 18 | 13 | 1 | 4 |
+| 0 | Truth, trust and the unsafe edges | 18 | 12 | 1 | 5 |
 | 1 | Daily loop and language decisions | 18 | 0 | 0 | 0 |
 | 2 | Standard library | 12 | 0 | 0 | 0 |
 | 3 | Operational concurrency | 8 | 0 | 0 | 0 |
 | 4 | Project and ecosystem | 17 | 0 | 0 | 0 |
 | 5 | Later | 9 | 0 | 0 | 0 |
-| **Total** | | **82** | **13** | **1** | **4** |
+| **Total** | | **82** | **12** | **1** | **5** |
 
 Priority mix: P0 = 24, P1 = 34, P2 = 19, P3 = 5.
 
@@ -37,7 +37,7 @@ Rows are ordered by phase, then priority, then area, then ID.
 | [LANG-04](reviews/2026-10-24-build-f.md#lang-04) | The host typer still crashes on a qualified-import constructor, and still duplicates some diagnostics | Language | P0 | 0 | done | — | [#15](https://github.com/graeme-lockley/menard-lang/issues/15) | [#38](https://github.com/graeme-lockley/menard-lang/pull/38) |
 | [LIB-06](reviews/2026-10-24-build-f.md#lib-06) | `Map` keys beyond `Int`/`Str` are silently wrong natively | Libraries | P0 | 0 | ready | LANG-03 (Float keys) | [#17](https://github.com/graeme-lockley/menard-lang/issues/17) | — |
 | [CONC-01](reviews/2026-10-24-build-f.md#conc-01) | `Mailbox.close` must wake every waiter, including blocked senders | Concurrency | P0 | 0 | done | — | [#18](https://github.com/graeme-lockley/menard-lang/issues/18) | — |
-| [CONC-02](reviews/2026-10-24-build-f.md#conc-02) | Deadlines for every blocking operation | Concurrency | P0 | 0 | ready | CONC-01 | [#19](https://github.com/graeme-lockley/menard-lang/issues/19) | — |
+| [CONC-02](reviews/2026-10-24-build-f.md#conc-02) | Deadlines for every blocking operation | Concurrency | P0 | 0 | done | CONC-01 | [#19](https://github.com/graeme-lockley/menard-lang/issues/19) | — |
 | [CONC-03](reviews/2026-10-24-build-f.md#conc-03) | TLS must verify the peer, send SNI, and not block the mutator | Concurrency | P0 | 0 | ready | CONC-02, CONC-10 | [#20](https://github.com/graeme-lockley/menard-lang/issues/20) | — |
 | [CONC-04](reviews/2026-10-24-build-f.md#conc-04) | HTTP limits, header correctness, and connection hygiene | Concurrency | P0 | 0 | ready | CONC-02 | [#21](https://github.com/graeme-lockley/menard-lang/issues/21) | — |
 | [CONC-05](reviews/2026-10-24-build-f.md#conc-05) | An actor's death must not hang its callers | Concurrency | P0 | 0 | ready | CONC-01, CONC-02 | [#22](https://github.com/graeme-lockley/menard-lang/issues/22) | — |

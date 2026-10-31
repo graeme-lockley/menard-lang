@@ -18,6 +18,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <ucontext.h>
 
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -67,13 +68,26 @@ typedef struct MnTask {
   MnDeferEntry *defers; /* newest first */
   int defer_depth;
   int running_defers; /* reentrancy guard while applying cleanups */
+  int wait_timed_out; /* set by timer fire; consumed by wait_until */
 } MnTask;
+
+typedef struct MnTimer {
+  int64_t deadline; /* mono ms */
+  MnTask *task;
+  MnWaitCell *cell;
+  int alive;
+} MnTimer;
+
+#define MN_TIMER_CAP 256
 
 static MnTask *all_tasks = NULL;
 static int next_id = 1;
 
 static MnWaitCell *all_cells = NULL;
 static int next_cell_id = 1;
+
+static MnTimer timers[MN_TIMER_CAP];
+static int timer_count = 0;
 
 typedef struct MnDictEntry {
   MnWord key;
@@ -106,8 +120,12 @@ static int is_terminal(MnTask *t);
 static void waiter_enqueue(MnWaitCell *c, MnTask *t);
 static void waiter_unlink(MnWaitCell *c, MnTask *t);
 static int wait_on_cell(MnWaitCell *c);
+static int wait_on_cell_until(MnWaitCell *c, int64_t deadline_mono);
 static void run_defers_all(MnTask *t);
 static void run_defers_leave(MnTask *t);
+static void timer_arm(MnTask *t, MnWaitCell *c, int64_t deadline);
+static void timer_disarm_task(MnTask *t);
+static void idle_block(int timeout_ms);
 
 static void enqueue(MnTask *t) {
   if (t == NULL) {
@@ -427,11 +445,142 @@ static void run_one(MnTask *t) {
   }
 }
 
+int64_t mn_mono_now_ms(void) {
+  struct timespec ts;
+  if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+    return 0;
+  }
+  return (int64_t)ts.tv_sec * 1000 + (int64_t)ts.tv_nsec / 1000000;
+}
+
+MnWord mn_mono_ms(void) {
+  return mn_int_to_word(mn_mono_now_ms());
+}
+
+static void timer_arm(MnTask *t, MnWaitCell *c, int64_t deadline) {
+  timer_disarm_task(t);
+  if (timer_count >= MN_TIMER_CAP) {
+    mn_panic("mn_task: timer table full");
+  }
+  int i = timer_count++;
+  timers[i].deadline = deadline;
+  timers[i].task = t;
+  timers[i].cell = c;
+  timers[i].alive = 1;
+  /* Bubble up min-heap by deadline. */
+  while (i > 0) {
+    int p = (i - 1) / 2;
+    if (timers[p].deadline <= timers[i].deadline) {
+      break;
+    }
+    MnTimer tmp = timers[p];
+    timers[p] = timers[i];
+    timers[i] = tmp;
+    i = p;
+  }
+}
+
+static void timer_heap_remove_at(int i) {
+  if (i < 0 || i >= timer_count) {
+    return;
+  }
+  timers[i] = timers[timer_count - 1];
+  timer_count--;
+  if (i >= timer_count) {
+    return;
+  }
+  /* Sift down. */
+  for (;;) {
+    int l = 2 * i + 1;
+    int r = 2 * i + 2;
+    int smallest = i;
+    if (l < timer_count && timers[l].deadline < timers[smallest].deadline) {
+      smallest = l;
+    }
+    if (r < timer_count && timers[r].deadline < timers[smallest].deadline) {
+      smallest = r;
+    }
+    if (smallest == i) {
+      break;
+    }
+    MnTimer tmp = timers[i];
+    timers[i] = timers[smallest];
+    timers[smallest] = tmp;
+    i = smallest;
+  }
+}
+
+static void timer_disarm_task(MnTask *t) {
+  for (int i = 0; i < timer_count;) {
+    if (timers[i].alive && timers[i].task == t) {
+      timer_heap_remove_at(i);
+      continue;
+    }
+    i++;
+  }
+}
+
+void mn_timers_fire_due(void) {
+  int64_t now = mn_mono_now_ms();
+  while (timer_count > 0 && timers[0].alive && timers[0].deadline <= now) {
+    MnTimer fired = timers[0];
+    timer_heap_remove_at(0);
+    MnTask *t = fired.task;
+    MnWaitCell *c = fired.cell;
+    if (t == NULL || c == NULL) {
+      continue;
+    }
+    if (t->waiting_on != c) {
+      continue; /* already woken */
+    }
+    waiter_unlink(c, t);
+    t->waiting_on = NULL;
+    t->wait_timed_out = 1;
+    if (!t->is_main) {
+      enqueue(t);
+    }
+  }
+}
+
+int mn_timers_delay_ms(void) {
+  if (timer_count == 0 || !timers[0].alive) {
+    return -1;
+  }
+  int64_t now = mn_mono_now_ms();
+  int64_t d = timers[0].deadline - now;
+  if (d <= 0) {
+    return 0;
+  }
+  if (d > 2147483647) {
+    return 2147483647;
+  }
+  return (int)d;
+}
+
+static void idle_block(int timeout_ms) {
+  if (timeout_ms < 0) {
+    (void)mn_net_poll(-1);
+    return;
+  }
+  if (timeout_ms == 0) {
+    (void)mn_net_poll(0);
+    return;
+  }
+  if (mn_net_poll(timeout_ms) > 0) {
+    return;
+  }
+}
+
 static void pump(void) {
   for (;;) {
+    mn_timers_fire_due();
     MnTask *t = dequeue();
     if (t == NULL) {
       if (mn_net_poll(0) > 0) {
+        continue;
+      }
+      mn_timers_fire_due();
+      if (runnable_head != NULL) {
         continue;
       }
       return;
@@ -459,14 +608,26 @@ static int wait_on_cell(MnWaitCell *c) {
       if (self->cancel_requested) {
         return 1;
       }
+      mn_timers_fire_due();
       if (runnable_head != NULL) {
         pump();
         continue;
       }
-      if (mn_net_poll(-1) > 0) {
+      int delay = mn_timers_delay_ms();
+      if (delay == 0) {
         continue;
       }
-      mn_panic("mn_task_wait: main stuck");
+      idle_block(delay);
+      mn_timers_fire_due();
+      if (c->notified || c->closed) {
+        break;
+      }
+      if (runnable_head != NULL) {
+        continue;
+      }
+      if (delay < 0) {
+        mn_panic("mn_task_wait: main stuck");
+      }
     }
     if (self->cancel_requested) {
       return 1;
@@ -481,6 +642,87 @@ static int wait_on_cell(MnWaitCell *c) {
   self->waiting_on = c;
   park_current();
   self->waiting_on = NULL;
+  timer_disarm_task(self);
+  if (self->cancel_requested || self->status == MN_TASK_CANCELLED) {
+    return 1;
+  }
+  if (c->closed) {
+    return 0;
+  }
+  c->notified = 0;
+  return 0;
+}
+
+/* 0 = notified/closed, 1 = cancelled, 2 = timed out. */
+static int wait_on_cell_until(MnWaitCell *c, int64_t deadline_mono) {
+  MnTask *self = current;
+  self->wait_timed_out = 0;
+  if (self->cancel_requested || self->status == MN_TASK_CANCELLED) {
+    return 1;
+  }
+  if (c->closed) {
+    return 0;
+  }
+  if (c->notified) {
+    c->notified = 0;
+    return 0;
+  }
+  if (mn_mono_now_ms() >= deadline_mono) {
+    return 2;
+  }
+  if (self->is_main) {
+    while (!c->notified && !c->closed) {
+      if (self->cancel_requested) {
+        return 1;
+      }
+      if (mn_mono_now_ms() >= deadline_mono) {
+        return 2;
+      }
+      mn_timers_fire_due();
+      if (self->wait_timed_out) {
+        self->wait_timed_out = 0;
+        return 2;
+      }
+      if (runnable_head != NULL) {
+        pump();
+        continue;
+      }
+      int64_t now = mn_mono_now_ms();
+      int64_t left = deadline_mono - now;
+      if (left <= 0) {
+        return 2;
+      }
+      int delay = mn_timers_delay_ms();
+      int block_ms = (int)left;
+      if (delay >= 0 && delay < block_ms) {
+        block_ms = delay;
+      }
+      idle_block(block_ms);
+      mn_timers_fire_due();
+      if (self->wait_timed_out) {
+        self->wait_timed_out = 0;
+        return 2;
+      }
+    }
+    if (self->cancel_requested) {
+      return 1;
+    }
+    if (c->closed) {
+      return 0;
+    }
+    c->notified = 0;
+    return 0;
+  }
+  waiter_enqueue(c, self);
+  self->waiting_on = c;
+  timer_arm(self, c, deadline_mono);
+  park_current();
+  self->waiting_on = NULL;
+  timer_disarm_task(self);
+  if (self->wait_timed_out) {
+    self->wait_timed_out = 0;
+    return 2;
+  }
   if (self->cancel_requested || self->status == MN_TASK_CANCELLED) {
     return 1;
   }
@@ -605,6 +847,48 @@ MnWord mn_task_wait(MnWord cell_tagged) {
   return out;
 }
 
+MnWord mn_task_wait_until(MnWord cell_tagged, MnWord deadline_mono) {
+  ensure_main_task();
+  int id = (int)mn_word_to_int(cell_tagged);
+  MnWaitCell *c = cell_by_id(id);
+  if (c == NULL) {
+    mn_panic("mn_task_wait_until: bad cell");
+  }
+  int64_t deadline = mn_word_to_int(deadline_mono);
+  int rc = wait_on_cell_until(c, deadline);
+  MnWord out;
+  mn_root_push(&out);
+  if (rc == 0) {
+    out = mn_ok(MN_UNIT);
+  } else if (rc == 1) {
+    out = mn_err(mn_int_to_word(0)); /* cancel */
+  } else {
+    out = mn_err(mn_int_to_word(1)); /* timeout */
+  }
+  mn_root_pop();
+  return out;
+}
+
+MnWord mn_task_sleep_ms(MnWord ms_tagged) {
+  ensure_main_task();
+  int64_t ms = mn_word_to_int(ms_tagged);
+  if (ms < 0) {
+    ms = 0;
+  }
+  MnWaitCell *c = alloc_cell();
+  int64_t deadline = mn_mono_now_ms() + ms;
+  int rc = wait_on_cell_until(c, deadline);
+  MnWord out;
+  mn_root_push(&out);
+  if (rc == 1) {
+    out = mn_err(MN_UNIT);
+  } else {
+    out = mn_ok(MN_UNIT); /* timeout or notify both complete the sleep */
+  }
+  mn_root_pop();
+  return out;
+}
+
 MnWord mn_task_notify(MnWord cell_tagged) {
   ensure_main_task();
   int id = (int)mn_word_to_int(cell_tagged);
@@ -673,15 +957,22 @@ static void join_wait_until_terminal(MnTask *target) {
         continue;
       }
       if (target->status == MN_TASK_SUSPENDED && target->waiting_on != NULL) {
-        /* Target is parked on a wait cell — pump others; drive I/O. */
+        /* Target is parked on a wait cell — pump others; drive I/O/timers. */
         if (runnable_head != NULL) {
           pump();
           continue;
         }
-        if (mn_net_poll(/* block */ -1) > 0) {
+        mn_timers_fire_due();
+        int delay = mn_timers_delay_ms();
+        idle_block(delay);
+        mn_timers_fire_due();
+        if (runnable_head != NULL || is_terminal(target)) {
           continue;
         }
-        mn_panic("mn_task_join: target waiting on cell");
+        if (delay < 0) {
+          mn_panic("mn_task_join: target waiting on cell");
+        }
+        continue;
       }
       mn_panic("mn_task_join: stuck");
     }
@@ -722,6 +1013,66 @@ MnWord mn_task_join(MnWord id_tagged) {
   return out;
 }
 
+MnWord mn_task_join_timeout(MnWord id_tagged, MnWord ms_tagged) {
+  ensure_main_task();
+  int id = (int)mn_word_to_int(id_tagged);
+  MnTask *target = task_by_id(id);
+  if (target == NULL) {
+    mn_panic("mn_task_join_timeout: bad id");
+  }
+  int64_t ms = mn_word_to_int(ms_tagged);
+  if (ms < 0) {
+    ms = 0;
+  }
+  int64_t deadline = mn_mono_now_ms() + ms;
+
+  MnWord out;
+  mn_root_push(&out);
+
+  if (is_terminal(target)) {
+    MnWord inner;
+    mn_root_push(&inner);
+    if (target->status == MN_TASK_CANCELLED) {
+      inner = mn_err(MN_UNIT);
+    } else {
+      inner = mn_ok(target->result);
+    }
+    out = mn_ok(inner);
+    mn_root_pop();
+    mn_root_pop();
+    return out;
+  }
+
+  int rc = wait_on_cell_until(target->done_cell, deadline);
+  if (rc == 2 && !is_terminal(target)) {
+    /* Timed out; leave the task running. */
+    out = mn_err((MnWord)&mn_static_timeout);
+    mn_root_pop();
+    return out;
+  }
+  if (rc == 1) {
+    /* Caller cancelled while waiting — still surface join if terminal. */
+    if (!is_terminal(target)) {
+      out = mn_err((MnWord)&mn_static_timeout);
+      mn_root_pop();
+      return out;
+    }
+  }
+  {
+    MnWord inner;
+    mn_root_push(&inner);
+    if (target->status == MN_TASK_CANCELLED) {
+      inner = mn_err(MN_UNIT);
+    } else {
+      inner = mn_ok(target->result);
+    }
+    out = mn_ok(inner);
+    mn_root_pop();
+  }
+  mn_root_pop();
+  return out;
+}
+
 MnWord mn_task_cancel(MnWord id_tagged) {
   ensure_main_task();
   int id = (int)mn_word_to_int(id_tagged);
@@ -741,6 +1092,7 @@ MnWord mn_task_cancel(MnWord id_tagged) {
     MnWaitCell *c = t->waiting_on;
     waiter_unlink(c, t);
     t->waiting_on = NULL;
+    timer_disarm_task(t);
     /* Soft cancel: resume so mn_task_wait returns Err; do not consume sticky. */
     if (!t->is_main) {
       enqueue(t);

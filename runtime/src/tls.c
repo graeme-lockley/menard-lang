@@ -84,15 +84,12 @@ static MnTlsConn *get_conn(int id) {
   return &conns[id];
 }
 
-static void poll_fd(int fd, short events) {
-  struct pollfd p;
-  p.fd = fd;
-  p.events = events;
-  p.revents = 0;
-  poll(&p, 1, -1);
+/* Cooperative park — never blocks the mutator with poll(..., -1). */
+static MnWord park_tls(int fd, short events, int64_t deadline_mono) {
+  return mn_park_fd(fd, events, deadline_mono);
 }
 
-static MnWord handshake_loop(SSL *ssl, int fd) {
+static MnWord handshake_loop(SSL *ssl, int fd, int64_t deadline_mono) {
   for (;;) {
     int r = SSL_do_handshake(ssl);
     if (r == 1) {
@@ -100,27 +97,32 @@ static MnWord handshake_loop(SSL *ssl, int fd) {
     }
     int err = SSL_get_error(ssl, r);
     if (err == SSL_ERROR_WANT_READ) {
-      poll_fd(fd, POLLIN);
+      MnWord p = park_tls(fd, POLLIN, deadline_mono);
+      if (p != MN_EMPTY) {
+        return p;
+      }
       continue;
     }
     if (err == SSL_ERROR_WANT_WRITE) {
-      poll_fd(fd, POLLOUT);
+      MnWord p = park_tls(fd, POLLOUT, deadline_mono);
+      if (p != MN_EMPTY) {
+        return p;
+      }
       continue;
     }
     return io_other(EIO);
   }
 }
 
-MnWord mn_tls_client(MnWord fd_tagged) {
+static MnWord tls_client_deadline(int fd, int64_t deadline_mono) {
   ensure_openssl();
-  int fd = (int)mn_word_to_int(fd_tagged);
   SSL *ssl = SSL_new(client_ctx);
   if (ssl == NULL) {
     return io_other(ENOMEM);
   }
   SSL_set_fd(ssl, fd);
   SSL_set_connect_state(ssl);
-  MnWord hs = handshake_loop(ssl, fd);
+  MnWord hs = handshake_loop(ssl, fd, deadline_mono);
   if (hs != MN_EMPTY) {
     SSL_free(ssl);
     return hs;
@@ -133,9 +135,21 @@ MnWord mn_tls_client(MnWord fd_tagged) {
   return mn_ok(mn_int_to_word((int64_t)id));
 }
 
-MnWord mn_tls_server(MnWord fd_tagged, MnWord cert_path, MnWord key_path) {
+MnWord mn_tls_client(MnWord fd_tagged) {
+  return tls_client_deadline((int)mn_word_to_int(fd_tagged), -1);
+}
+
+MnWord mn_tls_client_timeout(MnWord fd_tagged, MnWord ms_tagged) {
+  int64_t ms = mn_word_to_int(ms_tagged);
+  if (ms < 0) {
+    ms = 0;
+  }
+  return tls_client_deadline((int)mn_word_to_int(fd_tagged), mn_mono_now_ms() + ms);
+}
+
+static MnWord tls_server_deadline(int fd, MnWord cert_path, MnWord key_path,
+                                  int64_t deadline_mono) {
   ensure_openssl();
-  int fd = (int)mn_word_to_int(fd_tagged);
   char *cpath = word_to_cstr(cert_path);
   char *kpath = word_to_cstr(key_path);
   if (cpath == NULL || kpath == NULL) {
@@ -157,7 +171,7 @@ MnWord mn_tls_server(MnWord fd_tagged, MnWord cert_path, MnWord key_path) {
   }
   SSL_set_fd(ssl, fd);
   SSL_set_accept_state(ssl);
-  MnWord hs = handshake_loop(ssl, fd);
+  MnWord hs = handshake_loop(ssl, fd, deadline_mono);
   if (hs != MN_EMPTY) {
     SSL_free(ssl);
     return hs;
@@ -170,12 +184,21 @@ MnWord mn_tls_server(MnWord fd_tagged, MnWord cert_path, MnWord key_path) {
   return mn_ok(mn_int_to_word((int64_t)id));
 }
 
-MnWord mn_tls_read(MnWord id_tagged, MnWord max_tagged) {
-  MnTlsConn *c = get_conn((int)mn_word_to_int(id_tagged));
-  if (c == NULL) {
-    return io_other(EBADF);
+MnWord mn_tls_server(MnWord fd_tagged, MnWord cert_path, MnWord key_path) {
+  return tls_server_deadline((int)mn_word_to_int(fd_tagged), cert_path, key_path, -1);
+}
+
+MnWord mn_tls_server_timeout(MnWord fd_tagged, MnWord cert_path, MnWord key_path,
+                             MnWord ms_tagged) {
+  int64_t ms = mn_word_to_int(ms_tagged);
+  if (ms < 0) {
+    ms = 0;
   }
-  int64_t max = mn_word_to_int(max_tagged);
+  return tls_server_deadline((int)mn_word_to_int(fd_tagged), cert_path, key_path,
+                             mn_mono_now_ms() + ms);
+}
+
+static MnWord tls_read_deadline(MnTlsConn *c, int64_t max, int64_t deadline_mono) {
   if (max <= 0) {
     max = 4096;
   }
@@ -196,11 +219,19 @@ MnWord mn_tls_read(MnWord id_tagged, MnWord max_tagged) {
     }
     int err = SSL_get_error(c->ssl, n);
     if (err == SSL_ERROR_WANT_READ) {
-      poll_fd(c->fd, POLLIN);
+      MnWord p = park_tls(c->fd, POLLIN, deadline_mono);
+      if (p != MN_EMPTY) {
+        free(buf);
+        return p;
+      }
       continue;
     }
     if (err == SSL_ERROR_WANT_WRITE) {
-      poll_fd(c->fd, POLLOUT);
+      MnWord p = park_tls(c->fd, POLLOUT, deadline_mono);
+      if (p != MN_EMPTY) {
+        free(buf);
+        return p;
+      }
       continue;
     }
     free(buf);
@@ -208,11 +239,27 @@ MnWord mn_tls_read(MnWord id_tagged, MnWord max_tagged) {
   }
 }
 
-MnWord mn_tls_write(MnWord id_tagged, MnWord data) {
+MnWord mn_tls_read(MnWord id_tagged, MnWord max_tagged) {
   MnTlsConn *c = get_conn((int)mn_word_to_int(id_tagged));
   if (c == NULL) {
     return io_other(EBADF);
   }
+  return tls_read_deadline(c, mn_word_to_int(max_tagged), -1);
+}
+
+MnWord mn_tls_read_timeout(MnWord id_tagged, MnWord max_tagged, MnWord ms_tagged) {
+  MnTlsConn *c = get_conn((int)mn_word_to_int(id_tagged));
+  if (c == NULL) {
+    return io_other(EBADF);
+  }
+  int64_t ms = mn_word_to_int(ms_tagged);
+  if (ms < 0) {
+    ms = 0;
+  }
+  return tls_read_deadline(c, mn_word_to_int(max_tagged), mn_mono_now_ms() + ms);
+}
+
+static MnWord tls_write_deadline(MnTlsConn *c, MnWord data, int64_t deadline_mono) {
   int64_t len = mn_word_to_int(mn_str_byte_length(data));
   char *buf = NULL;
   if (len > 0) {
@@ -233,11 +280,19 @@ MnWord mn_tls_write(MnWord id_tagged, MnWord data) {
     }
     int err = SSL_get_error(c->ssl, n);
     if (err == SSL_ERROR_WANT_READ) {
-      poll_fd(c->fd, POLLIN);
+      MnWord p = park_tls(c->fd, POLLIN, deadline_mono);
+      if (p != MN_EMPTY) {
+        free(buf);
+        return p;
+      }
       continue;
     }
     if (err == SSL_ERROR_WANT_WRITE) {
-      poll_fd(c->fd, POLLOUT);
+      MnWord p = park_tls(c->fd, POLLOUT, deadline_mono);
+      if (p != MN_EMPTY) {
+        free(buf);
+        return p;
+      }
       continue;
     }
     free(buf);
@@ -245,6 +300,26 @@ MnWord mn_tls_write(MnWord id_tagged, MnWord data) {
   }
   free(buf);
   return mn_ok(MN_UNIT);
+}
+
+MnWord mn_tls_write(MnWord id_tagged, MnWord data) {
+  MnTlsConn *c = get_conn((int)mn_word_to_int(id_tagged));
+  if (c == NULL) {
+    return io_other(EBADF);
+  }
+  return tls_write_deadline(c, data, -1);
+}
+
+MnWord mn_tls_write_timeout(MnWord id_tagged, MnWord data, MnWord ms_tagged) {
+  MnTlsConn *c = get_conn((int)mn_word_to_int(id_tagged));
+  if (c == NULL) {
+    return io_other(EBADF);
+  }
+  int64_t ms = mn_word_to_int(ms_tagged);
+  if (ms < 0) {
+    ms = 0;
+  }
+  return tls_write_deadline(c, data, mn_mono_now_ms() + ms);
 }
 
 MnWord mn_tls_close(MnWord id_tagged) {

@@ -10,6 +10,9 @@ import std/list as List
 pub type ActorError =
   | ActorCancelled
   | ActorDead
+  ; Mailbox deadline exceeded (CONC-02). Named ActorTimeout so it does not
+  ; collide with IoError.Timeout's ownership of the Timeout nullary.
+  | ActorTimeout
 
 ; Default bounded capacity (Build F backpressure).
 ; @test default-capacity() => 1024
@@ -140,6 +143,48 @@ pub let receive[a](mb: Mailbox a) -> Result a ActorError {
             | Err(_) -> Err(ActorCancelled())
             | Ok(_) -> recur()
         }
+}
+
+; Like receive, but Err(ActorTimeout) after ms; the queue is unchanged on timeout.
+; @test {
+;   let mb = mailbox-new()
+;   receive-timeout(mb, 5)
+; } => Err(ActorTimeout())
+pub let receive-timeout[a](mb: Mailbox a, ms: Int) -> Result a ActorError {
+  let deadline = Sched.mono-ms() + ms
+  loop ()
+    match (try-dequeue(mb))
+      | Some(msg) -> Ok(msg)
+      | None ->
+        if (not(is-alive(mb))) -> Err(ActorDead()) | {
+          match (Sched.wait-until(mb-cell(mb), deadline))
+            | Ok(_) -> recur()
+            | Err(e) ->
+              if (Sched.is-timeout(e)) -> Err(ActorTimeout()) | Err(ActorCancelled())
+        }
+}
+
+; Like send, but Err(ActorTimeout) after ms waiting for space; nothing is enqueued.
+; @test {
+;   let mb = mailbox-new-bounded(1)
+;   let _ = send(mb, 1)
+;   send-timeout(mb, 2, 5)
+; } => Err(ActorTimeout())
+pub let send-timeout[a](mb: Mailbox a, msg: a, ms: Int) -> Result Unit ActorError {
+  let deadline = Sched.mono-ms() + ms
+  loop ()
+    if (not(is-alive(mb))) -> Err(ActorDead()) | {
+      if (mb-count(mb) >= mb-capacity(mb)) -> {
+        match (Sched.wait-until(mb-space(mb), deadline))
+          | Ok(_) -> recur()
+          | Err(e) ->
+            if (Sched.is-timeout(e)) -> Err(ActorTimeout()) | Err(ActorCancelled())
+      } | {
+        mb-enqueue(mb, msg)
+        Sched.notify(mb-cell(mb))
+        Ok(())
+      }
+    }
 }
 
 ; Mark dead and wake every parked receiver and blocked sender.

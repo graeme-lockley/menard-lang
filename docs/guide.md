@@ -572,6 +572,27 @@ in both. The interpreter is a separate implementation, and the corpus
 compares its results with the compiled programs. That is the correctness
 check. The specification's [§2.14](menard-spec.md) says this in full.
 
+## Deadlines
+
+Blocking waits can take a relative millisecond budget. The runtime uses a
+monotonic clock; the interpreter advances a virtual clock so tests stay
+instant.
+
+```
+import std/task as Task
+pub import std/task (JoinTimeout)
+
+let wait-briefly(t: Task.Task Int) -> Int =
+  match (Task.join-timeout(t, 50))
+    | Ok(Ok(n)) -> n
+    | Ok(Err(_)) -> -1
+    | Err(JoinTimeout()) -> -2
+```
+
+Mailboxes expose `receive-timeout` / `send-timeout` (`ActorTimeout`). Net and
+HTTP offer `*-timeout` variants that return `IoError.Timeout` and leave the
+fd usable (see [stdlib.md](stdlib.md)).
+
 ## Next steps
 
 - Run the programs in [examples/](../examples/). Each one that defines

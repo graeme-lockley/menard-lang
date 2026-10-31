@@ -1,0 +1,43 @@
+; CONC-02: Mailbox receive-timeout / send-timeout.
+import std/actor as Actor
+pub import std/actor (ActorTimeout, ActorDead)
+import std/task as Task
+
+let main() -> Int {
+  ; receive-timeout on empty mailbox → ActorTimeout; later send still delivered.
+  let mb = Actor.mailbox-new()
+  match (Actor.receive-timeout(mb, 5))
+    | Err(ActorTimeout()) -> println(1)
+    | _ -> println(0)
+  let _ = Actor.send(mb, 42)
+  match (Actor.receive(mb))
+    | Ok(42) -> println(2)
+    | _ -> println(0)
+
+  ; send-timeout on a full bounded mailbox → ActorTimeout; message not enqueued.
+  let full = Actor.mailbox-new-bounded(1)
+  let _ = Actor.send(full, 1)
+  match (Actor.send-timeout(full, 2, 5))
+    | Err(ActorTimeout()) -> println(3)
+    | _ -> println(0)
+  match (Actor.receive(full))
+    | Ok(1) -> println(4)
+    | _ -> println(0)
+
+  ; close wakes a send-timeout waiter with ActorDead.
+  let closed-mb = Actor.mailbox-new-bounded(1)
+  let _ = Actor.send(closed-mb, 0)
+  let sender = Task.spawn(fn () = {
+    match (Actor.send-timeout(closed-mb, 99, 200))
+      | Err(ActorDead()) -> 5
+      | Err(ActorTimeout()) -> -1
+      | _ -> -2
+  })
+  let _ = Task.sleep-ms(5)
+  Actor.close(closed-mb)
+  match (Task.join(sender))
+    | Ok(5) -> println(5)
+    | _ -> println(0)
+
+  0
+}

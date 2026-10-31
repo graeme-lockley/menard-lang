@@ -45,6 +45,10 @@ import {
   taskYield,
   taskWaitNew,
   taskWait,
+  taskWaitUntil,
+  taskSleepMs,
+  taskJoinTimeout,
+  taskMonoMs,
   taskNotify,
   taskNotifyAll,
   taskDictSet,
@@ -266,6 +270,7 @@ const EXTERN_BUILTIN: Record<string, string> = {
   mn_list_dir: "list-dir",
   mn_realpath: "realpath",
   mn_now_ms: "now-ms",
+  mn_mono_ms: "mn_mono_ms",
   mn_remove: "remove",
   mn_is_dir: "is-dir",
   mn_spawn: "spawn",
@@ -275,10 +280,13 @@ const EXTERN_BUILTIN: Record<string, string> = {
   mn_task_suspend_for_test: "mn_task_suspend_for_test",
   mn_task_resume: "mn_task_resume",
   mn_task_join: "mn_task_join",
+  mn_task_join_timeout: "mn_task_join_timeout",
   mn_task_cancel: "mn_task_cancel",
   mn_task_yield: "mn_task_yield",
   mn_task_wait_new: "mn_task_wait_new",
   mn_task_wait: "mn_task_wait",
+  mn_task_wait_until: "mn_task_wait_until",
+  mn_task_sleep_ms: "mn_task_sleep_ms",
   mn_task_notify: "mn_task_notify",
   mn_task_notify_all: "mn_task_notify_all",
   mn_task_dict_set: "mn_task_dict_set",
@@ -1487,14 +1495,18 @@ function installBuiltins(env: Env): void {
     "spawn", "spawn-capture",
     "mn_task_spawn", "mn_task_self", "mn_task_suspend_for_test",
     "mn_task_resume", "mn_task_join", "mn_task_cancel",
-    "mn_task_yield", "mn_task_wait_new", "mn_task_wait", "mn_task_notify", "mn_task_notify_all",
+    "mn_task_yield", "mn_task_wait_new", "mn_task_wait", "mn_task_wait_until", "mn_task_sleep_ms",
+    "mn_task_join_timeout", "mn_mono_ms",
+    "mn_task_notify", "mn_task_notify_all",
     "mn_task_dict_set", "mn_task_dict_get",
     "mn_task_defer_enter", "mn_task_defer_push", "mn_task_defer_leave",
-    "mn_tcp_listen", "mn_tcp_accept", "mn_tcp_connect", "mn_tcp_read", "mn_tcp_write", "mn_tcp_close",
+    "mn_tcp_listen", "mn_tcp_accept", "mn_tcp_accept_timeout", "mn_tcp_connect", "mn_tcp_connect_timeout",
+    "mn_tcp_read", "mn_tcp_read_timeout", "mn_tcp_write", "mn_tcp_write_timeout", "mn_tcp_close",
     "mn_udp_bind", "mn_udp_send", "mn_udp_recv", "mn_udp_close",
-    "mn_tls_client", "mn_tls_server", "mn_tls_read", "mn_tls_write", "mn_tls_close",
+    "mn_tls_client", "mn_tls_client_timeout", "mn_tls_server", "mn_tls_server_timeout",
+    "mn_tls_read", "mn_tls_read_timeout", "mn_tls_write", "mn_tls_write_timeout", "mn_tls_close",
     "NotFound", "Permission", "Exists", "IsADirectory", "NotADirectory",
-    "InvalidPath", "TooLarge", "Other", "Unsupported",
+    "InvalidPath", "TooLarge", "Timeout", "Other", "Unsupported",
     "NotExecutable", "InvalidArgument", "TooManyArguments",
     "Exited", "Signalled", "SpawnOutput",
   ];
@@ -1850,6 +1862,7 @@ function applyBuiltin(
     case "NotADirectory":
     case "InvalidPath":
     case "TooLarge":
+    case "Timeout":
     case "Unsupported":
     case "NotExecutable":
     case "InvalidArgument":
@@ -1898,6 +1911,29 @@ function applyBuiltin(
       if (id.tag !== "int") throw new PanicError("mn_task_wait: expected Int", span);
       return taskWait(id.value, host);
     }
+    case "mn_task_wait_until": {
+      const id = args[0]!;
+      const dl = args[1]!;
+      if (id.tag !== "int" || dl.tag !== "int") {
+        throw new PanicError("mn_task_wait_until: expected Int Int", span);
+      }
+      return taskWaitUntil(id.value, dl.value, host);
+    }
+    case "mn_task_sleep_ms": {
+      const ms = args[0]!;
+      if (ms.tag !== "int") throw new PanicError("mn_task_sleep_ms: expected Int", span);
+      return taskSleepMs(ms.value, host);
+    }
+    case "mn_task_join_timeout": {
+      const id = args[0]!;
+      const ms = args[1]!;
+      if (id.tag !== "int" || ms.tag !== "int") {
+        throw new PanicError("mn_task_join_timeout: expected Int Int", span);
+      }
+      return taskJoinTimeout(id.value, ms.value, host);
+    }
+    case "mn_mono_ms":
+      return taskMonoMs();
     case "mn_task_notify": {
       const id = args[0]!;
       if (id.tag !== "int") throw new PanicError("mn_task_notify: expected Int", span);
@@ -1926,18 +1962,26 @@ function applyBuiltin(
       return taskDeferLeave(host);
     case "mn_tcp_listen":
     case "mn_tcp_accept":
+    case "mn_tcp_accept_timeout":
     case "mn_tcp_connect":
+    case "mn_tcp_connect_timeout":
     case "mn_tcp_read":
+    case "mn_tcp_read_timeout":
     case "mn_tcp_write":
+    case "mn_tcp_write_timeout":
     case "mn_tcp_close":
     case "mn_udp_bind":
     case "mn_udp_send":
     case "mn_udp_recv":
     case "mn_udp_close":
     case "mn_tls_client":
+    case "mn_tls_client_timeout":
     case "mn_tls_server":
+    case "mn_tls_server_timeout":
     case "mn_tls_read":
+    case "mn_tls_read_timeout":
     case "mn_tls_write":
+    case "mn_tls_write_timeout":
     case "mn_tls_close":
       throw new PanicError(`native-only networking: ${name} unbound in interpreter`, span);
     default:

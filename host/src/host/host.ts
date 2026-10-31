@@ -15,6 +15,7 @@ export type IoError =
   | { tag: "InvalidPath" }
   | { tag: "TooLarge" }
   | { tag: "Other"; code: bigint }
+  | { tag: "Timeout" }
   | { tag: "Unsupported" };
 
 /** Thrown by Host.exit — evaluator treats as program-requested termination. */

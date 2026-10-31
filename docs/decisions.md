@@ -28,6 +28,44 @@ specification. Where a name changed, the entry that changed it says so.
 
 ---
 
+## 2026-10-26 — Deadlines: timer heap, wait-until, virtual clock (CONC-02)
+
+### The decision
+
+Blocking waits take a **relative millisecond** budget at the public API and convert
+to an absolute **monotonic** deadline at park time (`mn_mono_ms` /
+`CLOCK_MONOTONIC` natively). The runtime keeps a min-heap of
+`(deadline, task, cell)` entries; due timers soft-resume the waiter with a
+timeout outcome (distinct from cancel). Idle `pump` / main wait use
+`mn_net_poll` with `min(next_timer, …)` and sleep when there are no FDs.
+
+`mn_task_wait_until(cell, deadline) -> Result Unit Int` encodes
+`Err(0)=cancel`, `Err(1)=timeout`. Public surfaces: `Task.sleep-ms` /
+`join-timeout` (`JoinTimeout`), `Mailbox.receive-timeout` /
+`send-timeout` (`ActorTimeout`), `Net.*-timeout` / TLS timeouts
+(`IoError.Timeout`), `Http.request-timeout` and `serve-timeout`. TLS never
+calls `poll(..., -1)` on the mutator — it parks like TCP.
+
+The interpreter uses a **virtual monotonic clock** that advances to the next
+armed deadline when every task is idle, so host tests are instant and
+deterministic. Native tests use sub-100 ms deadlines.
+
+### Why
+
+Without a timer, every park can hang forever and a stalled TLS handshake froze
+the single mutator. Relative public ms keep call sites readable; absolute mono
+deadlines avoid wall-clock jumps. A third wait outcome (timeout) must not look
+like cancel or notify. Virtual time makes the oracle suite non-flaky.
+
+### Rejected
+
+Wall-clock deadlines (`mn_now_ms`); a single `Result Unit Unit` that collapses
+timeout into cancel; exposing `mn_net_poll` as Platform API; sharing the
+`Timeout` nullary between `ActorError` and `IoError` for pattern matching
+(ctor ownership — use `ActorTimeout` / `JoinTimeout` / `IoError.Timeout`).
+
+---
+
 ## 2026-10-26 — Wait-cell `notify-all` + closed cell (CONC-01)
 
 ### The decision

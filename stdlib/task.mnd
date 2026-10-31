@@ -8,6 +8,10 @@ import std/sched as Sched
 pub type Cancelled =
   | Cancelled
 
+; Outer error for join-timeout (distinct from IoError.Timeout / ActorTimeout).
+pub type JoinTimeout =
+  | JoinTimeout
+
 ; Phantom result type; ctor name is not `Task` so `import std/task as Task` works.
 pub type Task[a] =
   | Tid(Int)
@@ -45,6 +49,26 @@ pub let join[a](t: Task a) -> Result a Cancelled =
   match (Sched.join(id(t)))
     | Ok(v) -> Ok(v)
     | Err(_) -> Err(Cancelled())
+
+; Sleep for ms milliseconds. Err(Cancelled) if cancelled while sleeping.
+; @test sleep-ms(0) => Ok(())
+pub let sleep-ms(ms: Int) -> Result Unit Cancelled =
+  match (Sched.sleep-ms(ms))
+    | Ok(_) -> Ok(())
+    | Err(_) -> Err(Cancelled())
+
+; Wait up to ms for completion. Err(JoinTimeout) leaves the child running.
+; @test {
+;   let t = spawn(fn () = 1)
+;   join-timeout(t, 50)
+; } => Ok(Ok(1))
+pub let join-timeout[a](t: Task a, ms: Int) -> Result (Result a Cancelled) JoinTimeout =
+  match (Sched.join-timeout(id(t), ms))
+    | Err(_) -> Err(JoinTimeout())
+    | Ok(inner) ->
+      match (inner)
+        | Ok(v) -> Ok(Ok(v))
+        | Err(_) -> Ok(Err(Cancelled()))
 
 ; Cooperative yield for long CPU work.
 ; @test yield()

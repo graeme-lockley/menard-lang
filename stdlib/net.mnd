@@ -5,9 +5,13 @@ pub import std/io (IoError)
 
 extern mn_tcp_listen(port: Int) -> Result Int IoError
 extern mn_tcp_accept(fd: Int) -> Result Int IoError
+extern mn_tcp_accept_timeout(fd: Int, ms: Int) -> Result Int IoError
 extern mn_tcp_connect(host: Str, port: Int) -> Result Int IoError
+extern mn_tcp_connect_timeout(host: Str, port: Int, ms: Int) -> Result Int IoError
 extern mn_tcp_read(fd: Int, max: Int) -> Result Str IoError
+extern mn_tcp_read_timeout(fd: Int, max: Int, ms: Int) -> Result Str IoError
 extern mn_tcp_write(fd: Int, data: Str) -> Result Unit IoError
+extern mn_tcp_write_timeout(fd: Int, data: Str, ms: Int) -> Result Unit IoError
 extern mn_tcp_close(fd: Int) -> Unit
 
 extern mn_udp_bind(port: Int) -> Result Int IoError
@@ -16,9 +20,13 @@ extern mn_udp_recv(fd: Int, max: Int) -> Result Str IoError
 extern mn_udp_close(fd: Int) -> Unit
 
 extern mn_tls_client(fd: Int) -> Result Int IoError
+extern mn_tls_client_timeout(fd: Int, ms: Int) -> Result Int IoError
 extern mn_tls_server(fd: Int, cert: Str, key: Str) -> Result Int IoError
+extern mn_tls_server_timeout(fd: Int, cert: Str, key: Str, ms: Int) -> Result Int IoError
 extern mn_tls_read(id: Int, max: Int) -> Result Str IoError
+extern mn_tls_read_timeout(id: Int, max: Int, ms: Int) -> Result Str IoError
 extern mn_tls_write(id: Int, data: Str) -> Result Unit IoError
+extern mn_tls_write_timeout(id: Int, data: Str, ms: Int) -> Result Unit IoError
 extern mn_tls_close(id: Int) -> Unit
 
 ; --- TCP ---
@@ -33,20 +41,41 @@ pub let listen(port: Int) -> Result Int IoError =
 pub let accept(fd: Int) -> Result Int IoError =
   mn_tcp_accept(fd)
 
+; Accept with a relative timeout. On Timeout the listener fd stays open.
+; @test true
+pub let accept-timeout(fd: Int, ms: Int) -> Result Int IoError =
+  mn_tcp_accept_timeout(fd, ms)
+
 ; Connect to host:port. Parks until connected. Native only.
 ; @test true
 pub let connect(host: Str, port: Int) -> Result Int IoError =
   mn_tcp_connect(host, port)
+
+; Connect with a relative timeout. On Timeout no fd is returned.
+; @test true
+pub let connect-timeout(host: Str, port: Int, ms: Int) -> Result Int IoError =
+  mn_tcp_connect_timeout(host, port, ms)
 
 ; Read up to max bytes. Parks until data or EOF. Native only.
 ; @test true
 pub let read(fd: Int, max: Int) -> Result Str IoError =
   mn_tcp_read(fd, max)
 
+; Read with a relative timeout. On Timeout the fd stays open and usable.
+; @test true
+pub let read-timeout(fd: Int, max: Int, ms: Int) -> Result Str IoError =
+  mn_tcp_read_timeout(fd, max, ms)
+
 ; Write data. Parks until complete or error. Native only.
 ; @test true
 pub let write(fd: Int, data: Str) -> Result Unit IoError =
   mn_tcp_write(fd, data)
+
+; Write with a relative timeout. On Timeout the fd stays open; bytes already
+; sent are not rolled back.
+; @test true
+pub let write-timeout(fd: Int, data: Str, ms: Int) -> Result Unit IoError =
+  mn_tcp_write_timeout(fd, data, ms)
 
 ; Close a TCP fd. Native only.
 ; @test true
@@ -89,20 +118,40 @@ pub let udp-close(fd: Int) -> Unit =
 pub let tls-client(fd: Int) -> Result Int IoError =
   mn_tls_client(fd)
 
+; Client TLS handshake with a relative timeout. Native only.
+; @test true
+pub let tls-client-timeout(fd: Int, ms: Int) -> Result Int IoError =
+  mn_tls_client_timeout(fd, ms)
+
 ; Server TLS handshake with cert/key paths. Native only.
 ; @test true
 pub let tls-server(fd: Int, cert: Str, key: Str) -> Result Int IoError =
   mn_tls_server(fd, cert, key)
+
+; Server TLS handshake with a relative timeout. Native only.
+; @test true
+pub let tls-server-timeout(fd: Int, cert: Str, key: Str, ms: Int) -> Result Int IoError =
+  mn_tls_server_timeout(fd, cert, key, ms)
 
 ; Read from a TLS session. Native only.
 ; @test true
 pub let tls-read(id: Int, max: Int) -> Result Str IoError =
   mn_tls_read(id, max)
 
+; TLS read with a relative timeout. Native only.
+; @test true
+pub let tls-read-timeout(id: Int, max: Int, ms: Int) -> Result Str IoError =
+  mn_tls_read_timeout(id, max, ms)
+
 ; Write to a TLS session. Native only.
 ; @test true
 pub let tls-write(id: Int, data: Str) -> Result Unit IoError =
   mn_tls_write(id, data)
+
+; TLS write with a relative timeout. Native only.
+; @test true
+pub let tls-write-timeout(id: Int, data: Str, ms: Int) -> Result Unit IoError =
+  mn_tls_write_timeout(id, data, ms)
 
 ; Close a TLS session. Native only.
 ; @test true

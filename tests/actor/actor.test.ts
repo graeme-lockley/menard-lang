@@ -63,6 +63,7 @@ const BASIC_EXPECTED = "30\n1\n1\n0\n1\n1\n11\n";
 const BOUNDED_EXPECTED = "1\n1\n5\n";
 /* recv-dead, recv-other, send-dead, send-other, drain sum 10+20+1 */
 const CLOSE_MANY_EXPECTED = "100\n0\n100\n0\n31\n";
+const TIMEOUTS_EXPECTED = "1\n2\n3\n4\n5\n";
 
 describe("Build E actors", () => {
   test("interpreter: mailbox + Actor.call + death + registry + escalate", () => {
@@ -120,5 +121,23 @@ describe("Build E actors", () => {
       expect(r.stdout).toBe(CLOSE_MANY_EXPECTED);
     },
     { timeout: 300_000 },
+  );
+
+  test("interpreter: mailbox timeouts (CONC-02)", () => {
+    const r = runInterpreter("tests/actor/timeouts.mnd");
+    expect(r.stderr).not.toContain("panic");
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe(TIMEOUTS_EXPECTED);
+  });
+
+  test.skipIf(!Bun.which("clang"))(
+    "native: mailbox timeouts (CONC-02)",
+    () => {
+      const r = runNative("tests/actor/timeouts.mnd");
+      expect(r.stderr).toBe("");
+      expect(r.status).toBe(0);
+      expect(r.stdout).toBe(TIMEOUTS_EXPECTED);
+    },
+    { timeout: 180_000 },
   );
 });

@@ -9,7 +9,9 @@ let unwrap-fd(r: Result Int IoError) -> Int =
     | Err(_) -> -1
 
 let main() -> Int {
-  let listener = unwrap-fd(Net.listen(18765))
+  ; Distinct from http/roundtrip (18765) and net/timeouts (19876).
+  let port = 18766
+  let listener = unwrap-fd(Net.listen(port))
   if (listener < 0) -> {
     println("listen-fail")
     1
@@ -28,7 +30,9 @@ let main() -> Int {
                 }
           }
     })
-    match (Net.connect("127.0.0.1", 18765))
+    ; Yield so the server parks on accept before connect (reduces race).
+    Task.yield()
+    match (Net.connect("127.0.0.1", port))
       | Err(_) -> {
           println("connect-fail")
           Task.cancel(server)
