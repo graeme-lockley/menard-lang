@@ -399,7 +399,8 @@ Parkable TCP/UDP and OpenSSL TLS. **Native only** (interpreter unbound).
 
 | Name | |
 | --- | --- |
-| `listen` / `accept` / `connect` / `read` / `write` / `close` | TCP (unbounded park). |
+| `listen` / `accept` / `connect` / `read` / `write` / `close` | TCP (unbounded park). `listen(0)` binds an ephemeral port. |
+| `local-port(fd)` | Bound TCP port via `getsockname` (for ephemeral listeners). |
 | `accept-timeout` / `connect-timeout` / `read-timeout` / `write-timeout` | Relative ms; `Err(Timeout)`; on timeout the fd stays open and usable (connect closes the half-open socket). |
 | `with-connection(fd, body)` | `defer` close around `body`. |
 | `udp-bind` / `udp-send` / `udp-recv` / `udp-close` | UDP. |
@@ -413,16 +414,21 @@ Parkable TCP/UDP and OpenSSL TLS. **Native only** (interpreter unbound).
 
 `import std/http as Http` · `import std/rest as Rest`
 
-Menard HTTP/1.1 (request line + headers + Content-Length) and small REST helpers.
+Menard HTTP/1.1 (request line + headers + Content-Length body; no chunked encoding, no keep-alive). Native only.
+
+**Headers.** Names are lowercased on parse. `Request.headers` / `Response.headers` are `Map Str Str` with **last-wins** for duplicate names (including `Set-Cookie` — callers that need every cookie must handle that themselves). Lookups such as `content-length` and `host` use the lowercased key.
+
+**Limits** (`Limits` / `default-limits()`): request line ≤ 8 KiB, header block ≤ 64 KiB, ≤ 100 headers, body ≤ 8 MiB. Exceeding a limit returns wire status **431** (headers/line) or **413** (body) and closes the connection before allocating the body. Protocol errors (bad request line, conflicting `Content-Length`, missing `Host` on HTTP/1.1, invalid `Content-Length`) return **400** as `BadRequest`. A short body is `Incomplete`. Extra bytes past `Content-Length` are not parsed as a second request — the one-shot handler closes the fd.
+
+**Deadlines.** Relative milliseconds (CONC-02). `serve` / `request` use a 30s default; `serve-timeout` / `request-timeout` take an explicit budget; `serve-timeout-limits` / `request-timeout-limits` also take `Limits`. `serve-on(listener, …)` runs the accept loop on an already-bound socket (use with `listen(0)` + `local-port`).
 
 | Name | |
 | --- | --- |
-| `Request` / `Response` / `Method` / `HttpError` | Core types. |
+| `Request` / `Response` / `Method` / `HttpError` / `Limits` | Core types. `HttpError` includes `BadRequest`, `HeaderLimit`, `BodyLimit`, `Incomplete`, `Closed`, `NetErr`. |
+| `default-limits()` | 8 KiB / 64 KiB / 100 headers / 8 MiB. |
 | `read-request` / `write-response` | Per-connection. |
-| `serve(port, handler)` | Accept loop under `Task.scope` with a default per-connection deadline (30s). |
-| `serve-timeout(port, conn-ms, handler)` | Same, with an explicit per-connection deadline. |
-| `request(host, port, req)` | One-shot client (unbounded). |
-| `request-timeout(host, port, req, ms)` | One-shot client under a relative deadline. |
+| `serve` / `serve-timeout` / `serve-timeout-limits` / `serve-on` | Accept loop under `Task.scope`. |
+| `request` / `request-timeout` / `request-timeout-limits` | One-shot client (default or explicit deadline). |
 | `Rest.ok-json` / `not-found` / `path-segments` / `json-body` | REST helpers. |
 
 ## Console

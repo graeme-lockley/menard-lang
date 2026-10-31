@@ -375,6 +375,7 @@ MnWord mn_tcp_read_timeout(MnWord fd_tagged, MnWord max_tagged, MnWord ms_tagged
 MnWord mn_tcp_write(MnWord fd_tagged, MnWord data);         /* → Result Unit IoError */
 MnWord mn_tcp_write_timeout(MnWord fd_tagged, MnWord data, MnWord ms_tagged);
 MnWord mn_tcp_close(MnWord fd_tagged);         /* → Unit */
+MnWord mn_tcp_local_port(MnWord fd_tagged);    /* → Result Int IoError; getsockname */
 MnWord mn_udp_bind(MnWord port_tagged);        /* → Result Int IoError */
 MnWord mn_udp_send(MnWord fd_tagged, MnWord host_str, MnWord port_tagged, MnWord data);
 MnWord mn_udp_recv(MnWord fd_tagged, MnWord max_tagged); /* → Result Str IoError */

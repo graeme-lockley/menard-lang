@@ -1,57 +1,59 @@
-; Build F native TCP echo smoke.
+; Build F native TCP echo smoke (ephemeral port + wait-cell readiness).
 pub import std/io (IoError)
 import std/net as Net
 import std/task as Task
-
-let unwrap-fd(r: Result Int IoError) -> Int =
-  match (r)
-    | Ok(fd) -> fd
-    | Err(_) -> -1
+import std/sched as Sched
 
 let main() -> Int {
-  ; Distinct from http/roundtrip (18765) and net/timeouts (19876).
-  let port = 18766
-  let listener = unwrap-fd(Net.listen(port))
-  if (listener < 0) -> {
-    println("listen-fail")
-    1
-  } | {
-    defer Net.close(listener)
-    let server = Task.spawn(fn () = {
-      match (Net.accept(listener))
-        | Err(_) -> 0
-        | Ok(conn) -> {
-            defer Net.close(conn)
-            match (Net.read(conn, 64))
-              | Err(_) -> 0
-              | Ok(data) -> {
-                  let _ = Net.write(conn, data)
-                  0
-                }
-          }
-    })
-    ; Yield so the server parks on accept before connect (reduces race).
-    Task.yield()
-    match (Net.connect("127.0.0.1", port))
-      | Err(_) -> {
-          println("connect-fail")
-          Task.cancel(server)
-          let _ = Task.join(server)
-          1
-        }
-      | Ok(c) -> {
-          defer Net.close(c)
-          let _ = Net.write(c, "ping")
-          match (Net.read(c, 64))
-            | Err(_) -> {
-                println("read-fail")
-                1
-              }
-            | Ok(got) -> {
-                println(got)
-                let _ = Task.join(server)
-                0
+  let ready = Sched.wait-new()
+  let port-cell = ref(0)
+  let server = Task.spawn(fn () = {
+    match (Net.listen(0))
+      | Err(_) -> 1
+      | Ok(listener) -> {
+          defer Net.close(listener)
+          match (Net.local-port(listener))
+            | Err(_) -> 1
+            | Ok(port) -> {
+                set!(port-cell, port)
+                Sched.notify(ready)
+                match (Net.accept(listener))
+                  | Err(_) -> 0
+                  | Ok(conn) -> {
+                      defer Net.close(conn)
+                      match (Net.read(conn, 64))
+                        | Err(_) -> 0
+                        | Ok(data) -> {
+                            let _ = Net.write(conn, data)
+                            0
+                          }
+                    }
               }
         }
-  }
+  })
+  let _ = Sched.wait(ready)
+  let port = deref(port-cell)
+  match (Net.connect("127.0.0.1", port))
+    | Err(_) -> {
+        println("connect-fail")
+        Task.cancel(server)
+        let _ = Task.join(server)
+        1
+      }
+    | Ok(c) -> {
+        defer Net.close(c)
+        let _ = Net.write(c, "ping")
+        match (Net.read(c, 64))
+          | Err(_) -> {
+              println("read-fail")
+              Task.cancel(server)
+              let _ = Task.join(server)
+              1
+            }
+          | Ok(got) -> {
+              println(got)
+              let _ = Task.join(server)
+              0
+            }
+      }
 }

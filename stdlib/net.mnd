@@ -13,6 +13,7 @@ extern mn_tcp_read_timeout(fd: Int, max: Int, ms: Int) -> Result Str IoError
 extern mn_tcp_write(fd: Int, data: Str) -> Result Unit IoError
 extern mn_tcp_write_timeout(fd: Int, data: Str, ms: Int) -> Result Unit IoError
 extern mn_tcp_close(fd: Int) -> Unit
+extern mn_tcp_local_port(fd: Int) -> Result Int IoError
 
 extern mn_udp_bind(port: Int) -> Result Int IoError
 extern mn_udp_send(fd: Int, host: Str, port: Int, data: Str) -> Result Unit IoError
@@ -81,6 +82,11 @@ pub let write-timeout(fd: Int, data: Str, ms: Int) -> Result Unit IoError =
 ; @test true
 pub let close(fd: Int) -> Unit =
   mn_tcp_close(fd)
+
+; Local TCP port of a bound socket (for listen(0) ephemeral ports). Native only.
+; @test true
+pub let local-port(fd: Int) -> Result Int IoError =
+  mn_tcp_local_port(fd)
 
 ; Run body with a connected fd; always close (uses language defer). Native only.
 ; @test true

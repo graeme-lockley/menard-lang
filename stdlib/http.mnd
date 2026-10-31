@@ -1,5 +1,9 @@
-; Minimal HTTP/1.1 client + server in Menard (Build F).
+; Minimal HTTP/1.1 client + server in Menard (Build F / CONC-04).
 ; Request line + headers + Content-Length body.
+; Header names are lowercased on parse; Map Str Str is last-wins (including
+; Set-Cookie). Default limits: request line 8 KiB, header block 64 KiB,
+; 100 headers, body 8 MiB. One-shot connections — leftover body bytes are
+; discarded by closing the fd (no keep-alive / no request smuggling).
 ; @module std/http
 
 import std/net as Net
@@ -9,11 +13,28 @@ import std/list as List
 import std/map as Map
 import std/sched as Sched
 import std/string as String
+import std/string-buffer as Buf
 import std/task as Task
 
-; Default per-connection I/O budget for serve (ms).
+; Default per-connection I/O budget for serve / request (ms).
 let default-conn-deadline-ms() -> Int =
   30000
+
+; Configurable size caps (CONC-04).
+pub record Limits {
+  max-request-line: Int
+  max-header-block: Int
+  max-headers: Int
+  max-body: Int
+}
+
+; Default limits: 8 KiB / 64 KiB / 100 headers / 8 MiB.
+; @test {
+;   match (default-limits())
+;     | Limits(rl, hb, nh, mb) -> rl == 8192 && hb == 65536 && nh == 100 && mb == 8388608
+; } => true
+pub let default-limits() -> Limits =
+  Limits(8192, 65536, 100, 8388608)
 
 pub type Method =
   | GET
@@ -24,6 +45,7 @@ pub type Method =
   | OPTIONS
   | OtherMethod(Str)
 
+; Headers: lowercase names after parse; last-wins for duplicate names.
 pub record Request {
   method: Method
   path: Str
@@ -40,6 +62,8 @@ pub record Response {
 pub type HttpError =
   | NetErr(IoError)
   | BadRequest(Str)
+  | HeaderLimit(Str)
+  | BodyLimit(Str)
   | Incomplete
   | Closed
 
@@ -65,14 +89,20 @@ let method-str(m: Method) -> Str =
     | OPTIONS() -> "OPTIONS"
     | OtherMethod(s) -> s
 
-; Prefer exact then common Content-Length spellings.
-let content-length(headers: Map Str Str) -> Int =
-  match (Map.lookup("content-length", headers))
-    | Some(s) -> Int.from-str(s) ? 0
-    | None ->
-      match (Map.lookup("Content-Length", headers))
-        | Some(s) -> Int.from-str(s) ? 0
-        | None -> 0
+; ASCII A–Z → a–z; other bytes unchanged.
+let ascii-lower-byte(b: Int) -> Int =
+  if (b >= 65 && b <= 90) -> b + 32 | b
+
+; ASCII-lowercase a string (header names).
+let ascii-lower(s: Str) -> Str {
+  let sb = Buf.new()
+  let n = String.length(s)
+  loop (i = 0)
+    if (i >= n) -> Buf.take-str!(sb) | {
+      Buf.append-byte!(sb, ascii-lower-byte(String.byte(i, s)))
+      recur(i + 1)
+    }
+}
 
 ; Remaining relative ms until an absolute mono deadline (clamped ≥ 0).
 let ms-left(deadline: Int) -> Int {
@@ -80,18 +110,26 @@ let ms-left(deadline: Int) -> Int {
   if (left < 0) -> 0 | left
 }
 
-; Read until the header/body separator appears (or EOF/error/deadline).
-let read-headers-until(fd: Int, acc: Str, deadline: Int) -> Result Str HttpError =
+; Read until `\r\n\r\n` appears, respecting max-header-block and deadline.
+let read-headers-until(fd: Int, acc: Str, max-block: Int, deadline: Int) -> Result Str HttpError =
   match (String.index-of("\r\n\r\n", acc))
-    | Some(_) -> Ok(acc)
+    | Some(_) ->
+      if (String.length(acc) > max-block) -> Err(HeaderLimit("header block too large")) | Ok(acc)
     | None ->
-      match (Net.read-timeout(fd, 4096, ms-left(deadline)))
-        | Err(e) -> Err(NetErr(e))
-        | Ok("") ->
-          if (acc == "") -> Err(Closed()) | Err(Incomplete())
-        | Ok(chunk) -> read-headers-until(fd, String.concat(acc, chunk), deadline)
+      if (String.length(acc) > max-block) -> Err(HeaderLimit("header block too large")) | {
+        let room = max-block - String.length(acc) + 4
+        let chunk-max = if (room < 4096) -> room | 4096
+        if (chunk-max <= 0) -> Err(HeaderLimit("header block too large")) | {
+          match (Net.read-timeout(fd, chunk-max, ms-left(deadline)))
+            | Err(e) -> Err(NetErr(e))
+            | Ok("") ->
+              if (acc == "") -> Err(Closed()) | Err(Incomplete())
+            | Ok(chunk) ->
+              read-headers-until(fd, String.concat(acc, chunk), max-block, deadline)
+        }
+      }
 
-; Read until the header/body separator (unbounded).
+; Read until the header/body separator (unbounded — prefer timed path).
 let read-headers(fd: Int, acc: Str) -> Result Str HttpError =
   match (String.index-of("\r\n\r\n", acc))
     | Some(_) -> Ok(acc)
@@ -102,20 +140,51 @@ let read-headers(fd: Int, acc: Str) -> Result Str HttpError =
           if (acc == "") -> Err(Closed()) | Err(Incomplete())
         | Ok(chunk) -> read-headers(fd, String.concat(acc, chunk))
 
-; Fold `Name: value` lines into a header map.
-let parse-header-lines(lines: List Str, headers: Map Str Str) -> Map Str Str =
+; Fold `Name: value` lines; names lowercased; last-wins; conflict on CL.
+let parse-header-lines(
+  lines: List Str,
+  headers: Map Str Str,
+  cl: Maybe Str,
+  count: Int,
+  max-headers: Int
+) -> Result (Map Str Str * Maybe Str) HttpError =
   match (lines)
-    | [] -> headers
+    | [] -> Ok((headers, cl))
     | line :: rest ->
-      match (String.index-of(":", line))
-        | None -> parse-header-lines(rest, headers)
-        | Some(at) -> {
-            let name = String.slice(0, at, line)
-            let raw = String.drop(at + 1, line)
-            let val =
-              if (String.starts-with(" ", raw)) -> String.drop(1, raw) | raw
-            parse-header-lines(rest, Map.set(name, val, headers))
-          }
+      if (count >= max-headers) -> Err(HeaderLimit("too many headers")) | {
+        match (String.index-of(":", line))
+          | None -> parse-header-lines(rest, headers, cl, count, max-headers)
+          | Some(at) -> {
+              let name = ascii-lower(String.slice(0, at, line))
+              let raw = String.drop(at + 1, line)
+              let val =
+                if (String.starts-with(" ", raw)) -> String.drop(1, raw) | raw
+              let next = count + 1
+              let headers2 = Map.set(name, val, headers)
+              if (name == "content-length") -> {
+                match (cl)
+                  | Some(prev) ->
+                    match (prev == val)
+                      | true -> parse-header-lines(rest, headers2, cl, next, max-headers)
+                      | false -> Err(BadRequest("conflicting Content-Length"))
+                  | None ->
+                    parse-header-lines(rest, headers2, Some(val), next, max-headers)
+              } | parse-header-lines(rest, headers2, cl, next, max-headers)
+            }
+      }
+
+; Parse Content-Length text under body limits.
+let parse-content-length(cl: Maybe Str, max-body: Int) -> Result Int HttpError =
+  match (cl)
+    | None -> Ok(0)
+    | Some(s) ->
+      match (Int.from-str(s))
+        | None -> Err(BadRequest("invalid Content-Length"))
+        | Some(n) ->
+          cond
+            | n < 0 -> Err(BadRequest("invalid Content-Length"))
+            | n > max-body -> Err(BodyLimit("body too large"))
+            | else -> Ok(n)
 
 ; Read until `need` body bytes are accumulated (with deadline).
 let read-body-until(fd: Int, need: Int, acc: Str, deadline: Int) -> Result Str HttpError =
@@ -139,29 +208,98 @@ let read-body(fd: Int, need: Int, acc: Str) -> Result Str HttpError =
         | Ok("") -> Err(Incomplete())
         | Ok(chunk) -> read-body(fd, need, String.concat(acc, chunk))
 
-; Parse a raw HTTP/1.1 request buffer into Request plus leftover bytes.
-let parse-request(raw: Str) -> Result (Request * Str) HttpError =
-  match (String.index-of("\r\n\r\n", raw))
-    | None -> Err(Incomplete())
-    | Some(at) -> {
-        let head = String.slice(0, at, raw)
-        let rest = String.drop(at + 4, raw)
-        let lines = String.split("\r\n", head)
-        match (lines)
-          | [] -> Err(BadRequest("empty"))
-          | req-line :: hdrs ->
-            match (String.split(" ", req-line))
-              | [meth, path, _] -> {
-                  let headers = parse-header-lines(hdrs, Map.empty())
-                  let n = content-length(headers)
-                  if (String.length(rest) < n) -> Err(Incomplete()) | {
-                    let body = String.slice(0, n, rest)
-                    let leftover = String.drop(n, rest)
-                    Ok((Request(method-of(meth), path, headers, body), leftover))
-                  }
+; Parsed request line + headers + declared body length + bytes after headers.
+; Body bytes may still need to be read from the socket.
+pub record RequestHead {
+  method: Method
+  path: Str
+  headers: Map Str Str
+  content-length: Int
+  after-headers: Str
+}
+
+; Finish RequestHead once headers and CL are known.
+let finish-request-head(
+  meth: Str,
+  path: Str,
+  ver: Str,
+  headers: Map Str Str,
+  cl: Maybe Str,
+  rest: Str,
+  max-body: Int
+) -> Result RequestHead HttpError {
+  let need-host = ver == "HTTP/1.1"
+  let host-ok =
+    match (Map.lookup("host", headers))
+      | None -> not(need-host)
+      | Some(_) -> true
+  match (host-ok)
+    | false -> Err(BadRequest("missing Host"))
+    | true ->
+      match (parse-content-length(cl, max-body))
+        | Err(e) -> Err(e)
+        | Ok(n) -> Ok(RequestHead(method-of(meth), path, headers, n, rest))
+}
+
+; Parse request line + headers (not the body) under limits.
+let parse-request-head(raw: Str, limits: Limits) -> Result RequestHead HttpError =
+  match (limits)
+    | Limits(max-line, max-block, max-headers, max-body) ->
+      match (String.index-of("\r\n\r\n", raw))
+        | None -> Err(Incomplete())
+        | Some(at) -> {
+            let head = String.slice(0, at, raw)
+            let rest = String.drop(at + 4, raw)
+            let block-len = String.length(head) + 4
+            match (block-len > max-block)
+              | true -> Err(HeaderLimit("header block too large"))
+              | false -> {
+                  let lines = String.split("\r\n", head)
+                  match (lines)
+                    | [] -> Err(BadRequest("empty"))
+                    | req-line :: hdrs ->
+                      match (String.length(req-line) > max-line)
+                        | true -> Err(HeaderLimit("request line too large"))
+                        | false ->
+                          match (String.split(" ", req-line))
+                            | [meth, path, ver] ->
+                              match (parse-header-lines(hdrs, Map.empty(), None(), 0, max-headers))
+                                | Err(e) -> Err(e)
+                                | Ok((headers, cl)) ->
+                                  finish-request-head(meth, path, ver, headers, cl, rest, max-body)
+                            | _ -> Err(BadRequest("bad request line"))
                 }
-              | _ -> Err(BadRequest("bad request line"))
+          }
+
+; Assemble a Request once `need` body bytes are available in `buf` (may over-read).
+let take-body(head: RequestHead, buf: Str) -> Result (Request * Str) HttpError =
+  match (head)
+    | RequestHead(method, path, headers, need, _) ->
+      if (String.length(buf) < need) -> Err(Incomplete()) | {
+        let body = String.slice(0, need, buf)
+        let leftover = String.drop(need, buf)
+        Ok((Request(method, path, headers, body), leftover))
       }
+
+; Parse headers then require the full body already present in `raw` (no further I/O).
+let parse-request(raw: Str, limits: Limits) -> Result (Request * Str) HttpError =
+  match (parse-request-head(raw, limits))
+    | Err(e) -> Err(e)
+    | Ok(head) ->
+      match (head)
+        | RequestHead(_, _, _, _, after) -> take-body(head, after)
+
+; Read any remaining body bytes under a deadline, then build the Request.
+let complete-request(
+  fd: Int,
+  head: RequestHead,
+  deadline: Int
+) -> Result Request HttpError =
+  match (head)
+    | RequestHead(method, path, headers, need, after) ->
+      match (read-body-until(fd, need, after, deadline))
+        | Err(e) -> Err(e)
+        | Ok(body) -> Ok(Request(method, path, headers, body))
 
 ; Render headers as `Name: value\r\n` lines.
 let format-headers(headers: Map Str Str) -> Str =
@@ -174,6 +312,28 @@ let format-headers(headers: Map Str Str) -> Str =
     "",
     Map.keys(headers)
   )
+
+; Plain-text error response for limit / protocol failures.
+let error-response(status: Int, msg: Str) -> Response =
+  Response(status, Map.set("Content-Type", "text/plain", Map.empty()), msg)
+
+; Wire status for a parse/limit error (0 = do not write a response).
+let error-status(e: HttpError) -> Int =
+  match (e)
+    | BadRequest(_) -> 400
+    | HeaderLimit(_) -> 431
+    | BodyLimit(_) -> 413
+    | _ -> 0
+
+; Human-readable message for a typed HttpError.
+let error-message(e: HttpError) -> Str =
+  match (e)
+    | BadRequest(s) -> s
+    | HeaderLimit(s) -> s
+    | BodyLimit(s) -> s
+    | Incomplete() -> "incomplete"
+    | Closed() -> "closed"
+    | NetErr(_) -> "io error"
 
 ; Serialize a Response to HTTP/1.1 bytes (always sets Content-Length).
 ; @test String.starts-with("HTTP/1.1 200 ", format-response(Response(200, Map.empty(), "hi"))) => true
@@ -209,15 +369,23 @@ pub let format-request(host: Str, req: Request) -> Str =
         )
       }
 
-; Read one HTTP request from a connected fd. Native only.
+; Read one HTTP request from a connected fd under default limits. Native only.
 ; @test true
 pub let read-request(fd: Int) -> Result Request HttpError =
   match (read-headers(fd, ""))
     | Err(e) -> Err(e)
     | Ok(raw) ->
-      match (parse-request(raw))
+      match (parse-request-head(raw, default-limits()))
         | Err(e) -> Err(e)
-        | Ok((req, _)) -> Ok(req)
+        | Ok(head) ->
+          match (head)
+            | RequestHead(_, _, _, need, after) ->
+              match (read-body(fd, need, after))
+                | Err(e) -> Err(e)
+                | Ok(body) ->
+                  match (head)
+                    | RequestHead(method, path, headers, _, _) ->
+                      Ok(Request(method, path, headers, body))
 
 ; Write one HTTP response to a connected fd. Native only.
 ; @test true
@@ -226,52 +394,103 @@ pub let write-response(fd: Int, res: Response) -> Result Unit HttpError =
     | Err(e) -> Err(NetErr(e))
     | Ok(_) -> Ok(())
 
-; Handle one connection under a per-connection deadline.
-let handle-conn(conn: Int, deadline: Int, handler: (Request) -> Response) -> Int {
-  defer Net.close(conn)
-  match (read-headers-until(conn, "", deadline))
-    | Err(_) -> 0
-    | Ok(raw) ->
-      match (parse-request(raw))
-        | Err(_) -> 0
-        | Ok((req, _)) -> {
-            let _ =
-              match (Net.write-timeout(conn, format-response(handler(req)), ms-left(deadline)))
-                | Err(_) -> ()
-                | Ok(_) -> ()
-            0
-          }
+; Write an error response when status is non-zero; ignore I/O failures.
+let write-error(conn: Int, e: HttpError, deadline: Int) -> Unit {
+  let st = error-status(e)
+  if (st == 0) -> () | {
+    let _ =
+      match (Net.write-timeout(conn, format-response(error-response(st, error-message(e))), ms-left(deadline)))
+        | Err(_) -> ()
+        | Ok(_) -> ()
+    ()
+  }
 }
 
-; Accept loop under Task.scope; each connection has a deadline. Native only.
+; Handle one connection under a per-connection deadline and limits.
+let handle-conn(conn: Int, deadline: Int, limits: Limits, handler: (Request) -> Response) -> Int {
+  defer Net.close(conn)
+  match (limits)
+    | Limits(_, max-block, _, _) ->
+      match (read-headers-until(conn, "", max-block, deadline))
+        | Err(e) -> {
+            write-error(conn, e, deadline)
+            0
+          }
+        | Ok(raw) ->
+          match (parse-request-head(raw, limits))
+            | Err(Incomplete()) -> 0
+            | Err(e) -> {
+                write-error(conn, e, deadline)
+                0
+              }
+            | Ok(head) ->
+              match (complete-request(conn, head, deadline))
+                | Err(Incomplete()) -> 0
+                | Err(e) -> {
+                    write-error(conn, e, deadline)
+                    0
+                  }
+                | Ok(req) -> {
+                    ; Leftover bytes past Content-Length are discarded with the
+                    ; connection close — no keep-alive, no second request parse.
+                    let _ =
+                      match (Net.write-timeout(conn, format-response(handler(req)), ms-left(deadline)))
+                        | Err(_) -> ()
+                        | Ok(_) -> ()
+                    0
+                  }
+}
+
+; Accept loop on an already-listening fd (caller owns close). Native only.
 ; @test true
-pub let serve-timeout(port: Int, conn-ms: Int, handler: (Request) -> Response) -> Result Unit HttpError =
+pub let serve-on(
+  listener: Int,
+  conn-ms: Int,
+  limits: Limits,
+  handler: (Request) -> Response
+) -> Result Unit HttpError {
+  Task.scope(fn (scope) = {
+    loop () {
+      match (Net.accept(listener))
+        | Err(_) -> ()
+        | Ok(conn) -> {
+            let deadline = Sched.mono-ms() + conn-ms
+            let _ =
+              Task.spawn-in(scope, fn () = handle-conn(conn, deadline, limits, handler))
+            recur()
+          }
+    }
+  })
+  Ok(())
+}
+
+; Accept loop under Task.scope with explicit limits. Native only.
+; @test true
+pub let serve-timeout-limits(
+  port: Int,
+  conn-ms: Int,
+  limits: Limits,
+  handler: (Request) -> Response
+) -> Result Unit HttpError =
   match (Net.listen(port))
     | Err(e) -> Err(NetErr(e))
     | Ok(listener) -> {
         defer Net.close(listener)
-        Task.scope(fn (scope) = {
-          loop () {
-            match (Net.accept(listener))
-              | Err(_) -> ()
-              | Ok(conn) -> {
-                  let deadline = Sched.mono-ms() + conn-ms
-                  let _ =
-                    Task.spawn-in(scope, fn () = handle-conn(conn, deadline, handler))
-                  recur()
-                }
-          }
-        })
-        Ok(())
+        serve-on(listener, conn-ms, limits, handler)
       }
+
+; Accept loop under Task.scope; each connection has a deadline. Native only.
+; @test true
+pub let serve-timeout(port: Int, conn-ms: Int, handler: (Request) -> Response) -> Result Unit HttpError =
+  serve-timeout-limits(port, conn-ms, default-limits(), handler)
 
 ; Accept loop with the default per-connection deadline. Native only.
 ; @test true
 pub let serve(port: Int, handler: (Request) -> Response) -> Result Unit HttpError =
   serve-timeout(port, default-conn-deadline-ms(), handler)
 
-; Parse a response buffer under a deadline (shared by request helpers).
-let finish-response(fd: Int, raw: Str, deadline: Int) -> Result Response HttpError =
+; Parse a response buffer under a deadline and body limit.
+let finish-response(fd: Int, raw: Str, deadline: Int, max-body: Int) -> Result Response HttpError =
   match (String.index-of("\r\n\r\n", raw))
     | None -> Err(Incomplete())
     | Some(at) -> {
@@ -280,71 +499,58 @@ let finish-response(fd: Int, raw: Str, deadline: Int) -> Result Response HttpErr
         let lines = String.split("\r\n", head)
         match (lines)
           | [] -> Err(BadRequest("empty response"))
-          | status-line :: hdrs -> {
-              let headers = parse-header-lines(hdrs, Map.empty())
-              let n = content-length(headers)
-              match (read-body-until(fd, n, rest, deadline))
-                | Err(e) -> Err(e)
-                | Ok(body) -> {
-                    let code =
-                      match (String.split(" ", status-line))
-                        | _ :: c :: _ -> Int.from-str(c) ? 0
-                        | _ -> 0
-                    Ok(Response(code, headers, body))
-                  }
-            }
+          | status-line :: hdrs ->
+            match (parse-header-lines(hdrs, Map.empty(), None(), 0, 1000))
+              | Err(e) -> Err(e)
+              | Ok((headers, cl)) ->
+                match (parse-content-length(cl, max-body))
+                  | Err(e) -> Err(e)
+                  | Ok(n) ->
+                    match (read-body-until(fd, n, rest, deadline))
+                      | Err(e) -> Err(e)
+                      | Ok(body) -> {
+                          let code =
+                            match (String.split(" ", status-line))
+                              | _ :: c :: _ ->
+                                match (Int.from-str(c))
+                                  | Some(n) -> n
+                                  | None -> 0
+                              | _ -> 0
+                          Ok(Response(code, headers, body))
+                        }
       }
+
+; One-shot HTTP client request with timeout and limits. Native only.
+; @test true
+pub let request-timeout-limits(
+  host: Str,
+  port: Int,
+  req: Request,
+  ms: Int,
+  limits: Limits
+) -> Result Response HttpError {
+  let deadline = Sched.mono-ms() + ms
+  match (limits)
+    | Limits(_, max-block, _, max-body) ->
+      match (Net.connect-timeout(host, port, ms-left(deadline)))
+        | Err(e) -> Err(NetErr(e))
+        | Ok(fd) -> {
+            defer Net.close(fd)
+            match (Net.write-timeout(fd, format-request(host, req), ms-left(deadline)))
+              | Err(e) -> Err(NetErr(e))
+              | Ok(_) ->
+                match (read-headers-until(fd, "", max-block, deadline))
+                  | Err(e) -> Err(e)
+                  | Ok(raw) -> finish-response(fd, raw, deadline, max-body)
+          }
+}
 
 ; One-shot HTTP client request with a relative timeout. Native only.
 ; @test true
-pub let request-timeout(host: Str, port: Int, req: Request, ms: Int) -> Result Response HttpError {
-  let deadline = Sched.mono-ms() + ms
-  match (Net.connect-timeout(host, port, ms-left(deadline)))
-    | Err(e) -> Err(NetErr(e))
-    | Ok(fd) -> {
-        defer Net.close(fd)
-        match (Net.write-timeout(fd, format-request(host, req), ms-left(deadline)))
-          | Err(e) -> Err(NetErr(e))
-          | Ok(_) ->
-            match (read-headers-until(fd, "", deadline))
-              | Err(e) -> Err(e)
-              | Ok(raw) -> finish-response(fd, raw, deadline)
-      }
-}
+pub let request-timeout(host: Str, port: Int, req: Request, ms: Int) -> Result Response HttpError =
+  request-timeout-limits(host, port, req, ms, default-limits())
 
-; One-shot HTTP client request (unbounded). Native only.
+; One-shot HTTP client request under the default deadline. Native only.
 ; @test true
 pub let request(host: Str, port: Int, req: Request) -> Result Response HttpError =
-  match (Net.connect(host, port))
-    | Err(e) -> Err(NetErr(e))
-    | Ok(fd) -> {
-        defer Net.close(fd)
-        match (Net.write(fd, format-request(host, req)))
-          | Err(e) -> Err(NetErr(e))
-          | Ok(_) ->
-            match (read-headers(fd, ""))
-              | Err(e) -> Err(e)
-              | Ok(raw) ->
-                match (String.index-of("\r\n\r\n", raw))
-                  | None -> Err(Incomplete())
-                  | Some(at) -> {
-                      let head = String.slice(0, at, raw)
-                      let rest = String.drop(at + 4, raw)
-                      let lines = String.split("\r\n", head)
-                      match (lines)
-                        | [] -> Err(BadRequest("empty response"))
-                        | status-line :: hdrs -> {
-                            let headers = parse-header-lines(hdrs, Map.empty())
-                            let n = content-length(headers)
-                            match (read-body(fd, n, rest))
-                              | Err(e) -> Err(e)
-                              | Ok(body) -> {
-                                  let code =
-                                    match (String.split(" ", status-line))
-                                      | _ :: c :: _ -> Int.from-str(c) ? 0
-                                      | _ -> 0
-                                  Ok(Response(code, headers, body))
-                                }
-                          }
-                    }
-      }
+  request-timeout(host, port, req, default-conn-deadline-ms())

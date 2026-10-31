@@ -300,6 +300,7 @@ const EXTERN_BUILTIN: Record<string, string> = {
   mn_tcp_read: "mn_tcp_read",
   mn_tcp_write: "mn_tcp_write",
   mn_tcp_close: "mn_tcp_close",
+  mn_tcp_local_port: "mn_tcp_local_port",
   mn_udp_bind: "mn_udp_bind",
   mn_udp_send: "mn_udp_send",
   mn_udp_recv: "mn_udp_recv",
@@ -1501,7 +1502,7 @@ function installBuiltins(env: Env): void {
     "mn_task_dict_set", "mn_task_dict_get",
     "mn_task_defer_enter", "mn_task_defer_push", "mn_task_defer_leave",
     "mn_tcp_listen", "mn_tcp_accept", "mn_tcp_accept_timeout", "mn_tcp_connect", "mn_tcp_connect_timeout",
-    "mn_tcp_read", "mn_tcp_read_timeout", "mn_tcp_write", "mn_tcp_write_timeout", "mn_tcp_close",
+    "mn_tcp_read", "mn_tcp_read_timeout", "mn_tcp_write", "mn_tcp_write_timeout", "mn_tcp_close", "mn_tcp_local_port",
     "mn_udp_bind", "mn_udp_send", "mn_udp_recv", "mn_udp_close",
     "mn_tls_client", "mn_tls_client_timeout", "mn_tls_server", "mn_tls_server_timeout",
     "mn_tls_read", "mn_tls_read_timeout", "mn_tls_write", "mn_tls_write_timeout", "mn_tls_close",
@@ -1970,6 +1971,7 @@ function applyBuiltin(
     case "mn_tcp_write":
     case "mn_tcp_write_timeout":
     case "mn_tcp_close":
+    case "mn_tcp_local_port":
     case "mn_udp_bind":
     case "mn_udp_send":
     case "mn_udp_recv":

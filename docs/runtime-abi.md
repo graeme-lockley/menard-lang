@@ -69,6 +69,7 @@ Native only — interpreter stubs throw unbound.
 | Symbol | Notes |
 |---|---|
 | `mn_tcp_listen` / `accept` / `connect` / `read` / `write` / `close` | Non-blocking; park via wait cells + `mn_net_poll` |
+| `mn_tcp_local_port` | `getsockname` → bound port (`Result Int IoError`); enables `listen(0)` |
 | `mn_tcp_accept_timeout` / `connect_timeout` / `read_timeout` / `write_timeout` | Relative ms; `Err(Timeout)` leaves the fd open (except connect, which closes) |
 | `mn_udp_bind` / `send` / `recv` / `close` | Same parking model |
 | `mn_tls_client` / `server` / `read` / `write` / `close` | OpenSSL over an existing TCP fd; handshake parks cooperatively (no mutator `poll(-1)`) |
