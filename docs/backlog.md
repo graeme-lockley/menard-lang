@@ -16,15 +16,15 @@
 
 | Phase | Theme | Items | Ready | In progress | Done |
 | --- | --- | ---: | ---: | ---: | ---: |
-| 0 | Truth, trust and the unsafe edges | 20 | 9 | 1 | 10 |
+| 0 | Truth, trust and the unsafe edges | 21 | 10 | 1 | 10 |
 | 1 | Daily loop and language decisions | 16 | 0 | 0 | 0 |
 | 2 | Standard library | 12 | 0 | 0 | 0 |
 | 3 | Operational concurrency | 8 | 0 | 0 | 0 |
 | 4 | Project and ecosystem | 17 | 0 | 0 | 0 |
 | 5 | Later | 9 | 0 | 0 | 0 |
-| **Total** | | **82** | **11** | **1** | **10** |
+| **Total** | | **83** | **10** | **1** | **10** |
 
-Priority mix: P0 = 24, P1 = 34, P2 = 19, P3 = 5.
+Priority mix: P0 = 24, P1 = 35, P2 = 19, P3 = 5.
 
 ## Work items
 
@@ -50,6 +50,7 @@ Rows are ordered by phase, then priority, then area, then ID.
 | [LANG-07](reviews/2026-10-24-build-f.md#lang-07) | Nullary constructors are values; the `None()`/`Red()` call form is removed | Language | P1 | 0 | ready | — | [#47](https://github.com/graeme-lockley/menard-lang/issues/47) | — |
 | [LANG-09](reviews/2026-10-24-build-f.md#lang-09) | Operator-spacing diagnostics, and a real `help:` line | Language | P1 | 0 | ready | TOOL-03 | [#16](https://github.com/graeme-lockley/menard-lang/issues/16) | — |
 | [LANG-10](reviews/2026-10-24-build-f.md#lang-10) | `Char` shows as a decimal number | Language | P1 | 0 | ready | — | [#48](https://github.com/graeme-lockley/menard-lang/issues/48) | — |
+| [LANG-16](reviews/2026-10-24-build-f.md#lang-16) | Aliased imports must carry re-exported types | Language | P1 | 0 | ready | LANG-04 | [#52](https://github.com/graeme-lockley/menard-lang/issues/52) | — |
 | [CONC-10](reviews/2026-10-24-build-f.md#conc-10) | Interpreter stubs for net/TLS, and a defined oracle boundary | Concurrency | P1 | 0 | done | CONC-04 | [#23](https://github.com/graeme-lockley/menard-lang/issues/23) | [#51](https://github.com/graeme-lockley/menard-lang/pull/51) |
 | [OTH-05](reviews/2026-10-24-build-f.md#oth-05) | Security policy: TLS verification, HTTP limits, FFI and disclosure | Other | P1 | 0 | ready | CONC-03, CONC-04, CONC-10 | [#27](https://github.com/graeme-lockley/menard-lang/issues/27) | — |
 | [TOOL-01](reviews/2026-10-24-build-f.md#tool-01) | `mn fmt` and `mn fmt --check` | Tooling | P0 | 1 | todo | LANG-09 | — | — |
