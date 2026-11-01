@@ -2,7 +2,7 @@
 ; Empty and full waiter sets cannot coexist on one queue, so each set uses
 ; its own bounded mailbox; both exercise notify-all past the old 64 cap.
 import std/actor as Actor
-pub import std/actor (ActorDead)
+pub import std/task (Cancelled)
 import std/task as Tsk
 
 let n() -> Int =
@@ -28,7 +28,7 @@ let main() -> Int {
   let recv-done = ref(0)
   loop (i = 0)
     if (i >= n()) -> () | {
-      let _ = Tsk.spawn(fn () = {
+      Tsk.spawn(fn () = {
         bump(recv-ready)
         match (Actor.receive(mb-r))
           | Ok(_) -> {
@@ -36,7 +36,7 @@ let main() -> Int {
               bump(recv-done)
               0
             }
-          | Err(ActorDead()) -> {
+          | Err(Actor.ActorDead()) -> {
               bump(recv-dead)
               bump(recv-done)
               0
@@ -58,20 +58,20 @@ let main() -> Int {
   Actor.close(mb-r)
   Actor.close(mb-r)
   match (Actor.send(mb-r, 0))
-    | Err(ActorDead()) -> ()
+    | Err(Actor.ActorDead()) -> ()
     | _ -> bump(recv-other)
   await-count(recv-done, n())
 
   ; --- 100 blocked senders on a full mailbox ---
   let mb-s = Actor.mailbox-new-bounded(1)
-  let _ = Actor.send(mb-s, 1)
+  Actor.send(mb-s, 1)
   let send-ready = ref(0)
   let send-dead = ref(0)
   let send-other = ref(0)
   let send-done = ref(0)
   loop (i = 0)
     if (i >= n()) -> () | {
-      let _ = Tsk.spawn(fn () = {
+      Tsk.spawn(fn () = {
         bump(send-ready)
         match (Actor.send(mb-s, 2))
           | Ok(_) -> {
@@ -79,7 +79,7 @@ let main() -> Int {
               bump(send-done)
               0
             }
-          | Err(ActorDead()) -> {
+          | Err(Actor.ActorDead()) -> {
               bump(send-dead)
               bump(send-done)
               0
@@ -103,8 +103,8 @@ let main() -> Int {
 
   ; --- queued messages still drain before ActorDead ---
   let mb-d = Actor.mailbox-new-bounded(4)
-  let _ = Actor.send(mb-d, 10)
-  let _ = Actor.send(mb-d, 20)
+  Actor.send(mb-d, 10)
+  Actor.send(mb-d, 20)
   Actor.close(mb-d)
   let a = match (Actor.receive(mb-d))
     | Ok(v) -> v
@@ -114,7 +114,7 @@ let main() -> Int {
     | Err(_) -> -1
   let c = match (Actor.receive(mb-d))
     | Ok(_) -> -1
-    | Err(ActorDead()) -> 1
+    | Err(Actor.ActorDead()) -> 1
     | Err(_) -> -2
 
   println(deref(recv-dead))

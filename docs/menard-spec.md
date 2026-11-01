@@ -1996,6 +1996,7 @@ type IoError =
   | InvalidPath
   | TooLarge
   | Timeout        ; deadline on a parkable wait (task / net)
+  | Unsupported    ; host cannot perform the op (e.g. net under mn inter)
   | Other(Int)     ; Int is a Menard code, never errno
 ```
 

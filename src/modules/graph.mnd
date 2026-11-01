@@ -633,10 +633,10 @@ let form-decl-kind(form: Ast) -> Str =
         | None -> ""
     | _ -> ""
 
-; NotFound and Permission are the IoError singletons. SpawnError lists them
-; so a match is exhaustive; they are not a second export.
+; NotFound, Permission, and Unsupported are the IoError singletons.
+; SpawnError lists them so a match is exhaustive; they are not a second export.
 let shared-io-ctor(name: Str) -> Bool =
-  name == "NotFound" || name == "Permission"
+  name == "NotFound" || name == "Permission" || name == "Unsupported"
 
 let register-one-export!(exports: Ref (Map Str Str), path: Str, name: Str, kind: Str) -> Result Unit Str =
   match (Map.lookup(name, deref(exports)))

@@ -230,7 +230,7 @@ A mutable buffer. The buffer is the first parameter. `!` marks the operations th
 | `read-file(path)` | The contents of a file. |
 | `write-file(path, data)` | Replace a file's contents. |
 
-`IoError` is `NotFound`, `Permission`, `Exists`, `IsADirectory`, `NotADirectory`, `InvalidPath`, `TooLarge`, or `Other`.
+`IoError` is `NotFound`, `Permission`, `Exists`, `IsADirectory`, `NotADirectory`, `InvalidPath`, `TooLarge`, `Timeout`, `Unsupported`, or `Other(Int)`.
 
 ## Fs
 
@@ -414,7 +414,9 @@ OTP-lite helpers (Build F). See [build-f-network.md](design/builds/f-network.md)
 
 `import std/net as Net`
 
-Parkable TCP/UDP and OpenSSL TLS. **Native only** (interpreter unbound).
+Parkable TCP/UDP and OpenSSL TLS. **Native only:** under `mn inter`, every
+`Result`-returning call returns `Err(Unsupported)` (tag 36); `close` /
+`udp-close` / `tls-close` are inert no-ops. There is no virtual network.
 
 | Name | |
 | --- | --- |
@@ -427,13 +429,13 @@ Parkable TCP/UDP and OpenSSL TLS. **Native only** (interpreter unbound).
 | `tls-*-timeout` | Relative-ms TLS handshake / I/O. |
 | `with-tls(id, body)` | `defer` tls-close. |
 
-`IoError` includes `Timeout` (tag 28).
+`IoError` includes `Timeout` (tag 28) and `Unsupported` (tag 36; interpreter boundary).
 
 ## Http / Rest
 
 `import std/http as Http` · `import std/rest as Rest`
 
-Menard HTTP/1.1 (request line + headers + Content-Length body; no chunked encoding, no keep-alive). Native only.
+Menard HTTP/1.1 (request line + headers + Content-Length body; no chunked encoding, no keep-alive). Native only: under `mn inter`, `request` / `serve` fail as `Err(NetErr(Unsupported))` via `Net.*`.
 
 **Headers.** Names are lowercased on parse. `Request.headers` / `Response.headers` are `Map Str Str` with **last-wins** for duplicate names (including `Set-Cookie` — callers that need every cookie must handle that themselves). Lookups such as `content-length` and `host` use the lowercased key.
 

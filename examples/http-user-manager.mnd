@@ -7,7 +7,7 @@
 ;   GET  /search?q=Name
 
 import std/actor as Actor
-pub import std/actor (Ask, Pid)
+pub import std/actor (Ask, Pid, Cancelled)
 import std/http as Http
 pub import std/http (Request, Response, Method)
 import std/rest as Rest

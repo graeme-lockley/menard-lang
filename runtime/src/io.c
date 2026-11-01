@@ -34,6 +34,8 @@
 #define TAG_IO_TOO_LARGE 26
 #define TAG_IO_OTHER 27
 #define TAG_IO_TIMEOUT 28
+/* Shared with SpawnError.Unsupported (lower.mnd ctor tag 36). */
+#define TAG_IO_UNSUPPORTED 36
 
 static MnShape shape_io_not_found = {
     .tag = TAG_IO_NOT_FOUND, .nbytes = 8, .layout = MN_LAYOUT_ORDINARY, .location = MN_LOC_STATIC};
@@ -53,6 +55,8 @@ static MnShape shape_io_other = {
     .tag = TAG_IO_OTHER, .nbytes = 16, .layout = MN_LAYOUT_ORDINARY};
 static MnShape shape_io_timeout = {
     .tag = TAG_IO_TIMEOUT, .nbytes = 8, .layout = MN_LAYOUT_ORDINARY, .location = MN_LOC_STATIC};
+static MnShape shape_io_unsupported = {
+    .tag = TAG_IO_UNSUPPORTED, .nbytes = 8, .layout = MN_LAYOUT_ORDINARY, .location = MN_LOC_STATIC};
 
 MnNullary mn_static_not_found __attribute__((aligned(8))) = {.shape = &shape_io_not_found};
 MnNullary mn_static_permission __attribute__((aligned(8))) = {.shape = &shape_io_permission};
@@ -62,6 +66,7 @@ MnNullary mn_static_not_a_directory __attribute__((aligned(8))) = {.shape = &sha
 MnNullary mn_static_invalid_path __attribute__((aligned(8))) = {.shape = &shape_io_invalid_path};
 MnNullary mn_static_too_large __attribute__((aligned(8))) = {.shape = &shape_io_too_large};
 MnNullary mn_static_timeout __attribute__((aligned(8))) = {.shape = &shape_io_timeout};
+MnNullary mn_static_unsupported __attribute__((aligned(8))) = {.shape = &shape_io_unsupported};
 
 static int g_argc = 0;
 static char **g_argv = NULL;
@@ -292,6 +297,7 @@ void mn_register_io_statics(void) {
   mn_register_static(&mn_static_invalid_path);
   mn_register_static(&mn_static_too_large);
   mn_register_static(&mn_static_timeout);
+  mn_register_static(&mn_static_unsupported);
   mn_register_static(&mn_static_not_executable);
   mn_register_static(&mn_static_invalid_argument);
   mn_register_static(&mn_static_too_many_arguments);

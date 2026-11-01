@@ -49,10 +49,10 @@ let main() -> Int {
       | Err(_) -> 0
   })
   Sched.notify(cell3)
-  let _ = Sched.join(w1)
+  Sched.join(w1)
   ; Second waiter still parked — wake it.
   Sched.notify(cell3)
-  let _ = Sched.join(w2)
+  Sched.join(w2)
   println(deref(acc))
 
   ; Cancel during wait — soft Err in-frame; join still Cancelled; sticky kept.
@@ -124,9 +124,9 @@ let main() -> Int {
     } | ()
   Sched.yield()
   Sched.notify-all(cell5)
-  let _ = Sched.join(a1)
-  let _ = Sched.join(a2)
-  let _ = Sched.join(a3)
+  Sched.join(a1)
+  Sched.join(a2)
+  Sched.join(a3)
   println(deref(all-acc))
   ; Late wait on a closed cell returns without parking.
   match (Sched.wait(cell5))

@@ -1591,7 +1591,7 @@ let parse-multi-pat-acc(ps: Ps, n: Int, acc: List Ast) -> Result (List Ast) Pars
           if (ast-len(acc) != n) -> perr(peek(ps), String.concat("pattern has ", show(ast-len(acc)), " parts, match has ", show(n))) | Ok(acc)
     | else ->
       {
-        let _ = eat(ps, ",")
+        eat(ps, ",")
         if (delim(ps, ")")) -> parse-multi-pat-acc(ps, n, acc) | parse-multi-pat-one(ps, n, acc)
       }
 
@@ -1600,7 +1600,7 @@ let parse-multi-pat-one(ps: Ps, n: Int, acc: List Ast) -> Result (List Ast) Pars
     | Err(e) -> Err(e)
     | Ok(p) ->
       {
-        let _ = eat(ps, ",")
+        eat(ps, ",")
         parse-multi-pat-acc(ps, n, append-ast(acc, p))
       }
 

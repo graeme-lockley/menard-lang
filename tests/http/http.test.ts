@@ -1,5 +1,5 @@
 /**
- * Build F / CONC-04 — HTTP round-trip and hygiene (native only).
+ * Build F / CONC-04 — HTTP round-trip and hygiene; CONC-10 inter Unsupported.
  */
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
@@ -43,6 +43,15 @@ function runNative(fixture: string): { status: number | null; stdout: string; st
   }
 }
 
+function runInter(fixture: string): { status: number | null; stdout: string; stderr: string } {
+  const r = spawnSync(
+    process.execPath,
+    ["run", "host/src/cli/menard.ts", "run", fixture],
+    { cwd: ROOT, encoding: "utf8", timeout: 30_000 },
+  );
+  return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+}
+
 describe("Build F http", () => {
   test.skipIf(!Bun.which("clang"))(
     "native: HTTP server + client round-trip (ephemeral port)",
@@ -67,4 +76,12 @@ describe("Build F http", () => {
     },
     { timeout: 180_000 },
   );
+
+  test("inter: Http.request returns NetErr(Unsupported) (CONC-10)", () => {
+    const r = runInter("tests/http/unsupported.mnd");
+    expect(r.stderr).not.toContain("panic");
+    expect(r.stderr).not.toContain("unbound");
+    expect(r.stdout).toContain("Unsupported");
+    expect(r.status).not.toBe(0);
+  });
 });

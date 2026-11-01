@@ -16,7 +16,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import {
@@ -51,6 +51,19 @@ const RUNTIME_INCLUDE = runtimeInclude(ROOT);
 const RUNTIME_THIRD_PARTY = runtimeThirdPartyInclude(ROOT);
 
 const stage1 = process.env.MENARD_STAGE1 ?? "";
+
+/**
+ * Programs outside the hermetic oracle dirs that must not be compared
+ * interp↔native. Net/HTTP are native-only; the interpreter returns
+ * Err(Unsupported) (CONC-10).
+ */
+export const ORACLE_EXCLUSIONS: { path: string; reason: string }[] = [
+  { path: "tests/net/echo.mnd", reason: "native-only networking (CONC-10)" },
+  { path: "tests/net/timeouts.mnd", reason: "native-only networking (CONC-10)" },
+  { path: "tests/http/roundtrip.mnd", reason: "native-only networking (CONC-10)" },
+  { path: "tests/http/hygiene.mnd", reason: "native-only networking (CONC-10)" },
+  { path: "tests/http/unsupported.mnd", reason: "native-only networking (CONC-10)" },
+];
 
 function codeOf(rel: string): string {
   return readFileSync(join(ROOT, rel), "utf8")
@@ -179,4 +192,15 @@ describe.skipIf(clang === null)("hermetic corpus oracle", () => {
     },
     120000,
   );
+});
+
+describe("oracle exclusion table (CONC-10)", () => {
+  test("lists network programs with reasons and existing paths", () => {
+    expect(ORACLE_EXCLUSIONS.length).toBeGreaterThan(0);
+    for (const { path, reason } of ORACLE_EXCLUSIONS) {
+      expect(reason.length).toBeGreaterThan(0);
+      expect(existsSync(join(ROOT, path))).toBe(true);
+      expect(hermeticPrograms()).not.toContain(path);
+    }
+  });
 });

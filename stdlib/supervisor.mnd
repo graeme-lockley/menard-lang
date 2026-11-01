@@ -84,7 +84,7 @@ pub let supervise[a](children: List (ChildSpec a)) -> Unit =
   Task.scope(fn (scope) = {
     List.for-each(
       fn (spec) = {
-        let _ = Task.spawn-in(scope, fn () = {
+        Task.spawn-in(scope, fn () = {
           watch-one(spec)
           0
         })
@@ -93,6 +93,6 @@ pub let supervise[a](children: List (ChildSpec a)) -> Unit =
       children
     )
     let cell = Sched.wait-new()
-    let _ = Sched.wait(cell)
+    Sched.wait(cell)
     ()
   })

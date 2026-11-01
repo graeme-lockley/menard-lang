@@ -1,6 +1,6 @@
 ; Build E: mailbox multi-sender/waiter, Actor.call, death, registry, escalate.
 import std/actor as Actor
-pub import std/actor (ActorError, Ask, ActorCancelled, ActorDead)
+pub import std/task (Cancelled)
 import std/task as Tsk
 import std/list as List
 import std/map as Map
@@ -36,28 +36,28 @@ let step(db: Map Str Str, req: UserReq) -> (Map Str Str * UserRes) =
         (db, OkUsers(ids))
       }
 
-let unwrap-res(r: Result UserRes ActorError) -> Int =
+let unwrap-res(r: Result UserRes Actor.ActorError) -> Int =
   match (r)
     | Ok(OkUser(_, _)) -> 1
     | Ok(OkUsers(xs)) -> List.length(xs)
     | Ok(NotFound()) -> 0
     | Ok(BadRequest(_)) -> -2
-    | Err(ActorDead()) -> -3
-    | Err(ActorCancelled()) -> -4
+    | Err(Actor.ActorDead()) -> -3
+    | Err(Actor.ActorCancelled()) -> -4
 
 let main() -> Int {
   ; --- Mailbox: multi-sender, then receive ---
   let mb = Actor.mailbox-new()
   let s1 = Tsk.spawn(fn () = {
-    let _ = Actor.send(mb, 10)
+    Actor.send(mb, 10)
     1
   })
   let s2 = Tsk.spawn(fn () = {
-    let _ = Actor.send(mb, 20)
+    Actor.send(mb, 20)
     1
   })
-  let _ = Tsk.join(s1)
-  let _ = Tsk.join(s2)
+  Tsk.join(s1)
+  Tsk.join(s2)
   let a = match (Actor.receive(mb))
     | Ok(n) -> n
     | Err(_) -> 0
@@ -69,7 +69,7 @@ let main() -> Int {
   ; --- Actor.call put/get/search ---
   let um = Actor.serve-state(Map.empty(), step)
   Actor.register("user-manager", um)
-  let _ = Actor.call(um, Put("1", "ada"))
+  Actor.call(um, Put("1", "ada"))
   println(unwrap-res(Actor.call(um, Get("1"))))
   println(unwrap-res(Actor.call(um, Search("ada"))))
   println(unwrap-res(Actor.call(um, Get("missing"))))
@@ -81,10 +81,10 @@ let main() -> Int {
 
   ; --- Post-death send ---
   Actor.cancel(um)
-  let _ = Actor.join(um)
-  match (Actor.cast(um, Ask(Get("1"), Actor.mailbox-new())))
+  Actor.join(um)
+  match (Actor.cast(um, Actor.Ask(Get("1"), Actor.mailbox-new())))
     | Ok(_) -> println(0)
-    | Err(ActorDead()) -> println(1)
+    | Err(Actor.ActorDead()) -> println(1)
     | Err(_) -> println(0)
 
   ; --- Scope escalate: cancel one actor cancels sibling waiter ---
@@ -116,8 +116,8 @@ let main() -> Int {
       } | ()
     Tsk.yield()
     Actor.cancel(slow)
-    let _ = Actor.join(peer)
-    let _ = Actor.join(slow)
+    Actor.join(peer)
+    Actor.join(slow)
     ()
   })
   println(deref(saw))

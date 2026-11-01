@@ -4,18 +4,18 @@
 ; Notify-then-park: after Sched.wait(ready) returns, the peer has continued
 ; into its next park (receive / wait) — same pattern as tests/defer/basic.mnd.
 import std/actor as Actor
-pub import std/actor (Ask, ActorDead, ActorCancelled, ActorError)
+pub import std/task (Cancelled)
 import std/task as Tsk
 import std/sched as Sched
 
-let flag-dead(r: Result Int ActorError) -> Int =
+let flag-dead(r: Result Int Actor.ActorError) -> Int =
   match (r)
-    | Err(ActorDead()) -> 1
+    | Err(Actor.ActorDead()) -> 1
     | _ -> 0
 
-let flag-cancelled(r: Result Int ActorError) -> Int =
+let flag-cancelled(r: Result Int Actor.ActorError) -> Int =
   match (r)
-    | Err(ActorCancelled()) -> 1
+    | Err(Actor.ActorCancelled()) -> 1
     | _ -> 0
 
 let main() -> Int {
@@ -25,7 +25,7 @@ let main() -> Int {
   let die-pid =
     Actor.spawn(fn (mb) = {
       match (Actor.receive(mb))
-        | Ok(Ask(_, _)) -> {
+        | Ok(Actor.Ask(_, _)) -> {
             Sched.notify(die-ready)
             ()
           }
@@ -37,9 +37,9 @@ let main() -> Int {
       set!(die-got, flag-dead(r))
       r
     })
-  let _ = Sched.wait(die-ready)
-  let _ = Actor.join(die-pid)
-  let _ = Tsk.join(die-caller)
+  Sched.wait(die-ready)
+  Actor.join(die-pid)
+  Tsk.join(die-caller)
   println(deref(die-got))
 
   ; --- cancel-actor-mid-request (serve) → ActorDead ---
@@ -50,7 +50,7 @@ let main() -> Int {
   let serve-pid =
     Actor.serve(fn (n) = {
       Sched.notify(serve-ready)
-      let _ = Sched.wait(serve-gate)
+      Sched.wait(serve-gate)
       n
     })
   let serve-caller =
@@ -59,10 +59,10 @@ let main() -> Int {
       set!(serve-got, flag-dead(r))
       r
     })
-  let _ = Sched.wait(serve-ready)
+  Sched.wait(serve-ready)
   Actor.cancel(serve-pid)
-  let _ = Tsk.join(serve-caller)
-  let _ = Actor.join(serve-pid)
+  Tsk.join(serve-caller)
+  Actor.join(serve-pid)
   println(deref(serve-got))
 
   ; --- cancel-actor-mid-request (serve-state) → ActorDead ---
@@ -72,7 +72,7 @@ let main() -> Int {
   let state-pid =
     Actor.serve-state(0, fn (st, n) = {
       Sched.notify(state-ready)
-      let _ = Sched.wait(state-gate)
+      Sched.wait(state-gate)
       (st, n)
     })
   let state-caller =
@@ -81,10 +81,10 @@ let main() -> Int {
       set!(state-got, flag-dead(r))
       r
     })
-  let _ = Sched.wait(state-ready)
+  Sched.wait(state-ready)
   Actor.cancel(state-pid)
-  let _ = Tsk.join(state-caller)
-  let _ = Actor.join(state-pid)
+  Tsk.join(state-caller)
+  Actor.join(state-pid)
   println(deref(state-got))
 
   ; --- cancel-caller-waiting (Ask still queued) ---
@@ -95,15 +95,15 @@ let main() -> Int {
   let hold-pid =
     Actor.spawn(fn (mb) = {
       Sched.notify(hold-actor-ready)
-      let _ = Sched.wait(hold-gate)
+      Sched.wait(hold-gate)
       match (Actor.receive(mb))
-        | Ok(Ask(tag, reply)) -> {
-            let _ = Actor.send(reply, Ok(tag))
+        | Ok(Actor.Ask(tag, reply)) -> {
+            Actor.send(reply, Ok(tag))
             ()
           }
         | Err(_) -> ()
     })
-  let _ = Sched.wait(hold-actor-ready)
+  Sched.wait(hold-actor-ready)
   let hold-call-ready = Sched.wait-new()
   let hold-got = ref(-1)
   let hold-caller =
@@ -113,19 +113,19 @@ let main() -> Int {
       set!(hold-got, flag-cancelled(r))
       r
     })
-  let _ = Sched.wait(hold-call-ready)
+  Sched.wait(hold-call-ready)
   Tsk.cancel(hold-caller)
-  let _ = Tsk.join(hold-caller)
+  Tsk.join(hold-caller)
   println(deref(hold-got))
   Sched.notify(hold-gate)
   let probe-reply = Actor.mailbox-new()
-  let _ = Actor.cast(hold-pid, Ask(2, probe-reply))
+  Actor.cast(hold-pid, Actor.Ask(2, probe-reply))
   let dropped-ok =
     match (Actor.receive(probe-reply))
       | Ok(Ok(2)) -> 1
       | _ -> 0
   println(dropped-ok)
-  let _ = Actor.join(hold-pid)
+  Actor.join(hold-pid)
 
   ; --- cancel-caller-waiting (actor holds reply): reply send → ActorDead ---
   ; Actor notifies after dequeue (Ask in hand, reply held); caller already
@@ -137,10 +137,10 @@ let main() -> Int {
   let inflight-pid =
     Actor.spawn(fn (mb) = {
       match (Actor.receive(mb))
-        | Ok(Ask(_, reply)) -> {
+        | Ok(Actor.Ask(_, reply)) -> {
             set!(held-reply, reply)
             Sched.notify(got-ask)
-            let _ = Sched.wait(reply-gate)
+            Sched.wait(reply-gate)
             ()
           }
         | Err(_) -> ()
@@ -153,17 +153,17 @@ let main() -> Int {
       set!(inflight-got, flag-cancelled(r))
       r
     })
-  let _ = Sched.wait(inflight-call-ready)
-  let _ = Sched.wait(got-ask)
+  Sched.wait(inflight-call-ready)
+  Sched.wait(got-ask)
   Tsk.cancel(inflight-caller)
-  let _ = Tsk.join(inflight-caller)
+  Tsk.join(inflight-caller)
   println(deref(inflight-got))
   let direct =
     match (Actor.send(deref(held-reply), Ok(0)))
-      | Err(ActorDead()) -> 1
+      | Err(Actor.ActorDead()) -> 1
       | _ -> 0
   println(direct)
   Sched.notify(reply-gate)
-  let _ = Actor.join(inflight-pid)
+  Actor.join(inflight-pid)
   0
 }

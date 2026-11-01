@@ -1,12 +1,12 @@
 ; Build F: bounded mailbox block-on-full + space notify.
 import std/actor as Actor
-pub import std/actor (ActorCancelled, ActorDead)
+pub import std/task (Cancelled)
 import std/task as Tsk
 
 let main() -> Int {
   let mb = Actor.mailbox-new-bounded(2)
-  let _ = Actor.send(mb, 1)
-  let _ = Actor.send(mb, 2)
+  Actor.send(mb, 1)
+  Actor.send(mb, 2)
   let blocked = ref(0)
   let filler = Tsk.spawn(fn () = {
     set!(blocked, 1)
@@ -36,7 +36,7 @@ let main() -> Int {
       Tsk.yield()
       recur()
     } | ()
-  let _ = Tsk.join(filler)
+  Tsk.join(filler)
   let b = match (Actor.receive(mb))
     | Ok(n) -> n
     | Err(_) -> 0
