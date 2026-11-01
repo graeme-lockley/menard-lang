@@ -539,9 +539,10 @@ Map.set(a, "k", 1)     ; b would also change
 would silently alias, and the language's central promise would be false for
 exactly the data type the *compiler itself* uses most. Two honest options:
 
-- **Structurally-shared persistent map** (HAMT or equivalent) in the runtime,
+- **Structurally-shared persistent map** (ordered AVL tree) in the runtime,
   giving `O(log n)` updates with value semantics. **This is the specification.**
-  Costed in §7, and it is implemented twice (§2.15 note).
+  Costed in §7, and it is implemented twice (§2.15 note). Key order is language
+  `compare` (§2.12); every orderable type is a valid key.
 - **Escape hatch, free of charge:** because `Ref` exists, the *prelude* can
   implement mutable scope chains as association lists behind a `Ref` when a
   program wants O(1) extension and does not care about persistence. The compiler
@@ -1024,12 +1025,12 @@ distinction a single blanket marker would destroy.
 
 Three deliberate choices among the maps:
 
-- **`keys` and `map-entries` return the derived canonical order**, not hash
-  order. That makes map iteration deterministic *by construction*, which is
-  worth an `O(k log k)` sort on every call. It also means **the hash function
-  needs no agreement between the interpreter and the runtime**: the hash order
-  is never observable, so the interpreter's TypeScript map and the runtime's C
-  table may differ freely. That is a whole agreement axis removed by §2.11.O.
+- **`keys` and `map-entries` return the derived canonical order** — the same
+  total order as `compare` (§2.12). The map is an ordered AVL tree, so an
+  in-order walk yields that order in `O(k)` with no separate sort and no hash
+  function. The interpreter and the C runtime must agree on `compare`; they do
+  not need to agree on tree shape. That is a whole agreement axis removed by
+  §2.11.O.
 - **`map-entries` returns two parallel lists**, not a list of pairs, so that the
   built-in surface does not depend on a product spelling. `(List (k * v))` is a
   fine prelude function over it.
@@ -2989,7 +2990,7 @@ These are the invariants the implementation watches. Each row is a way the repre
 | Standard library wrappers: `sys`, `io`, `fs`, `proc`, `IoError`/`SpawnError` mapping, retry | Menard | 430 |
 | Runtime: allocator, GC, shadow stack, interning | C11 | 1,220 |
 | Runtime: collector, layout-kind + location scanning, heap-verify (incl. the no-partial-publication assertion) | C11 | 570 |
-| Runtime: `Str`/`Char` ops and the persistent `Map` (HAMT) | C11 | 750 |
+| Runtime: `Str`/`Char` ops and the persistent `Map` (AVL) | C11 | 750 |
 | Runtime: `StringBuffer`, growth, `to-str` cache, `take-str`, copy-on-write | C11 | 200 |
 | Runtime: fd-2 dump writer, stderr flush before panic | C11 | 40 |
 | Runtime: `posix_spawn` wrapper — two modes, status decode, error mapping | C11 | 160 |

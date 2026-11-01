@@ -142,6 +142,36 @@ export function equalValue(a: Value, b: Value): boolean {
   }
 }
 
+/** Walk Cons/Nil like a list; order matches native Nil=0 < Cons=1. */
+function compareListVariants(
+  a: Value & { tag: "variant" },
+  b: Value & { tag: "variant" },
+): number {
+  let left: Value = a;
+  let right: Value = b;
+  while (
+    left.tag === "variant" &&
+    left.ctor === "Cons" &&
+    left.payloads.length === 2 &&
+    right.tag === "variant" &&
+    right.ctor === "Cons" &&
+    right.payloads.length === 2
+  ) {
+    const c = compareValue(left.payloads[0]!, right.payloads[0]!);
+    if (c !== 0) return c;
+    left = left.payloads[1]!;
+    right = right.payloads[1]!;
+  }
+  const leftNil = left.tag === "variant" && left.ctor === "Nil";
+  const rightNil = right.tag === "variant" && right.ctor === "Nil";
+  const leftCons = left.tag === "variant" && left.ctor === "Cons";
+  const rightCons = right.tag === "variant" && right.ctor === "Cons";
+  if (leftNil && rightNil) return 0;
+  if (leftNil && rightCons) return -1;
+  if (leftCons && rightNil) return 1;
+  return compareValue(left, right);
+}
+
 export function compareValue(a: Value, b: Value): number {
   if (a.tag !== b.tag) return a.tag < b.tag ? -1 : 1;
   switch (a.tag) {
@@ -152,12 +182,18 @@ export function compareValue(a: Value, b: Value): number {
     }
     case "float":
       return compareFloat(a.value, (b as typeof a).value);
-    case "bool":
-      return Number(a.value) - Number((b as typeof a).value);
+    case "bool": {
+      const x = Number(a.value);
+      const y = Number((b as typeof a).value);
+      return x < y ? -1 : x > y ? 1 : 0;
+    }
     case "unit":
       return 0;
-    case "char":
-      return a.value - (b as typeof a).value;
+    case "char": {
+      const x = a.value;
+      const y = (b as typeof a).value;
+      return x < y ? -1 : x > y ? 1 : 0;
+    }
     case "str":
     case "sym": {
       const aa = a.tag === "str" ? a.bytes : a.name;
@@ -167,9 +203,9 @@ export function compareValue(a: Value, b: Value): number {
           : (b as { name: Uint8Array }).name;
       const n = Math.min(aa.length, bb.length);
       for (let i = 0; i < n; i++) {
-        if (aa[i]! !== bb[i]!) return aa[i]! - bb[i]!;
+        if (aa[i]! !== bb[i]!) return aa[i]! < bb[i]! ? -1 : 1;
       }
-      return aa.length - bb.length;
+      return aa.length < bb.length ? -1 : aa.length > bb.length ? 1 : 0;
     }
     case "list": {
       const bb = (b as typeof a).elems;
@@ -178,17 +214,29 @@ export function compareValue(a: Value, b: Value): number {
         const c = compareValue(a.elems[i]!, bb[i]!);
         if (c !== 0) return c;
       }
-      return a.elems.length - bb.length;
+      return a.elems.length < bb.length ? -1 : a.elems.length > bb.length ? 1 : 0;
     }
     case "variant": {
       const bb = b as typeof a;
+      /* Cons/Nil are lists: lexicographic elements, then length (§2.12).
+       * Native tags are Nil=0 < Cons=1; name order would invert that. */
+      if (
+        (a.ctor === "Nil" || a.ctor === "Cons") &&
+        (bb.ctor === "Nil" || bb.ctor === "Cons")
+      ) {
+        return compareListVariants(a, bb);
+      }
       if (a.ctor !== bb.ctor) return a.ctor < bb.ctor ? -1 : 1;
       const n = Math.min(a.payloads.length, bb.payloads.length);
       for (let i = 0; i < n; i++) {
         const c = compareValue(a.payloads[i]!, bb.payloads[i]!);
         if (c !== 0) return c;
       }
-      return a.payloads.length - bb.payloads.length;
+      return a.payloads.length < bb.payloads.length
+        ? -1
+        : a.payloads.length > bb.payloads.length
+          ? 1
+          : 0;
     }
     case "record": {
       const bb = b as typeof a;

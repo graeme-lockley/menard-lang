@@ -243,7 +243,14 @@ let walk-paren(elems: List Ast, arities: Map Str Int, entries: Ref (List Str)) -
     | head :: rest -> walk-paren-head(head, rest, arities, entries)
 
 let walk-paren-head(head: Ast, rest: List Ast, arities: Map Str Int, entries: Ref (List Str)) -> Unit =
-  if (is-sym(head, "quote")) -> () | walk-paren-nonquote(head, rest, arities, entries)
+  if (is-sym(head, "quote")) -> walk-quote(rest, entries) | walk-paren-nonquote(head, rest, arities, entries)
+
+; A quoted symbol is a Sym value whose name bytes live in the static
+; pool (same shape as Str). Other quote forms are not collected yet.
+let walk-quote(rest: List Ast, entries: Ref (List Str)) -> Unit =
+  match (rest)
+    | SymNode(name, _) :: _ -> record-str!(entries, name)
+    | _ -> ()
 
 let walk-paren-nonquote(head: Ast, rest: List Ast, arities: Map Str Int, entries: Ref (List Str)) -> Unit {
   maybe-record-nullary-ctor(head, rest, arities, entries)
@@ -339,7 +346,12 @@ let collect-raw-paren(elems: List Ast, acc: Ref (List Str)) -> Unit =
   match (elems)
     | [] -> ()
     | head :: rest ->
-      if (is-sym(head, "quote")) -> () | collect-raw-list(head :: rest, acc)
+      if (is-sym(head, "quote")) -> collect-raw-quote(rest, acc) | collect-raw-list(head :: rest, acc)
+
+let collect-raw-quote(rest: List Ast, acc: Ref (List Str)) -> Unit =
+  match (rest)
+    | SymNode(name, _) :: _ -> set!(acc, name :: deref(acc))
+    | _ -> ()
 
 let collect-raw-top(ast: Ast, acc: Ref (List Str)) -> Unit =
   match (unwrap-pub(ast))
@@ -370,7 +382,7 @@ let collect-str-list(xs: List Ast, acc: Ref (List Str)) -> Unit =
   match (xs)
     | [] -> ()
     | head :: rest ->
-      if (is-sym(head, "quote")) -> () | collect-str-list-body(head :: rest, acc)
+      if (is-sym(head, "quote")) -> collect-raw-quote(rest, acc) | collect-str-list-body(head :: rest, acc)
 
 let collect-str-list-body(xs: List Ast, acc: Ref (List Str)) -> Unit =
   match (xs)

@@ -95,7 +95,12 @@ In scope without an import.
 
 `import std/map as Map`
 
-A map is persistent. Keys are orderable, and `keys` returns them in that order. A literal `{ "a" => 1, "b" => 2 }` is the same operation. A later entry keeps the key.
+A map is persistent. Every orderable type is a valid key — `Int`, `Str`, `Bool`,
+`Char`, `Sym`, `Float`, records, variants, tuples, lists, and nested maps whose
+components are orderable. Key order is language `compare`; `keys` returns keys
+in that order. A literal `{ "a" => 1, "b" => 2 }` is the same operation. A later
+entry keeps the key. `Ref`, `Fn`, and `StringBuffer` are not orderable and are
+rejected as keys at compile time.
 
 `set`, `lookup`, and `has` are Menard functions. A literal still lowers to the intrinsics `map-set`, `map-get`, and `map-keys`, which take the map first.
 
