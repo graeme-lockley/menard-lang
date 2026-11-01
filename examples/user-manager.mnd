@@ -3,7 +3,7 @@
 ;      `./mn inter examples/user-manager.mnd`
 
 import std/actor as Actor
-pub import std/actor (ActorError, Ask)
+pub import std/task (Cancelled)
 import std/list as List
 import std/map as Map
 import std/string as String
@@ -53,7 +53,7 @@ let show-user(u: User) -> Str =
     | User(id, name, email) ->
       String.concat(id, ":", name, "<", email, ">")
 
-let show-res(r: Result UserRes ActorError) -> Str =
+let show-res(r: Result UserRes Actor.ActorError) -> Str =
   match (r)
     | Err(_) -> "error"
     | Ok(NotFound()) -> "not-found"

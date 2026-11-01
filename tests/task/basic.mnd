@@ -1,6 +1,5 @@
 ; Build D: public Task API — shared Ref, yield, cancel, scope.
 import std/task as Task
-pub import std/task (Cancelled)
 
 let bump(counter: Ref Int) -> Int {
   set!(counter, deref(counter) + 1)
@@ -13,14 +12,14 @@ let yield-then-bump(counter: Ref Int) -> Int {
   deref(counter)
 }
 
-let unwrap-ok(r: Result Int Cancelled) -> Int =
+let unwrap-ok(r: Result Int Task.Cancelled) -> Int =
   match (r)
     | Ok(n) -> n
     | Err(_) -> -1
 
 ; Same shape as Task.spawn-in; kept local so native GC-stress tests do not
 ; hit a cross-module rooting flake in the emitter (interpreter is fine).
-let spawn-in(scope: Ref (List Int), thunk: () -> Int) -> Task Int {
+let spawn-in(scope: Ref (List Int), thunk: () -> Int) -> Task.Task Int {
   let t = Task.spawn(thunk)
   let n = Task.id(t)
   let tail = deref(scope)

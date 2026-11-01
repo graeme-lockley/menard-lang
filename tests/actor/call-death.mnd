@@ -4,18 +4,18 @@
 ; Notify-then-park: after Sched.wait(ready) returns, the peer has continued
 ; into its next park (receive / wait) — same pattern as tests/defer/basic.mnd.
 import std/actor as Actor
-pub import std/actor (Ask, ActorDead, ActorCancelled, ActorError)
+pub import std/task (Cancelled)
 import std/task as Tsk
 import std/sched as Sched
 
-let flag-dead(r: Result Int ActorError) -> Int =
+let flag-dead(r: Result Int Actor.ActorError) -> Int =
   match (r)
-    | Err(ActorDead()) -> 1
+    | Err(Actor.ActorDead()) -> 1
     | _ -> 0
 
-let flag-cancelled(r: Result Int ActorError) -> Int =
+let flag-cancelled(r: Result Int Actor.ActorError) -> Int =
   match (r)
-    | Err(ActorCancelled()) -> 1
+    | Err(Actor.ActorCancelled()) -> 1
     | _ -> 0
 
 let main() -> Int {
@@ -25,7 +25,7 @@ let main() -> Int {
   let die-pid =
     Actor.spawn(fn (mb) = {
       match (Actor.receive(mb))
-        | Ok(Ask(_, _)) -> {
+        | Ok(Actor.Ask(_, _)) -> {
             Sched.notify(die-ready)
             ()
           }
@@ -97,7 +97,7 @@ let main() -> Int {
       Sched.notify(hold-actor-ready)
       Sched.wait(hold-gate)
       match (Actor.receive(mb))
-        | Ok(Ask(tag, reply)) -> {
+        | Ok(Actor.Ask(tag, reply)) -> {
             Actor.send(reply, Ok(tag))
             ()
           }
@@ -119,7 +119,7 @@ let main() -> Int {
   println(deref(hold-got))
   Sched.notify(hold-gate)
   let probe-reply = Actor.mailbox-new()
-  Actor.cast(hold-pid, Ask(2, probe-reply))
+  Actor.cast(hold-pid, Actor.Ask(2, probe-reply))
   let dropped-ok =
     match (Actor.receive(probe-reply))
       | Ok(Ok(2)) -> 1
@@ -137,7 +137,7 @@ let main() -> Int {
   let inflight-pid =
     Actor.spawn(fn (mb) = {
       match (Actor.receive(mb))
-        | Ok(Ask(_, reply)) -> {
+        | Ok(Actor.Ask(_, reply)) -> {
             set!(held-reply, reply)
             Sched.notify(got-ask)
             Sched.wait(reply-gate)
@@ -160,7 +160,7 @@ let main() -> Int {
   println(deref(inflight-got))
   let direct =
     match (Actor.send(deref(held-reply), Ok(0)))
-      | Err(ActorDead()) -> 1
+      | Err(Actor.ActorDead()) -> 1
       | _ -> 0
   println(direct)
   Sched.notify(reply-gate)

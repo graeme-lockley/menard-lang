@@ -1,6 +1,5 @@
 ; CONC-02: sleep-ms, join-timeout, virtual/native timers.
 import std/task as Task
-pub import std/task (JoinTimeout)
 
 let main() -> Int {
   ; sleep-ms(0) completes immediately.
@@ -14,7 +13,7 @@ let main() -> Int {
     7
   })
   match (Task.join-timeout(t, 5))
-    | Err(JoinTimeout()) -> println(2)
+    | Err(Task.JoinTimeout()) -> println(2)
     | Ok(_) -> println(0)
   match (Task.join(t))
     | Ok(7) -> println(3)

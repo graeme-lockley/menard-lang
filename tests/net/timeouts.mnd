@@ -1,7 +1,7 @@
 ; CONC-02: Net read-timeout / accept-timeout; mutator stays live.
 import std/net as Net
-pub import std/io (Timeout)
 import std/task as Task
+pub import std/io (IoError)
 
 let main() -> Int {
   ; Listening socket with no client: accept-timeout returns Timeout.

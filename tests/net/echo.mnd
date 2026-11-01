@@ -1,7 +1,7 @@
 ; Build F native TCP echo smoke (ephemeral port + wait-cell readiness).
 ; Under mn inter, Net.listen returns Err(Unsupported) (CONC-10).
-pub import std/io (IoError)
 import std/net as Net
+pub import std/io (IoError)
 import std/task as Task
 import std/sched as Sched
 

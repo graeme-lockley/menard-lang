@@ -1,13 +1,12 @@
 ; CONC-04: header case, Host/CL validation, limits, ephemeral ports, deadlines.
 import std/http as Http
-pub import std/http (Request, Response, Method, GET, Limits, NetErr)
+pub import std/io (IoError)
 import std/map as Map
 import std/task as Task
 import std/net as Net
 import std/sched as Sched
 import std/string as String
 import std/int as Int
-pub import std/io (Timeout)
 
 ; Read until we have a status line (or timeout/EOF). Returns the status code, or -1.
 let read-status(fd: Int, acc: Str, deadline: Int) -> Int =
@@ -42,15 +41,15 @@ let raw-status(host: Str, port: Int, raw: Str, ms: Int) -> Int =
           | Ok(_) -> read-status(fd, "", deadline)
       }
 
-let echo-handler(req: Request) -> Response =
+let echo-handler(req: Http.Request) -> Http.Response =
   match (req)
-    | Request(_, path, _, body) -> {
+    | Http.Request(_, path, _, body) -> {
         let out = if (body == "") -> path | body
-        Response(200, Map.set("Content-Type", "text/plain", Map.empty()), out)
+        Http.Response(200, Map.set("Content-Type", "text/plain", Map.empty()), out)
       }
 
 ; Start a server with limits; notify `ready` after listen; store port in `port-cell`.
-let start-server(ready: Int, port-cell: Ref Int, conn-ms: Int, limits: Limits) -> Task Int =
+let start-server(ready: Int, port-cell: Ref Int, conn-ms: Int, limits: Http.Limits) -> Task.Task Int =
   Task.spawn(fn () = {
     match (Net.listen(0))
       | Err(_) -> 1
@@ -68,7 +67,7 @@ let start-server(ready: Int, port-cell: Ref Int, conn-ms: Int, limits: Limits) -
         }
   })
 
-let stop(server: Task Int) -> Unit {
+let stop(server: Task.Task Int) -> Unit {
   Task.cancel(server)
   Task.join(server)
   ()
@@ -105,8 +104,8 @@ let main() -> Int {
 
   ; 1) Happy path via Http.request-timeout
   let ok-happy =
-    match (Http.request-timeout("127.0.0.1", p1, Request(GET(), "/hi", Map.empty(), ""), 2000))
-      | Ok(Response(200, _, "/hi")) -> 1
+    match (Http.request-timeout("127.0.0.1", p1, Http.Request(Http.GET(), "/hi", Map.empty(), ""), 2000))
+      | Ok(Http.Response(200, _, "/hi")) -> 1
       | _ -> 0
   println(ok-happy)
 
@@ -135,7 +134,7 @@ let main() -> Int {
   ; --- Tight limits: 431 / 413 ---
   let ready2 = Sched.wait-new()
   let port2 = ref(0)
-  let tight = Limits(64, 256, 20, 32)
+  let tight = Http.Limits(64, 256, 20, 32)
   let s2 = start-server(ready2, port2, 3000, tight)
   Sched.wait(ready2)
   let p2 = deref(port2)
@@ -201,8 +200,8 @@ let main() -> Int {
   Sched.wait(ready3)
   let p3 = deref(port3)
   let ok-timeout =
-    match (Http.request-timeout("127.0.0.1", p3, Request(GET(), "/", Map.empty(), ""), 50))
-      | Err(NetErr(Timeout())) -> 1
+    match (Http.request-timeout("127.0.0.1", p3, Http.Request(Http.GET(), "/", Map.empty(), ""), 50))
+      | Err(Http.NetErr(Timeout())) -> 1
       | Err(_) -> 1
       | Ok(_) -> 0
   println(ok-timeout)

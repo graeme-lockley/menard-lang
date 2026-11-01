@@ -1,7 +1,6 @@
 ; Build F — language defer: LIFO on block exit; cancel runs pending cleanups.
 import std/task as Task
 import std/sched as Sched
-pub import std/task (Cancelled)
 
 let defer-order() -> Int {
   let r = ref(0)

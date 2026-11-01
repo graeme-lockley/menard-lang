@@ -8,9 +8,8 @@
 import std/list as List
 import std/string as String
 import std/task as Task
-pub import std/task (Cancelled)
 
-let unwrap(r: Result (List Int) Cancelled) -> List Int =
+let unwrap(r: Result (List Int) Task.Cancelled) -> List Int =
   match (r)
     | Ok(xs) -> xs
     | Err(_) -> {

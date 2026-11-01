@@ -1,6 +1,6 @@
 ; Build F: bounded mailbox block-on-full + space notify.
 import std/actor as Actor
-pub import std/actor (ActorCancelled, ActorDead)
+pub import std/task (Cancelled)
 import std/task as Tsk
 
 let main() -> Int {

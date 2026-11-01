@@ -1,15 +1,15 @@
 ; CONC-04: HTTP server + client on an ephemeral port with wait-cell readiness.
 import std/http as Http
-pub import std/http (Request, Response, Method, GET)
+pub import std/io (IoError)
 import std/map as Map
 import std/task as Task
 import std/net as Net
 import std/sched as Sched
 
-let handler(req: Request) -> Response =
+let handler(req: Http.Request) -> Http.Response =
   match (req)
-    | Request(_, path, _, _) ->
-      Response(200, Map.set("Content-Type", "text/plain", Map.empty()), path)
+    | Http.Request(_, path, _, _) ->
+      Http.Response(200, Map.set("Content-Type", "text/plain", Map.empty()), path)
 
 let main() -> Int {
   let ready = Sched.wait-new()
@@ -32,8 +32,8 @@ let main() -> Int {
   })
   Sched.wait(ready)
   let port = deref(port-cell)
-  match (Http.request-timeout("127.0.0.1", port, Request(GET(), "/hi", Map.empty(), ""), 2000))
-    | Ok(Response(code, _, body)) -> {
+  match (Http.request-timeout("127.0.0.1", port, Http.Request(Http.GET(), "/hi", Map.empty(), ""), 2000))
+    | Ok(Http.Response(code, _, body)) -> {
         println(code)
         println(body)
         Task.cancel(server)
