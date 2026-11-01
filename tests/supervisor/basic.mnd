@@ -25,7 +25,7 @@ let main() -> Int {
   let again = Sup.restart-child(ChildSpec(start, Permanent()))
   println(if (Actor.id(again) > 0) -> 1 | 0)
   Sup.stop-children(again :: pids)
-  let _ = Actor.join(again)
+  Actor.join(again)
   println(1)
   0
 }

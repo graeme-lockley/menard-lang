@@ -595,6 +595,15 @@ Mailboxes expose `receive-timeout` / `send-timeout` (`ActorTimeout`). Net and
 HTTP offer `*-timeout` variants that return `IoError.Timeout` and leave the
 fd usable (see [stdlib.md](stdlib.md)).
 
+## Network
+
+TCP, UDP, TLS, and HTTP are **native-only**. `mn build` / `mn run` exercise
+the real socket and OpenSSL seams. Under `mn inter`, every `Result`-returning
+`Net.*` call yields `Err(Unsupported)`; `Http.request` / `serve` surface that
+as `Err(NetErr(Unsupported))`. There is no virtual network in the
+interpreter. The hermetic oracle corpus excludes network programs for that
+reason (CONC-10).
+
 ## Next steps
 
 - Run the programs in [examples/](../examples/). Each one that defines

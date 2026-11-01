@@ -21,12 +21,12 @@ let defer-cancel-cleanup() -> Int {
   let t = Task.spawn(fn () = {
     defer set!(flag, 1)
     Sched.notify(ready)
-    let _ = Sched.wait(Sched.wait-new())
+    Sched.wait(Sched.wait-new())
     0
   })
-  let _ = Sched.wait(ready)
+  Sched.wait(ready)
   Task.cancel(t)
-  let _ = Task.join(t)
+  Task.join(t)
   deref(flag)
 }
 

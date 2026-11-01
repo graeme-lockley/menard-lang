@@ -1521,9 +1521,6 @@ function ioErrorToValue(err: IoError): Value {
   switch (err.tag) {
     case "Other":
       return vVariant("Other", [vInt(err.code)]);
-    case "Unsupported":
-      // Not in the Menard IoError variant; fold into Other.
-      return vVariant("Other", [vInt(0n)]);
     default:
       return vVariant(err.tag);
   }
@@ -1971,6 +1968,8 @@ function applyBuiltin(
     }
     case "mn_task_defer_leave":
       return taskDeferLeave(host);
+    /* Native-only networking (CONC-10): Result ops return Err(Unsupported);
+     * Unit closes are inert no-ops (no fd to release under inter). */
     case "mn_tcp_listen":
     case "mn_tcp_accept":
     case "mn_tcp_accept_timeout":
@@ -1980,12 +1979,10 @@ function applyBuiltin(
     case "mn_tcp_read_timeout":
     case "mn_tcp_write":
     case "mn_tcp_write_timeout":
-    case "mn_tcp_close":
     case "mn_tcp_local_port":
     case "mn_udp_bind":
     case "mn_udp_send":
     case "mn_udp_recv":
-    case "mn_udp_close":
     case "mn_tls_client":
     case "mn_tls_client_timeout":
     case "mn_tls_server":
@@ -1994,8 +1991,11 @@ function applyBuiltin(
     case "mn_tls_read_timeout":
     case "mn_tls_write":
     case "mn_tls_write_timeout":
+      return resultErr({ tag: "Unsupported" });
+    case "mn_tcp_close":
+    case "mn_udp_close":
     case "mn_tls_close":
-      throw new PanicError(`native-only networking: ${name} unbound in interpreter`, span);
+      return vUnit();
     default:
       throw new PanicError(`unknown builtin ${name}`, span);
   }

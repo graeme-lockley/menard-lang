@@ -370,7 +370,7 @@ pub let format-request(host: Str, req: Request) -> Str =
       }
 
 ; Read one HTTP request from a connected fd under default limits. Native only.
-; @test true
+; @test-native
 pub let read-request(fd: Int) -> Result Request HttpError =
   match (read-headers(fd, ""))
     | Err(e) -> Err(e)
@@ -388,7 +388,7 @@ pub let read-request(fd: Int) -> Result Request HttpError =
                       Ok(Request(method, path, headers, body))
 
 ; Write one HTTP response to a connected fd. Native only.
-; @test true
+; @test-native
 pub let write-response(fd: Int, res: Response) -> Result Unit HttpError =
   match (Net.write(fd, format-response(res)))
     | Err(e) -> Err(NetErr(e))
@@ -398,10 +398,9 @@ pub let write-response(fd: Int, res: Response) -> Result Unit HttpError =
 let write-error(conn: Int, e: HttpError, deadline: Int) -> Unit {
   let st = error-status(e)
   if (st == 0) -> () | {
-    let _ =
-      match (Net.write-timeout(conn, format-response(error-response(st, error-message(e))), ms-left(deadline)))
-        | Err(_) -> ()
-        | Ok(_) -> ()
+    match (Net.write-timeout(conn, format-response(error-response(st, error-message(e))), ms-left(deadline)))
+      | Err(_) -> ()
+      | Ok(_) -> ()
     ()
   }
 }
@@ -433,16 +432,15 @@ let handle-conn(conn: Int, deadline: Int, limits: Limits, handler: (Request) -> 
                 | Ok(req) -> {
                     ; Leftover bytes past Content-Length are discarded with the
                     ; connection close — no keep-alive, no second request parse.
-                    let _ =
-                      match (Net.write-timeout(conn, format-response(handler(req)), ms-left(deadline)))
-                        | Err(_) -> ()
-                        | Ok(_) -> ()
+                    match (Net.write-timeout(conn, format-response(handler(req)), ms-left(deadline)))
+                      | Err(_) -> ()
+                      | Ok(_) -> ()
                     0
                   }
 }
 
 ; Accept loop on an already-listening fd (caller owns close). Native only.
-; @test true
+; @test-native
 pub let serve-on(
   listener: Int,
   conn-ms: Int,
@@ -455,8 +453,7 @@ pub let serve-on(
         | Err(_) -> ()
         | Ok(conn) -> {
             let deadline = Sched.mono-ms() + conn-ms
-            let _ =
-              Task.spawn-in(scope, fn () = handle-conn(conn, deadline, limits, handler))
+            Task.spawn-in(scope, fn () = handle-conn(conn, deadline, limits, handler))
             recur()
           }
     }
@@ -465,7 +462,7 @@ pub let serve-on(
 }
 
 ; Accept loop under Task.scope with explicit limits. Native only.
-; @test true
+; @test-native
 pub let serve-timeout-limits(
   port: Int,
   conn-ms: Int,
@@ -480,12 +477,12 @@ pub let serve-timeout-limits(
       }
 
 ; Accept loop under Task.scope; each connection has a deadline. Native only.
-; @test true
+; @test-native
 pub let serve-timeout(port: Int, conn-ms: Int, handler: (Request) -> Response) -> Result Unit HttpError =
   serve-timeout-limits(port, conn-ms, default-limits(), handler)
 
 ; Accept loop with the default per-connection deadline. Native only.
-; @test true
+; @test-native
 pub let serve(port: Int, handler: (Request) -> Response) -> Result Unit HttpError =
   serve-timeout(port, default-conn-deadline-ms(), handler)
 
@@ -521,7 +518,7 @@ let finish-response(fd: Int, raw: Str, deadline: Int, max-body: Int) -> Result R
       }
 
 ; One-shot HTTP client request with timeout and limits. Native only.
-; @test true
+; @test-native
 pub let request-timeout-limits(
   host: Str,
   port: Int,
@@ -546,11 +543,11 @@ pub let request-timeout-limits(
 }
 
 ; One-shot HTTP client request with a relative timeout. Native only.
-; @test true
+; @test-native
 pub let request-timeout(host: Str, port: Int, req: Request, ms: Int) -> Result Response HttpError =
   request-timeout-limits(host, port, req, ms, default-limits())
 
 ; One-shot HTTP client request under the default deadline. Native only.
-; @test true
+; @test-native
 pub let request(host: Str, port: Int, req: Request) -> Result Response HttpError =
   request-timeout(host, port, req, default-conn-deadline-ms())

@@ -294,14 +294,20 @@ Concurrency capstone (Build F): language **`defer`** (LIFO; cancel runs
 remaining cleanups); parkable **`std/net`** (TCP+UDP) and **OpenSSL** TLS via
 `mn_*`; Menard **`std/http`** + **`std/rest`**; bounded actor mailboxes
 (block-on-full, default 1024); **`std/supervisor`** one-for-one helpers.
-Networking is **native-only** (interpreter unbound). Details:
-[build-f-network.md](design/builds/f-network.md).
+Networking is **native-only**. The interpreter does not implement a virtual
+network: `Result`-returning `mn_tcp_*` / `mn_udp_*` / `mn_tls_*` stubs return
+`Err(Unsupported)` (`IoError` tag 36); Unit closes are no-ops; HTTP fails as
+`Err(NetErr(Unsupported))`. The hermetic oracle excludes `tests/net` and
+`tests/http` with an explicit exclusion table. Details:
+[build-f-network.md](design/builds/f-network.md); CONC-10.
 
 ### Why
 
 §3.10.1a requires cleanup on cancel before concurrent I/O; Menard-first HTTP
 matches the library philosophy; one OpenSSL backend avoids platform `#ifdef`
-splits; block-on-full is industrial backpressure.
+splits; block-on-full is industrial backpressure. A typed `Unsupported`
+boundary is honest dual-host agreement without pretending sockets work under
+`mn inter`.
 
 ---
 

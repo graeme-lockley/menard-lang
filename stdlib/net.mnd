@@ -1,4 +1,4 @@
-; Parkable TCP/UDP + TLS (Build F). Native seam; interpreter unbound.
+; Parkable TCP/UDP + TLS (Build F). Native seam; interpreter returns Err(Unsupported) (CONC-10).
 ; @module std/net
 
 pub import std/io (IoError)
@@ -33,63 +33,63 @@ extern mn_tls_close(id: Int) -> Unit
 ; --- TCP ---
 
 ; Bind and listen on a TCP port. Native only.
-; @test true
+; @test-native
 pub let listen(port: Int) -> Result Int IoError =
   mn_tcp_listen(port)
 
 ; Accept one connection. Parks until ready. Native only.
-; @test true
+; @test-native
 pub let accept(fd: Int) -> Result Int IoError =
   mn_tcp_accept(fd)
 
 ; Accept with a relative timeout. On Timeout the listener fd stays open.
-; @test true
+; @test-native
 pub let accept-timeout(fd: Int, ms: Int) -> Result Int IoError =
   mn_tcp_accept_timeout(fd, ms)
 
 ; Connect to host:port. Parks until connected. Native only.
-; @test true
+; @test-native
 pub let connect(host: Str, port: Int) -> Result Int IoError =
   mn_tcp_connect(host, port)
 
 ; Connect with a relative timeout. On Timeout no fd is returned.
-; @test true
+; @test-native
 pub let connect-timeout(host: Str, port: Int, ms: Int) -> Result Int IoError =
   mn_tcp_connect_timeout(host, port, ms)
 
 ; Read up to max bytes. Parks until data or EOF. Native only.
-; @test true
+; @test-native
 pub let read(fd: Int, max: Int) -> Result Str IoError =
   mn_tcp_read(fd, max)
 
 ; Read with a relative timeout. On Timeout the fd stays open and usable.
-; @test true
+; @test-native
 pub let read-timeout(fd: Int, max: Int, ms: Int) -> Result Str IoError =
   mn_tcp_read_timeout(fd, max, ms)
 
 ; Write data. Parks until complete or error. Native only.
-; @test true
+; @test-native
 pub let write(fd: Int, data: Str) -> Result Unit IoError =
   mn_tcp_write(fd, data)
 
 ; Write with a relative timeout. On Timeout the fd stays open; bytes already
 ; sent are not rolled back.
-; @test true
+; @test-native
 pub let write-timeout(fd: Int, data: Str, ms: Int) -> Result Unit IoError =
   mn_tcp_write_timeout(fd, data, ms)
 
 ; Close a TCP fd. Native only.
-; @test true
+; @test-native
 pub let close(fd: Int) -> Unit =
   mn_tcp_close(fd)
 
 ; Local TCP port of a bound socket (for listen(0) ephemeral ports). Native only.
-; @test true
+; @test-native
 pub let local-port(fd: Int) -> Result Int IoError =
   mn_tcp_local_port(fd)
 
 ; Run body with a connected fd; always close (uses language defer). Native only.
-; @test true
+; @test-native
 pub let with-connection[a](fd: Int, body: (Int) -> a) -> a {
   defer close(fd)
   body(fd)
@@ -98,74 +98,74 @@ pub let with-connection[a](fd: Int, body: (Int) -> a) -> a {
 ; --- UDP ---
 
 ; Bind a UDP socket to a port. Native only.
-; @test true
+; @test-native
 pub let udp-bind(port: Int) -> Result Int IoError =
   mn_udp_bind(port)
 
 ; Send a UDP datagram. Native only.
-; @test true
+; @test-native
 pub let udp-send(fd: Int, host: Str, port: Int, data: Str) -> Result Unit IoError =
   mn_udp_send(fd, host, port, data)
 
 ; Receive a UDP datagram (up to max bytes). Native only.
-; @test true
+; @test-native
 pub let udp-recv(fd: Int, max: Int) -> Result Str IoError =
   mn_udp_recv(fd, max)
 
 ; Close a UDP fd. Native only.
-; @test true
+; @test-native
 pub let udp-close(fd: Int) -> Unit =
   mn_udp_close(fd)
 
 ; --- TLS (OpenSSL) ---
 
 ; Client TLS handshake over a connected TCP fd. Native only.
-; @test true
+; @test-native
 pub let tls-client(fd: Int) -> Result Int IoError =
   mn_tls_client(fd)
 
 ; Client TLS handshake with a relative timeout. Native only.
-; @test true
+; @test-native
 pub let tls-client-timeout(fd: Int, ms: Int) -> Result Int IoError =
   mn_tls_client_timeout(fd, ms)
 
 ; Server TLS handshake with cert/key paths. Native only.
-; @test true
+; @test-native
 pub let tls-server(fd: Int, cert: Str, key: Str) -> Result Int IoError =
   mn_tls_server(fd, cert, key)
 
 ; Server TLS handshake with a relative timeout. Native only.
-; @test true
+; @test-native
 pub let tls-server-timeout(fd: Int, cert: Str, key: Str, ms: Int) -> Result Int IoError =
   mn_tls_server_timeout(fd, cert, key, ms)
 
 ; Read from a TLS session. Native only.
-; @test true
+; @test-native
 pub let tls-read(id: Int, max: Int) -> Result Str IoError =
   mn_tls_read(id, max)
 
 ; TLS read with a relative timeout. Native only.
-; @test true
+; @test-native
 pub let tls-read-timeout(id: Int, max: Int, ms: Int) -> Result Str IoError =
   mn_tls_read_timeout(id, max, ms)
 
 ; Write to a TLS session. Native only.
-; @test true
+; @test-native
 pub let tls-write(id: Int, data: Str) -> Result Unit IoError =
   mn_tls_write(id, data)
 
 ; TLS write with a relative timeout. Native only.
-; @test true
+; @test-native
 pub let tls-write-timeout(id: Int, data: Str, ms: Int) -> Result Unit IoError =
   mn_tls_write_timeout(id, data, ms)
 
 ; Close a TLS session. Native only.
-; @test true
+; @test-native
 pub let tls-close(id: Int) -> Unit =
   mn_tls_close(id)
 
 ; Run body with a TLS id; always tls-close (uses language defer). Native only.
-; @test true
+; @test-native
 pub let with-tls[a](id: Int, body: (Int) -> a) -> a {
   defer tls-close(id)
   body(id)

@@ -90,7 +90,7 @@ let join-drain(ids: List Int) -> Unit {
       | n :: rest -> {
           set!(cell, rest)
           Sched.cancel(n)
-          let _ = Sched.join(n)
+          Sched.join(n)
           recur()
         }
 }

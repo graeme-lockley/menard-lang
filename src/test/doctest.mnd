@@ -16,7 +16,8 @@ import std/path as Path
 import std/string as String
 import std/string-buffer as Buf
 
-let gen-version = "; #gen 1\n"
+; Bump when extraction semantics change (e.g. reserved @test-* markers).
+let gen-version = "; #gen 2\n"
 
 pub record DocCase {
   generated: Str
@@ -371,6 +372,7 @@ let scan-comment(line: Line, rest: List Line, sc: Scan, body: Str) -> Scan =
       cond
         | String.starts-with("@module ", body) -> scan-module(num, start, body, rest, sc)
         | String.starts-with("@test-import", body) -> scan-extra(line, body, rest, sc)
+        | String.starts-with("@test-", body) -> scan-lines(rest, sc)
         | String.starts-with("@test", body) ->
           {
             let d = start-test(line, rest)

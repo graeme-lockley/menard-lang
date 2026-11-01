@@ -70,7 +70,7 @@ let start-server(ready: Int, port-cell: Ref Int, conn-ms: Int, limits: Limits) -
 
 let stop(server: Task Int) -> Unit {
   Task.cancel(server)
-  let _ = Task.join(server)
+  Task.join(server)
   ()
 }
 
@@ -100,7 +100,7 @@ let main() -> Int {
   let ready1 = Sched.wait-new()
   let port1 = ref(0)
   let s1 = start-server(ready1, port1, 3000, Http.default-limits())
-  let _ = Sched.wait(ready1)
+  Sched.wait(ready1)
   let p1 = deref(port1)
 
   ; 1) Happy path via Http.request-timeout
@@ -137,7 +137,7 @@ let main() -> Int {
   let port2 = ref(0)
   let tight = Limits(64, 256, 20, 32)
   let s2 = start-server(ready2, port2, 3000, tight)
-  let _ = Sched.wait(ready2)
+  Sched.wait(ready2)
   let p2 = deref(port2)
 
   ; 7) Request line too long → 431
@@ -166,8 +166,8 @@ let main() -> Int {
   let pb = ref(0)
   let sa = start-server(ready-a, pa, 3000, Http.default-limits())
   let sb = start-server(ready-b, pb, 3000, Http.default-limits())
-  let _ = Sched.wait(ready-a)
-  let _ = Sched.wait(ready-b)
+  Sched.wait(ready-a)
+  Sched.wait(ready-b)
   let ok-ports =
     if (deref(pa) != 0 && deref(pb) != 0 && deref(pa) != deref(pb)) -> 1 | 0
   println(ok-ports)
@@ -192,13 +192,13 @@ let main() -> Int {
                   | Err(_) -> 1
                   | Ok(conn) -> {
                       defer Net.close(conn)
-                      let _ = Task.sleep-ms(500)
+                      Task.sleep-ms(500)
                       0
                     }
               }
         }
   })
-  let _ = Sched.wait(ready3)
+  Sched.wait(ready3)
   let p3 = deref(port3)
   let ok-timeout =
     match (Http.request-timeout("127.0.0.1", p3, Request(GET(), "/", Map.empty(), ""), 50))

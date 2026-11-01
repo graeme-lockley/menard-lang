@@ -30,20 +30,20 @@ let main() -> Int {
               }
         }
   })
-  let _ = Sched.wait(ready)
+  Sched.wait(ready)
   let port = deref(port-cell)
   match (Http.request-timeout("127.0.0.1", port, Request(GET(), "/hi", Map.empty(), ""), 2000))
     | Ok(Response(code, _, body)) -> {
         println(code)
         println(body)
         Task.cancel(server)
-        let _ = Task.join(server)
+        Task.join(server)
         0
       }
     | Err(_) -> {
         println(0)
         Task.cancel(server)
-        let _ = Task.join(server)
+        Task.join(server)
         1
       }
 }

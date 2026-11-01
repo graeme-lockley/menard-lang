@@ -77,6 +77,6 @@ let main() -> Unit {
     | Some(p) -> println(show-res(Actor.call(p, Get("1"))))
 
   Actor.cancel(um)
-  let _ = Actor.join(um)
+  Actor.join(um)
   ()
 }

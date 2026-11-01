@@ -1,6 +1,6 @@
 # Build F — Network, cleanup, supervision
 
-**Status:** implemented (native networking; interpreter unbound for net/TLS).  
+**Status:** implemented (native networking; interpreter `Err(Unsupported)` for net/TLS — CONC-10).  
 **Architecture:** [design-libraries-concurrency.md](../libraries-concurrency.md) §3.4 / §3.10.1a / §3.10.2 / phases 8–9.  
 **Prior:** [build-e-actors.md](e-actors.md).
 
@@ -11,7 +11,7 @@
 | 1 | HTTPS via **`mn_*` → OpenSSL** (one backend everywhere). |
 | 2 | HTTP in **`std/http`** (Menard). |
 | 3 | Sockets module: **`std/net`** with TCP + UDP. |
-| 4 | **Native-only** networking/TLS; interpreter hard unbound. |
+| 4 | **Native-only** networking/TLS; interpreter returns `Err(Unsupported)`. |
 | 5 | Language **`defer`** special form; LIFO; runs on block exit and task cancel. |
 | 6 | Bounded mailboxes: **block-on-full**; default capacity **1024**. |
 | 7 | **`std/supervisor`**: OTP-lite one-for-one; `start-children` / `stop-children` + scaffolding `supervise`. |
@@ -56,7 +56,7 @@ Install on macOS: `brew install openssl@3`. On Linux: distro `libssl-dev` / `ope
 
 ## Known limitations
 
-- Interpreter: all `mn_tcp_*` / `mn_udp_*` / `mn_tls_*` unbound.
+- Interpreter: all `Result`-returning `mn_tcp_*` / `mn_udp_*` / `mn_tls_*` return `Err(Unsupported)`; Unit closes are no-ops.
 - TLS handshake uses cooperative `poll` on the mutator (not wait-cell registered).
 - `Supervisor.supervise` restart loop is scaffolding; prefer `start-children` / `stop-children` until termination probes are richer.
 - HTTP: no chunked encoding; no HTTP/2.

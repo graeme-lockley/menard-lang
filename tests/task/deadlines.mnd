@@ -10,7 +10,7 @@ let main() -> Int {
 
   ; join-timeout: child sleeps longer than the wait → Timeout; child still runs.
   let t = Task.spawn(fn () = {
-    let _ = Task.sleep-ms(40)
+    Task.sleep-ms(40)
     7
   })
   match (Task.join-timeout(t, 5))

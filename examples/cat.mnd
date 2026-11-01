@@ -21,6 +21,7 @@ let reason(e: IoError) -> Str =
     | TooLarge -> "File too large"
     | Exists -> "File exists"
     | Timeout -> "Timed out"
+    | Unsupported -> "Operation not supported"
     | Other(_) -> "Input/output error"
 
 let report(path: Str, e: IoError) -> Unit {

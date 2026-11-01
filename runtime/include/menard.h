@@ -73,6 +73,7 @@ extern MnNullary mn_static_not_a_directory;
 extern MnNullary mn_static_invalid_path;
 extern MnNullary mn_static_too_large;
 extern MnNullary mn_static_timeout;
+extern MnNullary mn_static_unsupported;
 extern MnNullary mn_static_not_executable;
 extern MnNullary mn_static_invalid_argument;
 extern MnNullary mn_static_too_many_arguments;

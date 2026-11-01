@@ -59,7 +59,7 @@ let main() -> Int {
 
   ; Scope exit cancels unfinished children.
   Task.scope(fn (s) = {
-    let _ = spawn-in(s, fn () = {
+    spawn-in(s, fn () = {
       Task.yield()
       0
     })

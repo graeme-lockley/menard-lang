@@ -2,7 +2,8 @@
 ;
 ; A doc comment is the contiguous `;` lines immediately above a `defn`,
 ; with no blank line before the form. The first line is the summary.
-; Every `pub let` needs at least one `@test` line.
+; Every `pub let` needs at least one `@test` line (including reserved
+; markers such as `@test-native` for native-only APIs).
 ;
 ; Usage: bun run host/src/cli/menard.ts run src/tools/docs.mnd -- stdlib
 ; Prints one record per published function. Exits 1 when a check fails.

@@ -855,8 +855,8 @@ let ctor-owner(c: CtorInfo) -> Str =
     | CtorInfo(type-name, _, _) -> type-name
 
 ; A constructor already owned by another variant stays there. SpawnError
-; lists the IoError singletons NotFound and Permission for exhaustiveness
-; without taking them away from IoError.
+; lists the IoError singletons NotFound, Permission, and Unsupported for
+; exhaustiveness without taking them away from IoError.
 let register-variant-ctor-set(env: TypeEnv, type-name: Str, params: List Str, cname: Str, payloads: List Type) -> Unit {
   ctor-set(env, cname, CtorInfo(type-name, payloads, params))
   value-set(env, cname, Scheme(params, t-fn(payloads, t-nominal(type-name, params-to-types(params), "variant"))))
@@ -1376,7 +1376,7 @@ let infer-return(env: TypeEnv, rest: List Ast, local: Map Str Type) -> Type =
 let infer-defer(env: TypeEnv, rest: List Ast, local: Map Str Type) -> Type {
   match (rest)
     | a :: _ -> {
-        let _ = infer(env, a, local)
+        infer(env, a, local)
         t-unit()
       }
     | [] -> t-unit()

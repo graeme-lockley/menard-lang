@@ -8,7 +8,7 @@ let as-int(b: Bool) -> Int =
   if (b) -> 1 | 0
 
 let touch() -> Unit {
-  let _ = 0
+  0
   ()
 }
 

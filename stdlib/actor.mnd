@@ -32,7 +32,7 @@ pub record Mailbox[a] {
 ; Empty live mailbox with default capacity.
 ; @test {
 ;   let mb = mailbox-new()
-;   let _ = send(mb, 1)
+;   send(mb, 1)
 ;   receive(mb)
 ; } => Ok(1)
 pub let mailbox-new[a]() -> Mailbox a =
@@ -41,7 +41,7 @@ pub let mailbox-new[a]() -> Mailbox a =
 ; Empty live mailbox with explicit capacity (block-on-full send).
 ; @test {
 ;   let mb = mailbox-new-bounded(1)
-;   let _ = send(mb, 7)
+;   send(mb, 7)
 ;   receive(mb)
 ; } => Ok(7)
 pub let mailbox-new-bounded[a](capacity: Int) -> Mailbox a =
@@ -130,7 +130,7 @@ pub let send[a](mb: Mailbox a, msg: a) -> Result Unit ActorError {
 ; Cancel does not dequeue; the message stays in the queue.
 ; @test {
 ;   let mb = mailbox-new()
-;   let _ = send(mb, 7)
+;   send(mb, 7)
 ;   receive(mb)
 ; } => Ok(7)
 pub let receive[a](mb: Mailbox a) -> Result a ActorError {
@@ -167,7 +167,7 @@ pub let receive-timeout[a](mb: Mailbox a, ms: Int) -> Result a ActorError {
 ; Like send, but Err(ActorTimeout) after ms waiting for space; nothing is enqueued.
 ; @test {
 ;   let mb = mailbox-new-bounded(1)
-;   let _ = send(mb, 1)
+;   send(mb, 1)
 ;   send-timeout(mb, 2, 5)
 ; } => Err(ActorTimeout())
 pub let send-timeout[a](mb: Mailbox a, msg: a, ms: Int) -> Result Unit ActorError {
@@ -299,11 +299,11 @@ pub let spawn-in[a](scope: Ref (List Int), body: (Mailbox a) -> Unit) -> Pid a {
 ; Send to an actor's mailbox.
 ; @test {
 ;   let p = spawn(fn (mb) = {
-;     let _ = receive(mb)
+;     receive(mb)
 ;     ()
 ;   })
 ;   let r = cast(p, 1)
-;   let _ = join(p)
+;   join(p)
 ;   r
 ; } => Ok(())
 pub let cast[a](pid: Pid a, msg: a) -> Result Unit ActorError =
@@ -312,7 +312,7 @@ pub let cast[a](pid: Pid a, msg: a) -> Result Unit ActorError =
 ; Cancel the actor task; close the mailbox and escalate the nursery.
 ; @test {
 ;   let p = spawn(fn (mb) = {
-;     let _ = receive(mb)
+;     receive(mb)
 ;     ()
 ;   })
 ;   cancel(p)
@@ -373,7 +373,7 @@ let drop-ask-for-reply[req, res](mb: Mailbox (Ask req res), reply: Mailbox (Resu
 ;   let p = serve(fn (n) = n + 1)
 ;   let r = call(p, 40)
 ;   cancel(p)
-;   let _ = join(p)
+;   join(p)
 ;   r
 ; } => Ok(41)
 pub let call[req, res](pid: Pid (Ask req res), req: req) -> Result res ActorError {
@@ -409,7 +409,7 @@ let serve-loop[req, res](mb: Mailbox (Ask req res), scope: Ref (List Int), pendi
           let hook = fn () = close(reply)
           set!(pending, hook :: deref(pending))
           let out = handle(req)
-          let _ = send(reply, Ok(out))
+          send(reply, Ok(out))
           set!(pending, List.filter(fn (h) = h != hook, deref(pending)))
           recur()
         }
@@ -420,7 +420,7 @@ let serve-loop[req, res](mb: Mailbox (Ask req res), scope: Ref (List Int), pendi
 ;   let p = serve(fn (n) = n * 2)
 ;   let r = call(p, 21)
 ;   cancel(p)
-;   let _ = join(p)
+;   join(p)
 ;   r
 ; } => Ok(42)
 pub let serve[req, res](handle: req -> res) -> Pid (Ask req res) {
@@ -437,7 +437,7 @@ pub let serve[req, res](handle: req -> res) -> Pid (Ask req res) {
 ;   let p = serve-in(s, fn (n) = n)
 ;   let r = call(p, 3)
 ;   cancel(p)
-;   let _ = join(p)
+;   join(p)
 ;   r
 ; } => Ok(3)
 pub let serve-in[req, res](scope: Ref (List Int), handle: req -> res) -> Pid (Ask req res) {
@@ -462,7 +462,7 @@ let serve-state-loop[req, res, s](mb: Mailbox (Ask req res), scope: Ref (List In
           let pair = step(st, req)
           match (pair)
             | (st2, out) -> {
-                let _ = send(reply, Ok(out))
+                send(reply, Ok(out))
                 set!(pending, List.filter(fn (h) = h != hook, deref(pending)))
                 recur(st2)
               }
@@ -474,7 +474,7 @@ let serve-state-loop[req, res, s](mb: Mailbox (Ask req res), scope: Ref (List In
 ;   let p = serve-state(0, fn (st, n) = (st + n, st + n))
 ;   let r = call(p, 5)
 ;   cancel(p)
-;   let _ = join(p)
+;   join(p)
 ;   r
 ; } => Ok(5)
 pub let serve-state[req, res, s](init: s, step: (s, req) -> (s * res)) -> Pid (Ask req res) {
@@ -491,7 +491,7 @@ pub let serve-state[req, res, s](init: s, step: (s, req) -> (s * res)) -> Pid (A
 ;   let p = serve-state-in(s, 0, fn (st, n) = (st + 1, n))
 ;   let r = call(p, 9)
 ;   cancel(p)
-;   let _ = join(p)
+;   join(p)
 ;   r
 ; } => Ok(9)
 pub let serve-state-in[req, res, s](scope: Ref (List Int), init: s, step: (s, req) -> (s * res)) -> Pid (Ask req res) {
@@ -508,7 +508,7 @@ pub let serve-state-in[req, res, s](scope: Ref (List Int), init: s, step: (s, re
 ; @test {
 ;   let p = spawn(fn (_) = ())
 ;   register("docs-actor", p)
-;   let _ = join(p)
+;   join(p)
 ; }
 pub let register[a](name: Str, pid: Pid a) -> Unit =
   Sched.dict-set(name, pid)
@@ -521,7 +521,7 @@ pub let register[a](name: Str, pid: Pid a) -> Unit =
 ;     match (whereis("docs-whereis"))
 ;       | Some(q) -> id(q) == id(p)
 ;       | None -> false
-;   let _ = join(p)
+;   join(p)
 ;   ok
 ; } => true
 pub let whereis[a](name: Str) -> Maybe (Pid a) =

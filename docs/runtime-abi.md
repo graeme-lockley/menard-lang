@@ -25,7 +25,7 @@ to this catalogue. Example: [examples/ffi/sqlite/](../examples/ffi/sqlite/)
 | `stdlib/proc.mnd` | Argv-vector spawn |
 | `stdlib/time.mnd` | Wall clock only (`mn_now_ms`) |
 | `stdlib/sched.mnd` | **Internal** task runtime (Build D) — not Platform API; prefer `std/task` |
-| `stdlib/net.mnd` | Parkable TCP/UDP + OpenSSL TLS (Build F); interpreter unbound |
+| `stdlib/net.mnd` | Parkable TCP/UDP + OpenSSL TLS (Build F); interpreter `Err(Unsupported)` |
 
 Confinement is enforced by the host module loader (`E_EXTERN_SEAM`) and by lint
 tests. Compiler/runtime-internal symbols (strings, maps, GC, apply, floats, …)
@@ -64,7 +64,9 @@ Public façade: `stdlib/task.mnd` (no `extern`; wraps `std/sched`).
 ### Network + TLS (Build F)
 
 See [build-f-network.md](design/builds/f-network.md). Platform façade: `stdlib/net.mnd`.
-Native only — interpreter stubs throw unbound.
+Native only — interpreter stubs return `Err(Unsupported)` for `Result` ops;
+Unit closes are no-ops. The hermetic oracle excludes `tests/net` and
+`tests/http` (see `ORACLE_EXCLUSIONS` in `tests/corpus/oracle.test.ts`).
 
 | Symbol | Notes |
 |---|---|
@@ -95,7 +97,8 @@ Native only — interpreter stubs throw unbound.
 | `mn_write_file` | `Io.write-file` | `Result Unit IoError` |
 
 `IoError`: `NotFound`, `Permission`, `Exists`, `IsADirectory`, `NotADirectory`,
-`InvalidPath`, `TooLarge`, `Other(Int)`, `Timeout`.
+`InvalidPath`, `TooLarge`, `Other(Int)`, `Timeout`, `Unsupported` (tag 36;
+shared with `SpawnError.Unsupported`).
 
 ### `std/fs`
 

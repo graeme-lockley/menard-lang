@@ -49,15 +49,15 @@ let main() -> Int {
   ; --- Mailbox: multi-sender, then receive ---
   let mb = Actor.mailbox-new()
   let s1 = Tsk.spawn(fn () = {
-    let _ = Actor.send(mb, 10)
+    Actor.send(mb, 10)
     1
   })
   let s2 = Tsk.spawn(fn () = {
-    let _ = Actor.send(mb, 20)
+    Actor.send(mb, 20)
     1
   })
-  let _ = Tsk.join(s1)
-  let _ = Tsk.join(s2)
+  Tsk.join(s1)
+  Tsk.join(s2)
   let a = match (Actor.receive(mb))
     | Ok(n) -> n
     | Err(_) -> 0
@@ -69,7 +69,7 @@ let main() -> Int {
   ; --- Actor.call put/get/search ---
   let um = Actor.serve-state(Map.empty(), step)
   Actor.register("user-manager", um)
-  let _ = Actor.call(um, Put("1", "ada"))
+  Actor.call(um, Put("1", "ada"))
   println(unwrap-res(Actor.call(um, Get("1"))))
   println(unwrap-res(Actor.call(um, Search("ada"))))
   println(unwrap-res(Actor.call(um, Get("missing"))))
@@ -81,7 +81,7 @@ let main() -> Int {
 
   ; --- Post-death send ---
   Actor.cancel(um)
-  let _ = Actor.join(um)
+  Actor.join(um)
   match (Actor.cast(um, Ask(Get("1"), Actor.mailbox-new())))
     | Ok(_) -> println(0)
     | Err(ActorDead()) -> println(1)
@@ -116,8 +116,8 @@ let main() -> Int {
       } | ()
     Tsk.yield()
     Actor.cancel(slow)
-    let _ = Actor.join(peer)
-    let _ = Actor.join(slow)
+    Actor.join(peer)
+    Actor.join(slow)
     ()
   })
   println(deref(saw))

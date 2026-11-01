@@ -32,11 +32,11 @@ let main() -> Int {
           loop ()
             if (deref(progress) >= 3) -> 3 | {
               set!(progress, deref(progress) + 1)
-              let _ = Task.sleep-ms(5)
+              Task.sleep-ms(5)
               recur()
             }
         })
-        let _ = Task.sleep-ms(5)
+        Task.sleep-ms(5)
         match (Net.connect("127.0.0.1", 19876))
           | Err(_) -> println(0)
           | Ok(client) -> {
