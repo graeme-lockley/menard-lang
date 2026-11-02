@@ -370,6 +370,11 @@ function defineTop(ast: Ast, env: Env): void {
       const cname = symName(ce.elems[0]!);
       if (envGet(env, cname)) continue;
       const arity = ce.elems.length - 1;
+      // LANG-07: a nullary constructor is the variant value itself.
+      if (arity === 0) {
+        envSet(env, cname, vVariant(cname));
+        continue;
+      }
       envSet(env, cname, {
         tag: "fn",
         params: Array.from({ length: arity }, (_, j) => `p${j}`),
@@ -1385,7 +1390,12 @@ function matchPat(pat: Ast, v: Value, env: Env): boolean {
   if (pat.tag === "sym") {
     const n = symName(pat);
     if (n === "_") return true;
-    if (v.tag === "variant" && v.ctor === n && v.payloads.length === 0) return true;
+    // Uppercase bare name: nullary constructor pattern (LANG-07). Do not
+    // fall through to a variable binding — `Nil`/`None` are not locals.
+    const c0 = n.charCodeAt(0);
+    if (c0 >= 65 && c0 <= 90) {
+      return v.tag === "variant" && v.ctor === n && v.payloads.length === 0;
+    }
     envSet(env, n, v);
     return true;
   }
@@ -1490,7 +1500,7 @@ function installBuiltins(env: Env): void {
     "show", "print", "println", "=", "compare", "dump",
     "ref", "deref",
     "map-new", "map-set", "map-get", "map-has", "map-keys",
-    "None", "Some", "Ok", "Err", "Nil", "Cons",
+    "Some", "Ok", "Err", "Cons",
     "exit", "arg-count", "arg", "write", "read-file", "write-file",
     "getenv", "exists", "rename",
     "isatty", "mtime", "cwd", "ensure-dir", "list-dir", "realpath", "now-ms", "remove", "is-dir",
@@ -1507,13 +1517,21 @@ function installBuiltins(env: Env): void {
     "mn_udp_bind", "mn_udp_send", "mn_udp_recv", "mn_udp_close",
     "mn_tls_client", "mn_tls_client_timeout", "mn_tls_server", "mn_tls_server_timeout",
     "mn_tls_read", "mn_tls_read_timeout", "mn_tls_write", "mn_tls_write_timeout", "mn_tls_close",
-    "NotFound", "Permission", "Exists", "IsADirectory", "NotADirectory",
-    "InvalidPath", "TooLarge", "Timeout", "Other", "Unsupported",
-    "NotExecutable", "InvalidArgument", "TooManyArguments",
+    "Other",
     "Exited", "Signalled", "SpawnOutput",
   ];
   for (const n of names) {
     envSet(env, n, { tag: "builtin", name: n });
+  }
+  // LANG-07: nullary constructors are values, not zero-argument builtins.
+  const nullaries = [
+    "None", "Nil",
+    "NotFound", "Permission", "Exists", "IsADirectory", "NotADirectory",
+    "InvalidPath", "TooLarge", "Timeout", "Unsupported",
+    "NotExecutable", "InvalidArgument", "TooManyArguments",
+  ];
+  for (const n of nullaries) {
+    envSet(env, n, vVariant(n));
   }
 }
 
@@ -1733,16 +1751,12 @@ function applyBuiltin(
       const sb = args[0] as { sb: ReturnType<typeof sbNew> };
       return vStr(sbTakeStr(sb.sb));
     }
-    case "None":
-      return vVariant("None");
     case "Some":
       return vVariant("Some", [args[0]!]);
     case "Ok":
       return vVariant("Ok", [args[0]!]);
     case "Err":
       return vVariant("Err", [args[0]!]);
-    case "Nil":
-      return vVariant("Nil");
     case "Cons":
       return vVariant("Cons", [args[0]!, args[1]!]);
     case "exit": {
@@ -1863,19 +1877,6 @@ function applyBuiltin(
         fieldNames: ["status", "stdout", "stderr"],
       });
     }
-    case "NotFound":
-    case "Permission":
-    case "Exists":
-    case "IsADirectory":
-    case "NotADirectory":
-    case "InvalidPath":
-    case "TooLarge":
-    case "Timeout":
-    case "Unsupported":
-    case "NotExecutable":
-    case "InvalidArgument":
-    case "TooManyArguments":
-      return vVariant(name);
     case "Exited":
       return vVariant("Exited", [args[0]!]);
     case "Signalled":

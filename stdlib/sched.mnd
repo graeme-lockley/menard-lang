@@ -119,15 +119,15 @@ pub type WaitError =
 pub let wait-until(cell: Int, deadline: Int) -> Result Unit WaitError =
   match (mn_task_wait_until(cell, deadline))
     | Ok(u) -> Ok(u)
-    | Err(0) -> Err(WaitCancelled())
-    | Err(_) -> Err(WaitTimeout())
+    | Err(0) -> Err(WaitCancelled)
+    | Err(_) -> Err(WaitTimeout)
 
 ; True when wait-until failed because the deadline passed.
-; @test is-timeout(WaitTimeout()) => true
+; @test is-timeout(WaitTimeout) => true
 pub let is-timeout(e: WaitError) -> Bool =
   match (e)
-    | WaitTimeout() -> true
-    | WaitCancelled() -> false
+    | WaitTimeout -> true
+    | WaitCancelled -> false
 
 ; Monotonic clock in milliseconds.
 ; @test mono-ms() >= 0

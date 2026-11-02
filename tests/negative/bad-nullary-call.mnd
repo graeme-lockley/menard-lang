@@ -1,0 +1,9 @@
+; LANG-07: nullary constructors are values; the call form is an error.
+type Color =
+  | Red
+  | Blue
+
+let main() -> Int {
+  let _x = None()
+  0
+}

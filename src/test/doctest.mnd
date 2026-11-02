@@ -559,10 +559,10 @@ let one-source(abs: Str, display: Str, src: Str, failed: Ref Bool) -> Maybe DocC
     | Scan(_, _, _, _, _, tests, saw) ->
       if (not(saw)) -> {
         drop-gen(abs)
-        None()
+        None
       } | if (tests == []) -> {
         drop-gen(abs)
-        None()
+        None
       } | {
         let gen = doctest-path(abs)
         if (gen-fresh(abs, gen)) -> Some(DocCase(gen, display)) | {
@@ -570,7 +570,7 @@ let one-source(abs: Str, display: Str, src: Str, failed: Ref Bool) -> Maybe DocC
           if (write-if-changed(gen, text)) -> Some(DocCase(gen, display)) | {
             set!(failed, true)
             report-span(display, src, blank-span(), "error", "E_TEST", "cannot write generated tests")
-            None()
+            None
           }
         }
       }

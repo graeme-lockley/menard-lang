@@ -71,7 +71,7 @@ import "../reader/ast.mnd"
 let sym-str(ast: Ast) -> Maybe Str =
   match (ast)
     | SymNode(n, _) -> Some(n)
-    | _ -> None()
+    | _ -> None
 
 let is-sym(ast: Ast, name: Str) -> Bool =
   match (sym-str(ast))
@@ -116,7 +116,7 @@ let arrow-split-body(s: ArrowSplit) -> List Ast =
 
 let find-arrow(elems: List Ast) -> Maybe ArrowSplit =
   match (elems)
-    | [] -> None()
+    | [] -> None
     | e :: rest -> find-arrow-step(e, rest)
 
 let find-arrow-step(e: Ast, rest: List Ast) -> Maybe ArrowSplit =
@@ -125,11 +125,11 @@ let find-arrow-step(e: Ast, rest: List Ast) -> Maybe ArrowSplit =
 let find-arrow-tail(arrow: Ast, rest: List Ast) -> Maybe ArrowSplit =
   match (rest)
     | ret :: body -> Some(ArrowSplit([], arrow, ret, body))
-    | [] -> None()
+    | [] -> None
 
 let find-arrow-prepend(e: Ast, rest: List Ast) -> Maybe ArrowSplit =
   match (find-arrow(rest))
-    | None -> None()
+    | None -> None
     | Some(s) -> Some(ArrowSplit(e :: arrow-split-header(s), arrow-split-arrow(s), arrow-split-ret(s), arrow-split-body(s)))
 
 ; ---------------------------------------------------------------------------
@@ -143,7 +143,7 @@ record SplitLast {
 
 let split-last(xs: List Ast) -> Maybe SplitLast =
   match (xs)
-    | [] -> None()
+    | [] -> None
     | [x] -> Some(SplitLast([], x))
     | x :: rest -> split-last-cons(x, rest)
 
@@ -212,7 +212,7 @@ let root-all(forms: List Ast) -> List Ast =
 ; comment for why they are added here, unwrapped, rather than being
 ; subject to `root-top-level` themselves.
 let shadow-helper-defn(name: Str) -> Ast =
-  ParenNode([SymNode("defn", dummy-span()), SymNode(name, dummy-span()), SymNode("->", dummy-span()), SymNode("Unit", dummy-span()), ParenNode(Nil(), dummy-span())], dummy-span())
+  ParenNode([SymNode("defn", dummy-span()), SymNode(name, dummy-span()), SymNode("->", dummy-span()), SymNode("Unit", dummy-span()), ParenNode(Nil, dummy-span())], dummy-span())
 
 let shadow-helper-defns() -> List Ast =
   [shadow-helper-defn("shadow-push"), shadow-helper-defn("shadow-pop")]

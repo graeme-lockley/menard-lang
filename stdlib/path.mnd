@@ -224,12 +224,12 @@ let auth-end(s: Str, i: Int, n: Int) -> Int {
 ;     | Some(u) -> u.path == "/path" && u.query == "" && u.fragment == "frag"
 ;     | None -> false
 ; } => true
-; @test parse-url("nope") => None()
-; @test parse-url("http:/x") => None()
-; @test parse-url("") => None()
+; @test parse-url("nope") => None
+; @test parse-url("http:/x") => None
+; @test parse-url("") => None
 pub let parse-url(s: Str) -> Maybe Url {
   let sep = index-of-scheme-sep(s)
-  if (sep < 0) -> None() |
+  if (sep < 0) -> None |
     {
       let scheme = String.slice(0, sep, s)
       let after = sep + 3

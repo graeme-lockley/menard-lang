@@ -42,18 +42,18 @@ pub let map-error[a, e, f](g: (e) -> f, r: Result a e) -> Result a f =
 
 ; The Ok value, or None. The error is dropped.
 ; @test to-maybe(Ok(1)) => Some(1)
-; @test to-maybe(Err("x")) => None()
+; @test to-maybe(Err("x")) => None
 ; @test (Ok(3) ? 0) => 3
 ; @test (Err("x") ? 0) => 0
 pub let to-maybe[a, e](r: Result a e) -> Maybe a =
   match (r)
     | Ok(v) -> Some(v)
-    | Err(_) -> None()
+    | Err(_) -> None
 
 ; Ok of the Some value, or Err(err) when m is None.
 ; @test from-maybe("missing", Some(1)) => Ok(1)
-; @test from-maybe("missing", None()) => Err("missing")
-; @test (None() |> from-maybe("missing")) => Err("missing")
+; @test from-maybe("missing", None) => Err("missing")
+; @test (None |> from-maybe("missing")) => Err("missing")
 pub let from-maybe[a, e](err: e, m: Maybe a) -> Result a e =
   match (m)
     | Some(v) -> Ok(v)

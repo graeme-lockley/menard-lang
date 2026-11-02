@@ -11,18 +11,18 @@ import std/io
 
 let read-forms(path: Str) -> Maybe (List Ast) =
   match (read-file(project-file(path)))
-    | Err(_) -> None()
+    | Err(_) -> None
     | Ok(src) ->
       match (read-all(src))
-        | Err(_) -> None()
+        | Err(_) -> None
         | Ok(forms) -> Some(forms)
 
 let desugared(path: Str) -> Maybe (List Ast) =
   match (read-forms(path))
-    | None -> None()
+    | None -> None
     | Some(forms) ->
       match (desugar-all(forms))
-        | Err(_) -> None()
+        | Err(_) -> None
         | Ok(out) -> Some(out)
 
 let type-codes-have(es: List TypeError, code: Str) -> Bool =

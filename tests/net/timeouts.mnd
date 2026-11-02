@@ -13,7 +13,7 @@ let main() -> Int {
     | Ok(listener) -> {
         defer Net.close(listener)
         match (Net.accept-timeout(listener, 20))
-          | Err(Timeout()) -> println(1)
+          | Err(Timeout) -> println(1)
           | _ -> println(0)
 
         ; A peer that never sends: read-timeout; other tasks still run.
@@ -23,7 +23,7 @@ let main() -> Int {
             | Ok(conn) -> {
                 defer Net.close(conn)
                 match (Net.read-timeout(conn, 64, 30))
-                  | Err(Timeout()) -> 2
+                  | Err(Timeout) -> 2
                   | _ -> -2
               }
         })

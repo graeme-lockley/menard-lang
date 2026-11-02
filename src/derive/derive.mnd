@@ -50,7 +50,7 @@ let paren(xs: List Ast) -> Ast =
 let sym-str(ast: Ast) -> Maybe Str =
   match (ast)
     | SymNode(n, _) -> Some(n)
-    | _ -> None()
+    | _ -> None
 
 let is-sym(ast: Ast, name: Str) -> Bool =
   match (sym-str(ast))
@@ -131,7 +131,8 @@ let join-shown(fields: List Str) -> Ast =
 
 let show-of-ctor(c: DeriveCtor, prefix: Str) -> Ast {
   let spelled = source-ctor-name(dc-name(c))
-  if (dc-arity(c) == 0) -> st(String.concat("(", spelled, ")")) | concat2(st(String.concat("(", spelled, " ")), concat2(join-shown(binders(prefix, dc-arity(c), 0)), st(")")))
+  ; LANG-07: nullary constructors show as the bare name.
+  if (dc-arity(c) == 0) -> st(spelled) | concat2(st(String.concat("(", spelled, " ")), concat2(join-shown(binders(prefix, dc-arity(c), 0)), st(")")))
 }
 
 let show-clauses(ctors: List DeriveCtor) -> List Ast =
@@ -211,9 +212,9 @@ let classify-user(ast: Ast, ctors: Map Str Str) -> Maybe Str =
     | SymNode(n, _) -> ctor-type-of(n, ctors)
     | ParenNode(head :: args, _) ->
       match (sym-str(head))
-        | None -> None()
+        | None -> None
         | Some(hn) -> ctor-type-of(hn, ctors)
-    | _ -> None()
+    | _ -> None
 
 let is-derive-op(name: Str) -> Bool =
   name == "show" || name == "=" || name == "compare" || name == "dump"
@@ -345,8 +346,8 @@ let take-name(ast: Ast) -> Maybe Str =
     | ParenNode(n :: _, _) ->
       match (sym-str(n))
         | Some(s) -> Some(strip-colon(s))
-        | None -> None()
-    | _ -> None()
+        | None -> None
+    | _ -> None
 
 let consider-named(hn: Str, rest: List Ast, acc: TypeAcc) -> TypeAcc =
   cond

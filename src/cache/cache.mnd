@@ -58,7 +58,7 @@ pub record Iface {
 let sym-str(ast: Ast) -> Maybe Str =
   match (ast)
     | SymNode(n, _) -> Some(n)
-    | _ -> None()
+    | _ -> None
 
 let blank() -> Span =
   Span(0, 0, 0, 1)
@@ -240,7 +240,7 @@ let elem-int(elems: List Ast, i: Int) -> Int =
 
 let elem-ast(elems: List Ast, i: Int) -> Maybe Ast =
   match (elems)
-    | [] -> None()
+    | [] -> None
     | e :: rest ->
       if (i == 0) -> Some(e) | elem-ast(rest, i - 1)
 
@@ -317,12 +317,12 @@ let compatible-iface(forms: List Ast) -> Bool =
 
 pub let read-iface(abs: Str) -> Maybe Iface =
   match (read-file(iface-path(abs)))
-    | Err(_) -> None()
+    | Err(_) -> None
     | Ok(text) ->
       match (read-all(text))
-        | Err(_) -> None()
+        | Err(_) -> None
         | Ok(forms) ->
-          if (compatible-iface(forms)) -> Some(iface-from-forms(forms)) | None()
+          if (compatible-iface(forms)) -> Some(iface-from-forms(forms)) | None
 
 let deps-match(deps: List DepRec) -> Bool =
   match (deps)

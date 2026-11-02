@@ -302,11 +302,11 @@ let parse-digits(s: Str, i: Int, n: Int) -> Maybe Int =
 let parse-digits-acc(s: Str, i: Int, n: Int, acc: Int) -> Maybe Int =
   cond
     | n == 0 -> Some(acc)
-    | i >= String.length(s) -> None()
+    | i >= String.length(s) -> None
     | else ->
       {
         let d = digit-at(s, i)
-        if (d < 0) -> None() | parse-digits-acc(s, i + 1, n - 1, acc * 10 + d)
+        if (d < 0) -> None | parse-digits-acc(s, i + 1, n - 1, acc * 10 + d)
       }
 
 ; Expect byte b at i.
@@ -318,23 +318,23 @@ let parse-offset-at(s: Str, i: Int) -> Maybe (Offset * Int) =
   cond
     | expect-byte(s, i, 90) -> Some((utc(), i + 1))
     | expect-byte(s, i, 43) || expect-byte(s, i, 45) -> parse-offset-hm(s, i)
-    | else -> None()
+    | else -> None
 
 ; parse-offset-hm.
 let parse-offset-hm(s: Str, i: Int) -> Maybe (Offset * Int) {
   let sign = if (expect-byte(s, i, 45)) -> -1 | 1
   match (parse-digits(s, i + 1, 2))
-    | None -> None()
+    | None -> None
     | Some(hh) -> parse-offset-mm(s, i, sign, hh)
 }
 
 ; parse-offset-mm.
 let parse-offset-mm(s: Str, i: Int, sign: Int, hh: Int) -> Maybe (Offset * Int) =
   cond
-    | not(expect-byte(s, i + 3, 58)) -> None()
+    | not(expect-byte(s, i + 3, 58)) -> None
     | else ->
       match (parse-digits(s, i + 4, 2))
-        | None -> None()
+        | None -> None
         | Some(mm) -> Some((fixed-offset(sign * (hh * 60 + mm)), i + 6))
 
 ; Require fixed digits at i, then continue.
@@ -366,62 +366,62 @@ let need-byte(s: Str, i: Int, b: Int) -> Bool =
 ;     | Some(t) -> to-posix-ms(t) == 1234567890123
 ;     | None -> false
 ; } => true
-; @test parse("nope") => None()
-; @test parse("1970-01-01T00:00:00.000") => None()
-; @test parse("1970-01-01T00:00:00.000Zx") => None()
+; @test parse("nope") => None
+; @test parse("1970-01-01T00:00:00.000") => None
+; @test parse("1970-01-01T00:00:00.000Zx") => None
 pub let parse(s: Str) -> Maybe Instant =
   match (need-digits(s, 0, 4))
-    | None -> None()
+    | None -> None
     | Some(year) ->
-      if (need-byte(s, 4, 45)) -> parse-after-year(s, year) | None()
+      if (need-byte(s, 4, 45)) -> parse-after-year(s, year) | None
 
 ; parse-after-year.
 let parse-after-year(s: Str, year: Int) -> Maybe Instant =
   match (need-digits(s, 5, 2))
-    | None -> None()
+    | None -> None
     | Some(month) ->
-      if (need-byte(s, 7, 45)) -> parse-after-month(s, year, month) | None()
+      if (need-byte(s, 7, 45)) -> parse-after-month(s, year, month) | None
 
 ; parse-after-month.
 let parse-after-month(s: Str, year: Int, month: Int) -> Maybe Instant =
   match (need-digits(s, 8, 2))
-    | None -> None()
+    | None -> None
     | Some(day) ->
-      if (need-byte(s, 10, 84)) -> parse-after-day(s, year, month, day) | None()
+      if (need-byte(s, 10, 84)) -> parse-after-day(s, year, month, day) | None
 
 ; parse-after-day.
 let parse-after-day(s: Str, year: Int, month: Int, day: Int) -> Maybe Instant =
   match (need-digits(s, 11, 2))
-    | None -> None()
+    | None -> None
     | Some(hour) ->
-      if (need-byte(s, 13, 58)) -> parse-after-hour(s, year, month, day, hour) | None()
+      if (need-byte(s, 13, 58)) -> parse-after-hour(s, year, month, day, hour) | None
 
 ; parse-after-hour.
 let parse-after-hour(s: Str, year: Int, month: Int, day: Int, hour: Int) -> Maybe Instant =
   match (need-digits(s, 14, 2))
-    | None -> None()
+    | None -> None
     | Some(minute) ->
-      if (need-byte(s, 16, 58)) -> parse-after-minute(s, year, month, day, hour, minute) | None()
+      if (need-byte(s, 16, 58)) -> parse-after-minute(s, year, month, day, hour, minute) | None
 
 ; parse-after-minute.
 let parse-after-minute(s: Str, year: Int, month: Int, day: Int, hour: Int, minute: Int) -> Maybe Instant =
   match (need-digits(s, 17, 2))
-    | None -> None()
+    | None -> None
     | Some(second) ->
-      if (need-byte(s, 19, 46)) -> parse-after-second(s, year, month, day, hour, minute, second) | None()
+      if (need-byte(s, 19, 46)) -> parse-after-second(s, year, month, day, hour, minute, second) | None
 
 ; parse-after-second.
 let parse-after-second(s: Str, year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> Maybe Instant =
   match (need-digits(s, 20, 3))
-    | None -> None()
+    | None -> None
     | Some(millis) -> finish-parse(s, year, month, day, hour, minute, second, millis)
 
 ; finish-parse.
 let finish-parse(s: Str, year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int, millis: Int) -> Maybe Instant =
   match (parse-offset-at(s, 23))
-    | None -> None()
+    | None -> None
     | Some(pair) ->
       cond
         | pair.2 == String.length(s) ->
           Some(from-datetime(DateTime(year, month, day, hour, minute, second, millis, pair.1)))
-        | else -> None()
+        | else -> None

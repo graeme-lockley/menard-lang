@@ -53,32 +53,32 @@ let print-verbose(lines: List Str, on: Bool, show-output: Bool) -> Unit =
 ; A passing file stays a single status line. A failure points at the
 ; assertion expression, the same way a compile error points at its span.
 let fail-name(line: Str) -> Maybe Str =
-  if (String.starts-with("fail ", line)) -> Some(String.slice(5, String.length(line) - 5, line)) | None()
+  if (String.starts-with("fail ", line)) -> Some(String.slice(5, String.length(line) - 5, line)) | None
 
 let sym-text(a: Ast) -> Maybe Str =
   match (a)
     | SymNode(s, _) -> Some(s)
-    | _ -> None()
+    | _ -> None
 
 let str-text(a: Ast) -> Maybe Str =
   match (a)
     | StrNode(s, _) -> Some(s)
-    | _ -> None()
+    | _ -> None
 
 let list-head(xs: List Ast) -> Maybe Ast =
   match (xs)
     | h :: _ -> Some(h)
-    | [] -> None()
+    | [] -> None
 
 let list-second(xs: List Ast) -> Maybe Ast =
   match (xs)
     | _ :: n :: _ -> Some(n)
-    | _ -> None()
+    | _ -> None
 
 let third(xs: List Ast) -> Maybe Ast =
   match (xs)
     | _ :: _ :: e :: _ -> Some(e)
-    | _ -> None()
+    | _ -> None
 
 let test-named(form: Ast, name: Str) -> Maybe Ast =
   match (form)
@@ -93,17 +93,17 @@ let test-named(form: Ast, name: Str) -> Maybe Ast =
                     | Some(n) ->
                       match (str-text(n))
                         | Some(text) ->
-                          if (text == name) -> third(elems) | None()
-                        | None -> None()
-                    | None -> None()
-                | else -> None()
-            | None -> None()
-        | None -> None()
-    | _ -> None()
+                          if (text == name) -> third(elems) | None
+                        | None -> None
+                    | None -> None
+                | else -> None
+            | None -> None
+        | None -> None
+    | _ -> None
 
 let find-named(forms: List Ast, name: Str) -> Maybe Ast =
   match (forms)
-    | [] -> None()
+    | [] -> None
     | f :: rest ->
       match (test-named(f, name))
         | Some(expr) -> Some(expr)
@@ -173,7 +173,7 @@ let rev-strs(xs: List Str, acc: List Str) -> List Str =
 
 ; `file <path>` is printed by the suite bootstrap before that file's tests.
 let file-path(line: Str) -> Maybe Str =
-  if (String.starts-with("file ", line)) -> Some(String.slice(5, String.length(line) - 5, line)) | None()
+  if (String.starts-with("file ", line)) -> Some(String.slice(5, String.length(line) - 5, line)) | None
 
 record RunAcc {
   path: Str

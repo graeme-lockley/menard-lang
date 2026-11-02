@@ -1,0 +1,35 @@
+; LANG-07: nullary constructors are values in every expression position.
+import std/map as Map
+
+type Color =
+  | Red
+  | Blue
+
+record Box {
+  flag: Color
+}
+
+let paint(c: Color) -> Int =
+  match (c)
+    | Red -> 1
+    | Blue -> 2
+
+let take-maybe(m: Maybe Int) -> Int =
+  match (m)
+    | None -> 0
+    | Some(n) -> n
+
+let main() -> Int {
+  let x = None
+  let colors = [Red, Blue]
+  let m = Map.set(1, Red, Map.empty())
+  let b = Box(Blue)
+  let n = paint(Red)
+  let shown = show(None)
+  let shown-red = show(Red)
+  let from-map =
+    match (Map.lookup(1, m))
+      | Some(c) -> if (c == Red) -> 0 | 1
+      | None -> 2
+  if (take-maybe(x) == 0 && shown == "None" && shown-red == "Red" && n == 1 && colors == [Red, Blue] && b.flag == Blue && from-map == 0) -> 0 | 3
+}

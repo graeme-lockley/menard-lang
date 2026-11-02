@@ -3,7 +3,7 @@ import { diagnose, run } from "../../../host/src/interp/pipeline.ts";
 import { createHost, resolveSpawnCmd, validateSpawnArgv } from "../../../host/src/host/index.ts";
 
 function listStr(...xs: string[]): string {
-  let acc = "Nil()";
+  let acc = "Nil";
   for (let i = xs.length - 1; i >= 0; i--) {
     acc = `Cons("${xs[i]!.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}", ${acc})`;
   }
@@ -45,8 +45,8 @@ describe("spawn", () => {
     const host = createHost();
     const src = `import std/proc
 {
-  spawn(Cons("x", Nil()))
-  spawn-capture(Cons("x", Nil()), "")
+  spawn(Cons("x", Nil))
+  spawn-capture(Cons("x", Nil), "")
 }`;
     host.writeFile("/main.mnd", new TextEncoder().encode(src));
     const diags = diagnose(src, { path: "/main.mnd", host });

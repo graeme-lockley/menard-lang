@@ -18,7 +18,7 @@ const stub = join(import.meta.dir, "../../stub-child/main.ts");
 const bun = process.execPath;
 
 function listStr(...xs: string[]): string {
-  let acc = "Nil()";
+  let acc = "Nil";
   for (let i = xs.length - 1; i >= 0; i--) {
     acc = `Cons("${xs[i]!.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}", ${acc})`;
   }
@@ -28,7 +28,7 @@ function listStr(...xs: string[]): string {
 describe("spawn (real child)", () => {
   test("empty argv is InvalidArgument", () => {
     const real = createRealHost({ spawnEnabled: true });
-    const r = runProc(`spawn(Nil())`, real);
+    const r = runProc(`spawn(Nil)`, real);
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "variant") {
       expect(r.value.ctor).toBe("Err");
@@ -45,7 +45,7 @@ describe("spawn (real child)", () => {
   let sb = Buf.new()
   Buf.append!(sb, "a")
   Buf.append-byte!(sb, 0)
-  spawn(Cons(Buf.to-str(sb), Nil()))
+  spawn(Cons(Buf.to-str(sb), Nil))
 }`,
       real,
     );

@@ -48,7 +48,7 @@ describe("desugar", () => {
       `match (xs)
   | Nil -> 0
   | h :: t :: Nil -> h + t
-  | _ -> f(1 :: 2 :: Nil())`,
+  | _ -> f(1 :: 2 :: Nil)`,
     );
   });
 

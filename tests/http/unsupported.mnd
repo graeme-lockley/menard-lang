@@ -4,7 +4,7 @@ pub import std/io (IoError)
 import std/map as Map
 
 let main() -> Int =
-  match (Http.request("127.0.0.1", 9, Http.Request(Http.GET(), "/", Map.empty(), "")))
+  match (Http.request("127.0.0.1", 9, Http.Request(Http.GET, "/", Map.empty(), "")))
     | Err(Http.NetErr(Unsupported)) -> {
         println("Unsupported")
         1

@@ -70,23 +70,23 @@ pub type HttpError =
 ; Parse a method token into Method.
 let method-of(s: Str) -> Method =
   cond
-    | s == "GET" -> GET()
-    | s == "POST" -> POST()
-    | s == "PUT" -> PUT()
-    | s == "DELETE" -> DELETE()
-    | s == "HEAD" -> HEAD()
-    | s == "OPTIONS" -> OPTIONS()
+    | s == "GET" -> GET
+    | s == "POST" -> POST
+    | s == "PUT" -> PUT
+    | s == "DELETE" -> DELETE
+    | s == "HEAD" -> HEAD
+    | s == "OPTIONS" -> OPTIONS
     | else -> OtherMethod(s)
 
 ; Render a Method as its wire spelling.
 let method-str(m: Method) -> Str =
   match (m)
-    | GET() -> "GET"
-    | POST() -> "POST"
-    | PUT() -> "PUT"
-    | DELETE() -> "DELETE"
-    | HEAD() -> "HEAD"
-    | OPTIONS() -> "OPTIONS"
+    | GET -> "GET"
+    | POST -> "POST"
+    | PUT -> "PUT"
+    | DELETE -> "DELETE"
+    | HEAD -> "HEAD"
+    | OPTIONS -> "OPTIONS"
     | OtherMethod(s) -> s
 
 ; ASCII A–Z → a–z; other bytes unchanged.
@@ -123,7 +123,7 @@ let read-headers-until(fd: Int, acc: Str, max-block: Int, deadline: Int) -> Resu
           match (Net.read-timeout(fd, chunk-max, ms-left(deadline)))
             | Err(e) -> Err(NetErr(e))
             | Ok("") ->
-              if (acc == "") -> Err(Closed()) | Err(Incomplete())
+              if (acc == "") -> Err(Closed) | Err(Incomplete)
             | Ok(chunk) ->
               read-headers-until(fd, String.concat(acc, chunk), max-block, deadline)
         }
@@ -137,7 +137,7 @@ let read-headers(fd: Int, acc: Str) -> Result Str HttpError =
       match (Net.read(fd, 4096))
         | Err(e) -> Err(NetErr(e))
         | Ok("") ->
-          if (acc == "") -> Err(Closed()) | Err(Incomplete())
+          if (acc == "") -> Err(Closed) | Err(Incomplete)
         | Ok(chunk) -> read-headers(fd, String.concat(acc, chunk))
 
 ; Fold `Name: value` lines; names lowercased; last-wins; conflict on CL.
@@ -194,7 +194,7 @@ let read-body-until(fd: Int, need: Int, acc: Str, deadline: Int) -> Result Str H
     | else ->
       match (Net.read-timeout(fd, need - String.length(acc), ms-left(deadline)))
         | Err(e) -> Err(NetErr(e))
-        | Ok("") -> Err(Incomplete())
+        | Ok("") -> Err(Incomplete)
         | Ok(chunk) -> read-body-until(fd, need, String.concat(acc, chunk), deadline)
 
 ; Read until `need` body bytes are accumulated.
@@ -205,7 +205,7 @@ let read-body(fd: Int, need: Int, acc: Str) -> Result Str HttpError =
     | else ->
       match (Net.read(fd, need - String.length(acc)))
         | Err(e) -> Err(NetErr(e))
-        | Ok("") -> Err(Incomplete())
+        | Ok("") -> Err(Incomplete)
         | Ok(chunk) -> read-body(fd, need, String.concat(acc, chunk))
 
 ; Parsed request line + headers + declared body length + bytes after headers.
@@ -246,7 +246,7 @@ let parse-request-head(raw: Str, limits: Limits) -> Result RequestHead HttpError
   match (limits)
     | Limits(max-line, max-block, max-headers, max-body) ->
       match (String.index-of("\r\n\r\n", raw))
-        | None -> Err(Incomplete())
+        | None -> Err(Incomplete)
         | Some(at) -> {
             let head = String.slice(0, at, raw)
             let rest = String.drop(at + 4, raw)
@@ -263,7 +263,7 @@ let parse-request-head(raw: Str, limits: Limits) -> Result RequestHead HttpError
                         | false ->
                           match (String.split(" ", req-line))
                             | [meth, path, ver] ->
-                              match (parse-header-lines(hdrs, Map.empty(), None(), 0, max-headers))
+                              match (parse-header-lines(hdrs, Map.empty(), None, 0, max-headers))
                                 | Err(e) -> Err(e)
                                 | Ok((headers, cl)) ->
                                   finish-request-head(meth, path, ver, headers, cl, rest, max-body)
@@ -275,7 +275,7 @@ let parse-request-head(raw: Str, limits: Limits) -> Result RequestHead HttpError
 let take-body(head: RequestHead, buf: Str) -> Result (Request * Str) HttpError =
   match (head)
     | RequestHead(method, path, headers, need, _) ->
-      if (String.length(buf) < need) -> Err(Incomplete()) | {
+      if (String.length(buf) < need) -> Err(Incomplete) | {
         let body = String.slice(0, need, buf)
         let leftover = String.drop(need, buf)
         Ok((Request(method, path, headers, body), leftover))
@@ -331,8 +331,8 @@ let error-message(e: HttpError) -> Str =
     | BadRequest(s) -> s
     | HeaderLimit(s) -> s
     | BodyLimit(s) -> s
-    | Incomplete() -> "incomplete"
-    | Closed() -> "closed"
+    | Incomplete -> "incomplete"
+    | Closed -> "closed"
     | NetErr(_) -> "io error"
 
 ; Serialize a Response to HTTP/1.1 bytes (always sets Content-Length).
@@ -352,7 +352,7 @@ pub let format-response(res: Response) -> Str =
       }
 
 ; Serialize a Request to HTTP/1.1 bytes (sets Host and Content-Length).
-; @test String.starts-with("GET / HTTP/1.1", format-request("h", Request(GET(), "/", Map.empty(), ""))) => true
+; @test String.starts-with("GET / HTTP/1.1", format-request("h", Request(GET, "/", Map.empty(), ""))) => true
 pub let format-request(host: Str, req: Request) -> Str =
   match (req)
     | Request(method, path, headers, body) -> {
@@ -417,14 +417,14 @@ let handle-conn(conn: Int, deadline: Int, limits: Limits, handler: (Request) -> 
           }
         | Ok(raw) ->
           match (parse-request-head(raw, limits))
-            | Err(Incomplete()) -> 0
+            | Err(Incomplete) -> 0
             | Err(e) -> {
                 write-error(conn, e, deadline)
                 0
               }
             | Ok(head) ->
               match (complete-request(conn, head, deadline))
-                | Err(Incomplete()) -> 0
+                | Err(Incomplete) -> 0
                 | Err(e) -> {
                     write-error(conn, e, deadline)
                     0
@@ -489,7 +489,7 @@ pub let serve(port: Int, handler: (Request) -> Response) -> Result Unit HttpErro
 ; Parse a response buffer under a deadline and body limit.
 let finish-response(fd: Int, raw: Str, deadline: Int, max-body: Int) -> Result Response HttpError =
   match (String.index-of("\r\n\r\n", raw))
-    | None -> Err(Incomplete())
+    | None -> Err(Incomplete)
     | Some(at) -> {
         let head = String.slice(0, at, raw)
         let rest = String.drop(at + 4, raw)
@@ -497,7 +497,7 @@ let finish-response(fd: Int, raw: Str, deadline: Int, max-body: Int) -> Result R
         match (lines)
           | [] -> Err(BadRequest("empty response"))
           | status-line :: hdrs ->
-            match (parse-header-lines(hdrs, Map.empty(), None(), 0, 1000))
+            match (parse-header-lines(hdrs, Map.empty(), None, 0, 1000))
               | Err(e) -> Err(e)
               | Ok((headers, cl)) ->
                 match (parse-content-length(cl, max-body))

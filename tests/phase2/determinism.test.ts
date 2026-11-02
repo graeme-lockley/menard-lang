@@ -119,7 +119,7 @@ describe("§2.11 determinism", () => {
     const bc1 = join(dir, "a.bc");
     const bc2 = join(dir, "b.bc");
     const program = (alias: string) =>
-      `type Color =\n  | Red\n\nalias ${alias} = Color\n\nlet paint() -> ${alias} =\n  Red()\n\nlet main() -> Int {\n  println(show(paint()))\n  0\n}\n`;
+      `type Color =\n  | Red\n\nalias ${alias} = Color\n\nlet paint() -> ${alias} =\n  Red\n\nlet main() -> Int {\n  println(show(paint()))\n  0\n}\n`;
     try {
       writeFileSync(file, program("Hue"));
       const first = emit(file, bc1);
@@ -203,7 +203,7 @@ describe("§2.11 determinism", () => {
   dump(())
   dump(true)
   dump("hi")
-  dump(None())
+  dump(None)
   0
 }
 `;
@@ -228,7 +228,7 @@ describe("§2.11 determinism", () => {
       expect(text).not.toContain("undefined");
       expect(text).not.toContain("empty word");
     }
-    expect(ran.stderr).toContain("(None)");
+    expect(ran.stderr).toContain("None");
   });
 
   test("dump stays on stderr and out of stdout data", () => {

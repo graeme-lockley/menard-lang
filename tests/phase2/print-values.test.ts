@@ -12,11 +12,11 @@ const fixture = "tests/phase2/fixtures/print-values.mnd";
 const expected = [
   'Input: [1,2], Tokens: [["1", "2"]]',
   "true false () -42 1.5",
-  "(Point 7 true) (Red) (Rgb 1 2 3)",
+  "(Point 7 true) Red (Rgb 1 2 3)",
   "[true, false] [[1, 2], [3]]",
   '(Some "hello") (Ok 42)',
   "computed",
-  "(Box false) (Node true (Node false (Empty)))",
+  "(Box false) (Node true (Node false Empty))",
   '["a\\"b", "c\\\\d"]',
   "{1 => 10, 2 => 20}",
   '{"a" => true, "b" => false}',

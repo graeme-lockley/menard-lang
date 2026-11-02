@@ -48,7 +48,7 @@ record Ctx {
 let sym-str(ast: Ast) -> Maybe Str =
   match (ast)
     | SymNode(n, _) -> Some(n)
-    | _ -> None()
+    | _ -> None
 
 let ctx-entry(c: Ctx) -> Str =
   match (c)
@@ -208,7 +208,7 @@ let before-arrow(xs: List Ast, acc: List Ast) -> List Ast =
 
 let after-arrow(xs: List Ast) -> Maybe Ast =
   match (xs)
-    | [] -> None()
+    | [] -> None
     | x :: rest ->
       match (sym-str(x))
         | Some(n) ->
@@ -216,7 +216,7 @@ let after-arrow(xs: List Ast) -> Maybe Ast =
             | n == "->" ->
               match (rest)
                 | r :: _ -> Some(r)
-                | [] -> None()
+                | [] -> None
             | else -> after-arrow(rest)
         | None -> after-arrow(rest)
 
@@ -225,24 +225,24 @@ let defn-rest(form: Ast) -> Maybe (List Ast) =
     | ParenNode(h :: rest, _) ->
       match (sym-str(h))
         | Some(n) ->
-          if (n == "defn") -> Some(rest) | None()
-        | None -> None()
-    | _ -> None()
+          if (n == "defn") -> Some(rest) | None
+        | None -> None
+    | _ -> None
 
 ; `(defn f …)` or `(defn (f [a]) …)`.
 let bare-name(name: Ast) -> Maybe Str =
   match (name)
     | SymNode(n, _) -> Some(n)
     | ParenNode(h :: _, _) -> sym-str(h)
-    | _ -> None()
+    | _ -> None
 
 let defn-name(form: Ast) -> Maybe Str =
   match (defn-rest(form))
-    | None -> None()
+    | None -> None
     | Some(rest) ->
       match (rest)
         | name :: _ -> bare-name(name)
-        | [] -> None()
+        | [] -> None
 
 let is-test-form(form: Ast) -> Bool =
   is-head(form, "test")
@@ -303,10 +303,10 @@ let top-let-name(form: Ast) -> Maybe Str =
             | n == "let" ->
               match (rest)
                 | name :: _ -> bare-name(name)
-                | [] -> None()
-            | else -> None()
-        | None -> None()
-    | _ -> None()
+                | [] -> None
+            | else -> None
+        | None -> None
+    | _ -> None
 
 let add-rename(forms: List Ast, path: Str, acc: Map Str Str) -> Map Str Str =
   match (forms)
@@ -335,10 +335,10 @@ let add-lam-rename(forms: List Ast, path: Str, acc: Map Str Str) -> Map Str Str 
 
 let extern-stub(form: Ast) -> Maybe Ast =
   match (defn-rest(form))
-    | None -> None()
+    | None -> None
     | Some(rest) ->
       match (after-arrow(rest))
-        | None -> None()
+        | None -> None
         | Some(ret) -> Some(ParenNode(append-asts([sym("extern")], append-asts(before-arrow(rest, []), [sym("->"), ret])), blank()))
 
 let fn-arity(rest: List Ast) -> Int =
@@ -607,9 +607,9 @@ let type-stub-name(stub: Ast) -> Maybe Str =
     | ParenNode(h :: name :: _, _) ->
       match (sym-str(h))
         | Some(k) ->
-          if (k == "defrec" || k == "variant" || k == "alias") -> bare-name(name) | None()
-        | None -> None()
-    | _ -> None()
+          if (k == "defrec" || k == "variant" || k == "alias") -> bare-name(name) | None
+        | None -> None
+    | _ -> None
 
 ; `Alias.Type` still rewrites to `__import_Alias_Type` when that name was not
 ; in the bare selective list. Point it at the bare type so identity is shared.
@@ -765,13 +765,13 @@ let openssl-cflags() -> List Str =
   match (getenv("MENARD_OPENSSL_CFLAGS"))
     | Some(s) ->
       if (String.length(s) == 0) -> [] | String.split(" ", s)
-    | None() -> openssl-cflags-default()
+    | None -> openssl-cflags-default()
 
 let openssl-libs() -> List Str =
   match (getenv("MENARD_OPENSSL_LIBS"))
     | Some(s) ->
       if (String.length(s) == 0) -> ["-lssl", "-lcrypto"] | String.split(" ", s)
-    | None() -> openssl-libs-default()
+    | None -> openssl-libs-default()
 
 let rt-third-party(runtime: Str, name: Str) -> Str =
   Path.join(name, Path.join("third_party", runtime))

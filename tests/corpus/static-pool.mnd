@@ -15,8 +15,8 @@ let main() -> Int {
   println(lit == built)
   println(show(lit))
   println(show(built))
-  println(None() == Map.lookup(1, Map.empty()))
-  println(show(Empty()))
-  println(show(Empty()))
+  println(None == Map.lookup(1, Map.empty()))
+  println(show(Empty))
+  println(show(Empty))
   0
 }

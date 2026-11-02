@@ -113,7 +113,7 @@ lex-peek(1)`;
 
   test("builds and sizes a 10k-element list", () => {
     const src = `let mk(n: Int) -> List Int =
-  if (n == 0) -> Nil() | Cons(n, mk(n - 1))
+  if (n == 0) -> Nil | Cons(n, mk(n - 1))
 let size[a](xs: List a) -> Int =
   match (xs)
     | [] -> 0
@@ -180,7 +180,7 @@ describe("intrinsics via run", () => {
 {
   let m = {"a" => 10, "b" => 20, "a" => 3}
   let n = {...m, "b" => 4, "c" => 1}
-  let from-none = None() ? 2
+  let from-none = None ? 2
   let from-some = Some(1) ? panic("no")
   match (Map.lookup("a", n))
     | Some(a) ->

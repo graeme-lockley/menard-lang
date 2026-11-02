@@ -11,7 +11,7 @@ let greeting() -> Str {
 }
 
 let nothing() -> Maybe Int =
-  None()
+  None
 
 let main() -> Int =
   0

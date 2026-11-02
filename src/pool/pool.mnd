@@ -55,7 +55,7 @@ import std/map as Map
 let sym-str(ast: Ast) -> Maybe Str =
   match (ast)
     | SymNode(n, _) -> Some(n)
-    | _ -> None()
+    | _ -> None
 
 let is-sym(ast: Ast, name: Str) -> Bool =
   match (sym-str(ast))
@@ -68,7 +68,7 @@ let decl-name-of(name-part: Ast) -> Maybe Str =
   match (name-part)
     | SymNode(n, _) -> Some(n)
     | ParenNode(n-ast :: _, _) -> sym-str(n-ast)
-    | _ -> None()
+    | _ -> None
 
 ; `(pub defn …)`/`(pub variant …)`/`(pub defrec …)` — strip the `pub`
 ; wrapper, exactly as `emit/lower.mnd`'s `unwrap-pub` does.
@@ -461,7 +461,7 @@ pub let pool-entry-lines-with(forms: List Ast, extra: Map Str Int) -> Result (Li
   entry-lines(forms, arities-with(forms, extra))
 
 let ctor-name-of(line: Str) -> Maybe Str =
-  if (String.starts-with("ctor ", line)) -> Some(String.slice(5, String.length(line) - 5, line)) | None()
+  if (String.starts-with("ctor ", line)) -> Some(String.slice(5, String.length(line) - 5, line)) | None
 
 let ctor-names-of(lines: List Str) -> List Str =
   match (lines)

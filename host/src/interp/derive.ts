@@ -33,7 +33,7 @@ export function showValue(v: Value): string {
         return showList(v);
       }
       return v.payloads.length === 0
-        ? `(${v.ctor})`
+        ? v.ctor
         : `(${v.ctor} ${v.payloads.map(showValue).join(" ")})`;
     case "record":
       return `(${v.name} ${v.fields.map(showValue).join(" ")})`;

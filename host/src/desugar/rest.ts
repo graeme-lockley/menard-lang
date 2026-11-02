@@ -403,10 +403,12 @@ function splitPieces(args: Ast[], ctx: Ctx): { pieces: Piece[]; bad: boolean } {
 }
 
 function nilNode(span: Span): Ast {
-  return list("paren", [sym("Nil", span)], span);
+  // LANG-07: Nil is a bare value, not `(Nil)`.
+  return sym("Nil", span);
 }
 
 function isNilNode(ast: Ast): boolean {
+  if (ast.tag === "sym" && isSym(ast, "Nil")) return true;
   return ast.tag === "list" && ast.kind === "paren" && ast.elems.length === 1 && isSym(ast.elems[0]!, "Nil");
 }
 
@@ -440,7 +442,7 @@ function appendDefn(name: string, span: Span): Ast {
     [
       sym("match", span),
       sym("xs", span),
-      list("paren", [sym("Nil", span)], span),
+      sym("Nil", span),
       sym("ys", span),
       list("paren", [sym("Cons", span), sym("h", span), sym("t", span)], span),
       consBody,

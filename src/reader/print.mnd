@@ -20,12 +20,12 @@ let join(xs: List Str, sep: Str) -> Str =
 let sym-str(a: Ast) -> Maybe Str =
   match (a)
     | SymNode(n, _) -> Some(n)
-    | _ -> None()
+    | _ -> None
 
 let head-str(a: Ast) -> Maybe Str =
   match (a)
     | ParenNode(h :: _, _) -> sym-str(h)
-    | _ -> None()
+    | _ -> None
 
 let is-head(a: Ast, name: Str) -> Bool =
   match (head-str(a))
@@ -478,7 +478,7 @@ let expr-prec(a: Ast) -> Int =
 let sym-str-of-head(a: Ast) -> Maybe Str =
   match (a)
     | ParenNode(h :: _, _) -> sym-str(h)
-    | _ -> None()
+    | _ -> None
 
 let is-neq(a: Ast) -> Bool =
   match (a)

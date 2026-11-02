@@ -62,7 +62,7 @@ let describe(j: Json.Json) -> Str =
 
 let main() -> Int {
   println(describe(Json.JsonFloat(1.5)))
-  println(describe(Json.JsonNull()))
+  println(describe(Json.JsonNull))
   0
 }
 `,

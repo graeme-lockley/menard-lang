@@ -78,10 +78,10 @@ let map-desugar(elems: List Ast, diags: Ref (List DesugarError)) -> List Ast =
     | [] -> []
     | x :: rest -> desugar-node(x, diags) :: map-desugar(rest, diags)
 
-; `[e …]` → `(Cons e … (Nil))`. `[]` → `(Nil)`.
+; `[e …]` → `(Cons e … Nil)`. `[]` → `Nil` (LANG-07 bare nullary).
 let cons-chain(elems: List Ast, sp: Span) -> Ast =
   match (elems)
-    | [] -> ParenNode([mk-sym("Nil", sp)], sp)
+    | [] -> mk-sym("Nil", sp)
     | e :: rest -> ParenNode([mk-sym("Cons", sp), e, cons-chain(rest, sp)], sp)
 
 let is-decl-keyword(ast: Ast) -> Bool =
@@ -248,7 +248,7 @@ let desugar-fn(elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast
     | fn-sym :: params-ast :: SymNode("->", _) :: ret :: [body] ->
       desugar-fn-with(desugar-node(fn-sym, diags), params-ast, Some(desugar-node(ret, diags)), desugar-node(body, diags), sp, diags)
     | fn-sym :: params-ast :: [body] ->
-      desugar-fn-with(desugar-node(fn-sym, diags), params-ast, None(), desugar-node(body, diags), sp, diags)
+      desugar-fn-with(desugar-node(fn-sym, diags), params-ast, None, desugar-node(body, diags), sp, diags)
     | _ -> ParenNode(map-desugar(elems, diags), sp)
 
 let desugar-pub(elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast =
@@ -400,8 +400,8 @@ let desugar-map-spread(base: Ast, src: Ast, sp: Span) -> Ast {
   let val-name = mk-sym("mn-map-v", sp)
   let recur-some = ParenNode([mk-sym("recur", sp), ParenNode([mk-sym("map-set", sp), acc-name, key-name, val-name], sp), rest-name], sp)
   let recur-none = ParenNode([mk-sym("recur", sp), acc-name, rest-name], sp)
-  let inner = ParenNode([mk-sym("match", sp), ParenNode([mk-sym("map-get", sp), src-name, key-name], sp), ParenNode([mk-sym("Some", sp), val-name], sp), recur-some, ParenNode([mk-sym("None", sp)], sp), recur-none], sp)
-  let outer = ParenNode([mk-sym("match", sp), ks-name, ParenNode([mk-sym("Nil", sp)], sp), acc-name, ParenNode([mk-sym("Cons", sp), key-name, rest-name], sp), inner], sp)
+  let inner = ParenNode([mk-sym("match", sp), ParenNode([mk-sym("map-get", sp), src-name, key-name], sp), ParenNode([mk-sym("Some", sp), val-name], sp), recur-some, mk-sym("None", sp), recur-none], sp)
+  let outer = ParenNode([mk-sym("match", sp), ks-name, mk-sym("Nil", sp), acc-name, ParenNode([mk-sym("Cons", sp), key-name, rest-name], sp), inner], sp)
   let loop-form = ParenNode([mk-sym("loop", sp), ParenNode([ParenNode([acc-name, base-name], sp), ParenNode([ks-name, ParenNode([mk-sym("map-keys", sp), src-name], sp)], sp)], sp), outer], sp)
   let inner-let = ParenNode([mk-sym("let", sp), src-name, src, loop-form], sp)
   ParenNode([mk-sym("let", sp), base-name, base, inner-let], sp)
@@ -612,7 +612,7 @@ let desugar-when(elems: List Ast, sp: Span, diags: Ref (List DesugarError)) -> A
 
 let desugar-when-body(test: Ast, body: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast {
   let then-expr = wrap-do(body, sp)
-  desugar-node(ParenNode([mk-sym("if", sp), test, then-expr, ParenNode(Nil(), sp)], sp), diags)
+  desugar-node(ParenNode([mk-sym("if", sp), test, then-expr, ParenNode(Nil, sp)], sp), diags)
 }
 
 ; ---------------------------------------------------------------------------
@@ -635,8 +635,8 @@ let while-body-do(body: List Ast, recur-form: Ast, sp: Span) -> Ast =
 let desugar-while-body(test: Ast, body: List Ast, sp: Span, diags: Ref (List DesugarError)) -> Ast {
   let recur-form = ParenNode([mk-sym("recur", sp)], sp)
   let body-do = while-body-do(body, recur-form, sp)
-  let if-form = ParenNode([mk-sym("if", sp), test, body-do, ParenNode(Nil(), sp)], sp)
-  desugar-node(ParenNode([mk-sym("loop", sp), ParenNode(Nil(), sp), if-form], sp), diags)
+  let if-form = ParenNode([mk-sym("if", sp), test, body-do, ParenNode(Nil, sp)], sp)
+  desugar-node(ParenNode([mk-sym("loop", sp), ParenNode(Nil, sp), if-form], sp), diags)
 }
 
 ; ---------------------------------------------------------------------------
@@ -727,19 +727,19 @@ let open-mpat(node: Ast, diags: Ref (List DesugarError)) -> Maybe (List Ast) =
     | ParenNode(head :: pats, _) ->
       if (is-sym(head, "mpat")) -> Some(pats) | {
         push-diag!(diags, ast-span(node), "E_DESUGAR_MATCH", "match arm requires a pattern for each scrutinee")
-        None()
+        None
       }
     | _ ->
       {
         push-diag!(diags, ast-span(node), "E_DESUGAR_MATCH", "match arm requires a pattern for each scrutinee")
-        None()
+        None
       }
 
 let m-guard-of(node: Ast, diags: Ref (List DesugarError)) -> Maybe Ast =
   match (node)
     | ParenNode(head :: _ :: g :: _, _) ->
-      if (is-sym(head, "mguard")) -> Some(desugar-node(g, diags)) | None()
-    | _ -> None()
+      if (is-sym(head, "mguard")) -> Some(desugar-node(g, diags)) | None
+    | _ -> None
 
 let take-m-arm(node: Ast, body: Ast, rest: List Ast, n: Int, diags: Ref (List DesugarError)) -> List MArm =
   match (open-mpat(m-node(node), diags))
@@ -771,18 +771,18 @@ let sym-text(a: Ast) -> Str =
 let classify-pat(pat: Ast, rec-id: Ref Int) -> PatKind =
   match (pat)
     | SymNode(n, sp) ->
-      if (n == "_" || is-lower-start(n)) -> AnyPat() | CtorPat(n, [], ParenNode([pat], sp))
+      if (n == "_" || is-lower-start(n)) -> AnyPat | CtorPat(n, [], ParenNode([pat], sp))
     | IntNode(v, _) -> CtorPat(String.concat("int:", show(v)), [], pat)
     | StrNode(s, _) -> CtorPat(String.concat("str:", s), [], pat)
     | BoolNode(v, _) -> CtorPat(String.concat("bool:", if (v) -> "true" | "false"), [], pat)
     | ParenNode(head :: rest, _) -> classify-paren(head, rest, pat, rec-id)
-    | _ -> AnyPat()
+    | _ -> AnyPat
 
 ; `Alias.Ctor` in a pattern — use the field name as the constructor key.
 let project-ctor-name(ast: Ast) -> Maybe Str =
   match (ast)
     | ParenNode(SymNode("project", _) :: _ :: SymNode(field, _) :: _, _) -> Some(field)
-    | _ -> None()
+    | _ -> None
 
 let classify-paren(head: Ast, rest: List Ast, pat: Ast, rec-id: Ref Int) -> PatKind {
   let n = sym-text(head)
@@ -790,14 +790,14 @@ let classify-paren(head: Ast, rest: List Ast, pat: Ast, rec-id: Ref Int) -> PatK
     | n == "project" ->
       match (project-ctor-name(pat))
         | Some(cname) -> CtorPat(cname, [], pat)
-        | None -> AnyPat()
+        | None -> AnyPat
     | n == "recpat" -> classify-recpat(rest, pat, rec-id)
-    | n == "guard" || n == "_" || is-lower-start(n) -> AnyPat()
+    | n == "guard" || n == "_" || is-lower-start(n) -> AnyPat
     | n != "" -> CtorPat(n, rest, pat)
     | else ->
       match (project-ctor-name(head))
         | Some(cname) -> CtorPat(cname, rest, pat)
-        | None -> AnyPat()
+        | None -> AnyPat
 }
 
 let classify-recpat(rest: List Ast, pat: Ast, rec-id: Ref Int) -> PatKind =
@@ -808,7 +808,7 @@ let classify-recpat(rest: List Ast, pat: Ast, rec-id: Ref Int) -> PatKind =
         set!(rec-id, id + 1)
         CtorPat(String.concat("rec:", sym-text(name), ":", show(id)), [], pat)
       }
-    | [] -> AnyPat()
+    | [] -> AnyPat
 
 let arm-first(arm: MArm) -> Ast =
   match (arm)
@@ -844,7 +844,7 @@ let bind-any(pat: Ast, v: Ast, body: Ast, guard: Maybe Ast) -> BoundArm =
 
 let bind-guard(name: Str, sp: Span, v: Ast, guard: Maybe Ast) -> Maybe Ast =
   match (guard)
-    | None -> None()
+    | None -> None
     | Some(g) -> Some(wrap-let(name, sp, v, g))
 
 let arm-pat(pat: Ast, guard: Maybe Ast) -> Ast =
@@ -890,7 +890,7 @@ let finish-one(arms: List MArm, sp: Span) -> List Arm1 =
 
 let finish-arms(arms: List MArm, sp: Span) -> Ast =
   match (arms)
-    | MArm(_, body, None()) :: [] -> body
+    | MArm(_, body, None) :: [] -> body
     | _ -> emit-match(sp, ParenNode([], sp), finish-one(arms, sp))
 
 let compile-multi(scruts: List Ast, arms: List MArm, fresh: Ref Int, rec-id: Ref Int, sp: Span) -> Ast =
@@ -992,7 +992,7 @@ let group-covered(xs: List Classed, name: Str) -> Bool =
     | Classed(arm, kind) :: rest ->
       match (arm)
         | MArm(_, _, Some(_)) -> group-covered(rest, name)
-        | MArm(_, _, None()) -> group-covered-kind(kind, rest, name)
+        | MArm(_, _, None) -> group-covered-kind(kind, rest, name)
 
 let group-covered-kind(kind: PatKind, rest: List Classed, name: Str) -> Bool =
   match (kind)
@@ -1012,7 +1012,7 @@ let ctor-branch(sample: Sample, more: List Sample, classed: List Classed, rest: 
         let vars = fresh-vars(count, fresh, sp)
         let inner = inner-of(classed, name, vars, v)
         let body = compile-multi(append-list(vars, rest), inner, fresh, rec-id, sp)
-        let guard = if (group-covered(classed, name)) -> None() | Some(BoolNode(true, sp))
+        let guard = if (group-covered(classed, name)) -> None | Some(BoolNode(true, sp))
         Arm1(outer-pat(sample, vars, sp), body, guard) :: ctor-branches(more, classed, rest, v, fresh, rec-id, sp)
       }
 
@@ -1029,7 +1029,7 @@ let any-covered(xs: List Classed) -> Bool =
     | [] -> false
     | Classed(arm, _) :: rest ->
       match (arm)
-        | MArm(_, _, None()) -> true
+        | MArm(_, _, None) -> true
         | MArm(_, _, Some(_)) -> any-covered(rest)
 
 let append-arm1(xs: List Arm1, x: Arm1) -> List Arm1 =
@@ -1042,7 +1042,7 @@ let arm-rest-any(arm: MArm) -> Bool =
     | MArm(pats, _, guard) ->
       match (guard)
         | Some(_) -> false
-        | None() -> pats-after-any(pats)
+        | None -> pats-after-any(pats)
 
 let pats-after-any(pats: List Ast) -> Bool =
   match (pats)
@@ -1077,7 +1077,7 @@ let any-branch-arm(anys: List Classed, rest: List Ast, v: Ast, fresh: Ref Int, r
     match (rest)
       | [] -> finish-arms(next, sp)
       | _ -> compile-multi(rest, next, fresh, rec-id, sp)
-  let guard = if (any-covered(anys)) -> None() | Some(BoolNode(true, sp))
+  let guard = if (any-covered(anys)) -> None | Some(BoolNode(true, sp))
   append-arm1(branches, Arm1(mk-sym("_", sp), body, guard))
 }
 

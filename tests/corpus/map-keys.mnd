@@ -86,11 +86,11 @@ let main() -> Int {
   ; Variant
   let mv = Map.empty()
     |> Map.set(B(2), "g2")
-    |> Map.set(A(), "r")
+    |> Map.set(A, "r")
     |> Map.set(C(1, 0), "b")
     |> Map.set(B(1), "g1")
   println(Map.keys(mv))
-  println(Map.lookup(A(), mv))
+  println(Map.lookup(A, mv))
   println(Map.lookup(B(1), mv))
 
   ; Tuple / product

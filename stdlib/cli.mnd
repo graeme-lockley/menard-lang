@@ -13,7 +13,7 @@ pub record Flag {
 ; The flag named name, if the table has it.
 let flag-named(name: Str, flags: List Flag) -> Maybe Flag =
   match (flags)
-    | [] -> None()
+    | [] -> None
     | f :: rest ->
       match (f)
         | Flag(n, _) ->

@@ -20,18 +20,18 @@ pub let is-empty[a](xs: List a) -> Bool =
 
 ; The first element, or None when xs is empty.
 ; @test head([10, 20]) => Some(10)
-; @test head([]) => None()
+; @test head([]) => None
 pub let head[a](xs: List a) -> Maybe a =
   match (xs)
-    | [] -> None()
+    | [] -> None
     | h :: _ -> Some(h)
 
 ; xs without its first element, or None when xs is empty.
 ; @test tail([10, 20]) => Some([20])
-; @test tail([]) => None()
+; @test tail([]) => None
 pub let tail[a](xs: List a) -> Maybe (List a) =
   match (xs)
-    | [] -> None()
+    | [] -> None
     | _ :: t -> Some(t)
 
 ; A list of one element.
@@ -54,12 +54,12 @@ pub let range(lo: Int, hi: Int) -> List Int =
 ; The element at i, or None when i is past the end.
 ; A non-positive index selects the first element.
 ; @test nth(1, [10, 20]) => Some(20)
-; @test nth(3, [10]) => None()
+; @test nth(3, [10]) => None
 ; @test (nth(1, [10, 20]) ? 0) => 20
 ; @test (nth(3, [10]) ? 0) => 0
 pub let nth[a](i: Int, xs: List a) -> Maybe a =
   match (xs)
-    | [] -> None()
+    | [] -> None
     | h :: t ->
       if (i <= 0) -> Some(h) | nth(i - 1, t)
 
@@ -143,7 +143,7 @@ pub let filter[a](f: (a) -> Bool, xs: List a) -> List a =
     | h :: t -> if (f(h)) -> h :: filter(f, t) | filter(f, t)
 
 ; The Some values of f, in order.
-; @test filter-map(fn (n) = if (n > 1) -> Some(n) | None(), [1, 2, 3]) => [2, 3]
+; @test filter-map(fn (n) = if (n > 1) -> Some(n) | None, [1, 2, 3]) => [2, 3]
 pub let filter-map[a, b](f: (a) -> Maybe b, xs: List a) -> List b =
   match (xs)
     | [] -> []
@@ -193,10 +193,10 @@ pub let product(xs: List Int) -> Int =
 
 ; The smallest element, or None when xs is empty.
 ; @test minimum([3, 1, 2]) => Some(1)
-; @test minimum([]) => None()
+; @test minimum([]) => None
 pub let minimum(xs: List Int) -> Maybe Int =
   match (xs)
-    | [] -> None()
+    | [] -> None
     | h :: t -> Some(minimum-onto(t, h))
 
 ; The smallest of best and the elements of xs.
@@ -207,10 +207,10 @@ let minimum-onto(xs: List Int, best: Int) -> Int =
 
 ; The largest element, or None when xs is empty.
 ; @test maximum([3, 1, 2]) => Some(3)
-; @test maximum([]) => None()
+; @test maximum([]) => None
 pub let maximum(xs: List Int) -> Maybe Int =
   match (xs)
-    | [] -> None()
+    | [] -> None
     | h :: t -> Some(maximum-onto(t, h))
 
 ; The largest of best and the elements of xs.
@@ -268,10 +268,10 @@ pub let sort[a](xs: List a) -> List a =
 
 ; The first element for which f returns true.
 ; @test find(fn (n) = n > 1, [1, 2, 3]) => Some(2)
-; @test find(fn (n) = n > 9, [1, 2]) => None()
+; @test find(fn (n) = n > 9, [1, 2]) => None
 pub let find[a](f: (a) -> Bool, xs: List a) -> Maybe a =
   match (xs)
-    | [] -> None()
+    | [] -> None
     | h :: t ->
       if (f(h)) -> Some(h) | find(f, t)
 

@@ -70,7 +70,7 @@ let try-dequeue[a](mb: Mailbox a) -> Maybe a =
           match (List.reverse(deref(back)))
             | [] -> {
                 set!(back, [])
-                None()
+                None
               }
             | h :: t -> {
                 set!(front, t)
@@ -110,13 +110,13 @@ let mb-capacity[a](mb: Mailbox a) -> Int =
 ;   let mb = mailbox-new()
 ;   close(mb)
 ;   send(mb, 1)
-; } => Err(ActorDead())
+; } => Err(ActorDead)
 pub let send[a](mb: Mailbox a, msg: a) -> Result Unit ActorError {
   loop ()
-    if (not(is-alive(mb))) -> Err(ActorDead()) | {
+    if (not(is-alive(mb))) -> Err(ActorDead) | {
       if (mb-count(mb) >= mb-capacity(mb)) -> {
         match (Sched.wait(mb-space(mb)))
-          | Err(_) -> Err(ActorCancelled())
+          | Err(_) -> Err(ActorCancelled)
           | Ok(_) -> recur()
       } | {
         mb-enqueue(mb, msg)
@@ -138,9 +138,9 @@ pub let receive[a](mb: Mailbox a) -> Result a ActorError {
     match (try-dequeue(mb))
       | Some(msg) -> Ok(msg)
       | None ->
-        if (not(is-alive(mb))) -> Err(ActorDead()) | {
+        if (not(is-alive(mb))) -> Err(ActorDead) | {
           match (Sched.wait(mb-cell(mb)))
-            | Err(_) -> Err(ActorCancelled())
+            | Err(_) -> Err(ActorCancelled)
             | Ok(_) -> recur()
         }
 }
@@ -149,18 +149,18 @@ pub let receive[a](mb: Mailbox a) -> Result a ActorError {
 ; @test {
 ;   let mb = mailbox-new()
 ;   receive-timeout(mb, 5)
-; } => Err(ActorTimeout())
+; } => Err(ActorTimeout)
 pub let receive-timeout[a](mb: Mailbox a, ms: Int) -> Result a ActorError {
   let deadline = Sched.mono-ms() + ms
   loop ()
     match (try-dequeue(mb))
       | Some(msg) -> Ok(msg)
       | None ->
-        if (not(is-alive(mb))) -> Err(ActorDead()) | {
+        if (not(is-alive(mb))) -> Err(ActorDead) | {
           match (Sched.wait-until(mb-cell(mb), deadline))
             | Ok(_) -> recur()
             | Err(e) ->
-              if (Sched.is-timeout(e)) -> Err(ActorTimeout()) | Err(ActorCancelled())
+              if (Sched.is-timeout(e)) -> Err(ActorTimeout) | Err(ActorCancelled)
         }
 }
 
@@ -169,16 +169,16 @@ pub let receive-timeout[a](mb: Mailbox a, ms: Int) -> Result a ActorError {
 ;   let mb = mailbox-new-bounded(1)
 ;   send(mb, 1)
 ;   send-timeout(mb, 2, 5)
-; } => Err(ActorTimeout())
+; } => Err(ActorTimeout)
 pub let send-timeout[a](mb: Mailbox a, msg: a, ms: Int) -> Result Unit ActorError {
   let deadline = Sched.mono-ms() + ms
   loop ()
-    if (not(is-alive(mb))) -> Err(ActorDead()) | {
+    if (not(is-alive(mb))) -> Err(ActorDead) | {
       if (mb-count(mb) >= mb-capacity(mb)) -> {
         match (Sched.wait-until(mb-space(mb), deadline))
           | Ok(_) -> recur()
           | Err(e) ->
-            if (Sched.is-timeout(e)) -> Err(ActorTimeout()) | Err(ActorCancelled())
+            if (Sched.is-timeout(e)) -> Err(ActorTimeout) | Err(ActorCancelled)
       } | {
         mb-enqueue(mb, msg)
         Sched.notify(mb-cell(mb))
@@ -193,7 +193,7 @@ pub let send-timeout[a](mb: Mailbox a, msg: a, ms: Int) -> Result Unit ActorErro
 ;   let mb = mailbox-new()
 ;   close(mb)
 ;   receive(mb)
-; } => Err(ActorDead())
+; } => Err(ActorDead)
 pub let close[a](mb: Mailbox a) -> Unit =
   match (mb)
     | Mailbox(_, _, cell, space, _, _, alive) -> {
@@ -317,7 +317,7 @@ pub let cast[a](pid: Pid a, msg: a) -> Result Unit ActorError =
 ;   })
 ;   cancel(p)
 ;   join(p)
-; } => Err(Cancelled())
+; } => Err(Cancelled)
 pub let cancel[a](pid: Pid a) -> Unit {
   ; Close pending replies first so a mid-handle body cannot send Ok when
   ; soft-cancel pumps the actor. Then cancel (so join sees Cancelled), then
@@ -337,7 +337,7 @@ pub let cancel[a](pid: Pid a) -> Unit {
 pub let join[a](pid: Pid a) -> Result Unit Cancelled =
   match (Sched.join(pid-task-id(pid)))
     | Ok(v) -> Ok(v)
-    | Err(_) -> Err(Cancelled())
+    | Err(_) -> Err(Cancelled)
 
 ; Debug task id of a Pid (not a wake handle).
 ; @test id(spawn(fn (_) = ())) >= 1
@@ -403,8 +403,8 @@ pub let call[req, res](pid: Pid (Ask req res), req: req) -> Result res ActorErro
 let serve-loop[req, res](mb: Mailbox (Ask req res), scope: Ref (List Int), pending: Ref (List (() -> Unit)), handle: req -> res) -> Unit {
   loop ()
     match (receive(mb))
-      | Err(ActorCancelled()) -> finish-actor(mb, scope, pending, true)
-      | Err(ActorDead()) -> finish-actor(mb, scope, pending, false)
+      | Err(ActorCancelled) -> finish-actor(mb, scope, pending, true)
+      | Err(ActorDead) -> finish-actor(mb, scope, pending, false)
       | Ok(Ask(req, reply)) -> {
           let hook = fn () = close(reply)
           set!(pending, hook :: deref(pending))
@@ -454,8 +454,8 @@ pub let serve-in[req, res](scope: Ref (List Int), handle: req -> res) -> Pid (As
 let serve-state-loop[req, res, s](mb: Mailbox (Ask req res), scope: Ref (List Int), pending: Ref (List (() -> Unit)), init: s, step: (s, req) -> (s * res)) -> Unit {
   loop (st = init)
     match (receive(mb))
-      | Err(ActorCancelled()) -> finish-actor(mb, scope, pending, true)
-      | Err(ActorDead()) -> finish-actor(mb, scope, pending, false)
+      | Err(ActorCancelled) -> finish-actor(mb, scope, pending, true)
+      | Err(ActorDead) -> finish-actor(mb, scope, pending, false)
       | Ok(Ask(req, reply)) -> {
           let hook = fn () = close(reply)
           set!(pending, hook :: deref(pending))

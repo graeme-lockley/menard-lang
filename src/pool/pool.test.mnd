@@ -12,10 +12,10 @@ import std/string as String
 
 let read-forms(path: Str) -> Maybe (List Ast) =
   match (read-file(project-file(path)))
-    | Err(_) -> None()
+    | Err(_) -> None
     | Ok(src) ->
       match (read-all(src))
-        | Err(_) -> None()
+        | Err(_) -> None
         | Ok(forms) -> Some(forms)
 
 let summary-is(fixture: Str, golden: Str) -> Bool =

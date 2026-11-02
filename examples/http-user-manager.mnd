@@ -42,17 +42,17 @@ let step(db: Map Str User, req: UserReq) -> (Map Str User * UserRes) =
     | Get(id) ->
       match (Map.lookup(id, db))
         | Some(u) -> (db, OkUser(u))
-        | None() -> (db, Missing())
+        | None -> (db, Missing)
     | Search(q) -> {
         let users =
           Map.keys(db)
           |> List.filter-map(fn (id) = {
             match (Map.lookup(id, db))
-              | None -> None()
+              | None -> None
               | Some(u) ->
                 match (u)
                   | User(_, name, _) ->
-                    if (name == q) -> Some(u) | None()
+                    if (name == q) -> Some(u) | None
           })
         (db, OkUsers(users))
       }
@@ -68,13 +68,13 @@ let user-json(u: User) -> Json =
 
 let handle(um: Pid (Ask UserReq UserRes), req: Request) -> Response =
   match (req)
-    | Request(GET(), path, _, _) ->
+    | Request(GET, path, _, _) ->
       cond
         | String.starts-with("/users/", path) -> {
             let id = String.drop(7, path)
             match (Actor.call(um, Get(id)))
               | Err(_) -> Rest.bad-request("actor error")
-              | Ok(Missing()) -> Rest.not-found()
+              | Ok(Missing) -> Rest.not-found()
               | Ok(OkUser(u)) -> Rest.ok-json(Json.encode(user-json(u)))
               | Ok(_) -> Rest.bad-request("unexpected")
           }
@@ -87,7 +87,7 @@ let handle(um: Pid (Ask UserReq UserRes), req: Request) -> Response =
               | Ok(_) -> Rest.bad-request("unexpected")
           }
         | else -> Rest.not-found()
-    | Request(PUT(), "/users", _, body) ->
+    | Request(PUT, "/users", _, body) ->
       match (Json.decode(body))
         | Err(_) -> Rest.bad-request("invalid json")
         | Ok(JsonObject(m)) -> {

@@ -32,7 +32,7 @@ let main() -> Int {
   })
   Sched.wait(ready)
   let port = deref(port-cell)
-  match (Http.request-timeout("127.0.0.1", port, Http.Request(Http.GET(), "/hi", Map.empty(), ""), 2000))
+  match (Http.request-timeout("127.0.0.1", port, Http.Request(Http.GET, "/hi", Map.empty(), ""), 2000))
     | Ok(Http.Response(code, _, body)) -> {
         println(code)
         println(body)

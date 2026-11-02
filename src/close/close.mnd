@@ -51,7 +51,7 @@ import std/map as Map
 let sym-str(ast: Ast) -> Maybe Str =
   match (ast)
     | SymNode(n, _) -> Some(n)
-    | _ -> None()
+    | _ -> None
 
 let is-sym(ast: Ast, name: Str) -> Bool =
   match (sym-str(ast))
@@ -97,12 +97,12 @@ let collect-symbols-list(elems: List Ast) -> List Str =
 let defn-param-name(ast: Ast) -> Maybe Str =
   match (ast)
     | ParenNode(name-ast :: _, _) -> defn-param-name-sym(name-ast)
-    | _ -> None()
+    | _ -> None
 
 let defn-param-name-sym(name-ast: Ast) -> Maybe Str =
   match (sym-str(name-ast))
     | Some(n) -> Some(strip-trailing-colon(n))
-    | None -> None()
+    | None -> None
 
 let defn-param-names(elems: List Ast) -> List Str =
   match (elems)
@@ -129,7 +129,7 @@ let fn-param-name(ast: Ast) -> Maybe Str =
   match (ast)
     | SymNode(n, _) -> Some(n)
     | ParenNode(name-ast :: _, _) -> defn-param-name-sym(name-ast)
-    | _ -> None()
+    | _ -> None
 
 let fn-param-elems(params-ast: Ast) -> List Ast =
   match (params-ast)
@@ -172,7 +172,7 @@ let arrow-split-body(s: ArrowSplit) -> List Ast =
 
 let find-arrow(elems: List Ast) -> Maybe ArrowSplit =
   match (elems)
-    | [] -> None()
+    | [] -> None
     | e :: rest -> find-arrow-step(e, rest)
 
 let find-arrow-step(e: Ast, rest: List Ast) -> Maybe ArrowSplit =
@@ -181,11 +181,11 @@ let find-arrow-step(e: Ast, rest: List Ast) -> Maybe ArrowSplit =
 let find-arrow-tail(arrow: Ast, rest: List Ast) -> Maybe ArrowSplit =
   match (rest)
     | ret :: body -> Some(ArrowSplit([], arrow, ret, body))
-    | [] -> None()
+    | [] -> None
 
 let find-arrow-prepend(e: Ast, rest: List Ast) -> Maybe ArrowSplit =
   match (find-arrow(rest))
-    | None -> None()
+    | None -> None
     | Some(s) -> Some(ArrowSplit(e :: arrow-split-header(s), arrow-split-arrow(s), arrow-split-ret(s), arrow-split-body(s)))
 
 let defn-scope-of(header: List Ast) -> List Str =
@@ -275,23 +275,23 @@ record LetFn {
 let as-let-fn(f: Ast) -> Maybe LetFn =
   match (f)
     | ParenNode([head, name-ast, val-ast], _) -> as-let-fn-check(head, name-ast, val-ast)
-    | _ -> None()
+    | _ -> None
 
 let as-let-fn-check(head: Ast, name-ast: Ast, val-ast: Ast) -> Maybe LetFn =
-  if (is-sym(head, "let")) -> as-let-fn-named(name-ast, val-ast) | None()
+  if (is-sym(head, "let")) -> as-let-fn-named(name-ast, val-ast) | None
 
 let as-let-fn-named(name-ast: Ast, val-ast: Ast) -> Maybe LetFn =
   match (sym-str(name-ast))
-    | None -> None()
+    | None -> None
     | Some(n) -> as-fn-value(n, val-ast)
 
 let as-fn-value(name: Str, val-ast: Ast) -> Maybe LetFn =
   match (val-ast)
     | ParenNode([fn-head, params-ast, body-expr], _) -> as-fn-value-check(name, fn-head, params-ast, body-expr)
-    | _ -> None()
+    | _ -> None
 
 let as-fn-value-check(name: Str, fn-head: Ast, params-ast: Ast, body-expr: Ast) -> Maybe LetFn =
-  if (is-sym(fn-head, "fn") || is-sym(fn-head, "lambda")) -> Some(LetFn(name, params-ast, body-expr)) | None()
+  if (is-sym(fn-head, "fn") || is-sym(fn-head, "lambda")) -> Some(LetFn(name, params-ast, body-expr)) | None
 
 record SimpleLet {
   name: Str
@@ -301,15 +301,15 @@ record SimpleLet {
 let as-simple-let(f: Ast) -> Maybe SimpleLet =
   match (f)
     | ParenNode([head, name-ast, expr-ast], _) -> as-simple-let-check(head, name-ast, expr-ast)
-    | _ -> None()
+    | _ -> None
 
 let as-simple-let-check(head: Ast, name-ast: Ast, expr-ast: Ast) -> Maybe SimpleLet =
-  if (is-sym(head, "let")) -> as-simple-let-named(name-ast, expr-ast) | None()
+  if (is-sym(head, "let")) -> as-simple-let-named(name-ast, expr-ast) | None
 
 let as-simple-let-named(name-ast: Ast, expr-ast: Ast) -> Maybe SimpleLet =
   match (sym-str(name-ast))
     | Some(n) -> Some(SimpleLet(n, expr-ast))
-    | None -> None()
+    | None -> None
 
 let rebuild-simple-let(new-expr: Ast, orig: Ast) -> Ast =
   match (orig)
@@ -492,7 +492,7 @@ let close-expr-lambda(rest: List Ast, scope: List Str, subst: Map Str LiftedInfo
   match (rest)
     | params-ast :: body-expr :: _ ->
       {
-        let lifted = lift-lambda(None(), params-ast, body-expr, scope, subst, counter)
+        let lifted = lift-lambda(None, params-ast, body-expr, scope, subst, counter)
         ExprResult(make-closure-create(lift-out-lam-name(lifted), lift-out-free-vars(lifted)), lift-out-extra(lifted))
       }
     | _ -> ExprResult(ParenNode(SymNode("fn", dummy-span()) :: rest, dummy-span()), [])
@@ -630,7 +630,7 @@ let binding-list-elems-close(ast: Ast) -> Maybe (List Ast) =
   match (ast)
     | ParenNode(elems, _) -> Some(elems)
     | BracketNode(elems, _) -> Some(elems)
-    | _ -> None()
+    | _ -> None
 
 let loop-binding-names(pairs: List Ast) -> List Str =
   match (pairs)

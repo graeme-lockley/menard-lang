@@ -66,7 +66,7 @@ import std/map as Map
 let sym-str(ast: Ast) -> Maybe Str =
   match (ast)
     | SymNode(n, _) -> Some(n)
-    | _ -> None()
+    | _ -> None
 
 let is-sym(ast: Ast, name: Str) -> Bool =
   match (sym-str(ast))
@@ -75,7 +75,7 @@ let is-sym(ast: Ast, name: Str) -> Bool =
 
 let last-of(xs: List Ast) -> Maybe Ast =
   match (xs)
-    | [] -> None()
+    | [] -> None
     | [x] -> Some(x)
     | _ :: rest -> last-of(rest)
 
@@ -85,7 +85,7 @@ let decl-name-of(name-part: Ast) -> Maybe Str =
   match (name-part)
     | SymNode(n, _) -> Some(n)
     | ParenNode(n-ast :: _, _) -> sym-str(n-ast)
-    | _ -> None()
+    | _ -> None
 
 ; `(pub defn …)`/`(pub variant …)`/`(pub defrec …)` — strip the `pub`
 ; wrapper, exactly as `emit/lower.mnd`'s `unwrap-pub` does.
@@ -212,15 +212,15 @@ let is-bool-op(name: Str) -> Bool =
 
 let classify-sym(name: Str, ctors: Map Str CtorMeta) -> Maybe Str =
   match (Map.lookup(name, ctors))
-    | None -> None()
+    | None -> None
     | Some(meta) ->
-      if (ctor-meta-arity(meta) == 0) -> Some(ctor-meta-type(meta)) | None()
+      if (ctor-meta-arity(meta) == 0) -> Some(ctor-meta-type(meta)) | None
 
 let classify-ctor-call(hn: Str, args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
   match (Map.lookup(hn, ctors))
-    | None -> None()
+    | None -> None
     | Some(meta) ->
-      if (ctor-meta-arity(meta) == length(args)) -> Some(ctor-meta-type(meta)) | None()
+      if (ctor-meta-arity(meta) == length(args)) -> Some(ctor-meta-type(meta)) | None
 
 let classify-expr-type(ast: Ast, ctors: Map Str CtorMeta) -> Maybe Str =
   match (ast)
@@ -230,16 +230,16 @@ let classify-expr-type(ast: Ast, ctors: Map Str CtorMeta) -> Maybe Str =
     | StrNode(_, _) -> Some("Str")
     | SymNode(name, _) -> classify-sym(name, ctors)
     | ParenNode(elems, _) -> classify-paren(elems, ctors)
-    | BracketNode(_, _) -> None()
+    | BracketNode(_, _) -> None
 
 let classify-paren(elems: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
   match (elems)
-    | [] -> None()
+    | [] -> None
     | head :: args -> classify-paren-head(head, args, ctors)
 
 let classify-paren-head(head: Ast, args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
   match (sym-str(head))
-    | None -> None()
+    | None -> None
     | Some(hn) -> classify-named(hn, args, ctors)
 
 let classify-named(hn: Str, args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
@@ -256,12 +256,12 @@ let classify-named(hn: Str, args: List Ast, ctors: Map Str CtorMeta) -> Maybe St
 let classify-if(args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
   match (args)
     | _ :: then-ast :: _ -> classify-expr-type(then-ast, ctors)
-    | _ -> None()
+    | _ -> None
 
 let classify-let(args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
   match (args)
     | _ :: expr-ast :: body -> classify-let-body(expr-ast, body, ctors)
-    | _ -> None()
+    | _ -> None
 
 let classify-let-body(expr-ast: Ast, body: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
   match (body)
@@ -270,7 +270,7 @@ let classify-let-body(expr-ast: Ast, body: List Ast, ctors: Map Str CtorMeta) ->
 
 let classify-do(args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
   match (last-of(args))
-    | None -> None()
+    | None -> None
     | Some(tail) -> classify-expr-type(tail, ctors)
 
 ; ---------------------------------------------------------------------------

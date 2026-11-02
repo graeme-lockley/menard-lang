@@ -71,7 +71,7 @@ let mk-sym(name: Str, sp: Span) -> Ast =
 let sym-of(ast: Ast) -> Maybe Str =
   match (ast)
     | SymNode(n, _) -> Some(n)
-    | _ -> None()
+    | _ -> None
 
 let is-sym(ast: Ast, name: Str) -> Bool =
   match (sym-of(ast))
@@ -92,7 +92,8 @@ let reverse-asts(xs: List Ast, acc: List Ast) -> List Ast =
     | x :: rest -> reverse-asts(rest, x :: acc)
 
 let nil-node(sp: Span) -> Ast =
-  ParenNode([mk-sym("Nil", sp)], sp)
+  ; LANG-07: Nil is a bare value, not `(Nil)`.
+  mk-sym("Nil", sp)
 
 let cons-node(h: Ast, t: Ast, sp: Span) -> Ast =
   ParenNode([mk-sym("Cons", sp), h, t], sp)
@@ -102,6 +103,7 @@ let call-node(name: Str, args: List Ast, sp: Span) -> Ast =
 
 let is-nil-node(ast: Ast) -> Bool =
   match (ast)
+    | SymNode(n, _) -> n == "Nil"
     | ParenNode([h], _) -> is-sym(h, "Nil")
     | _ -> false
 
@@ -143,19 +145,19 @@ let name-text(ast: Ast) -> Maybe Str =
   match (ast)
     | SymNode(n, _) -> Some(n)
     | ParenNode(h :: _, _) -> sym-of(h)
-    | _ -> None()
+    | _ -> None
 
 let defined-name(form: Ast) -> Maybe Str =
   match (unwrap(form))
     | ParenNode(h :: name :: _, _) ->
-      if (is-sym(h, "defn") || is-sym(h, "extern") || is-sym(h, "runtime")) -> name-text(name) | None()
-    | _ -> None()
+      if (is-sym(h, "defn") || is-sym(h, "extern") || is-sym(h, "runtime")) -> name-text(name) | None
+    | _ -> None
 
 let let-name(form: Ast) -> Maybe Str =
   match (unwrap(form))
     | ParenNode(h :: name :: _, _) ->
-      if (is-sym(h, "let")) -> sym-of(name) | None()
-    | _ -> None()
+      if (is-sym(h, "let")) -> sym-of(name) | None
+    | _ -> None
 
 let take-params(xs: List Ast) -> List Ast =
   match (xs)
@@ -166,8 +168,8 @@ let take-params(xs: List Ast) -> List Ast =
 let param-asts(form: Ast) -> Maybe (List Ast) =
   match (unwrap(form))
     | ParenNode(h :: _ :: rest, _) ->
-      if (is-sym(h, "defn") || is-sym(h, "extern") || is-sym(h, "runtime")) -> Some(take-params(rest)) | None()
-    | _ -> None()
+      if (is-sym(h, "defn") || is-sym(h, "extern") || is-sym(h, "runtime")) -> Some(take-params(rest)) | None
+    | _ -> None
 
 let is-list-type(ast: Ast) -> Bool =
   match (ast)
@@ -190,7 +192,7 @@ let report-if(report: Bool, diags: Ref (List RestError), sp: Span, message: Str)
 
 let split-last(xs: List Ast, acc: List Ast) -> Maybe SplitLast =
   match (xs)
-    | [] -> None()
+    | [] -> None
     | x :: [] -> Some(SplitLast(reverse-asts(acc, []), x))
     | x :: rest -> split-last(rest, x :: acc)
 
@@ -202,12 +204,12 @@ let validate-rest-type(init: List Ast, sp: Span, i: Int, diags: Ref (List RestEr
         | else ->
           {
             report-if(report, diags, ast-span(ty), "rest parameter type must be a List")
-            None()
+            None
           }
     | _ ->
       {
         report-if(report, diags, sp, "rest parameter must be a (name: Type ...) form")
-        None()
+        None
       }
 
 let validate-rest-elems(elems: List Ast, sp: Span, i: Int, diags: Ref (List RestError), report: Bool) -> Maybe Int =
@@ -215,7 +217,7 @@ let validate-rest-elems(elems: List Ast, sp: Span, i: Int, diags: Ref (List Rest
     | None ->
       {
         report-if(report, diags, sp, "rest parameter must be a (name: Type ...) form")
-        None()
+        None
       }
     | Some(SplitLast(init, last)) ->
       cond
@@ -224,13 +226,13 @@ let validate-rest-elems(elems: List Ast, sp: Span, i: Int, diags: Ref (List Rest
             | contains-dots-list(init) ->
               {
                 report-if(report, diags, dots-span-list(init, sp), "rest marker must be the last element of the parameter")
-                None()
+                None
               }
             | else -> validate-rest-type(init, sp, i, diags, report)
         | else ->
           {
             report-if(report, diags, dots-span-list(elems, sp), "rest marker must be the last element of the parameter")
-            None()
+            None
           }
 
 let validate-rest-param(p: Ast, i: Int, diags: Ref (List RestError), report: Bool) -> Maybe Int =
@@ -239,12 +241,12 @@ let validate-rest-param(p: Ast, i: Int, diags: Ref (List RestError), report: Boo
     | _ ->
       {
         report-if(report, diags, dots-span(p), "rest parameter must be a (name: Type ...) form")
-        None()
+        None
       }
 
 let rest-fixed-params(ps: List Ast, i: Int, diags: Ref (List RestError), report: Bool) -> Maybe Int =
   match (ps)
-    | [] -> None()
+    | [] -> None
     | p :: rest ->
       cond
         | contains-dots(p) ->
@@ -252,14 +254,14 @@ let rest-fixed-params(ps: List Ast, i: Int, diags: Ref (List RestError), report:
             | not-empty(rest) ->
               {
                 report-if(report, diags, dots-span(p), "rest parameter must be last")
-                None()
+                None
               }
             | else -> validate-rest-param(p, i, diags, report)
         | else -> rest-fixed-params(rest, i + 1, diags, report)
 
 let rest-fixed(form: Ast, diags: Ref (List RestError), report: Bool) -> Maybe Int =
   match (param-asts(form))
-    | None -> None()
+    | None -> None
     | Some(ps) -> rest-fixed-params(ps, 0, diags, report)
 
 let drop-sig(sigs: List RestFn, name: Str) -> List RestFn =
@@ -294,7 +296,7 @@ let collect-sigs(forms: List Ast, diags: Ref (List RestError), acc: List RestFn)
 
 let fixed-of(name: Str, sigs: List RestFn) -> Maybe Int =
   match (sigs)
-    | [] -> None()
+    | [] -> None
     | RestFn(n, k) :: rest ->
       if (n == name) -> Some(k) | fixed-of(name, rest)
 
@@ -414,7 +416,7 @@ let piece-len(ps: List Piece) -> Int =
 
 let first-splice(ps: List Piece) -> Maybe Piece =
   match (ps)
-    | [] -> None()
+    | [] -> None
     | p :: rest ->
       if (match (p)
         | Splice(_, _) -> true
@@ -599,13 +601,13 @@ let strip-prefix(xs: List Ast) -> List Ast =
 
 let split-arrow(xs: List Ast, acc: List Ast) -> Maybe ArrowSplit =
   match (xs)
-    | [] -> None()
+    | [] -> None
     | x :: rest ->
       cond
         | is-sym(x, "->") ->
           match (rest)
             | ret :: body -> Some(ArrowSplit(reverse-asts(ret :: x :: acc, []), body))
-            | [] -> None()
+            | [] -> None
         | else -> split-arrow(rest, x :: acc)
 
 let rewrite-header(form: Ast, ctx: PackCtx) -> Ast =
@@ -642,7 +644,7 @@ let rewrite-forms(forms: List Ast, ctx: PackCtx) -> List Ast =
     | f :: rest -> rewrite-top(f, ctx) :: rewrite-forms(rest, ctx)
 
 let append-defn(name: Str, sp: Span) -> Ast =
-  ParenNode([mk-sym("defn", sp), ParenNode([mk-sym(name, sp), BracketNode([mk-sym("a", sp)], sp)], sp), ParenNode([mk-sym("xs:", sp), ParenNode([mk-sym("List", sp), mk-sym("a", sp)], sp)], sp), ParenNode([mk-sym("ys:", sp), ParenNode([mk-sym("List", sp), mk-sym("a", sp)], sp)], sp), mk-sym("->", sp), ParenNode([mk-sym("List", sp), mk-sym("a", sp)], sp), ParenNode([mk-sym("match", sp), mk-sym("xs", sp), ParenNode([mk-sym("Nil", sp)], sp), mk-sym("ys", sp), ParenNode([mk-sym("Cons", sp), mk-sym("h", sp), mk-sym("t", sp)], sp), ParenNode([mk-sym("Cons", sp), mk-sym("h", sp), ParenNode([mk-sym(name, sp), mk-sym("t", sp), mk-sym("ys", sp)], sp)], sp)], sp)], sp)
+  ParenNode([mk-sym("defn", sp), ParenNode([mk-sym(name, sp), BracketNode([mk-sym("a", sp)], sp)], sp), ParenNode([mk-sym("xs:", sp), ParenNode([mk-sym("List", sp), mk-sym("a", sp)], sp)], sp), ParenNode([mk-sym("ys:", sp), ParenNode([mk-sym("List", sp), mk-sym("a", sp)], sp)], sp), mk-sym("->", sp), ParenNode([mk-sym("List", sp), mk-sym("a", sp)], sp), ParenNode([mk-sym("match", sp), mk-sym("xs", sp), mk-sym("Nil", sp), mk-sym("ys", sp), ParenNode([mk-sym("Cons", sp), mk-sym("h", sp), mk-sym("t", sp)], sp), ParenNode([mk-sym("Cons", sp), mk-sym("h", sp), ParenNode([mk-sym(name, sp), mk-sym("t", sp), mk-sym("ys", sp)], sp)], sp)], sp)], sp)
 
 pub let pack-rest(forms: List Ast) -> RestPack {
   let diags = ref([])

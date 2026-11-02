@@ -63,8 +63,8 @@ pub let path-segments(path: Str) -> List Str {
 }
 
 ; Decode JSON body or BadRequest.
-; @test json-body(Request(GET(), "/", Map.empty(), "null")) => Ok(JsonNull())
-; @test json-body(Request(GET(), "/", Map.empty(), "{")) => Err("invalid json")
+; @test json-body(Request(GET, "/", Map.empty(), "null")) => Ok(JsonNull)
+; @test json-body(Request(GET, "/", Map.empty(), "{")) => Err("invalid json")
 pub let json-body(req: Request) -> Result Json Str =
   match (req)
     | Request(_, _, _, body) ->
