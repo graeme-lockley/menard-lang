@@ -36,7 +36,7 @@ let main() -> Int {
               bump(recv-done)
               0
             }
-          | Err(Actor.ActorDead()) -> {
+          | Err(Actor.ActorDead) -> {
               bump(recv-dead)
               bump(recv-done)
               0
@@ -58,7 +58,7 @@ let main() -> Int {
   Actor.close(mb-r)
   Actor.close(mb-r)
   match (Actor.send(mb-r, 0))
-    | Err(Actor.ActorDead()) -> ()
+    | Err(Actor.ActorDead) -> ()
     | _ -> bump(recv-other)
   await-count(recv-done, n())
 
@@ -79,7 +79,7 @@ let main() -> Int {
               bump(send-done)
               0
             }
-          | Err(Actor.ActorDead()) -> {
+          | Err(Actor.ActorDead) -> {
               bump(send-dead)
               bump(send-done)
               0
@@ -114,7 +114,7 @@ let main() -> Int {
     | Err(_) -> -1
   let c = match (Actor.receive(mb-d))
     | Ok(_) -> -1
-    | Err(Actor.ActorDead()) -> 1
+    | Err(Actor.ActorDead) -> 1
     | Err(_) -> -2
 
   println(deref(recv-dead))

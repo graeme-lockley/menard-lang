@@ -21,15 +21,15 @@ pub type Strategy =
   | OneForOne
 
 ; Permanent always; Transient only after cancel; Temporary never.
-; @test should-restart(Permanent(), false) => true
-; @test should-restart(Temporary(), true) => false
-; @test should-restart(Transient(), true) => true
-; @test should-restart(Transient(), false) => false
+; @test should-restart(Permanent, false) => true
+; @test should-restart(Temporary, true) => false
+; @test should-restart(Transient, true) => true
+; @test should-restart(Transient, false) => false
 pub let should-restart(policy: Restart, cancelled: Bool) -> Bool =
   match (policy)
-    | Permanent() -> true
-    | Transient() -> cancelled
-    | Temporary() -> false
+    | Permanent -> true
+    | Transient -> cancelled
+    | Temporary -> false
 
 ; Start each child once; return Pids.
 ; @test start-children([]) => []
@@ -49,7 +49,7 @@ pub let stop-children[a](pids: List (Pid a)) -> Unit =
 
 ; Restart a single child by calling its start again.
 ; @test {
-;   let p = restart-child(ChildSpec(fn () = Actor.spawn(fn (_) = ()), Permanent()))
+;   let p = restart-child(ChildSpec(fn () = Actor.spawn(fn (_) = ()), Permanent))
 ;   Actor.cancel(p)
 ;   Actor.id(p) > 0
 ; } => true

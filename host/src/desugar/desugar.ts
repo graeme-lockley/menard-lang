@@ -41,9 +41,9 @@ function mapElems(elems: Ast[], diags: Diagnostic[]): Ast[] {
   return elems.map((e) => desugarNode(e, diags));
 }
 
-/** `[e1 e2 …]` → `(Cons e1 (Cons e2 (Nil)))`. `[]` → `(Nil)`. */
+/** `[e1 e2 …]` → `(Cons e1 (Cons e2 Nil))`. `[]` → `Nil` (LANG-07 bare nullary). */
 function consChain(elems: Ast[], span: Ast["span"]): Ast {
-  let acc = list("paren", [sym("Nil", span)], span);
+  let acc: Ast = sym("Nil", span);
   for (let i = elems.length - 1; i >= 0; i--) {
     acc = list("paren", [sym("Cons", span), elems[i]!, acc], span);
   }
@@ -475,7 +475,7 @@ function desugarMapSpread(base: Ast, src: Ast, span: Ast["span"]): Ast {
       list("paren", [sym("map-get", span), srcName, keyName], span),
       list("paren", [sym("Some", span), valName], span),
       recurSome,
-      list("paren", [sym("None", span)], span),
+      sym("None", span),
       recurNone,
     ],
     span,
@@ -485,7 +485,7 @@ function desugarMapSpread(base: Ast, src: Ast, span: Ast["span"]): Ast {
     [
       sym("match", span),
       ksName,
-      list("paren", [sym("Nil", span)], span),
+      sym("Nil", span),
       accName,
       list("paren", [sym("Cons", span), keyName, restName], span),
       inner,

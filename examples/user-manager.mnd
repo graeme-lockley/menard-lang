@@ -33,17 +33,17 @@ let step(db: Map Str User, req: UserReq) -> (Map Str User * UserRes) =
     | Get(id) ->
       match (Map.lookup(id, db))
         | Some(u) -> (db, OkUser(u))
-        | None -> (db, NotFound())
+        | None -> (db, NotFound)
     | Search(q) -> {
         let users =
           Map.keys(db)
           |> List.filter-map(fn (id) = {
             match (Map.lookup(id, db))
-              | None -> None()
+              | None -> None
               | Some(u) ->
                 match (u)
                   | User(_, name, _) ->
-                    if (name == q) -> Some(u) | None()
+                    if (name == q) -> Some(u) | None
           })
         (db, OkUsers(users))
       }
@@ -56,7 +56,7 @@ let show-user(u: User) -> Str =
 let show-res(r: Result UserRes Actor.ActorError) -> Str =
   match (r)
     | Err(_) -> "error"
-    | Ok(NotFound()) -> "not-found"
+    | Ok(NotFound) -> "not-found"
     | Ok(BadRequest(s)) -> String.concat("bad:", s)
     | Ok(OkUser(u)) -> show-user(u)
     | Ok(OkUsers(xs)) ->

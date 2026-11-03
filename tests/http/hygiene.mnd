@@ -104,7 +104,7 @@ let main() -> Int {
 
   ; 1) Happy path via Http.request-timeout
   let ok-happy =
-    match (Http.request-timeout("127.0.0.1", p1, Http.Request(Http.GET(), "/hi", Map.empty(), ""), 2000))
+    match (Http.request-timeout("127.0.0.1", p1, Http.Request(Http.GET, "/hi", Map.empty(), ""), 2000))
       | Ok(Http.Response(200, _, "/hi")) -> 1
       | _ -> 0
   println(ok-happy)
@@ -200,8 +200,8 @@ let main() -> Int {
   Sched.wait(ready3)
   let p3 = deref(port3)
   let ok-timeout =
-    match (Http.request-timeout("127.0.0.1", p3, Http.Request(Http.GET(), "/", Map.empty(), ""), 50))
-      | Err(Http.NetErr(Timeout())) -> 1
+    match (Http.request-timeout("127.0.0.1", p3, Http.Request(Http.GET, "/", Map.empty(), ""), 50))
+      | Err(Http.NetErr(Timeout)) -> 1
       | Err(_) -> 1
       | Ok(_) -> 0
   println(ok-timeout)

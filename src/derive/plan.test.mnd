@@ -9,10 +9,10 @@ import std/io
 
 let plan-of(path: Str) -> Maybe Str =
   match (read-file(project-file(path)))
-    | Err(_) -> None()
+    | Err(_) -> None
     | Ok(src) ->
       match (read-all(src))
-        | Err(_) -> None()
+        | Err(_) -> None
         | Ok(forms) -> Some(describe-derives(forms))
 
 test "(show 1) plans show for Int" =

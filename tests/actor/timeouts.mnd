@@ -7,7 +7,7 @@ let main() -> Int {
   ; receive-timeout on empty mailbox → ActorTimeout; later send still delivered.
   let mb = Actor.mailbox-new()
   match (Actor.receive-timeout(mb, 5))
-    | Err(Actor.ActorTimeout()) -> println(1)
+    | Err(Actor.ActorTimeout) -> println(1)
     | _ -> println(0)
   Actor.send(mb, 42)
   match (Actor.receive(mb))
@@ -18,7 +18,7 @@ let main() -> Int {
   let full = Actor.mailbox-new-bounded(1)
   Actor.send(full, 1)
   match (Actor.send-timeout(full, 2, 5))
-    | Err(Actor.ActorTimeout()) -> println(3)
+    | Err(Actor.ActorTimeout) -> println(3)
     | _ -> println(0)
   match (Actor.receive(full))
     | Ok(1) -> println(4)
@@ -29,8 +29,8 @@ let main() -> Int {
   Actor.send(closed-mb, 0)
   let sender = Task.spawn(fn () = {
     match (Actor.send-timeout(closed-mb, 99, 200))
-      | Err(Actor.ActorDead()) -> 5
-      | Err(Actor.ActorTimeout()) -> -1
+      | Err(Actor.ActorDead) -> 5
+      | Err(Actor.ActorTimeout) -> -1
       | _ -> -2
   })
   Task.sleep-ms(5)

@@ -71,28 +71,28 @@ pub record CtorInfo {
 ; rather than a bare variant application.
 
 pub let t-int() -> Type =
-  TInt()
+  TInt
 
 pub let t-float() -> Type =
-  TFloat()
+  TFloat
 
 pub let t-bool() -> Type =
-  TBool()
+  TBool
 
 pub let t-char() -> Type =
-  TChar()
+  TChar
 
 pub let t-str() -> Type =
-  TStr()
+  TStr
 
 pub let t-sym() -> Type =
-  TSym()
+  TSym
 
 pub let t-unit() -> Type =
-  TUnit()
+  TUnit
 
 pub let t-string-buffer() -> Type =
-  TStringBuffer()
+  TStringBuffer
 
 pub let t-list(elem: Type) -> Type =
   TList(elem)

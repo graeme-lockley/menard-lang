@@ -72,7 +72,7 @@ let is-none[a](m: Maybe a) -> Bool =
     | Some(_) -> false
 
 let no-parse-error() -> Maybe ParseError =
-  None()
+  None
 
 let empty-toks() -> List Tok =
   []
@@ -80,7 +80,7 @@ let empty-toks() -> List Tok =
 ; Set for the duration of `lex-all`, so a lexical error on a mapped
 ; line is reported against the original file.
 let fresh-lex-current() -> Ref (Maybe Lex) =
-  ref(None())
+  ref(None)
 
 let lex-current = fresh-lex-current()
 
@@ -778,7 +778,7 @@ let lex-all(src: Str) -> Result (List Tok) ParseError {
       | line-ready(lx, failed) ->
         if (is-none(deref(failed))) -> scan-one(lx, toks, failed)
   }
-  set!(lex-current, None())
+  set!(lex-current, None)
   match (deref(failed))
     | Some(e) -> Err(e)
     | None ->
@@ -815,9 +815,9 @@ let is-op-text(text: Str) -> Bool =
 let eat(ps: Ps, text: Str) -> Maybe Tok {
   let t = peek(ps)
   cond
-    | t.text != text -> None()
-    | is-delim-text(text) && t.kind != "punct" -> None()
-    | is-op-text(text) && t.kind != "op" -> None()
+    | t.text != text -> None
+    | is-delim-text(text) && t.kind != "punct" -> None
+    | is-op-text(text) && t.kind != "op" -> None
     | else ->
       {
         advance(ps)
@@ -1532,7 +1532,7 @@ let parse-multi-arm-body(ps: Ps, kw: Tok, n: Int, acc: List Ast, alts: List (Lis
           | Err(e) -> Err(e)
           | Ok(g) -> parse-multi-arm-arrow(ps, kw, n, acc, alts, Some(g))
       }
-    | else -> parse-multi-arm-arrow(ps, kw, n, acc, alts, None())
+    | else -> parse-multi-arm-arrow(ps, kw, n, acc, alts, None)
 
 let parse-multi-arm-arrow(ps: Ps, kw: Tok, n: Int, acc: List Ast, alts: List (List Ast), guard: Maybe Ast) -> Result Ast ParseError =
   match (eat(ps, "->"))
@@ -1907,7 +1907,7 @@ let parse-fn-params(ps: Ps) -> Result FnParams ParseError =
     | Some(open) -> parse-fn-params-open(ps, open)
 
 let parse-fn-params-open(ps: Ps, open: Tok) -> Result FnParams ParseError =
-  match (collect-fn-params(ps, [], None()))
+  match (collect-fn-params(ps, [], None))
     | Err(e) -> Err(e)
     | Ok(collected) ->
       match (collected)
@@ -2154,7 +2154,7 @@ let parse-type-atom-project(ps: Ps, left: Ast) -> Result Ast ParseError =
 
 let parse-tparams-opt(ps: Ps) -> Result (Maybe Ast) ParseError =
   cond
-    | not(delim(ps, "[")) -> Ok(None())
+    | not(delim(ps, "[")) -> Ok(None)
     | else ->
       {
         let open = peek(ps)

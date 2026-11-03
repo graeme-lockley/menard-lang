@@ -4,7 +4,7 @@ type Hidden =
   | H
 
 pub let leak() -> Hidden =
-  H()
+  H
 
 let main() -> Int =
   0

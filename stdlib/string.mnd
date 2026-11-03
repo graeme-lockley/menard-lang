@@ -103,10 +103,10 @@ pub let join(sep: Str, parts: List Str) -> Str =
 ; Byte index of the first occurrence of sep, or None when it does not occur.
 ; @test index-of("ell", "hello") => Some(1)
 ; @test index-of(",", "a,b,c") => Some(1)
-; @test index-of("xyz", "hello") => None()
+; @test index-of("xyz", "hello") => None
 ; @test index-of("", "abc") => Some(0)
 ; @test index-of("", "") => Some(0)
-; @test index-of("a", "") => None()
+; @test index-of("a", "") => None
 pub let index-of(sep: Str, s: Str) -> Maybe Int =
   index-of-from(sep, 0, s)
 
@@ -116,15 +116,15 @@ pub let index-of(sep: Str, s: Str) -> Maybe Int =
 ; @test index-of-from(",", 2, "a,b,c") => Some(3)
 ; @test index-of-from(",", 1, "a,b,c") => Some(1)
 ; @test index-of-from(",", -1, "a,b") => Some(1)
-; @test index-of-from("", 4, "abc") => None()
+; @test index-of-from("", 4, "abc") => None
 ; @test index-of-from("", 3, "abc") => Some(3)
-; @test index-of-from("c", 3, "abc") => None()
+; @test index-of-from("c", 3, "abc") => None
 pub let index-of-from(sep: Str, i: Int, s: Str) -> Maybe Int {
   let n = length(sep)
   let sn = length(s)
   loop (j = if (i < 0) -> 0 | i)
     cond
-      | j > sn || n > sn - j -> None()
+      | j > sn || n > sn - j -> None
       | bytes-eq(s, j, sep, 0, n) -> Some(j)
       | else -> recur(j + 1)
 }
@@ -324,11 +324,11 @@ pub let is-digit-byte(b: Int) -> Bool =
 ; @test hex-value(70) => Some(15)
 ; @test hex-value(97) => Some(10)
 ; @test hex-value(102) => Some(15)
-; @test hex-value(71) => None()
-; @test hex-value(103) => None()
+; @test hex-value(71) => None
+; @test hex-value(103) => None
 pub let hex-value(b: Int) -> Maybe Int =
   cond
     | b >= 48 && b <= 57 -> Some(b - 48)
     | b >= 65 && b <= 70 -> Some(b - 55)
     | b >= 97 && b <= 102 -> Some(b - 87)
-    | else -> None()
+    | else -> None

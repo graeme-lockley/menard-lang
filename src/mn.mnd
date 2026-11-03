@@ -536,13 +536,13 @@ let openssl-cflags() -> List Str =
   match (getenv("MENARD_OPENSSL_CFLAGS"))
     | Some(s) ->
       if (String.length(s) == 0) -> [] | String.split(" ", s)
-    | None() -> openssl-cflags-default()
+    | None -> openssl-cflags-default()
 
 let openssl-libs() -> List Str =
   match (getenv("MENARD_OPENSSL_LIBS"))
     | Some(s) ->
       if (String.length(s) == 0) -> ["-lssl", "-lcrypto"] | String.split(" ", s)
-    | None() -> openssl-libs-default()
+    | None -> openssl-libs-default()
 
 let rt-third-party(runtime: Str, name: Str) -> Str =
   runtime |> Path.join("third_party") |> Path.join(name)
@@ -617,13 +617,13 @@ let path-dir-end(s: Str, i: Int, n: Int) -> Int =
 
 let probe-dir(dir: Str, name: Str) -> Maybe Str {
   let candidate = Path.join(name, dir)
-  if (exists(candidate)) -> Some(candidate) | None()
+  if (exists(candidate)) -> Some(candidate) | None
 }
 
 let search-path(path: Str, name: Str, i: Int) -> Maybe Str {
   let n = String.length(path)
   cond
-    | i > n -> None()
+    | i > n -> None
     | else ->
       {
         let end = path-dir-end(path, i, n)
@@ -631,13 +631,13 @@ let search-path(path: Str, name: Str, i: Int) -> Maybe Str {
         match (probe-dir(dir, name))
           | Some(c) -> Some(c)
           | None ->
-            if (end >= n) -> None() | search-path(path, name, end + 1)
+            if (end >= n) -> None | search-path(path, name, end + 1)
       }
 }
 
 let find-on-path(name: Str) -> Maybe Str =
   match (getenv("PATH"))
-    | None -> None()
+    | None -> None
     | Some(path) -> search-path(path, name, 0)
 
 ; ---------------------------------------------------------------------------

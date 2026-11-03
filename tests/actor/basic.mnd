@@ -22,7 +22,7 @@ let step(db: Map Str Str, req: UserReq) -> (Map Str Str * UserRes) =
     | Get(id) ->
       match (Map.lookup(id, db))
         | Some(name) -> (db, OkUser(id, name))
-        | None -> (db, NotFound())
+        | None -> (db, NotFound)
     | Search(q) -> {
         let ids =
           List.filter(
@@ -40,10 +40,10 @@ let unwrap-res(r: Result UserRes Actor.ActorError) -> Int =
   match (r)
     | Ok(OkUser(_, _)) -> 1
     | Ok(OkUsers(xs)) -> List.length(xs)
-    | Ok(NotFound()) -> 0
+    | Ok(NotFound) -> 0
     | Ok(BadRequest(_)) -> -2
-    | Err(Actor.ActorDead()) -> -3
-    | Err(Actor.ActorCancelled()) -> -4
+    | Err(Actor.ActorDead) -> -3
+    | Err(Actor.ActorCancelled) -> -4
 
 let main() -> Int {
   ; --- Mailbox: multi-sender, then receive ---
@@ -84,7 +84,7 @@ let main() -> Int {
   Actor.join(um)
   match (Actor.cast(um, Actor.Ask(Get("1"), Actor.mailbox-new())))
     | Ok(_) -> println(0)
-    | Err(Actor.ActorDead()) -> println(1)
+    | Err(Actor.ActorDead) -> println(1)
     | Err(_) -> println(0)
 
   ; --- Scope escalate: cancel one actor cancels sibling waiter ---

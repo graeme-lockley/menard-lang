@@ -13,7 +13,7 @@ let main() -> Int {
       | Ok(_) -> ()
       | Err(_) -> ()
   })
-  let specs = [Sup.ChildSpec(start, Sup.Permanent()), Sup.ChildSpec(start, Sup.Temporary())]
+  let specs = [Sup.ChildSpec(start, Sup.Permanent), Sup.ChildSpec(start, Sup.Temporary)]
   let pids = Sup.start-children(specs)
   println(List.length(pids))
   loop ()
@@ -22,7 +22,7 @@ let main() -> Int {
       recur()
     } | ()
   println(deref(hits))
-  let again = Sup.restart-child(Sup.ChildSpec(start, Sup.Permanent()))
+  let again = Sup.restart-child(Sup.ChildSpec(start, Sup.Permanent))
   println(if (Actor.id(again) > 0) -> 1 | 0)
   Sup.stop-children(again :: pids)
   Actor.join(again)

@@ -830,9 +830,10 @@ throughput — it is **allocation deletion**, and the two are not the same shape
 > iteration.
 
 A literal is a constant, and a constant that is rebuilt on every evaluation is
-the purest form of waste. The same holds for a nullary constructor: `(None)` is
+the purest form of waste. The same holds for a nullary constructor: `None` is
 returned by every failed lookup in `Map.lookup` and `arr-nth`, which in a compiler
-is a hot path.
+is a hot path. (Surface spelling is the bare name — LANG-07; the call form
+`None()` is an error.)
 
 So the reason to record is: **a compiler's most frequent allocations are its
 constants**, and static objects remove them from the allocation path entirely

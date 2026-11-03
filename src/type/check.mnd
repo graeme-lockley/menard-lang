@@ -79,7 +79,7 @@ let note-ques!(sp: Span, kind: Int) -> Unit =
 
 let find-ques-note(sp: Span, notes: List QuesNote) -> Maybe QuesNote =
   match (notes)
-    | [] -> None()
+    | [] -> None
     | QuesNote(s, e, o, k) :: rest ->
       if (s == sp.start && e == sp.end && o == sp.origin) -> Some(QuesNote(s, e, o, k)) | find-ques-note(sp, rest)
 
@@ -120,7 +120,7 @@ let note-show!(sp: Span, t: Type) -> Unit =
 
 let find-show-note(sp: Span, notes: List ShowNote) -> Maybe Type =
   match (notes)
-    | [] -> None()
+    | [] -> None
     | ShowNote(start, end, origin, t) :: rest ->
       if (start == sp.start && end == sp.end && origin == sp.origin) -> Some(t) | find-show-note(sp, rest)
 
@@ -137,7 +137,7 @@ let proj-note-matches(sp: Span, note: ProjNote) -> Bool =
 ; The note for this span, if inference selected a field.
 let find-proj-note(sp: Span, notes: List ProjNote) -> Maybe ProjNote =
   match (notes)
-    | [] -> None()
+    | [] -> None
     | note :: rest ->
       if (proj-note-matches(sp, note)) -> Some(note) | find-proj-note(sp, rest)
 
@@ -191,7 +191,7 @@ let fresh-var-anon(env: TypeEnv) -> Type =
 let sym-str(ast: Ast) -> Maybe Str =
   match (ast)
     | SymNode(n, _) -> Some(n)
-    | _ -> None()
+    | _ -> None
 
 let is-sym(ast: Ast, name: Str) -> Bool =
   match (sym-str(ast))
@@ -205,7 +205,7 @@ let strip-trailing-colon(raw: Str) -> Str {
 
 let field-name(ast: Ast) -> Maybe Str =
   match (sym-str(ast))
-    | None -> None()
+    | None -> None
     | Some(s) -> Some(strip-trailing-colon(s))
 
 ; ---------------------------------------------------------------------------
@@ -259,15 +259,15 @@ let install-map-ops(env: TypeEnv) -> Unit {
 }
 
 let install-maybe(env: TypeEnv) -> Unit {
-  type-set(env, "Maybe", VariantDef("Maybe", ["a"], [VariantCtor("None", Nil()), VariantCtor("Some", TParam("a") :: Nil())]))
+  type-set(env, "Maybe", VariantDef("Maybe", ["a"], [VariantCtor("None", Nil), VariantCtor("Some", TParam("a") :: Nil)]))
   ctor-set(env, "None", CtorInfo("Maybe", [], ["a"]))
   ctor-set(env, "Some", CtorInfo("Maybe", [TParam("a")], ["a"]))
-  value-set(env, "None", Scheme(["a"], t-fn([], t-maybe(TParam("a")))))
+  value-set(env, "None", Scheme(["a"], t-maybe(TParam("a"))))
   value-set(env, "Some", Scheme(["a"], t-fn([TParam("a")], t-maybe(TParam("a")))))
 }
 
 let install-result(env: TypeEnv) -> Unit {
-  type-set(env, "Result", VariantDef("Result", ["t", "e"], [VariantCtor("Ok", TParam("t") :: Nil()), VariantCtor("Err", TParam("e") :: Nil())]))
+  type-set(env, "Result", VariantDef("Result", ["t", "e"], [VariantCtor("Ok", TParam("t") :: Nil), VariantCtor("Err", TParam("e") :: Nil)]))
   ctor-set(env, "Ok", CtorInfo("Result", [TParam("t")], ["t", "e"]))
   ctor-set(env, "Err", CtorInfo("Result", [TParam("e")], ["t", "e"]))
   value-set(env, "Ok", Scheme(["t", "e"], t-fn([TParam("t")], t-result(TParam("t"), TParam("e")))))
@@ -275,10 +275,10 @@ let install-result(env: TypeEnv) -> Unit {
 }
 
 let install-list-type(env: TypeEnv) -> Unit {
-  type-set(env, "List", VariantDef("List", ["a"], [VariantCtor("Nil", Nil()), VariantCtor("Cons", TParam("a") :: t-list(TParam("a")) :: Nil())]))
+  type-set(env, "List", VariantDef("List", ["a"], [VariantCtor("Nil", Nil), VariantCtor("Cons", TParam("a") :: t-list(TParam("a")) :: Nil)]))
   ctor-set(env, "Nil", CtorInfo("List", [], ["a"]))
   ctor-set(env, "Cons", CtorInfo("List", [TParam("a"), t-list(TParam("a"))], ["a"]))
-  value-set(env, "Nil", Scheme(["a"], t-fn([], t-list(TParam("a")))))
+  value-set(env, "Nil", Scheme(["a"], t-list(TParam("a"))))
   value-set(env, "Cons", Scheme(["a"], t-fn([TParam("a"), t-list(TParam("a"))], t-list(TParam("a")))))
 }
 
@@ -293,7 +293,7 @@ let install-builtins(env: TypeEnv) -> Unit {
 }
 
 let empty-env() -> TypeEnv {
-  let env = TypeEnv(ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(0), ref([]), ref(Map.empty()), ref(None()))
+  let env = TypeEnv(ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(Map.empty()), ref(0), ref([]), ref(Map.empty()), ref(None))
   install-builtins(env)
   env
 }
@@ -548,7 +548,7 @@ let arrow-split-after(s: ArrowSplit) -> List Ast =
 
 let find-arrow(elems: List Ast) -> Maybe ArrowSplit =
   match (elems)
-    | [] -> None()
+    | [] -> None
     | e :: rest -> find-arrow-cons(e, rest)
 
 let find-arrow-cons(e: Ast, rest: List Ast) -> Maybe ArrowSplit =
@@ -556,7 +556,7 @@ let find-arrow-cons(e: Ast, rest: List Ast) -> Maybe ArrowSplit =
 
 let find-arrow-cons-recurse(e: Ast, rest: List Ast) -> Maybe ArrowSplit =
   match (find-arrow(rest))
-    | None -> None()
+    | None -> None
     | Some(split) -> Some(ArrowSplit(e :: arrow-split-before(split), arrow-split-after(split)))
 
 let type-def-kind(td: TypeDef) -> Str =
@@ -735,19 +735,19 @@ let parse-type-name-params(more: List Ast) -> List Str =
 
 let parse-type-name-paren-named(name-ast: Ast, more: List Ast) -> Maybe NameParams =
   match (sym-str(name-ast))
-    | None -> None()
+    | None -> None
     | Some(name) -> Some(NameParams(name, parse-type-name-params(more)))
 
 let parse-type-name-paren(elems: List Ast) -> Maybe NameParams =
   match (elems)
     | name-ast :: more -> parse-type-name-paren-named(name-ast, more)
-    | [] -> None()
+    | [] -> None
 
 let parse-type-name(ast: Ast) -> Maybe NameParams =
   match (ast)
     | SymNode(name, _) -> Some(NameParams(name, []))
     | ParenNode(elems, _) -> parse-type-name-paren(elems)
-    | _ -> None()
+    | _ -> None
 
 let params-to-types(params: List Str) -> List Type =
   match (params)
@@ -805,18 +805,18 @@ let record-field-types(fields: List RecordField) -> List Type =
 
 let parse-record-field-named(env: TypeEnv, name-ast: Ast, type-ast: Ast, params: List Str) -> Maybe RecordField =
   match (field-name(name-ast))
-    | None -> None()
+    | None -> None
     | Some(name) -> Some(RecordField(name, parse-type-expr(env, type-ast, params)))
 
 let parse-record-field-elems(env: TypeEnv, felems: List Ast, params: List Str) -> Maybe RecordField =
   match (felems)
     | name-ast :: type-ast :: _ -> parse-record-field-named(env, name-ast, type-ast, params)
-    | _ -> None()
+    | _ -> None
 
 let parse-record-field(env: TypeEnv, f: Ast, params: List Str) -> Maybe RecordField =
   match (f)
     | ParenNode(felems, _) -> parse-record-field-elems(env, felems, params)
-    | _ -> None()
+    | _ -> None
 
 let parse-record-fields(env: TypeEnv, fields: List Ast, params: List Str) -> List RecordField =
   match (fields)
@@ -859,7 +859,11 @@ let ctor-owner(c: CtorInfo) -> Str =
 ; exhaustiveness without taking them away from IoError.
 let register-variant-ctor-set(env: TypeEnv, type-name: Str, params: List Str, cname: Str, payloads: List Type) -> Unit {
   ctor-set(env, cname, CtorInfo(type-name, payloads, params))
-  value-set(env, cname, Scheme(params, t-fn(payloads, t-nominal(type-name, params-to-types(params), "variant"))))
+  let nominal = t-nominal(type-name, params-to-types(params), "variant")
+  ; LANG-07: nullary constructors are values of the nominal type.
+  match (payloads)
+    | [] -> value-set(env, cname, Scheme(params, nominal))
+    | _ -> value-set(env, cname, Scheme(params, t-fn(payloads, nominal)))
 }
 
 let register-variant-ctor-checked(env: TypeEnv, type-name: Str, params: List Str, cname: Str, payloads: List Type) -> Unit =
@@ -874,18 +878,18 @@ let register-variant-ctor(env: TypeEnv, type-name: Str, params: List Str, vc: Va
 
 let parse-variant-ctor-named(env: TypeEnv, cname-ast: Ast, payload-asts: List Ast, params: List Str) -> Maybe VariantCtor =
   match (sym-str(cname-ast))
-    | None -> None()
+    | None -> None
     | Some(cname) -> Some(VariantCtor(cname, parse-type-exprs(env, payload-asts, params)))
 
 let parse-variant-ctor-elems(env: TypeEnv, celems: List Ast, params: List Str) -> Maybe VariantCtor =
   match (celems)
     | cname-ast :: payload-asts -> parse-variant-ctor-named(env, cname-ast, payload-asts, params)
-    | [] -> None()
+    | [] -> None
 
 let parse-variant-ctor(env: TypeEnv, c: Ast, params: List Str) -> Maybe VariantCtor =
   match (c)
     | ParenNode(celems, _) -> parse-variant-ctor-elems(env, celems, params)
-    | _ -> None()
+    | _ -> None
 
 let collect-variant-ctor-list(env: TypeEnv, type-name: Str, params: List Str, ctor-asts: List Ast) -> List VariantCtor =
   match (ctor-asts)
@@ -974,7 +978,7 @@ let parse-defn-return-rest(env: TypeEnv, name: Str, type-params: List Str, pname
     | [] ->
       {
         if (report) -> err!(env, "E_TYPE_DEFN", "defn missing return type", whole-span)
-        None()
+        None
       }
 
 let parse-defn-header(env: TypeEnv, name: Str, type-params: List Str, rest: List Ast, whole-span: Span, report: Bool) -> Maybe ParsedDefn =
@@ -985,7 +989,7 @@ let parse-defn-name(env: TypeEnv, name-part: Ast, rest: List Ast, whole-span: Sp
     | None ->
       {
         if (report) -> err!(env, "E_TYPE_DEFN", "malformed defn name", ast-span(name-part))
-        None()
+        None
       }
     | Some(np) -> parse-defn-header(env, name-params-name(np), name-params-params(np), rest, whole-span, report)
 
@@ -995,7 +999,7 @@ let parse-defn(env: TypeEnv, elems: List Ast, whole-span: Span, report: Bool) ->
     | _ ->
       {
         if (report) -> err!(env, "E_TYPE_DEFN", "malformed defn", whole-span)
-        None()
+        None
       }
 
 ; ---------------------------------------------------------------------------
@@ -1049,7 +1053,7 @@ let build-param-local(names: List Str, types: List Type) -> Map Str Type =
 
 let last-of(xs: List Ast) -> Maybe Ast =
   match (xs)
-    | [] -> None()
+    | [] -> None
     | [x] -> Some(x)
     | _ :: rest -> last-of(rest)
 
@@ -1189,12 +1193,12 @@ record SimpleLet {
 }
 
 let as-simple-let-named(head: Ast, name-ast: Ast, expr-ast: Ast) -> Maybe SimpleLet =
-  if (is-sym(head, "let")) -> Some(SimpleLet(name-ast, expr-ast)) | None()
+  if (is-sym(head, "let")) -> Some(SimpleLet(name-ast, expr-ast)) | None
 
 let as-simple-let(f: Ast) -> Maybe SimpleLet =
   match (f)
     | ParenNode([head, name-ast, expr-ast], _) -> as-simple-let-named(head, name-ast, expr-ast)
-    | _ -> None()
+    | _ -> None
 
 let infer-named-expr(env: TypeEnv, name: Str, expr: Ast, local: Map Str Type) -> Type =
   if (is-fn-expr(expr)) -> infer-recursive-fn(env, name, expr, local) | infer(env, expr, local)
@@ -1431,8 +1435,8 @@ record LambdaParts {
 let lambda-parts(elems: List Ast) -> Maybe LambdaParts =
   match (elems)
     | _ :: params :: SymNode("->", _) :: ret :: body :: _ -> Some(LambdaParts(params, body, Some(ret)))
-    | _ :: params :: body :: _ -> Some(LambdaParts(params, body, None()))
-    | _ -> None()
+    | _ :: params :: body :: _ -> Some(LambdaParts(params, body, None))
+    | _ -> None
 
 let lambda-param-elems(params: Ast) -> List Ast =
   match (params)
@@ -1506,7 +1510,7 @@ let bind-lambda-params(env: TypeEnv, pelems: List Ast, expected: List Type, loc:
         | e :: erest ->
           bind-lambda-params(env, rest, erest, loc, bind-lambda-param(env, p, loc, Some(e)) :: acc)
         | [] ->
-          bind-lambda-params(env, rest, [], loc, bind-lambda-param(env, p, loc, None()) :: acc)
+          bind-lambda-params(env, rest, [], loc, bind-lambda-param(env, p, loc, None) :: acc)
 
 let rev-types(xs: List Type, acc: List Type) -> List Type =
   match (xs)
@@ -1543,7 +1547,7 @@ let infer-lambda-with(env: TypeEnv, parts: LambdaParts, local: Map Str Type, exp
 
 let infer-lambda(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) -> Type =
   match (lambda-parts(elems))
-    | Some(parts) -> infer-lambda-with(env, parts, local, [], None())
+    | Some(parts) -> infer-lambda-with(env, parts, local, [], None)
     | None ->
       {
         err!(env, "E_TYPE_FN", "fn requires params and body", sp)
@@ -1812,7 +1816,7 @@ let nominal-type-name-of(t: Type) -> Maybe Str =
     | TMaybe(_) -> Some("Maybe")
     | TResult(_, _) -> Some("Result")
     | TList(_) -> Some("List")
-    | _ -> None()
+    | _ -> None
 
 let check-ctor-covered(env: TypeEnv, c: VariantCtor, covered: List Str, sp: Span) -> Unit =
   match (c)
@@ -1886,7 +1890,7 @@ let infer-match-scrut(env: TypeEnv, scrut-ast: Ast, clauses: List Ast, sp: Span,
   if (list-odd-length(clauses)) -> err!(env, "E_TYPE_MATCH", "match clauses must be pattern/body pairs", sp)
   let covered = ref([])
   let has-wild = ref(false)
-  let result = run-match-clauses(env, clauses, scrut, local, covered, has-wild, None())
+  let result = run-match-clauses(env, clauses, scrut, local, covered, has-wild, None)
   check-match-exhaustive(env, scrut, deref(covered), deref(has-wild), sp)
   check-match-exhaustive-product(env, scrut, deref(covered), deref(has-wild), sp)
   match (result)
@@ -1954,16 +1958,16 @@ let call-head-name(head: Ast) -> Maybe Str =
     | None ->
       match (head)
         | ParenNode(SymNode("project", _) :: _ :: SymNode(field, _) :: _, _) -> Some(field)
-        | _ -> None()
+        | _ -> None
 
 let nth-type(xs: List Type, i: Int) -> Maybe Type =
   match (xs)
-    | [] -> None()
+    | [] -> None
     | x :: rest -> if (i == 0) -> Some(x) | nth-type(rest, i - 1)
 
 let nth-ast(xs: List Ast, i: Int) -> Maybe Ast =
   match (xs)
-    | [] -> None()
+    | [] -> None
     | x :: rest -> if (i == 0) -> Some(x) | nth-ast(rest, i - 1)
 
 let type-still-open(t: Type) -> Bool =
@@ -2030,7 +2034,7 @@ let infer-app-args-against(env: TypeEnv, args: List Ast, params: List Type, loca
         | p :: prest ->
           infer-app-args-against(env, rest, prest, local, infer-app-arg(env, a, Some(p), local) :: acc)
         | [] ->
-          infer-app-args-against(env, rest, [], local, infer-app-arg(env, a, None(), local) :: acc)
+          infer-app-args-against(env, rest, [], local, infer-app-arg(env, a, None, local) :: acc)
 
 let infer-app-core(env: TypeEnv, head: Ast, args: List Ast, sp: Span, local: Map Str Type) -> Type {
   let callee = apply-subst(env, infer(env, head, local))
@@ -2053,8 +2057,51 @@ let infer-app-core(env: TypeEnv, head: Ast, args: List Ast, sp: Span, local: Map
       }
 }
 
+; LANG-07: a nullary constructor used as `Ctor()` is an error.
+let ctor-is-nullary(info: CtorInfo) -> Bool =
+  match (info)
+    | CtorInfo(_, payloads, _) ->
+      match (payloads)
+        | [] -> true
+        | _ -> false
+
+let nullary-ctor-name(env: TypeEnv, head: Ast, local: Map Str Type) -> Maybe Str =
+  match (sym-str(head))
+    | Some(n) ->
+      match (Map.lookup(n, local))
+        | Some(_) -> None
+        | None ->
+          match (ctor-get(env, n))
+            | Some(info) -> if (ctor-is-nullary(info)) -> Some(n) | None
+            | None -> None
+    | None ->
+      match (call-head-name(head))
+        | Some(n) ->
+          match (ctor-get(env, n))
+            | Some(info) -> if (ctor-is-nullary(info)) -> Some(n) | None
+            | None -> None
+        | None -> None
+
+let instantiate-nullary-or-fresh(env: TypeEnv, name: Str) -> Type =
+  match (value-get(env, name))
+    | Some(scheme) -> instantiate(env, scheme)
+    | None -> fresh-var-anon(env)
+
+let infer-nullary-call(env: TypeEnv, name: Str, sp: Span) -> Type {
+  err!(env, "E_TYPE_NULLARY_CALL", String.concat("nullary constructor ", name, " cannot be called"), sp)
+  instantiate-nullary-or-fresh(env, name)
+}
+
 let infer-app-dispatch(env: TypeEnv, head: Ast, args: List Ast, sp: Span, local: Map Str Type) -> Type =
-  if (is-sym(head, "print") || is-sym(head, "println")) -> infer-print-args(env, args, local, sp) | infer-app-core(env, head, args, sp, local)
+  cond
+    | is-sym(head, "print") || is-sym(head, "println") -> infer-print-args(env, args, local, sp)
+    | else ->
+      match (args)
+        | [] ->
+          match (nullary-ctor-name(env, head, local))
+            | Some(n) -> infer-nullary-call(env, n, sp)
+            | None -> infer-app-core(env, head, args, sp, local)
+        | _ -> infer-app-core(env, head, args, sp, local)
 
 let infer-app(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) -> Type =
   match (elems)
@@ -2066,14 +2113,14 @@ let infer-app(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) -> T
 ; Declaration order of a record field.
 let record-field-at(fields: List RecordField, name: Str, i: Int) -> Maybe Int =
   match (fields)
-    | [] -> None()
+    | [] -> None
     | RecordField(n, _) :: rest ->
       if (n == name) -> Some(i) | record-field-at(rest, name, i + 1)
 
 ; The declared type of a record field.
 let record-field-type-of(fields: List RecordField, name: Str) -> Maybe Type =
   match (fields)
-    | [] -> None()
+    | [] -> None
     | RecordField(n, t) :: rest ->
       if (n == name) -> Some(t) | record-field-type-of(rest, name)
 
@@ -2569,7 +2616,11 @@ let source-ctor-name(n: Str) -> Str {
 }
 
 let print-ctor-body(env: TypeEnv, name: Str, ts: List Type) -> Ast =
-  print-concat(print-str(String.concat("(", source-ctor-name(name))), print-concat(print-payloads(env, ts, 0), print-str(")")))
+  ; LANG-07: nullary constructors print as the bare name.
+  match (ts)
+    | [] -> print-str(source-ctor-name(name))
+    | _ ->
+      print-concat(print-str(String.concat("(", source-ctor-name(name))), print-concat(print-payloads(env, ts, 0), print-str(")")))
 
 let print-ctor-arms(env: TypeEnv, cs: List VariantCtor, params: Map Str Type) -> List Ast =
   match (cs)
@@ -2598,10 +2649,10 @@ let print-nominal-body(env: TypeEnv, name: Str, args: List Type) -> Ast =
 
 let print-map-body(env: TypeEnv, t: Type, k: Type, value: Type) -> Ast {
   let name = String.concat("__print-map", show(Map.size(deref(print-names))))
-  let found = print-call("match", [print-call("map-get", [print-sym("v"), print-sym("key")]), print-call("Some", [print-sym("item")]), print-format(env, value, print-sym("item")), print-call("None", []), print-error("print: map key disappeared")])
+  let found = print-call("match", [print-call("map-get", [print-sym("v"), print-sym("key")]), print-call("Some", [print-sym("item")]), print-format(env, value, print-sym("item")), print-sym("None"), print-error("print: map key disappeared")])
   let entry = print-concat(print-format(env, k, print-sym("key")), print-concat(print-str(" => "), found))
-  let tail = print-call("if", [print-call("=", [print-sym("rest"), print-call("Nil", [])]), print-str(""), print-concat(print-str(", "), print-call(name, [print-sym("v"), print-sym("rest")]))])
-  let body = print-call("match", [print-sym("keys"), print-call("Nil", []), print-str(""), print-call("Cons", [print-sym("key"), print-sym("rest")]), print-concat(entry, tail)])
+  let tail = print-call("if", [print-call("=", [print-sym("rest"), print-sym("Nil")]), print-str(""), print-concat(print-str(", "), print-call(name, [print-sym("v"), print-sym("rest")]))])
+  let body = print-call("match", [print-sym("keys"), print-sym("Nil"), print-str(""), print-call("Cons", [print-sym("key"), print-sym("rest")]), print-concat(entry, tail)])
   let def = print-call("defn", [print-sym(name), print-call("v:", [print-type-ast(t)]), print-call("keys:", [print-type-ast(TList(k))]), print-sym("->"), print-sym("Str"), body])
   set!(print-functions, def :: deref(print-functions))
   print-concat(print-str("{"), print-concat(print-call(name, [print-sym("v"), print-call("map-keys", [print-sym("v")])]), print-str("}")))
@@ -2610,8 +2661,8 @@ let print-map-body(env: TypeEnv, t: Type, k: Type, value: Type) -> Ast {
 let print-list-body(env: TypeEnv, t: Type, elem: Type) -> Ast {
   let name = String.concat("__print-list", show(Map.size(deref(print-names))))
   let item = print-format(env, elem, print-sym("item"))
-  let tail = print-call("if", [print-call("=", [print-sym("rest"), print-call("Nil", [])]), print-str(""), print-concat(print-str(", "), print-call(name, [print-sym("rest")]))])
-  let body = print-call("match", [print-sym("v"), print-call("Nil", []), print-str(""), print-call("Cons", [print-sym("item"), print-sym("rest")]), print-concat(item, tail)])
+  let tail = print-call("if", [print-call("=", [print-sym("rest"), print-sym("Nil")]), print-str(""), print-concat(print-str(", "), print-call(name, [print-sym("rest")]))])
+  let body = print-call("match", [print-sym("v"), print-sym("Nil"), print-str(""), print-call("Cons", [print-sym("item"), print-sym("rest")]), print-concat(item, tail)])
   set!(print-functions, print-def(name, t, body) :: deref(print-functions))
   print-concat(print-str("["), print-concat(print-call(name, [print-sym("v")]), print-str("]")))
 }
@@ -2651,7 +2702,7 @@ let print-format-body(env: TypeEnv, t: Type) -> Ast =
 
 let find-print-note(sp: Span, notes: List PrintNote) -> Maybe (List Type) =
   match (notes)
-    | [] -> None()
+    | [] -> None
     | PrintNote(saved, ts) :: rest ->
       if (sp.start == saved.start && sp.end == saved.end && sp.origin == saved.origin) -> Some(ts) | find-print-note(sp, rest)
 

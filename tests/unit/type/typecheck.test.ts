@@ -57,7 +57,7 @@ let f(x: T) -> Int =
   });
 
   test("built-in constructors typecheck as expressions", () => {
-    const cases = ["None()", "Some(1)", "Ok(1)", 'Err("e")', "Nil()", "Cons(1, Nil())"];
+    const cases = ["None", "Some(1)", "Ok(1)", 'Err("e")', "Nil", "Cons(1, Nil)"];
     for (const src of cases) {
       const diags = diagnose(src);
       expect(diags).toEqual([]);
@@ -66,7 +66,7 @@ let f(x: T) -> Int =
 
   test("built-in constructors in typed defn bodies", () => {
     const src = `let f(n: Int) -> List Int =
-  Cons(n, Nil())
+  Cons(n, Nil)
 let g(n: Int) -> Maybe Int =
   Some(n)
 let h(n: Int) -> Result Int Str =
@@ -224,12 +224,12 @@ sz(Leaf(9))`;
 
   test("built-in constructors evaluate", () => {
     const cases: { src: string; ctor: string }[] = [
-      { src: "None()", ctor: "None" },
+      { src: "None", ctor: "None" },
       { src: "Some(1)", ctor: "Some" },
       { src: "Ok(1)", ctor: "Ok" },
       { src: 'Err("e")', ctor: "Err" },
-      { src: "Nil()", ctor: "Nil" },
-      { src: "Cons(1, Nil())", ctor: "Cons" },
+      { src: "Nil", ctor: "Nil" },
+      { src: "Cons(1, Nil)", ctor: "Cons" },
     ];
     for (const { src, ctor } of cases) {
       const r = run(src);
@@ -311,7 +311,7 @@ is-even(4)`;
   n: Int
 }
 let leaf() -> Env =
-  Env(None(), 1)
+  Env(None, 1)
 leaf()`;
     const diags = diagnose(src);
     expect(diags).toEqual([]);
@@ -389,7 +389,7 @@ f(Span(1, 2))`;
 let f(c: Color) -> Int =
   match (c)
     | Color { n } -> n
-f(Red())`;
+f(Red)`;
     const diags = diagnose(src);
     expect(diags.some((d) => d.code === "E_TYPE_MISMATCH")).toBe(true);
   });
@@ -400,7 +400,7 @@ f(Red())`;
     | ([], []) -> true
     | (_ :: xt, _ :: yt) -> same-len(xt, yt)
     | (_, _) -> false
-same-len(Cons(1, Nil()), Cons(2, Nil()))`;
+same-len(Cons(1, Nil), Cons(2, Nil))`;
     const r = run(src);
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "bool") expect(r.value.value).toBe(true);
@@ -410,7 +410,7 @@ same-len(Cons(1, Nil()), Cons(2, Nil()))`;
     const src = `let f(xs: List Int, ys: List Int) -> Int =
   match (xs, ys)
     | ([], []) -> 0
-f(Nil(), Nil())`;
+f(Nil, Nil)`;
     const diags = diagnose(src);
     expect(diags.some((d) => d.code === "E_TYPE_EXHAUSTIVE")).toBe(true);
   });
@@ -420,7 +420,7 @@ f(Nil(), Nil())`;
   match (xs, ys)
     | (x :: _, y :: _) when x == y -> 1
     | (_, _) -> 0
-f(Cons(1, Nil()), Cons(1, Nil()))`;
+f(Cons(1, Nil), Cons(1, Nil))`;
     const r = run(src);
     expect(r.ok).toBe(true);
     if (r.ok && r.value.tag === "int") expect(r.value.value).toBe(1n);
@@ -453,7 +453,7 @@ match ((x, y))
   match (xs, ys)
     | ([], []) -> 0
     | (_, _) -> 1
-f(Nil(), Nil())`;
+f(Nil, Nil)`;
     expect(diagnose(src)).toEqual([]);
   });
 

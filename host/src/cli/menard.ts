@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
- * Thin Menard check/run CLI (Phase 1 host).
- * Exit: 0 ok, 1 program error/panic, 2 interpreter fault
+ * Thin Menard check/run/fix CLI (Phase 1 host).
+ * Exit: 0 ok, 1 program error/panic, 2 interpreter fault / usage
  * `(exit n)` ends the program with status `n & 0xff`.
  * Otherwise an `Int` returned from `main` is that status, as in the native binary.
  *
@@ -16,16 +16,30 @@ import { formatDiagnostics } from "../diagnostic/index.ts";
 import { createLiveHost } from "../host/index.ts";
 import { withInternalGuard } from "./guard.ts";
 import { parseCliArgs } from "./args.ts";
+import { parseFixArgs, runFix } from "./fix.ts";
 
 function usage(): never {
-  console.error("usage: menard <check|run> [--show-result] <file.mnd> [-- arg…]");
+  console.error(
+    "usage: menard <check|run> [--show-result] <file.mnd> [-- arg…]\n" +
+      "       menard fix [--dry-run] [--rule name] <file.mnd…>",
+  );
   process.exit(2);
 }
 
+const argv = process.argv.slice(2);
+if (argv[0] === "fix") {
+  const parsed = parseFixArgs(argv.slice(1));
+  if ("error" in parsed) {
+    console.error(`error: ${parsed.error}`);
+    usage();
+  }
+  process.exit(runFix(parsed));
+}
+
 const showStack = process.env.MENARD_STACK === "1";
-const parsed = parseCliArgs(process.argv.slice(2));
+const parsed = parseCliArgs(argv);
 if (!parsed) usage();
-const { cmd, file, showResult, argv } = parsed;
+const { cmd, file, showResult, argv: progArgv } = parsed;
 
 withInternalGuard(
   () => {
@@ -38,7 +52,7 @@ withInternalGuard(
     }
 
     const path = file;
-    const host = createLiveHost({ realFs: true, argv, spawnEnabled: true });
+    const host = createLiveHost({ realFs: true, argv: progArgv, spawnEnabled: true });
 
     if (cmd === "check") {
       const diags = diagnose(source, { path, host });

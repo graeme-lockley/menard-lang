@@ -154,7 +154,7 @@ pub let make(n: Int) -> Hidden =
   test("a pub signature may name an imported public type", () => {
     const host = hostWith({
       "/color.mnd": `pub type Color =\n  | Red\n`,
-      "/main.mnd": `import "./color.mnd"\npub let paint(c: Color) -> Int =\n  match (c)\n    | Red -> 1\npaint(Red())\n`,
+      "/main.mnd": `import "./color.mnd"\npub let paint(c: Color) -> Int =\n  match (c)\n    | Red -> 1\npaint(Red)\n`,
     });
     const src = host.readFile("/main.mnd");
     if (!src.ok) return;
@@ -166,7 +166,7 @@ pub let make(n: Int) -> Hidden =
     const host = hostWith({
       "/color.mnd": `pub type Color =\n  | Red\n  | Blue\npub let hidden() -> Int =\n  1\n`,
       "/wrap.mnd": `pub import "./color.mnd" (Color)\n`,
-      "/main.mnd": `import "./wrap.mnd"\nlet f(c: Color) -> Int =\n  match (c)\n    | Red -> 1\n    | Blue -> 2\nf(Red())\n`,
+      "/main.mnd": `import "./wrap.mnd"\nlet f(c: Color) -> Int =\n  match (c)\n    | Red -> 1\n    | Blue -> 2\nf(Red)\n`,
     });
     const src = host.readFile("/main.mnd");
     if (!src.ok) return;

@@ -151,7 +151,7 @@ pub let stamp-spans(forms: List Ast, src: Str, origin: Int) -> List Ast =
 let sym-str(a: Ast) -> Maybe Str =
   match (a)
     | SymNode(n, _) -> Some(n)
-    | _ -> None()
+    | _ -> None
 
 let is-sym(a: Ast, name: Str) -> Bool =
   match (sym-str(a))
@@ -278,16 +278,16 @@ let dep-spec-of(path: Str) -> Maybe DepSpec {
         }
   let s1 = index-of-byte(rel, 47, 0)
   cond
-    | s1 < 1 -> None()
+    | s1 < 1 -> None
     | else ->
       {
         let s2 = index-of-byte(rel, 47, s1 + 1)
         cond
-          | s2 < 0 -> None()
+          | s2 < 0 -> None
           | else ->
             {
               let s3 = index-of-byte(rel, 47, s2 + 1)
-              if (s3 < 0) -> None() | Some(DepSpec(String.slice(0, s1, rel), String.slice(s1 + 1, s2 - s1 - 1, rel), String.slice(s2 + 1, s3 - s2 - 1, rel)))
+              if (s3 < 0) -> None | Some(DepSpec(String.slice(0, s1, rel), String.slice(s1 + 1, s2 - s1 - 1, rel), String.slice(s2 + 1, s3 - s2 - 1, rel)))
             }
       }
 }
@@ -347,16 +347,16 @@ let github-ver(spec: Str) -> Maybe GithubVer =
         let rest = drop-prefix(spec, 7)
         let at = index-of-byte(rest, 64, 0)
         cond
-          | at < 1 -> None()
+          | at < 1 -> None
           | else ->
             {
               let owner-repo = String.slice(0, at, rest)
               let after = drop-prefix(rest, at + 1)
               let vslash = index-of-byte(after, 47, 0)
-              if (vslash < 1) -> None() | Some(GithubVer(owner-repo, String.slice(0, vslash, after)))
+              if (vslash < 1) -> None | Some(GithubVer(owner-repo, String.slice(0, vslash, after)))
             }
       }
-    | else -> None()
+    | else -> None
 
 ; Record owner/repo → version. A second version is an error.
 let note-version(versions: Ref (Map Str Str), spec: Str) -> Result Unit Str =
@@ -397,7 +397,7 @@ let spec-text(spec: Ast) -> Maybe Str =
   match (spec)
     | StrNode(s, _) -> Some(s)
     | SymNode(s, _) -> Some(s)
-    | _ -> None()
+    | _ -> None
 
 let parse-import-spec(form: Ast) -> Maybe Str =
   match (form)
@@ -407,9 +407,9 @@ let parse-import-spec(form: Ast) -> Maybe Str =
         | is-sym(head, "import") ->
           match (rest)
             | spec :: _ -> spec-text(spec)
-            | [] -> None()
-        | else -> None()
-    | _ -> None()
+            | [] -> None
+        | else -> None
+    | _ -> None
 
 let unwrap-pub-form(form: Ast) -> Ast =
   match (form)
@@ -440,7 +440,7 @@ let decl-name-of(name-part: Ast) -> Maybe Str =
   match (name-part)
     | SymNode(n, _) -> Some(n)
     | ParenNode(n-ast :: _, _) -> sym-str(n-ast)
-    | _ -> None()
+    | _ -> None
 
 let push-unique(xs: List Str, x: Str) -> List Str =
   match (xs)
@@ -731,7 +731,7 @@ let reexport-requested(rest: List Ast, dep: Str) -> Maybe (List Str) =
   match (rest)
     | [] -> Some(module-names-of(dep))
     | ParenNode(names, _) :: _ -> Some(sym-names(names))
-    | _ -> None()
+    | _ -> None
 
 let sym-names(xs: List Ast) -> List Str =
   match (xs)
@@ -842,7 +842,7 @@ let with-module-init(path: Str, forms: List Ast, inits: Ref (List Str)) -> List 
 
 let return-after-arrow(xs: List Ast) -> Maybe Str =
   match (xs)
-    | [] -> None()
+    | [] -> None
     | x :: rest ->
       cond
         | is-sym(x, "->") ->
@@ -851,7 +851,7 @@ let return-after-arrow(xs: List Ast) -> Maybe Str =
               match (sym-str(ret))
                 | Some(n) -> Some(n)
                 | None -> Some("")
-            | [] -> None()
+            | [] -> None
         | else -> return-after-arrow(rest)
 
 let defn-return-rest(rest: List Ast, want: Str) -> Maybe Str =
@@ -859,19 +859,19 @@ let defn-return-rest(rest: List Ast, want: Str) -> Maybe Str =
     | name-ast :: after ->
       match (sym-str(name-ast))
         | Some(n) ->
-          if (n == want) -> return-after-arrow(after) | None()
-        | None -> None()
-    | [] -> None()
+          if (n == want) -> return-after-arrow(after) | None
+        | None -> None
+    | [] -> None
 
 let defn-return-named(form: Ast, want: Str) -> Maybe Str =
   match (form)
     | ParenNode(head :: rest, _) ->
-      if (is-sym(head, "defn")) -> defn-return-rest(rest, want) | None()
-    | _ -> None()
+      if (is-sym(head, "defn")) -> defn-return-rest(rest, want) | None
+    | _ -> None
 
 let find-main-return(forms: List Ast, want: Str) -> Maybe Str =
   match (forms)
-    | [] -> None()
+    | [] -> None
     | f :: rest ->
       match (defn-return-named(f, want))
         | Some(r) -> Some(r)
@@ -966,17 +966,17 @@ let import-alias-of(form: Ast) -> Maybe Str =
   match (form)
     | ParenNode(head :: rest, sp) ->
       if (is-sym(head, "pub")) -> import-alias-of(ParenNode(rest, sp)) | import-alias-import(head, rest)
-    | _ -> None()
+    | _ -> None
 
 ; Alias of an import form, ignoring every other head.
 let import-alias-import(head: Ast, rest: List Ast) -> Maybe Str =
-  if (is-sym(head, "import")) -> import-alias-rest(rest) | None()
+  if (is-sym(head, "import")) -> import-alias-rest(rest) | None
 
 ; The third element of an import is the alias.
 let import-alias-rest(rest: List Ast) -> Maybe Str =
   match (rest)
     | _ :: mod :: _ -> sym-str(mod)
-    | _ -> None()
+    | _ -> None
 
 ; Map each qualified-import name to its resolved module path.
 let qualified-import-paths(from: Str, forms: List Ast, acc: Map Str Str) -> Map Str Str =
@@ -1173,14 +1173,14 @@ let string-op(name: Str) -> Maybe Str =
     | name == "slice" -> Some("str-slice")
     | name == "concat" -> Some("str-concat")
     | name == "from-char" -> Some("char->str")
-    | else -> None()
+    | else -> None
 
 let map-op(name: Str) -> Maybe Str =
   cond
     | name == "empty" -> Some("map-new")
     | name == "size" -> Some("map-size")
     | name == "keys" -> Some("map-keys")
-    | else -> None()
+    | else -> None
 
 let buffer-op(name: Str) -> Maybe Str =
   cond
@@ -1191,26 +1191,26 @@ let buffer-op(name: Str) -> Maybe Str =
     | name == "clear!" -> Some("sb-clear!")
     | name == "to-str" -> Some("sb-to-str")
     | name == "take-str!" -> Some("sb-take-str!")
-    | else -> None()
+    | else -> None
 
 let runtime-module(path: Str) -> Bool =
   path-ends(path, "/stdlib/string.mnd") || path-ends(path, "/stdlib/map.mnd") || path-ends(path, "/stdlib/string-buffer.mnd")
 
 let runtime-misplaced-list(forms: List Ast) -> Maybe Str =
   match (forms)
-    | [] -> None()
+    | [] -> None
     | f :: rest ->
       if (is-runtime-form(f)) -> Some("runtime is confined to stdlib string, map, and string-buffer") | runtime-misplaced-list(rest)
 
 pub let runtime-misplaced(path: Str, forms: List Ast) -> Maybe Str =
-  if (runtime-module(path)) -> None() | runtime-misplaced-list(forms)
+  if (runtime-module(path)) -> None | runtime-misplaced-list(forms)
 
 let runtime-binding(path: Str, name: Str) -> Maybe Str =
   cond
     | path-ends(path, "/stdlib/string.mnd") -> string-op(name)
     | path-ends(path, "/stdlib/map.mnd") -> map-op(name)
     | path-ends(path, "/stdlib/string-buffer.mnd") -> buffer-op(name)
-    | else -> None()
+    | else -> None
 
 let note-runtime!(symbol: Str, op: Str) -> Unit =
   set!(runtime-ops, Map.set(symbol, op, deref(runtime-ops)))
@@ -1218,8 +1218,8 @@ let note-runtime!(symbol: Str, op: Str) -> Unit =
 let runtime-decl-name(form: Ast) -> Maybe Str =
   match (unwrap-pub-form(form))
     | ParenNode(head :: name :: _, _) ->
-      if (is-sym(head, "runtime")) -> decl-name-of(name) | None()
-    | _ -> None()
+      if (is-sym(head, "runtime")) -> decl-name-of(name) | None
+    | _ -> None
 
 let note-renamed-runtime-list!(path: Str, forms: List Ast, renames: Map Str Str) -> Unit =
   match (forms)

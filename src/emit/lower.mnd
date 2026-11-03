@@ -198,7 +198,7 @@ import std/string-buffer as Buf
 let sym-str(ast: Ast) -> Maybe Str =
   match (ast)
     | SymNode(n, _) -> Some(n)
-    | _ -> None()
+    | _ -> None
 
 let is-sym(ast: Ast, name: Str) -> Bool =
   match (sym-str(ast))
@@ -269,7 +269,7 @@ record ArrowSplit {
 
 let find-arrow(elems: List Ast) -> Maybe ArrowSplit =
   match (elems)
-    | [] -> None()
+    | [] -> None
     | e :: rest -> find-arrow-cons(e, rest)
 
 let find-arrow-cons(e: Ast, rest: List Ast) -> Maybe ArrowSplit =
@@ -277,7 +277,7 @@ let find-arrow-cons(e: Ast, rest: List Ast) -> Maybe ArrowSplit =
 
 let find-arrow-cons-recurse(e: Ast, rest: List Ast) -> Maybe ArrowSplit =
   match (find-arrow(rest))
-    | None -> None()
+    | None -> None
     | Some(split) -> Some(ArrowSplit(e :: arrow-split-before(split), arrow-split-after(split)))
 
 let arrow-split-before(s: ArrowSplit) -> List Ast =
@@ -291,12 +291,12 @@ let arrow-split-after(s: ArrowSplit) -> List Ast =
 let param-of(ast: Ast) -> Maybe LParam =
   match (ast)
     | ParenNode(name-ast :: ty-ast :: _, _) -> param-of-named(name-ast, ty-ast)
-    | _ -> None()
+    | _ -> None
 
 let param-of-named(name-ast: Ast, ty-ast: Ast) -> Maybe LParam =
   match (sym-str(name-ast))
     | Some(n) -> Some(LParam(strip-trailing-colon(n), ty-ast))
-    | None -> None()
+    | None -> None
 
 let params-of(elems: List Ast) -> List LParam =
   match (elems)
@@ -314,27 +314,27 @@ let defn-name-of(name-part: Ast) -> Maybe Str =
   match (name-part)
     | SymNode(n, _) -> Some(n)
     | ParenNode(n-ast :: _, _) -> sym-str(n-ast)
-    | _ -> None()
+    | _ -> None
 
 let parse-ldefn(elems: List Ast) -> Maybe LDefn =
   match (elems)
     | _ :: name-part :: rest -> parse-ldefn-named(name-part, rest)
-    | _ -> None()
+    | _ -> None
 
 let parse-ldefn-named(name-part: Ast, rest: List Ast) -> Maybe LDefn =
   match (defn-name-of(name-part))
-    | None -> None()
+    | None -> None
     | Some(name) -> parse-ldefn-header(name, rest)
 
 let parse-ldefn-header(name: Str, rest: List Ast) -> Maybe LDefn =
   match (find-arrow(rest))
-    | None -> None()
+    | None -> None
     | Some(split) -> parse-ldefn-ret(name, params-of(arrow-split-before(split)), arrow-split-after(split))
 
 let parse-ldefn-ret(name: Str, params: List LParam, after: List Ast) -> Maybe LDefn =
   match (after)
     | ret-ast :: body -> Some(LDefn(name, params, ret-ast, body))
-    | [] -> None()
+    | [] -> None
 
 ; `(pub defn …)` — strip the `pub` wrapper; every other top-level shape
 ; (`defrec`, `variant`, `alias`, a bare expression, …) is not a `defn` and
@@ -350,10 +350,10 @@ let unwrap-pub-head(head: Ast, rest: List Ast, sp: Span, ast: Ast) -> Ast =
 let top-form-ldefn(ast: Ast) -> Maybe LDefn =
   match (unwrap-pub(ast))
     | ParenNode(head :: rest, _) -> top-form-ldefn-named(head, rest)
-    | _ -> None()
+    | _ -> None
 
 let top-form-ldefn-named(head: Ast, rest: List Ast) -> Maybe LDefn =
-  if (is-sym(head, "defn")) -> parse-ldefn(head :: rest) | None()
+  if (is-sym(head, "defn")) -> parse-ldefn(head :: rest) | None
 
 let collect-ldefns-all(forms: List Ast) -> List LDefn =
   match (forms)
@@ -513,7 +513,7 @@ let collect-noop-names-cons(ld: LDefn, rest: List LDefn) -> Map Str Bool =
 
 let find-ldefn-named(lds: List LDefn, name: Str) -> Maybe LDefn =
   match (lds)
-    | [] -> None()
+    | [] -> None
     | ld :: rest ->
       if (ldefn-name(ld) == name) -> Some(ld) | find-ldefn-named(rest, name)
 
@@ -744,7 +744,7 @@ let pop-loop-frame!(b: Builder) -> Unit =
 
 let current-loop-frame(b: Builder) -> Maybe LoopFrame =
   match (deref(b-loops(b)))
-    | [] -> None()
+    | [] -> None
     | lf :: _ -> Some(lf)
 
 let emit-pending!(b: Builder, p: PendingItem) -> Unit {
@@ -1002,7 +1002,7 @@ let emit-ret!(b: Builder, val-abs: Int) -> Unit {
 }
 
 let emit-unreachable!(b: Builder) -> Unit {
-  emit!(b, IUnreachable())
+  emit!(b, IUnreachable)
   mark-terminated!(b)
 }
 
@@ -1726,13 +1726,13 @@ let binding-pair-of(ast: Ast) -> Maybe (List Ast) =
   match (ast)
     | ParenNode([name-ast, init-ast], _) -> Some([name-ast, init-ast])
     | BracketNode([name-ast, init-ast], _) -> Some([name-ast, init-ast])
-    | _ -> None()
+    | _ -> None
 
 let binding-list-elems(ast: Ast) -> Maybe (List Ast) =
   match (ast)
     | ParenNode(elems, _) -> Some(elems)
     | BracketNode(elems, _) -> Some(elems)
-    | _ -> None()
+    | _ -> None
 
 let lower-loop(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (rest)
@@ -1850,7 +1850,7 @@ let decl-name-of(name-part: Ast) -> Maybe Str =
   match (name-part)
     | SymNode(n, _) -> Some(n)
     | ParenNode(n-ast :: _, _) -> sym-str(n-ast)
-    | _ -> None()
+    | _ -> None
 
 let register-ctor-spec(acc: Map Str CtorSpec, name: Str, arity: Int, tag-ref: Ref Int) -> Map Str CtorSpec {
   let tag = deref(tag-ref)
@@ -1960,7 +1960,7 @@ let builtin-ctor-tag-of(hn: Str) -> Maybe Int =
     | hn == "InvalidArgument" -> Some(34)
     | hn == "TooManyArguments" -> Some(35)
     | hn == "Unsupported" -> Some(36)
-    | else -> None()
+    | else -> None
 
 let ctor-tag-of(hn: Str, pool: StrPool) -> Maybe Int =
   match (builtin-ctor-tag-of(hn))
@@ -1968,14 +1968,14 @@ let ctor-tag-of(hn: Str, pool: StrPool) -> Maybe Int =
     | None ->
       match (Map.lookup(hn, str-pool-ctors(pool)))
         | Some(spec) -> Some(ctor-spec-tag(spec))
-        | None -> None()
+        | None -> None
 
 let seam-fixed-arity(hn: Str) -> Maybe Int =
   cond
     | hn == "SpawnOutput" -> Some(3)
     | hn == "Other" || hn == "Exited" || hn == "Signalled" -> Some(1)
     | hn == "NotFound" || hn == "Permission" || hn == "Exists" || hn == "IsADirectory" || hn == "NotADirectory" || hn == "InvalidPath" || hn == "TooLarge" || hn == "Timeout" || hn == "NotExecutable" || hn == "InvalidArgument" || hn == "TooManyArguments" || hn == "Unsupported" -> Some(0)
-    | else -> None()
+    | else -> None
 
 let ctor-arity-of(hn: Str, pool: StrPool) -> Int =
   match (seam-fixed-arity(hn))
@@ -2314,7 +2314,7 @@ let pat-ctor-name(pat: Ast) -> Maybe Str =
   match (pat)
     | ParenNode(head :: _, _) -> sym-str(head)
     | SymNode(n, _) -> Some(n)
-    | _ -> None()
+    | _ -> None
 
 let pat-payload-asts(pat: Ast) -> List Ast =
   match (pat)
@@ -2608,15 +2608,15 @@ record SimpleLet {
 let as-simple-let(f: Ast) -> Maybe SimpleLet =
   match (f)
     | ParenNode([head, name-ast, expr-ast], _) -> as-simple-let-named(head, name-ast, expr-ast)
-    | _ -> None()
+    | _ -> None
 
 let as-simple-let-named(head: Ast, name-ast: Ast, expr-ast: Ast) -> Maybe SimpleLet =
   cond
     | is-sym(head, "let") ->
       match (sym-str(name-ast))
         | Some(n) -> Some(SimpleLet(n, expr-ast))
-        | None -> None()
-    | else -> None()
+        | None -> None
+    | else -> None
 
 let is-unit-noop-call(f: Ast, noop: Map Str Bool) -> Bool =
   match (f)
@@ -3452,22 +3452,22 @@ let is-mn-extern-name(n: Str) -> Bool =
 
 let extern-imp-from-arrow(name: Str, rest: List Ast) -> Maybe Imp =
   match (find-arrow(rest))
-    | None -> None()
+    | None -> None
     | Some(split) -> Some(Imp(name, name, param-arity-of(params-of(arrow-split-before(split)))))
 
 let extern-imp-named(name: Str, rest: List Ast) -> Maybe Imp =
-  if (is-mn-extern-name(name)) -> None() | extern-imp-from-arrow(name, rest)
+  if (is-mn-extern-name(name)) -> None | extern-imp-from-arrow(name, rest)
 
 let extern-imp-of-extern(name-part: Ast, rest: List Ast) -> Maybe Imp =
   match (defn-name-of(name-part))
-    | None -> None()
+    | None -> None
     | Some(name) -> extern-imp-named(name, rest)
 
 let extern-imp-of(form: Ast) -> Maybe Imp =
   match (unwrap-pub(form))
     | ParenNode(head :: name-part :: rest, _) ->
-      if (is-sym(head, "extern")) -> extern-imp-of-extern(name-part, rest) | None()
-    | _ -> None()
+      if (is-sym(head, "extern")) -> extern-imp-of-extern(name-part, rest) | None
+    | _ -> None
 
 let collect-ffi-imps(forms: List Ast) -> List Imp =
   match (forms)
@@ -3501,10 +3501,10 @@ let value-let-name(form: Ast) -> Maybe Str =
       cond
         | is-sym(head, "let") ->
           match (expr)
-            | IntNode(_, _) -> None()
+            | IntNode(_, _) -> None
             | _ -> sym-str(name)
-        | else -> None()
-    | _ -> None()
+        | else -> None
+    | _ -> None
 
 let top-value-let-names(forms: List Ast) -> List Str =
   match (forms)

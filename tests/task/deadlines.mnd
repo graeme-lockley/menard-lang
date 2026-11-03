@@ -13,7 +13,7 @@ let main() -> Int {
     7
   })
   match (Task.join-timeout(t, 5))
-    | Err(Task.JoinTimeout()) -> println(2)
+    | Err(Task.JoinTimeout) -> println(2)
     | Ok(_) -> println(0)
   match (Task.join(t))
     | Ok(7) -> println(3)

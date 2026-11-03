@@ -161,7 +161,7 @@ function installBuiltins(env: TypeEnv): void {
   });
   env.ctors.set("None", { typeName: "Maybe", payloads: [], params: ["a"] });
   env.ctors.set("Some", { typeName: "Maybe", payloads: [a], params: ["a"] });
-  env.values.set("None", { params: ["a"], type: tFn([], tMaybe(a)) });
+  env.values.set("None", { params: ["a"], type: tMaybe(a) });
   env.values.set("Some", { params: ["a"], type: tFn([a], tMaybe(a)) });
 
   env.types.set("Result", {
@@ -199,7 +199,7 @@ function installBuiltins(env: TypeEnv): void {
     payloads: [a, tList(a)],
     params: ["a"],
   });
-  env.values.set("Nil", { params: ["a"], type: tFn([], tList(a)) });
+  env.values.set("Nil", { params: ["a"], type: tList(a) });
   env.values.set("Cons", { params: ["a"], type: tFn([a, tList(a)], tList(a)) });
 
   void F;
@@ -974,17 +974,16 @@ function collectDef(env: TypeEnv, ast: Ast): void {
       const existing = env.ctors.get(cname);
       if (existing && existing.typeName !== name) continue;
       env.ctors.set(cname, { typeName: name, payloads, params });
+      const nominal: Type = {
+        tag: "nominal",
+        name,
+        args: params.map((p) => ({ tag: "param" as const, name: p })),
+        kind: "variant",
+      };
+      // Nullary constructors are values of the nominal type (LANG-07).
       env.values.set(cname, {
         params,
-        type: tFn(
-          payloads,
-          {
-            tag: "nominal",
-            name,
-            args: params.map((p) => ({ tag: "param" as const, name: p })),
-            kind: "variant",
-          },
-        ),
+        type: payloads.length === 0 ? nominal : tFn(payloads, nominal),
       });
     }
     env.types.set(name, { kind: "variant", name, params, ctors, span: ast.span });
@@ -1995,6 +1994,13 @@ function callHeadName(head: Ast): string | null {
   return null;
 }
 
+/** True when `name` names a constructor with no payload in this env. */
+function isNullaryCtor(env: TypeEnv, name: string | null): boolean {
+  if (!name) return false;
+  const ctor = env.ctors.get(name);
+  return ctor !== undefined && ctor.payloads.length === 0;
+}
+
 function inferApp(
   env: TypeEnv,
   ast: Ast & { tag: "list" },
@@ -2002,6 +2008,7 @@ function inferApp(
   subst: Subst,
 ): Type {
   const hn = callHeadName(ast.elems[0]!) ?? symStr(ast.elems[0]!);
+  const headSym = symStr(ast.elems[0]!);
 
   // Variadic print / println: Str raw; other args must be showable
   if (hn === "print" || hn === "println") {
@@ -2018,6 +2025,27 @@ function inferApp(
       }
     }
     return prim("Unit");
+  }
+
+  // LANG-07: nullary constructors are values; `None()` / `Red()` is an error.
+  // A bare local shadow of the name is an ordinary (failed) application.
+  const nullaryName =
+    headSym && !local.has(headSym) && isNullaryCtor(env, headSym)
+      ? headSym
+      : hn && isNullaryCtor(env, hn)
+        ? hn
+        : null;
+  if (nullaryName !== null && ast.elems.length === 1) {
+    err(
+      env,
+      "E_TYPE_NULLARY_CALL",
+      `nullary constructor ${nullaryName} cannot be called`,
+      ast.span,
+      [{ message: `help: remove the parentheses; ${nullaryName} is a value` }],
+    );
+    return env.values.has(nullaryName)
+      ? instantiate(env, env.values.get(nullaryName)!)
+      : freshVar(env);
   }
 
   const callee = infer(env, ast.elems[0]!, local, subst);

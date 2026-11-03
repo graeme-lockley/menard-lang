@@ -231,6 +231,12 @@ forward declaration with no constructors is not part of this syntax. The typer
 registers every type name before checking payloads, so a type may mention
 itself.
 
+In expression position a nullary constructor is that bare name — a value of
+the nominal type (`None`, `Red`, `JsonNull`). Writing `None()` or `Red()` is
+`E_TYPE_NULLARY_CALL`. A constructor with a payload is still applied:
+`Some(1)`, `Rgb(1, 2, 3)`. Zero-argument functions (`Map.empty()`) are
+unchanged.
+
 ### 2.1 Function declarations and function values
 
 A top-level `let` whose name is followed by a parameter list is a known
@@ -551,7 +557,8 @@ guarded     = pattern ["when" expr]
 ```
 
 A constructor pattern uses the same parentheses as a call. A nullary
-constructor is a bare name. A record pattern is positional, in field
+constructor is a bare name (`| None ->`, `| Red ->`) — the same spelling as
+the expression form. A record pattern is positional, in field
 declaration order: `Counts(p, f)`, `Span(s, _, _, _)`. The same record may
 name the fields it binds: `Span { line }`. Omitted fields are wildcards. A
 bare name binds a local of that name. There is no `field: local` rename.

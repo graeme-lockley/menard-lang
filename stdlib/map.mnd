@@ -14,7 +14,7 @@ pub let set[k, v](k2: k, v2: v, m: Map k v) -> Map k v =
   map-set(m, k2, v2)
 
 ; The value stored at k2, or None when the key is absent.
-; @test lookup("z", set("a", 1, empty())) => None()
+; @test lookup("z", set("a", 1, empty())) => None
 pub let lookup[k, v](k2: k, m: Map k v) -> Maybe v =
   map-get(m, k2)
 
@@ -51,7 +51,7 @@ let from-list-onto[k, v](pairs: List (k * v), acc: Map k v) -> Map k v =
 
 ; A map holding each pair. A repeated key keeps the last value.
 ; @test lookup("a", from-list([("a", 1)])) => Some(1)
-; @test lookup("z", from-list([("a", 1)])) => None()
+; @test lookup("z", from-list([("a", 1)])) => None
 ; @test lookup("a", from-list([("a", 1), ("a", 2)])) => Some(2)
 pub let from-list[k, v](pairs: List (k * v)) -> Map k v =
   from-list-onto(pairs, empty())
@@ -140,7 +140,7 @@ let pairs-without[k, v](pairs: List (k * v), key: k) -> List (k * v) =
       if (k2 == key) -> pairs-without(rest, key) | (k2, val) :: pairs-without(rest, key)
 
 ; m without key. Other entries stay. There is no map-delete builtin, so this rebuilds.
-; @test lookup("a", remove("a", from-list([("a", 1), ("b", 2)]))) => None()
+; @test lookup("a", remove("a", from-list([("a", 1), ("b", 2)]))) => None
 ; @test lookup("b", remove("a", from-list([("a", 1), ("b", 2)]))) => Some(2)
 pub let remove[k, v](key: k, m: Map k v) -> Map k v =
   from-list(pairs-without(to-list(m), key))

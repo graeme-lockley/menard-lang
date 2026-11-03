@@ -1,0 +1,17 @@
+; LANG-07 corpus: bare nullary constructors as values.
+type Color =
+  | Red
+  | Blue
+  | Green
+
+let main() -> Int {
+  let xs = [Red, Blue, Green]
+  match (xs)
+    | [Red, Blue, Green] ->
+      {
+        println(show(None))
+        println(show(Red))
+        0
+      }
+    | _ -> 1
+}

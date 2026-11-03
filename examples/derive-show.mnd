@@ -13,6 +13,6 @@ type Color =
 
 let main() -> Unit {
   println(Point(1, 2))
-  println(Red())
+  println(Red)
   println(Rgb(3, 4, 5))
 }

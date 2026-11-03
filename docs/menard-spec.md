@@ -236,7 +236,7 @@ is exactly what makes this safe, and it is the same rule that already covers
 - `Float` **literals**;
 - interned `Sym` names;
 - **every nullary variant constructor** — `None`, and each payload-free
-  constructor such as `(Empty)`, `(NotFound)`, `(Permission)`.
+  constructor such as `Empty`, `NotFound`, `Permission`.
 
 The last entry is worth stating generally. Because every value is one word and no
 operation consults per-type metadata — types are erased — `Maybe Int` and
@@ -1577,10 +1577,10 @@ same spelling, because the spelling is defined on bytes alone.
 | `Sym` | `'` followed by the name bytes, unescaped |
 | `Float` | shortest round-trip decimal under a fixed grammar (optional `-`, digits, optional fraction, optional `e`/`E` with a mandatory sign on the exponent); always a float lexeme (contains `.` or `e`); `0.0` / `-0.0` distinct in text and under `=`; non-finites are `nan`, `inf`, `-inf`; every NaN is one quiet payload so `nan = nan` (§2.12). The C implementation (`mn_format_float`) is normative; the interpreter must match it byte for byte. |
 | record | `(Name f1 f2 …)` in declaration order |
-| variant | `(Con payload…)` |
+| variant | nullary: `Con`; with payload: `(Con payload…)` (LANG-01 will move payloads to call syntax) |
 | `(List T)` / `(Arr T n)` | `[e1 e2 …]` |
 | `(Map K V)` | `{k1 => v1, k2 => v2, …}` in sorted key order, the same spelling as a map literal |
-| `(Maybe T)` / `(Result T E)` | `(Some v)` / `(None)` / `(Ok v)` / `(Err e)` |
+| `(Maybe T)` / `(Result T E)` | `(Some v)` / `None` / `(Ok v)` / `(Err e)` |
 | `Ref`, `StringBuffer`, `Fn` | **no spelling — a compile error to show** (§2.12). Debug output is a separate contract: §2.16 |
 
 A source literal may spell the same bytes with the escapes in [syntax.md](syntax.md) §1.4. Those spellings are decoded before the value exists. `show` keeps the one spelling in the table, raw bytes included, so a string that is not valid UTF-8 still has a spelling.

@@ -2,7 +2,7 @@
 
 **Source of truth for status.** The specification and acceptance criteria are the [Build F review](reviews/2026-10-24-build-f.md); this file is the live work queue. GitHub issues are the public work items and discussion, linked by the same ID. The review is deliberately not the tracker: do not tick its checkboxes.
 
-- **First item:** continue [LANG-01](reviews/2026-10-24-build-f.md#lang-01) (after [LANG-07](reviews/2026-10-24-build-f.md#lang-07) / [LANG-10](reviews/2026-10-24-build-f.md#lang-10)), or start [LANG-07](reviews/2026-10-24-build-f.md#lang-07) / [LANG-10](reviews/2026-10-24-build-f.md#lang-10); see `make next`.
+- **First item:** continue [LANG-01](reviews/2026-10-24-build-f.md#lang-01) (after [LANG-10](reviews/2026-10-24-build-f.md#lang-10)), or start [LANG-10](reviews/2026-10-24-build-f.md#lang-10); see `make next`.
 - **Phase 0 epic:** [#30](https://github.com/graeme-lockley/menard-lang/issues/30) — Phase 0 checklist (originally 18 items; LANG-07 and LANG-10 were promoted in to unblock `show`).
 - **Opened:** the original 18 Phase 0 issues were opened on 2026-10-24, all in the `v0.6 — Truth and trust` milestone.
 - **Phase 0** is the current focus. Everything else is `todo` until its phase opens.
@@ -16,13 +16,13 @@
 
 | Phase | Theme | Items | Ready | In progress | Done |
 | --- | --- | ---: | ---: | ---: | ---: |
-| 0 | Truth, trust and the unsafe edges | 21 | 10 | 1 | 10 |
+| 0 | Truth, trust and the unsafe edges | 21 | 9 | 1 | 11 |
 | 1 | Daily loop and language decisions | 16 | 0 | 0 | 0 |
 | 2 | Standard library | 12 | 0 | 0 | 0 |
 | 3 | Operational concurrency | 8 | 0 | 0 | 0 |
 | 4 | Project and ecosystem | 17 | 0 | 0 | 0 |
 | 5 | Later | 9 | 0 | 0 | 0 |
-| **Total** | | **83** | **10** | **1** | **10** |
+| **Total** | | **83** | **9** | **1** | **11** |
 
 Priority mix: P0 = 24, P1 = 35, P2 = 19, P3 = 5.
 
@@ -47,7 +47,7 @@ Rows are ordered by phase, then priority, then area, then ID.
 | [OTH-01](reviews/2026-10-24-build-f.md#oth-01) | Add an MIT licence | Other | P0 | 0 | done | — | [#24](https://github.com/graeme-lockley/menard-lang/issues/24) | [#34](https://github.com/graeme-lockley/menard-lang/pull/34) |
 | [OTH-02](reviews/2026-10-24-build-f.md#oth-02) | Harden CI, add OpenSSL and macOS, and run the new checks | Other | P0 | 0 | ready | TOOL-01, TOOL-03, TOOL-05, CONC-03, CONC-04, CONC-10, OTH-03 | [#25](https://github.com/graeme-lockley/menard-lang/issues/25) | — |
 | [OTH-03](reviews/2026-10-24-build-f.md#oth-03) | Build the regression corpus the P0 bugs prove is missing | Other | P0 | 0 | ready | LANG-01, LANG-02, LANG-03, LANG-04, LANG-06, LANG-07, LANG-15, CONC-01, CONC-03, CONC-04, CONC-06, LIB-06 | [#26](https://github.com/graeme-lockley/menard-lang/issues/26) | — |
-| [LANG-07](reviews/2026-10-24-build-f.md#lang-07) | Nullary constructors are values; the `None()`/`Red()` call form is removed | Language | P1 | 0 | ready | — | [#47](https://github.com/graeme-lockley/menard-lang/issues/47) | — |
+| [LANG-07](reviews/2026-10-24-build-f.md#lang-07) | Nullary constructors are values; the `None()`/`Red()` call form is removed | Language | P1 | 0 | done | — | [#47](https://github.com/graeme-lockley/menard-lang/issues/47) | [#53](https://github.com/graeme-lockley/menard-lang/pull/53) |
 | [LANG-09](reviews/2026-10-24-build-f.md#lang-09) | Operator-spacing diagnostics, and a real `help:` line | Language | P1 | 0 | ready | TOOL-03 | [#16](https://github.com/graeme-lockley/menard-lang/issues/16) | — |
 | [LANG-10](reviews/2026-10-24-build-f.md#lang-10) | `Char` shows as a decimal number | Language | P1 | 0 | ready | — | [#48](https://github.com/graeme-lockley/menard-lang/issues/48) | — |
 | [LANG-16](reviews/2026-10-24-build-f.md#lang-16) | Aliased imports must carry re-exported types | Language | P1 | 0 | ready | LANG-04 | [#52](https://github.com/graeme-lockley/menard-lang/issues/52) | — |

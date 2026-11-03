@@ -41,8 +41,9 @@ describe("backlog next", () => {
     const report = buildReport(rows);
     expect(report.cycles).toEqual([]);
     expect(rows.find((r) => r.id === "CONC-10")?.status).toBe("done");
-    // A ready Phase 0 item keeps the same point: the cycle fix leaves real work startable.
-    expect(report.startNow.map((r) => r.id)).toContain("LANG-07");
+    expect(rows.find((r) => r.id === "LANG-07")?.status).toBe("done");
+    // A ready Phase 0 item keeps the same point after LANG-07 landed.
+    expect(report.startNow.map((r) => r.id)).toContain("LANG-10");
   });
 
   test("starts only fully unblocked rows in the current phase", () => {

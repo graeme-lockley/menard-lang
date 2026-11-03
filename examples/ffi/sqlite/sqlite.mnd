@@ -19,7 +19,7 @@ extern sql_errmsg() -> Str
 
 let decode-err(code: Int) -> SqlError =
   cond
-    | code == 2 -> SqlBadState()
+    | code == 2 -> SqlBadState
     | else -> SqlErr(sql_errmsg())
 
 let map-unit(r: Result Unit Int) -> Result Unit SqlError =
@@ -37,7 +37,7 @@ let map-json-str(r: Result Str Int) -> Result Str SqlError =
 let parse-row(v: Json) -> Result (Map Str Json) SqlError =
   match (v)
     | JsonObject(m) -> Ok(m)
-    | _ -> Err(SqlBadJson())
+    | _ -> Err(SqlBadJson)
 
 let parse-rows(v: Json) -> Result (List (Map Str Json)) SqlError =
   match (v)
@@ -49,11 +49,11 @@ let parse-rows(v: Json) -> Result (List (Map Str Json)) SqlError =
             match (parse-row(h))
               | Err(e) -> Err(e)
               | Ok(row) -> recur(t, row :: acc)
-    | _ -> Err(SqlBadJson())
+    | _ -> Err(SqlBadJson)
 
 let decode-rows(s: Str) -> Result (List (Map Str Json)) SqlError =
   match (decode(s))
-    | Err(_) -> Err(SqlBadJson())
+    | Err(_) -> Err(SqlBadJson)
     | Ok(v) -> parse-rows(v)
 
 pub let open(path: Str) -> Result Unit SqlError =

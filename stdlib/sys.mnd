@@ -27,6 +27,6 @@ pub let arg(i: Int) -> Str =
 
 ; The environment value named name, or None when it is unset.
 ; @test getenv("PATH")
-; @test getenv("MENARD_NOT_A_REAL_VAR") => None()
+; @test getenv("MENARD_NOT_A_REAL_VAR") => None
 pub let getenv(name: Str) -> Maybe Str =
   mn_getenv(name)

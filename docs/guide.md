@@ -267,6 +267,9 @@ type Color =
   | Rgb(r: Int, g: Int, b: Int)
 ```
 
+A nullary constructor is a value of its type — write `Red`, not `Red()`. A
+constructor with a payload is still a call: `Rgb(1, 2, 3)`, `Some(1)`.
+
 `Maybe`, `Result`, and `List` are variants the language already knows:
 
 ```
@@ -279,7 +282,8 @@ type Result[t, e] =
   | Err(e)
 ```
 
-`[]` is the empty list. `1 :: xs` is cons. `[1, 2, 3]` is that written out.
+`None` and `Nil` are values. `Some(1)` and `Cons(1, xs)` are calls. `[]` is
+the empty list. `1 :: xs` is cons. `[1, 2, 3]` is that written out.
 
 ### Polymorphism
 
