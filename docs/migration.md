@@ -30,5 +30,12 @@ it does not strip `()` from payload constructors or zero-argument functions,
 and it does not rewrite match patterns (fix those by hand if they still use
 `Name()`).
 
+Rewrites are **byte-accurate**: edits use the reader's UTF-8 byte spans
+(`host/src/reader/span.ts`) via the shared applicator
+`host/src/fix/apply-rewrites.ts` (`applyByteRewrites`). Unrelated bytes —
+including non-ASCII comments/strings and `\n` / `\r\n` line endings — are
+copied unchanged. TOOL-12 rules must reuse this contract and must not slice
+JavaScript strings with parser byte offsets.
+
 **Edition.** Tied to OTH-10 when editions land; until then this is a flag-day
 change for anyone on the old call form.
