@@ -1,0 +1,86 @@
+; CONC-03: stalled TLS handshake parks off the mutator; other tasks run.
+import std/net as Net
+pub import std/io (IoError)
+import std/task as Task
+import std/sched as Sched
+
+let main() -> Int {
+  match (Net.listen(0))
+    | Err(_) -> {
+        println("listen-fail")
+        1
+      }
+    | Ok(listener) -> {
+        defer Net.close(listener)
+        match (Net.local-port(listener))
+          | Err(_) -> {
+              println("port-fail")
+              1
+            }
+          | Ok(port) -> {
+              ; Accept TCP but never speak TLS — client handshake stalls.
+              let acceptor = Task.spawn(fn () = {
+                match (Net.accept(listener))
+                  | Err(_) -> 1
+                  | Ok(conn) -> {
+                      ; Hold the fd open until cancelled; no tls-server.
+                      Task.sleep-ms(500)
+                      Net.close(conn)
+                      0
+                    }
+              })
+              let progress = ref(0)
+              let ticker = Task.spawn(fn () = {
+                loop ()
+                  if (deref(progress) >= 5) -> 5 | {
+                    set!(progress, deref(progress) + 1)
+                    Task.sleep-ms(5)
+                    recur()
+                  }
+              })
+              match (Net.connect("127.0.0.1", port))
+                | Err(_) -> {
+                    println("connect-fail")
+                    Task.cancel(acceptor)
+                    Task.cancel(ticker)
+                    1
+                  }
+                | Ok(c) -> {
+                    defer Net.close(c)
+                    let hs = Task.spawn(fn () =
+                      Net.tls-client-insecure-timeout(c, "localhost", 80))
+                    match (Task.join(ticker))
+                      | Ok(5) -> {
+                          match (Task.join(hs))
+                            | Ok(Err(Timeout)) -> {
+                                Task.cancel(acceptor)
+                                Task.join(acceptor)
+                                println("live")
+                                0
+                              }
+                            | Ok(Err(e)) -> {
+                                ; Handshake may fail as TlsHandshakeFailed if peer closes.
+                                println(show(e))
+                                Task.cancel(acceptor)
+                                Task.join(acceptor)
+                                ; Still prove ticker completed while handshake ran.
+                                println("live")
+                                0
+                              }
+                            | _ -> {
+                                println("hs-unexpected")
+                                Task.cancel(acceptor)
+                                Task.join(acceptor)
+                                1
+                              }
+                      }
+                      | _ -> {
+                          println("ticker-fail")
+                          Task.cancel(hs)
+                          Task.cancel(acceptor)
+                          1
+                        }
+                  }
+            }
+      }
+}

@@ -1,0 +1,265 @@
+; CONC-03: TLS peer verification, SNI, and typed errors.
+; Expects MENARD_TLS_CA_FILE (and optional MENARD_TLS_SNI_*) from the harness.
+import std/net as Net
+pub import std/io (IoError)
+import std/task as Task
+import std/sched as Sched
+
+let cert = "tests/net/certs/localhost.crt"
+let key = "tests/net/certs/localhost.key"
+let sni-default-cert = "tests/net/certs/sni-b.crt"
+let sni-default-key = "tests/net/certs/sni-b.key"
+
+; Echo one TLS message; host is the SNI/hostname the client must present.
+let serve-echo(cert-path: Str, key-path: Str, ready: Int, port-cell: Ref Int) -> Int {
+  match (Net.listen(0))
+    | Err(_) -> {
+        Sched.notify(ready)
+        1
+      }
+    | Ok(listener) -> {
+        defer Net.close(listener)
+        match (Net.local-port(listener))
+          | Err(_) -> {
+              Sched.notify(ready)
+              1
+            }
+          | Ok(port) -> {
+              set!(port-cell, port)
+              Sched.notify(ready)
+              match (Net.accept(listener))
+                | Err(_) -> 1
+                | Ok(conn) -> {
+                    defer Net.close(conn)
+                    match (Net.tls-server(conn, cert-path, key-path))
+                      | Err(_) -> 1
+                      | Ok(tls) -> {
+                          defer Net.tls-close(tls)
+                          match (Net.tls-read(tls, 64))
+                            | Err(_) -> 1
+                            | Ok(data) -> {
+                                Net.tls-write(tls, data)
+                                0
+                              }
+                        }
+                  }
+            }
+      }
+}
+
+let step-bad-path() -> Int {
+  match (Net.listen(0))
+    | Err(_) -> 1
+    | Ok(listener) -> {
+        defer Net.close(listener)
+        match (Net.local-port(listener))
+          | Err(_) -> 1
+          | Ok(port) -> {
+              let ready = Sched.wait-new()
+              let acceptor = Task.spawn(fn () = {
+                Sched.notify(ready)
+                match (Net.accept(listener))
+                  | Err(_) -> 1
+                  | Ok(conn) -> {
+                      defer Net.close(conn)
+                      match (Net.tls-server(conn, "tests/net/certs/no-such.crt", key))
+                        | Err(NotFound) -> 0
+                        | Err(_) -> 2
+                        | Ok(tls) -> {
+                            Net.tls-close(tls)
+                            3
+                          }
+                    }
+              })
+              Sched.wait(ready)
+              match (Net.connect("127.0.0.1", port))
+                | Err(_) -> {
+                    Task.cancel(acceptor)
+                    Task.join(acceptor)
+                    1
+                  }
+                | Ok(c) -> {
+                    defer Net.close(c)
+                    Net.tls-client-insecure-timeout(c, "localhost", 200)
+                    match (Task.join(acceptor))
+                      | Ok(0) -> 0
+                      | _ -> 1
+                  }
+            }
+      }
+}
+
+let step-verify-ok() -> Int {
+  let ready = Sched.wait-new()
+  let port-cell = ref(0)
+  let server = Task.spawn(fn () = serve-echo(cert, key, ready, port-cell))
+  Sched.wait(ready)
+  match (Net.connect("127.0.0.1", deref(port-cell)))
+    | Err(_) -> {
+        Task.cancel(server)
+        Task.join(server)
+        1
+      }
+    | Ok(c) -> {
+        defer Net.close(c)
+        match (Net.tls-client(c, "localhost"))
+          | Err(_) -> {
+              Task.cancel(server)
+              Task.join(server)
+              1
+            }
+          | Ok(tls) -> {
+              defer Net.tls-close(tls)
+              Net.tls-write(tls, "ping")
+              match (Net.tls-read(tls, 64))
+                | Ok("ping") -> {
+                    Task.join(server)
+                    0
+                  }
+                | _ -> {
+                    Task.cancel(server)
+                    Task.join(server)
+                    1
+                  }
+            }
+      }
+}
+
+let step-wrong-host() -> Int {
+  let ready = Sched.wait-new()
+  let port-cell = ref(0)
+  let server = Task.spawn(fn () = serve-echo(cert, key, ready, port-cell))
+  Sched.wait(ready)
+  match (Net.connect("127.0.0.1", deref(port-cell)))
+    | Err(_) -> {
+        Task.cancel(server)
+        Task.join(server)
+        1
+      }
+    | Ok(c) -> {
+        defer Net.close(c)
+        match (Net.tls-client(c, "wrong.example"))
+          | Err(TlsVerifyFailed) -> {
+              Task.cancel(server)
+              Task.join(server)
+              0
+            }
+          | Err(_) -> {
+              Task.cancel(server)
+              Task.join(server)
+              1
+            }
+          | Ok(tls) -> {
+              Net.tls-close(tls)
+              Task.cancel(server)
+              Task.join(server)
+              1
+            }
+      }
+}
+
+let step-insecure() -> Int {
+  let ready = Sched.wait-new()
+  let port-cell = ref(0)
+  let server = Task.spawn(fn () = serve-echo(cert, key, ready, port-cell))
+  Sched.wait(ready)
+  match (Net.connect("127.0.0.1", deref(port-cell)))
+    | Err(_) -> {
+        Task.cancel(server)
+        Task.join(server)
+        1
+      }
+    | Ok(c) -> {
+        defer Net.close(c)
+        match (Net.tls-client-insecure(c, "wrong.example"))
+          | Err(_) -> {
+              Task.cancel(server)
+              Task.join(server)
+              1
+            }
+          | Ok(tls) -> {
+              defer Net.tls-close(tls)
+              Net.tls-write(tls, "ok")
+              match (Net.tls-read(tls, 64))
+                | Ok("ok") -> {
+                    Task.join(server)
+                    0
+                  }
+                | _ -> {
+                    Task.cancel(server)
+                    Task.join(server)
+                    1
+                  }
+            }
+      }
+}
+
+let step-sni() -> Int {
+  let ready = Sched.wait-new()
+  let port-cell = ref(0)
+  let server = Task.spawn(fn () = serve-echo(sni-default-cert, sni-default-key, ready, port-cell))
+  Sched.wait(ready)
+  match (Net.connect("127.0.0.1", deref(port-cell)))
+    | Err(_) -> {
+        Task.cancel(server)
+        Task.join(server)
+        1
+      }
+    | Ok(c) -> {
+        defer Net.close(c)
+        match (Net.tls-client(c, "a.menard.test"))
+          | Err(_) -> {
+              Task.cancel(server)
+              Task.join(server)
+              1
+            }
+          | Ok(tls) -> {
+              defer Net.tls-close(tls)
+              Net.tls-write(tls, "sni")
+              match (Net.tls-read(tls, 64))
+                | Ok("sni") -> {
+                    Task.join(server)
+                    0
+                  }
+                | _ -> {
+                    Task.cancel(server)
+                    Task.join(server)
+                    1
+                  }
+            }
+      }
+}
+
+let main() -> Int {
+  if (step-bad-path() != 0) -> {
+    println("bad-path-fail")
+    1
+  } | {
+    println("1")
+    if (step-verify-ok() != 0) -> {
+      println("verify-ok-fail")
+      1
+    } | {
+      println("2")
+      if (step-wrong-host() != 0) -> {
+        println("wrong-host-fail")
+        1
+      } | {
+        println("3")
+        if (step-insecure() != 0) -> {
+          println("insecure-fail")
+          1
+        } | {
+          println("4")
+          if (step-sni() != 0) -> {
+            println("sni-fail")
+            1
+          } | {
+            println("5")
+            0
+          }
+        }
+      }
+    }
+  }
+}

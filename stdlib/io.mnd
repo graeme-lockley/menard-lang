@@ -17,7 +17,8 @@ pub let stderr = 2
 
 ; IoError is the closed taxonomy the runtime and the interpreter both
 ; return. Tags are the C statics: 20–26 nullary, 27 (Other Int), 28 Timeout,
-; 36 Unsupported (shared with SpawnError.Unsupported).
+; 29 TlsVerifyFailed, 36 Unsupported (shared with SpawnError.Unsupported),
+; 37 TlsHandshakeFailed.
 
 pub type IoError =
   | NotFound
@@ -28,7 +29,9 @@ pub type IoError =
   | InvalidPath
   | TooLarge
   | Timeout
+  | TlsVerifyFailed
   | Unsupported
+  | TlsHandshakeFailed
   | Other(Int)
 
 extern mn_write(fd: Int, data: Str) -> Result Unit IoError

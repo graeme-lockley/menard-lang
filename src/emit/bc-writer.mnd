@@ -609,7 +609,7 @@ let write-extern-decls!(m: BitSink, ma: Int) -> Unit {
   write-extern-decl!(m, func-type-idx-for-arity(4))
   write-extern-decl!(m, func-type-idx-for-arity(2))
   write-extern-decl!(m, func-type-idx-for-arity(1))
-  write-extern-decl!(m, func-type-idx-for-arity(1))
+  write-extern-decl!(m, func-type-idx-for-arity(2)) ; mn_tls_client (CONC-03: +host)
   write-extern-decl!(m, func-type-idx-for-arity(3))
   write-extern-decl!(m, func-type-idx-for-arity(2))
   write-extern-decl!(m, func-type-idx-for-arity(2))
@@ -625,12 +625,15 @@ let write-extern-decls!(m: BitSink, ma: Int) -> Unit {
   write-extern-decl!(m, func-type-idx-for-arity(3)) ; mn_tcp_connect_timeout
   write-extern-decl!(m, func-type-idx-for-arity(3)) ; mn_tcp_read_timeout
   write-extern-decl!(m, func-type-idx-for-arity(3)) ; mn_tcp_write_timeout
-  write-extern-decl!(m, func-type-idx-for-arity(2)) ; mn_tls_client_timeout
+  write-extern-decl!(m, func-type-idx-for-arity(3)) ; mn_tls_client_timeout
   write-extern-decl!(m, func-type-idx-for-arity(4)) ; mn_tls_server_timeout
   write-extern-decl!(m, func-type-idx-for-arity(3)) ; mn_tls_read_timeout
   write-extern-decl!(m, func-type-idx-for-arity(3)) ; mn_tls_write_timeout
   ; CONC-04: mn_tcp_local_port (abs +138)
   write-extern-decl!(m, func-type-idx-for-arity(1))
+  ; CONC-03: insecure TLS clients (abs +139 .. +140)
+  write-extern-decl!(m, func-type-idx-for-arity(2)) ; mn_tls_client_insecure
+  write-extern-decl!(m, func-type-idx-for-arity(3)) ; mn_tls_client_insecure_timeout
 }
 
  ; mn_char_to_str, mn_sb_clear, mn_apply_3..8, mn_task_*, mn_tcp_*, mn_tls_*
@@ -1004,6 +1007,8 @@ let write-extern-vst-entries!(v: BitSink, num-strings: Int) -> Unit {
   write-record!(v, vst-code-entry, extern-tls-read-timeout-abs(num-strings) :: str-byte-ops("mn_tls_read_timeout"))
   write-record!(v, vst-code-entry, extern-tls-write-timeout-abs(num-strings) :: str-byte-ops("mn_tls_write_timeout"))
   write-record!(v, vst-code-entry, extern-tcp-local-port-abs(num-strings) :: str-byte-ops("mn_tcp_local_port"))
+  write-record!(v, vst-code-entry, extern-tls-client-insecure-abs(num-strings) :: str-byte-ops("mn_tls_client_insecure"))
+  write-record!(v, vst-code-entry, extern-tls-client-insecure-timeout-abs(num-strings) :: str-byte-ops("mn_tls_client_insecure_timeout"))
 }
 
 let lfunc-list-length(fs: List LFunc) -> Int =

@@ -230,7 +230,7 @@ A mutable buffer. The buffer is the first parameter. `!` marks the operations th
 | `read-file(path)` | The contents of a file. |
 | `write-file(path, data)` | Replace a file's contents. |
 
-`IoError` is `NotFound`, `Permission`, `Exists`, `IsADirectory`, `NotADirectory`, `InvalidPath`, `TooLarge`, `Timeout`, `Unsupported`, or `Other(Int)`.
+`IoError` is `NotFound`, `Permission`, `Exists`, `IsADirectory`, `NotADirectory`, `InvalidPath`, `TooLarge`, `Timeout`, `TlsVerifyFailed`, `Unsupported`, `TlsHandshakeFailed`, or `Other(Int)`.
 
 ## Fs
 
@@ -425,11 +425,13 @@ Parkable TCP/UDP and OpenSSL TLS. **Native only:** under `mn inter`, every
 | `accept-timeout` / `connect-timeout` / `read-timeout` / `write-timeout` | Relative ms; `Err(Timeout)`; on timeout the fd stays open and usable (connect closes the half-open socket). |
 | `with-connection(fd, body)` | `defer` close around `body`. |
 | `udp-bind` / `udp-send` / `udp-recv` / `udp-close` | UDP. |
-| `tls-client` / `tls-server` / `tls-read` / `tls-write` / `tls-close` | TLS over a TCP fd (cooperative park). |
+| `tls-client(fd, host)` / `tls-client-timeout` | Verified client: system trust store (+ optional `MENARD_TLS_CA_FILE`), hostname check, SNI. |
+| `tls-client-insecure` / `tls-client-insecure-timeout` | **Development only** — skips peer verification; still sends SNI. |
+| `tls-server` / `tls-read` / `tls-write` / `tls-close` | TLS over a TCP fd (cooperative park). Bad cert/key path → `NotFound` / `InvalidPath`. |
 | `tls-*-timeout` | Relative-ms TLS handshake / I/O. |
 | `with-tls(id, body)` | `defer` tls-close. |
 
-`IoError` includes `Timeout` (tag 28) and `Unsupported` (tag 36; interpreter boundary).
+`IoError` includes `Timeout` (tag 28), `TlsVerifyFailed` (29), `Unsupported` (tag 36; interpreter boundary), and `TlsHandshakeFailed` (37).
 
 ## Http / Rest
 

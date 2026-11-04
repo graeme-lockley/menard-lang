@@ -57,7 +57,7 @@ Install on macOS: `brew install openssl@3`. On Linux: distro `libssl-dev` / `ope
 ## Known limitations
 
 - Interpreter: all `Result`-returning `mn_tcp_*` / `mn_udp_*` / `mn_tls_*` return `Err(Unsupported)`; Unit closes are no-ops.
-- TLS handshake uses cooperative `poll` on the mutator (not wait-cell registered).
+- TLS clients verify the peer, check the hostname, and send SNI by default (CONC-03); `tls-client-insecure` is development-only. Handshakes park via `mn_park_fd`.
 - `Supervisor.supervise` restart loop is scaffolding; prefer `start-children` / `stop-children` until termination probes are richer.
-- HTTP: no chunked encoding; no HTTP/2.
-- Load smoke: TCP echo + HTTP round-trip + bounded mailbox + supervisor start/stop in-repo; full UserManager-under-HTTP load is the `examples/http-user-manager.mnd` manual path.
+- HTTP: no chunked encoding; no HTTP/2; plain TCP only (no HTTPS wrapper yet).
+- Load smoke: TCP echo + HTTP round-trip + TLS verify fixtures + bounded mailbox + supervisor start/stop in-repo; full UserManager-under-HTTP load is the `examples/http-user-manager.mnd` manual path.
