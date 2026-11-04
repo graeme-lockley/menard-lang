@@ -123,16 +123,18 @@ let concat2(a: Ast, b: Ast) -> Ast =
 let show-call(name: Str) -> Ast =
   paren([sy("show"), sy(name)])
 
+; LANG-01: payload fields use ", " separators inside Name(...).
 let join-shown(fields: List Str) -> Ast =
   match (fields)
     | [] -> st("")
     | [f] -> show-call(f)
-    | f :: rest -> concat2(show-call(f), concat2(st(" "), join-shown(rest)))
+    | f :: rest -> concat2(show-call(f), concat2(st(", "), join-shown(rest)))
 
 let show-of-ctor(c: DeriveCtor, prefix: Str) -> Ast {
   let spelled = source-ctor-name(dc-name(c))
   ; LANG-07: nullary constructors show as the bare name.
-  if (dc-arity(c) == 0) -> st(spelled) | concat2(st(String.concat("(", spelled, " ")), concat2(join-shown(binders(prefix, dc-arity(c), 0)), st(")")))
+  ; LANG-01: payloads use constructor-call syntax Name(a, b).
+  if (dc-arity(c) == 0) -> st(spelled) | concat2(st(String.concat(spelled, "(")), concat2(join-shown(binders(prefix, dc-arity(c), 0)), st(")")))
 }
 
 let show-clauses(ctors: List DeriveCtor) -> List Ast =

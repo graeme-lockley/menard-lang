@@ -298,7 +298,7 @@ const fixtures: Array<{
     entry: "examples/derive-show.mnd",
     expectExit: 0,
     expectDis: /\bcall i64 @mn_str_concat\b/,
-    expectStdout: "(Point 1 2)\nRed\n(Rgb 3 4 5)\n",
+    expectStdout: "Point(1, 2)\nRed\nRgb(3, 4, 5)\n",
   },
   {
     name: "`/` by zero panics before sdiv",

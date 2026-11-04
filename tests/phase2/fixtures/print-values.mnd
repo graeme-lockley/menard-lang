@@ -43,6 +43,13 @@ let output(input: Str, tokens: List Str) -> Unit {
   let counter = ref(0)
   println(next(counter), " ", next(counter), " ", deref(counter))
   println([], " ", [7], " ", [[], [1]], " ", Box([true, false]))
+  ; LANG-01: explicit `show` section (same text as println of the value).
+  println(show(Point(7, true)))
+  println(show(Some("hello")))
+  println(show(Ok(42)))
+  println(show(Box([true, false])))
+  println(show([1, 2]))
+  println(show((1, 2)))
   print()
 }
 

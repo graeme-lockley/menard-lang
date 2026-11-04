@@ -1,0 +1,8 @@
+; Fixture for src/derive/plan.test.mnd: show of a map literal whose values
+; are Maybe plans `(Map Str (Maybe Int))`.
+
+let use-show() -> Str =
+  show({"a" => Some(1)})
+
+let main() -> Int =
+  0

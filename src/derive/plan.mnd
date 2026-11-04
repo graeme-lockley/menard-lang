@@ -212,17 +212,168 @@ let is-int-op(name: Str) -> Bool =
 let is-bool-op(name: Str) -> Bool =
   name == "<" || name == ">" || name == "<=" || name == ">=" || name == "="
 
+; LANG-01: built-in composites report type-show-shaped instantiations
+; (`(List Int)`, `(Maybe Int)`, `(Map Str Int)`, `Int * Bool`) so the plan
+; names the same keys the typer's `print-names` dedupe uses.
+
 let classify-sym(name: Str, ctors: Map Str CtorMeta) -> Maybe Str =
   match (Map.lookup(name, ctors))
     | None -> None
     | Some(meta) ->
-      if (ctor-meta-arity(meta) == 0) -> Some(ctor-meta-type(meta)) | None
+      if (ctor-meta-arity(meta) == 0) -> classify-nullary-inst(ctor-meta-type(meta)) | None
+
+; Nullary builtins without a payload cannot name their type argument(s);
+; omit them rather than reporting a bare `Maybe`/`List`/`Result`.
+let classify-nullary-inst(type-name: Str) -> Maybe Str =
+  cond
+    | type-name == "Maybe" -> None
+    | type-name == "List" -> None
+    | type-name == "Result" -> None
+    | else -> Some(type-name)
+
+let classify-type-list(args: List Ast, ctors: Map Str CtorMeta) -> Maybe (List Str) =
+  match (args)
+    | [] -> Some([])
+    | a :: rest ->
+      match (classify-expr-type(a, ctors))
+        | None -> None
+        | Some(t) ->
+          match (classify-type-list(rest, ctors))
+            | None -> None
+            | Some(ts) -> Some(t :: ts)
+
+let join-with-star(xs: List Str) -> Str =
+  match (xs)
+    | [] -> ""
+    | [x] -> x
+    | x :: rest -> String.concat(x, " * ", join-with-star(rest))
+
+let classify-list-lit(elems: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
+  match (elems)
+    | [] -> None
+    | e :: rest ->
+      match (classify-expr-type(e, ctors))
+        | None -> None
+        | Some(t) ->
+          if (list-elems-agree(rest, t, ctors)) -> Some(String.concat("(List ", t, ")")) | None
+
+let list-elems-agree(elems: List Ast, t: Str, ctors: Map Str CtorMeta) -> Bool =
+  match (elems)
+    | [] -> true
+    | e :: rest ->
+      match (classify-expr-type(e, ctors))
+        | Some(et) -> et == t && list-elems-agree(rest, t, ctors)
+        | None -> false
+
+let classify-tuple(args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
+  match (classify-type-list(args, ctors))
+    | None -> None
+    | Some(ts) ->
+      if (length(ts) < 2) -> None | Some(join-with-star(ts))
+
+let classify-map-pair(k: Ast, v: Ast, ctors: Map Str CtorMeta) -> Maybe (Str * Str) =
+  match (classify-expr-type(k, ctors))
+    | None -> None
+    | Some(kt) ->
+      match (classify-expr-type(v, ctors))
+        | None -> None
+        | Some(vt) -> Some((kt, vt))
+
+let classify-map-entry(entry: Ast, ctors: Map Str CtorMeta) -> Maybe (Str * Str) =
+  match (entry)
+    | ParenNode(head :: k :: v :: _, _) ->
+      if (is-sym(head, "=>")) -> classify-map-pair(k, v, ctors) | None
+    | _ -> None
+
+let map-entries-agree(entries: List Ast, kt: Str, vt: Str, ctors: Map Str CtorMeta) -> Bool =
+  match (entries)
+    | [] -> true
+    | e :: rest ->
+      match (classify-map-entry(e, ctors))
+        | Some((ek, ev)) -> ek == kt && ev == vt && map-entries-agree(rest, kt, vt, ctors)
+        | None -> false
+
+let classify-map-lit(entries: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
+  match (entries)
+    | [] -> None
+    | e :: rest ->
+      match (classify-map-entry(e, ctors))
+        | None -> None
+        | Some((kt, vt)) ->
+          if (map-entries-agree(rest, kt, vt, ctors)) ->
+            Some(String.concat("(Map ", kt, " ", vt, ")")) |
+            None
+
+let classify-maybe-inst(args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
+  match (args)
+    | [a] ->
+      match (classify-expr-type(a, ctors))
+        | Some(t) -> Some(String.concat("(Maybe ", t, ")"))
+        | None -> None
+    | _ -> None
+
+; Ok/Err expose only one Result parameter at a use site; omit rather than
+; invent the other. List Cons carries the element type in its head.
+let classify-cons-inst(args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
+  match (args)
+    | [h, _] ->
+      match (classify-expr-type(h, ctors))
+        | Some(t) -> Some(String.concat("(List ", t, ")"))
+        | None -> None
+    | _ -> None
+
+let classify-list-ctor-inst(hn: Str, args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
+  if (hn == "Cons") -> classify-cons-inst(args, ctors) | None
+
+let classify-ctor-inst(hn: Str, type-name: Str, args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
+  cond
+    | type-name == "Maybe" -> classify-maybe-inst(args, ctors)
+    | type-name == "Result" -> None
+    | type-name == "List" -> classify-list-ctor-inst(hn, args, ctors)
+    | else -> Some(type-name)
 
 let classify-ctor-call(hn: Str, args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
   match (Map.lookup(hn, ctors))
     | None -> None
     | Some(meta) ->
-      if (ctor-meta-arity(meta) == length(args)) -> Some(ctor-meta-type(meta)) | None
+      if (ctor-meta-arity(meta) == length(args)) ->
+        classify-ctor-inst(hn, ctor-meta-type(meta), args, ctors) |
+        None
+
+let classify-map-set(args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
+  match (args)
+    | [k, v, _] ->
+      match (classify-expr-type(k, ctors))
+        | None -> None
+        | Some(kt) ->
+          match (classify-expr-type(v, ctors))
+            | None -> None
+            | Some(vt) -> Some(String.concat("(Map ", kt, " ", vt, ")"))
+    | _ -> None
+
+let classify-qualified(mod: Str, name: Str, args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
+  cond
+    | mod == "Map" && name == "set" -> classify-map-set(args, ctors)
+    | else -> None
+
+let classify-project-names(mod-ast: Ast, name-ast: Ast, args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
+  match (sym-str(mod-ast))
+    | None -> None
+    | Some(mod) ->
+      match (sym-str(name-ast))
+        | None -> None
+        | Some(name) -> classify-qualified(mod, name, args, ctors)
+
+let classify-project-parts(proj: Ast, mod-ast: Ast, name-ast: Ast, args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
+  if (is-sym(proj, "project")) -> classify-project-names(mod-ast, name-ast, args, ctors) | None
+
+let classify-project-call(head: Ast, args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
+  match (head)
+    | ParenNode(elems, _) ->
+      match (elems)
+        | [proj, mod-ast, name-ast] -> classify-project-parts(proj, mod-ast, name-ast, args, ctors)
+        | _ -> None
+    | _ -> None
 
 let classify-expr-type(ast: Ast, ctors: Map Str CtorMeta) -> Maybe Str =
   match (ast)
@@ -232,7 +383,7 @@ let classify-expr-type(ast: Ast, ctors: Map Str CtorMeta) -> Maybe Str =
     | StrNode(_, _) -> Some("Str")
     | SymNode(name, _) -> classify-sym(name, ctors)
     | ParenNode(elems, _) -> classify-paren(elems, ctors)
-    | BracketNode(_, _) -> None
+    | BracketNode(elems, _) -> classify-list-lit(elems, ctors)
 
 let classify-paren(elems: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
   match (elems)
@@ -241,8 +392,8 @@ let classify-paren(elems: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
 
 let classify-paren-head(head: Ast, args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
   match (sym-str(head))
-    | None -> None
     | Some(hn) -> classify-named(hn, args, ctors)
+    | None -> classify-project-call(head, args, ctors)
 
 let classify-named(hn: Str, args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
   cond
@@ -253,6 +404,8 @@ let classify-named(hn: Str, args: List Ast, ctors: Map Str CtorMeta) -> Maybe St
     | hn == "if" -> classify-if(args, ctors)
     | hn == "let" -> classify-let(args, ctors)
     | hn == "do" -> classify-do(args, ctors)
+    | hn == "tuple" -> classify-tuple(args, ctors)
+    | hn == "map-lit" -> classify-map-lit(args, ctors)
     | else -> classify-ctor-call(hn, args, ctors)
 
 let classify-if(args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =

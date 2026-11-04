@@ -36,9 +36,9 @@ export function showValue(v: Value): string {
       }
       return v.payloads.length === 0
         ? v.ctor
-        : `(${v.ctor} ${v.payloads.map(showValue).join(" ")})`;
+        : `${v.ctor}(${v.payloads.map(showValue).join(", ")})`;
     case "record":
-      return `(${v.name} ${v.fields.map(showValue).join(" ")})`;
+      return `${v.name}(${v.fields.map(showValue).join(", ")})`;
     case "tuple":
       return `(${v.fields.map(showValue).join(", ")})`;
     case "module":

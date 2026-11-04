@@ -2600,11 +2600,13 @@ let print-format(env: TypeEnv, t: Type, value: Ast) -> Ast {
   print-call(name, [value])
 }
 
+; LANG-01: payload fields use ", " separators inside Name(...).
 let print-payloads(env: TypeEnv, ts: List Type, i: Int) -> Ast =
   match (ts)
     | [] -> print-str("")
+    | [t] -> print-format(env, t, print-sym(String.concat("p", show(i))))
     | t :: rest ->
-      print-concat(print-str(" "), print-concat(print-format(env, t, print-sym(String.concat("p", show(i)))), print-payloads(env, rest, i + 1)))
+      print-concat(print-format(env, t, print-sym(String.concat("p", show(i)))), print-concat(print-str(", "), print-payloads(env, rest, i + 1)))
 
 let print-pattern(name: Str, ts: List Type, i: Int) -> List Ast =
   match (ts)
@@ -2643,10 +2645,11 @@ let source-ctor-name(n: Str) -> Str {
 
 let print-ctor-body(env: TypeEnv, name: Str, ts: List Type) -> Ast =
   ; LANG-07: nullary constructors print as the bare name.
+  ; LANG-01: payloads use constructor-call syntax Name(a, b).
   match (ts)
     | [] -> print-str(source-ctor-name(name))
     | _ ->
-      print-concat(print-str(String.concat("(", source-ctor-name(name))), print-concat(print-payloads(env, ts, 0), print-str(")")))
+      print-concat(print-str(String.concat(source-ctor-name(name), "(")), print-concat(print-payloads(env, ts, 0), print-str(")")))
 
 let print-ctor-arms(env: TypeEnv, cs: List VariantCtor, params: Map Str Type) -> List Ast =
   match (cs)

@@ -88,15 +88,15 @@ describe("variant-order (LANG-18)", () => {
     // compare signs: Z < A, Ok < Err, None < Some, Wrap(Z) < Box(Z)
     expect(text).toContain("-1\n");
     // List.sort of reverse-alpha nullary+payload
-    expect(text).toContain("[Z, A, (B 1), (C 1 2)]\n");
+    expect(text).toContain("[Z, A, B(1), C(1, 2)]\n");
     // Map.keys in declaration tag order (Z first, not A)
-    expect(text).toContain("[Z, A, (B 1), (C 1 0)]\n");
+    expect(text).toContain("[Z, A, B(1), C(1, 0)]\n");
     // Map replacement keeps one B(1) entry (lookup wraps Some)
-    expect(text).toContain('(Some "replaced")\n');
-    expect(text).toContain('(Some "z")\n');
-    expect(text).toContain("[None, (Some 1)]\n");
-    expect(text).toContain("[(Ok 0), (Err 0)]\n");
-    expect(text).toContain("[(Wrap Z2), (Wrap A2), (Box A2)]\n");
+    expect(text).toContain('Some("replaced")\n');
+    expect(text).toContain('Some("z")\n');
+    expect(text).toContain("[None, Some(1)]\n");
+    expect(text).toContain("[Ok(0), Err(0)]\n");
+    expect(text).toContain("[Wrap(Z2), Wrap(A2), Box(A2)]\n");
   });
 
   test("host accepts compare of reverse-order variants", () => {

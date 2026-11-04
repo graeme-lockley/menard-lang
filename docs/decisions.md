@@ -28,6 +28,40 @@ specification. Where a name changed, the entry that changed it says so.
 
 ---
 
+## 2026-11-04 — Constructor-call canonical text for `show` (LANG-01)
+
+### The decision
+
+The canonical value-to-text spelling is **constructor-call syntax**, not
+Lisp-shaped lists: nullaries are bare (`None`, `Red`); payloads and records
+are `Some(1)`, `Point(1, 2)`; lists / maps / products keep `[…]`, `{k => v}`,
+`(a, b)`. Built-in composites (`List`, `Maybe`, `Result`, `Map`, products)
+are derived per instantiation and must not fall through to `mn_show`'s
+`#<obj>` fallback. `print` / `println` share the same text. Every spelling
+round-trips through the reader to a value equal under `=`.
+
+### Why
+
+The old `(Some 1)` / `(Point 1 2)` table was neither what source looks like
+nor what the native build produced for composites (`#<obj>`). Human-readable
+text that round-trips is the point of `show`; agreement without that text is
+hollow because the gate does not exercise `show` of composites.
+
+### Migration
+
+Flag-day with [migration.md](migration.md) LANG-01. TOOL-12 `show-text` and
+OTH-10 editions can lag; until then, rewrite expectations by hand
+(`(Some 1)` → `Some(1)`).
+
+### Consequences
+
+- Spec §2.13 table and round-trip rule; §2.12 names built-ins as derived;
+  §2.14 notes the `#<obj>` blind spot.
+- Corpus `tests/corpus/show.mnd` and host round-trip tests catch regressions
+  the fixed-point gate cannot see.
+
+---
+
 ## 2026-11-04 — Security policy docs and seam list includes `sched` / `net` (OTH-05)
 
 ### The decision
