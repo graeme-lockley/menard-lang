@@ -13,6 +13,7 @@ const RUNTIME_RELS = [
   "runtime/src/variants.c",
   "runtime/src/str.c",
   "runtime/src/float_text.c",
+  "runtime/src/char_text.c",
   "runtime/third_party/ryu/d2s.c",
   "runtime/src/map.c",
   "runtime/src/closure.c",

@@ -147,7 +147,7 @@ Helpers over the product type `a * b`. Projection is `p.1` / `p.2`.
 | `byte(i, s)` | The byte at `i`, or `0` when `i` is outside `s`. |
 | `slice(start, len, s)` | `len` bytes from `start`. Bounds outside `s` are clamped. |
 | `concat(a, b)` | `a` and `b` joined. Further arguments nest to the left. |
-| `from-char(c)` | `c` encoded as UTF-8. |
+| `from-char(c)` | `c` encoded as UTF-8. Use this to embed a character in text; `show(c)` returns a character literal instead. |
 | `from-int(n)` | The decimal spelling of `n`. |
 | `is-digit-byte(b)` | Whether `b` is an ASCII digit byte (`48..57`). |
 | `hex-value(b)` | `0..15` for an ASCII hex digit byte, or `None`. |
@@ -178,7 +178,7 @@ Whitespace for `trim` and `words` is space, tab, newline, and carriage return.
 
 `import std/char as Char`
 
-Predicates and ASCII case, using character literals. There is no conversion between a `Char` and its code point.
+Predicates and ASCII case, using character literals. There is no conversion between a `Char` and its code point. `show` of a `Char` is a character literal (`'A'`, `'\n'`, …); `String.from-char` embeds the scalar as UTF-8 in a `Str`.
 
 | Function | |
 | --- | --- |

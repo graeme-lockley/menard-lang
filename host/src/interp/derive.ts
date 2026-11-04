@@ -2,6 +2,7 @@ import type { Value } from "./value.ts";
 import { mapEntries, mapGet, mapSize } from "../builtins/collections.ts";
 import { formatFloat } from "./float-text.ts";
 import { compareFloat } from "./float-order.ts";
+import { printChar } from "../reader/print.ts";
 
 export function showValue(v: Value): string {
   switch (v.tag) {
@@ -14,7 +15,7 @@ export function showValue(v: Value): string {
     case "unit":
       return "()";
     case "char":
-      return String(v.value);
+      return printChar(v.value);
     case "str": {
       let out = '"';
       for (let i = 0; i < v.bytes.length; i++) {

@@ -142,9 +142,11 @@ a surrogate, a value above `U+10FFFF`).
 
 This is Kestrel's string-escape set, kept suitable for a byte string: `\u{…}`
 writes UTF-8 rather than a code-point string, and a raw byte stays a raw
-byte so a literal can still hold an arbitrary `Str`. `show` does not emit
-these escapes. It escapes only `\` and `"` and writes every other byte raw,
-which is what stays total on invalid UTF-8.
+byte so a literal can still hold an arbitrary `Str`. `show` of a `Str` does
+not emit these escapes: it escapes only `\` and `"` and writes every other
+byte raw, which is what stays total on invalid UTF-8. `show` of a `Char`
+*does* use this escape set, spelling a character literal (`'A'`, `'\n'`,
+`'\u{1F600}'` with uppercase hex) so the text round-trips.
 
 ### 1.5 Keywords
 

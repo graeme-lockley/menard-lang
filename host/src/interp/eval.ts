@@ -8,6 +8,7 @@ import {
   envGet,
   envSet,
   vInt,
+  vChar,
   vStr,
   vUnit,
   vBool,
@@ -910,7 +911,7 @@ function beginEval(
           case Sf.Char: {
             const n = ast.elems[1];
             if (!n || n.tag !== "int") throw new PanicError("char literal", ast.span);
-            return { tag: "value", value: vInt(n.value) };
+            return { tag: "value", value: vChar(n.value) };
           }
           case Sf.Project: {
             const field = ast.elems[2];
@@ -1415,7 +1416,7 @@ function matchPat(pat: Ast, v: Value, env: Env): boolean {
     symName(pat.elems[0]!) === "char" &&
     pat.elems[1]!.tag === "int"
   ) {
-    return v.tag === "int" && v.value === pat.elems[1]!.value;
+    return v.tag === "char" && v.value === Number(pat.elems[1]!.value);
   }
   // Nullary `Alias.Ctor` pattern is a bare project form.
   if (pat.tag === "list" && pat.elems[0]?.tag === "sym" && symName(pat.elems[0]) === "project") {

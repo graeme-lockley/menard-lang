@@ -650,7 +650,8 @@ function printAtom(a: Ast): string {
   return printExpr(a, 0);
 }
 
-function printChar(n: bigint): string {
+/** Canonical Char literal spelling (LANG-10); also used by `showValue`. */
+export function printChar(n: bigint | number): string {
   const c = Number(n);
   if (c === 10) return `'\\n'`;
   if (c === 13) return `'\\r'`;
@@ -658,7 +659,7 @@ function printChar(n: bigint): string {
   if (c === 92) return `'\\\\'`;
   if (c === 39) return `'\\''`;
   if (c >= 32 && c < 127) return `'${String.fromCharCode(c)}'`;
-  return `'\\u{${c.toString(16)}}'`;
+  return `'\\u{${c.toString(16).toUpperCase()}}'`;
 }
 
 function quoteStr(bytes: Uint8Array): string {

@@ -68,12 +68,14 @@ foreign.
 The smallest pieces are values: `42`, `true`, `"hello"`, `'A'`.
 
 `Int` is one integer type. `Str` is a sequence of bytes, not necessarily
-text. `Char` is one Unicode scalar. `Float` is a boxed floating-point number;
-its arithmetic is spelled `f+`, `f-`, `f*`, `f/`, not infix `+`. Ordering uses
-`compare` and `f<` / `f<=` / `f>` / `f>=` under one total order
-(`-inf < finite < +inf < nan`, with `-0.0 < 0.0`). `show` of a `Float` is a
-shortest round-trip spelling shared by both hosts (`1.0`, `0.1`, `1e+21`,
-`nan`, `inf`, `-inf`); `-0.0` is distinct from `0.0`, and `nan = nan`.
+text. `Char` is one Unicode scalar; `show` of a `Char` is a character literal
+(`'A'`, `'\n'`, `'\u{1F600}'`), not a code point. Use `String.from-char` when
+you need the character’s UTF-8 bytes inside a string. `Float` is a boxed
+floating-point number; its arithmetic is spelled `f+`, `f-`, `f*`, `f/`, not
+infix `+`. Ordering uses `compare` and `f<` / `f<=` / `f>` / `f>=` under one
+total order (`-inf < finite < +inf < nan`, with `-0.0 < 0.0`). `show` of a
+`Float` is a shortest round-trip spelling shared by both hosts (`1.0`, `0.1`,
+`1e+21`, `nan`, `inf`, `-inf`); `-0.0` is distinct from `0.0`, and `nan = nan`.
 
 A function names its arguments and its result.
 

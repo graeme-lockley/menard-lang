@@ -1572,7 +1572,7 @@ same spelling, because the spelling is defined on bytes alone.
 | `Int` | decimal, signed, no leading `+`, no padding |
 | `Bool` | `true` / `false` |
 | `Unit` | `()` |
-| `Char` | the scalar value in decimal |
+| `Char` | a character literal: `'A'` for ASCII printable (except `'` and `\`); named escapes `'\n'` `'\r'` `'\t'` `'\\'` `'\''`; otherwise `'\u{HEX}'` with uppercase hex and no padding. Injective over scalars; distinguishable from Sym (`'A` has no closing quote) and from Int (no quotes / decimal) |
 | `Str` | `"` … `"`, with `\` and `"` backslash-escaped and nothing else escaped; non-ASCII bytes emitted raw |
 | `Sym` | `'` followed by the name bytes, unescaped |
 | `Float` | shortest round-trip decimal under a fixed grammar (optional `-`, digits, optional fraction, optional `e`/`E` with a mandatory sign on the exponent); always a float lexeme (contains `.` or `e`); `0.0` / `-0.0` distinct in text and under `=`; non-finites are `nan`, `inf`, `-inf`; every NaN is one quiet payload so `nan = nan` (§2.12). The C implementation (`mn_format_float`) is normative; the interpreter must match it byte for byte. |

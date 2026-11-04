@@ -32,7 +32,7 @@ RUNTIME_SRCS := $(RUNTIME_DIR)/src/alloc.c $(RUNTIME_DIR)/src/gc.c $(RUNTIME_DIR
 # the `main` an emitted `.bc` module already defines.
 # Ryu lives under third_party/ryu/; -I third_party makes #include "ryu/…" work.
 CFLAGS += -I$(RUNTIME_DIR)/third_party
-RUNTIME_LIB_SRCS := $(RUNTIME_DIR)/src/alloc.c $(RUNTIME_DIR)/src/gc.c $(RUNTIME_DIR)/src/panic.c $(RUNTIME_DIR)/src/print.c $(RUNTIME_DIR)/src/shadow.c $(RUNTIME_DIR)/src/variants.c $(RUNTIME_DIR)/src/str.c $(RUNTIME_DIR)/src/float_text.c $(RUNTIME_DIR)/third_party/ryu/d2s.c $(RUNTIME_DIR)/src/map.c $(RUNTIME_DIR)/src/closure.c $(RUNTIME_DIR)/src/io.c $(RUNTIME_DIR)/src/equal.c $(RUNTIME_DIR)/src/task.c $(RUNTIME_DIR)/src/net.c $(RUNTIME_DIR)/src/tls.c
+RUNTIME_LIB_SRCS := $(RUNTIME_DIR)/src/alloc.c $(RUNTIME_DIR)/src/gc.c $(RUNTIME_DIR)/src/panic.c $(RUNTIME_DIR)/src/print.c $(RUNTIME_DIR)/src/shadow.c $(RUNTIME_DIR)/src/variants.c $(RUNTIME_DIR)/src/str.c $(RUNTIME_DIR)/src/float_text.c $(RUNTIME_DIR)/src/char_text.c $(RUNTIME_DIR)/third_party/ryu/d2s.c $(RUNTIME_DIR)/src/map.c $(RUNTIME_DIR)/src/closure.c $(RUNTIME_DIR)/src/io.c $(RUNTIME_DIR)/src/equal.c $(RUNTIME_DIR)/src/task.c $(RUNTIME_DIR)/src/net.c $(RUNTIME_DIR)/src/tls.c
 
 BUILD_DIR := build
 

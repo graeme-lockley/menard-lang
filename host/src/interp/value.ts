@@ -61,6 +61,10 @@ export function vBool(b: boolean): Value {
   return { tag: "bool", value: b };
 }
 
+export function vChar(n: number | bigint): Value {
+  return { tag: "char", value: Number(n) };
+}
+
 export function vVariant(ctor: string, payloads: Value[] = []): Value {
   return { tag: "variant", ctor, payloads };
 }
