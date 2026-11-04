@@ -6,6 +6,7 @@ import {
   BUILTIN_NULLARIES,
 } from "../../../host/src/fix/nullary-ctor.ts";
 import { parseProgram } from "../../../host/src/reader/parse.ts";
+import { diagnose } from "../../../host/src/interp/index.ts";
 
 describe("nullary-ctor fix", () => {
   test("rewrites None() and user nullaries in expressions", () => {
@@ -110,5 +111,94 @@ let x = None()
     expect(out).toContain("| Permanent ->");
     expect(out).toContain("| Temporary ->");
     expect(out).toContain("let x = None\n");
+  });
+
+  // LANG-17: byte-accurate rewrites (UTF-8 spans, not UTF-16 string indices).
+
+  test("applies rewrites on UTF-8 bytes (accented and non-BMP before first edit)", () => {
+    // café = c3 a9 (2 bytes); 𝄞 = f0 9d 84 9e (4 bytes). String.slice would mis-offset.
+    const src = `; café 𝄞\nlet x = None()\n`;
+    const r = fixNullaryCtor(src);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.changed).toBe(true);
+    expect(r.source).toBe(`; café 𝄞\nlet x = None\n`);
+  });
+
+  test("preserves comments, string literals, and CRLF around rewrites", () => {
+    const src =
+      "; note: café\r\n" +
+      'let msg = "héllö 𝄞"\r\n' +
+      "let x = None()\r\n";
+    const r = fixNullaryCtor(src);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.source).toBe(
+      "; note: café\r\n" +
+        'let msg = "héllö 𝄞"\r\n' +
+        "let x = None\r\n",
+    );
+  });
+
+  test("Unicode before, between, and after multiple constructor rewrites", () => {
+    const src = `type Color =
+  | Red
+  | Blue
+
+; avant café
+let a = None()
+; entre 𝄞
+let b = Red()
+; après 日本語
+`;
+    const expected = `type Color =
+  | Red
+  | Blue
+
+; avant café
+let a = None
+; entre 𝄞
+let b = Red
+; après 日本語
+`;
+    const r = fixNullaryCtor(src);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.changed).toBe(true);
+    expect(r.source).toBe(expected);
+    expect(r.rewrites.length).toBe(2);
+  });
+
+  test("Unicode migration is idempotent and typechecks", () => {
+    const src = `type Color =
+  | Red
+  | Blue
+
+; café 𝄞
+let f() -> Maybe Int = None()
+let g() -> Color = Red()
+`;
+    const once = fixNullaryCtor(src);
+    expect(once.ok).toBe(true);
+    if (!once.ok) return;
+    expect(once.changed).toBe(true);
+    expect(once.source).toBe(`type Color =
+  | Red
+  | Blue
+
+; café 𝄞
+let f() -> Maybe Int = None
+let g() -> Color = Red
+`);
+
+    const twice = fixNullaryCtor(once.source);
+    expect(twice.ok).toBe(true);
+    if (!twice.ok) return;
+    expect(twice.changed).toBe(false);
+    expect(twice.source).toBe(once.source);
+
+    const parsed = parseProgram(new TextEncoder().encode(once.source));
+    expect(parsed.ok).toBe(true);
+    expect(diagnose(once.source)).toEqual([]);
   });
 });
