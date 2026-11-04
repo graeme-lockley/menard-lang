@@ -1,4 +1,5 @@
-; CONC-04: header case, Host/CL validation, limits, ephemeral ports, deadlines.
+; CONC-04 / CONC-18: header case, Host/CL validation, limits, ephemeral ports,
+; deadlines, serialization hygiene, partition-stable header measurement.
 import std/http as Http
 import std/map as Map
 import std/task as Task
@@ -92,6 +93,37 @@ let check-cl(port: Int, name: Str) -> Int {
                 if (String.contains("abc", buf)) -> 1 | 0
       }
 }
+
+; Build a POST whose header block (through `\r\n\r\n`) is exactly `block-cap`
+; bytes, with body "ab". `extra` grows the block past the cap (oversized).
+; `head` is bytes before the terminator (no trailing CRLF on the last header).
+let near-cap-post(block-cap: Int, extra: Int) -> Str {
+  let prefix = "POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 2"
+  let at = block-cap - 4 + extra
+  let n-as = at - String.length(prefix) - 5
+  let head = String.concat(prefix, "\r\nX: ", String.repeat(n-as, "a"))
+  String.concat(head, "\r\n\r\n", "ab")
+}
+
+; Write `first` then optionally `second`; return response status (or -1).
+let raw-status-parts(host: Str, port: Int, first: Str, second: Str, ms: Int) -> Int =
+  match (Net.connect-timeout(host, port, ms))
+    | Err(_) -> -1
+    | Ok(fd) -> {
+        defer Net.close(fd)
+        let deadline = Sched.mono-ms() + ms
+        match (Net.write-timeout(fd, first, ms))
+          | Err(_) -> -1
+          | Ok(_) -> {
+              let wrote2 =
+                if (second == "") -> true | {
+                  match (Net.write-timeout(fd, second, ms))
+                    | Err(_) -> false
+                    | Ok(_) -> true
+                }
+              if (not(wrote2)) -> -1 | read-status(fd, "", deadline)
+            }
+      }
 
 let main() -> Int {
   ; --- Happy path + header case table + Host/CL on default limits ---
@@ -205,6 +237,154 @@ let main() -> Int {
       | Ok(_) -> 0
   println(ok-timeout)
   stop(s3)
+
+  ; --- CONC-18: conflicting-case serialization ---
+  let conflict-headers =
+    Map.set(
+      "host",
+      "evil",
+      Map.set("HOST", "also", Map.set("content-length", "999", Map.empty()))
+    )
+  let req-wire =
+    Http.format-request("good.example", Http.Request(Http.GET, "/", conflict-headers, "hi"))
+  let res-headers =
+    Map.set("content-length", "0", Map.set("CONTENT-LENGTH", "99", Map.empty()))
+  let res-wire = Http.format-response(Http.Response(200, res-headers, "hi"))
+  let ok-conflict =
+    if (
+      String.contains("\r\nHost: good.example\r\n", req-wire)
+        && String.contains("\r\nContent-Length: 2\r\n", req-wire)
+        && not(String.contains("\r\nhost:", req-wire))
+        && not(String.contains("\r\nHOST:", req-wire))
+        && not(String.contains("\r\ncontent-length:", req-wire))
+        && String.contains("\r\nContent-Length: 2\r\n", res-wire)
+        && not(String.contains("\r\ncontent-length:", res-wire))
+        && not(String.contains("\r\nCONTENT-LENGTH:", res-wire))
+    ) -> 1 | 0
+  println(ok-conflict)
+
+  ; --- CONC-18: exact-boundary / oversized-header / combined-vs-split ---
+  let ready4 = Sched.wait-new()
+  let port4 = ref(0)
+  let boundary-limits = Http.Limits(64, 256, 20, 32)
+  let s4 = start-server(ready4, port4, 3000, boundary-limits)
+  Sched.wait(ready4)
+  let p4 = deref(port4)
+
+  let exact = near-cap-post(256, 0)
+  let over = near-cap-post(256, 1)
+  ; 11) Exact header-block cap + body in same write → 200
+  println(
+    if (raw-status("127.0.0.1", p4, exact, 2000) == 200) -> 1 | 0
+  )
+  ; 12) Oversized header block → 431
+  println(
+    if (raw-status("127.0.0.1", p4, over, 2000) == 431) -> 1 | 0
+  )
+  ; 13) Combined vs split partition: same wire bytes → same status
+  let head-end = 256
+  let combined-st = raw-status("127.0.0.1", p4, exact, 2000)
+  let split-st =
+    raw-status-parts(
+      "127.0.0.1",
+      p4,
+      String.slice(0, head-end, exact),
+      String.drop(head-end, exact),
+      2000
+    )
+  println(
+    if (combined-st == split-st && combined-st == 200) -> 1 | 0
+  )
+
+  stop(s4)
+
+  ; --- CONC-18: slow-peer on public read-request-timeout ---
+  ; Peer stays silent well past the 50ms budget. Success requires NetErr(Timeout)
+  ; within ~200ms — not any Err after peer close (unbounded Net.read would pass that).
+  match (Net.listen(0))
+    | Err(_) -> println(0)
+    | Ok(listener) -> {
+        defer Net.close(listener)
+        match (Net.local-port(listener))
+          | Err(_) -> println(0)
+          | Ok(port) -> {
+              let peer = Task.spawn(fn () = {
+                match (Net.connect-timeout("127.0.0.1", port, 2000))
+                  | Err(_) -> 1
+                  | Ok(fd) -> {
+                      defer Net.close(fd)
+                      Task.sleep-ms(2000)
+                      0
+                    }
+              })
+              match (Net.accept(listener))
+                | Err(_) -> println(0)
+                | Ok(conn) -> {
+                    defer Net.close(conn)
+                    let t0 = Sched.mono-ms()
+                    let ok-slow =
+                      match (Http.read-request-timeout(conn, 50))
+                        | Err(Http.NetErr(Timeout)) -> {
+                            let elapsed = Sched.mono-ms() - t0
+                            if (elapsed < 200) -> 1 | 0
+                          }
+                        | _ -> 0
+                    println(ok-slow)
+                  }
+              Task.cancel(peer)
+              Task.join(peer)
+              ()
+            }
+      }
+
+  ; --- CONC-18: client response header-count limit ---
+  let ready5 = Sched.wait-new()
+  let port5 = ref(0)
+  let s5 = Task.spawn(fn () = {
+    match (Net.listen(0))
+      | Err(_) -> 1
+      | Ok(listener) -> {
+          defer Net.close(listener)
+          match (Net.local-port(listener))
+            | Err(_) -> 1
+            | Ok(port) -> {
+                set!(port5, port)
+                Sched.notify(ready5)
+                match (Net.accept(listener))
+                  | Err(_) -> 1
+                  | Ok(conn) -> {
+                      defer Net.close(conn)
+                      ; Drain a little of the request, then reply with many headers.
+                      match (Net.read-timeout(conn, 1, 2000))
+                        | Err(_) -> ()
+                        | Ok(_) -> ()
+                      let hdrs = String.repeat(10, "X: y\r\n")
+                      let resp =
+                        String.concat("HTTP/1.1 200 OK\r\n", hdrs, "Content-Length: 0\r\n\r\n")
+                      match (Net.write-timeout(conn, resp, 2000))
+                        | Err(_) -> 1
+                        | Ok(_) -> 0
+                    }
+              }
+        }
+  })
+  Sched.wait(ready5)
+  let p5 = deref(port5)
+  let client-limits = Http.Limits(8192, 65536, 5, 1024)
+  let ok-client-limit =
+    match (
+      Http.request-timeout-limits(
+        "127.0.0.1",
+        p5,
+        Http.Request(Http.GET, "/", Map.empty(), ""),
+        2000,
+        client-limits
+      )
+    )
+      | Err(Http.HeaderLimit(_)) -> 1
+      | _ -> 0
+  println(ok-client-limit)
+  stop(s5)
 
   0
 }

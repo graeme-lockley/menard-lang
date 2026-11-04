@@ -70,9 +70,11 @@ describe("Build F http", () => {
       const r = runNative("tests/http/hygiene.mnd");
       expect(r.stderr).not.toContain("panic");
       expect(r.status).toBe(0);
-      // 1 happy, 3 CL spellings, missing Host, conflicting CL,
-      // 431, 413, distinct ports, client timeout → ten ones
-      expect(r.stdout).toBe("1\n1\n1\n1\n1\n1\n1\n1\n1\n1\n");
+      // CONC-04: happy, 3 CL spellings, missing Host, conflicting CL,
+      // 431, 413, distinct ports, client timeout (10).
+      // CONC-18: conflicting-case, exact-boundary, oversized-header,
+      // combined-vs-split, slow-peer read, client-response-limit (+6) → 16 ones
+      expect(r.stdout).toBe("1\n1\n1\n1\n1\n1\n1\n1\n1\n1\n1\n1\n1\n1\n1\n1\n");
     },
     { timeout: 180_000 },
   );
