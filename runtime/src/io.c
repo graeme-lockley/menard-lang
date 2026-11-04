@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <poll.h>
+#include <signal.h>
 #include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -90,6 +91,9 @@ void mn_init(int argc, char **argv) {
     g_argc = 0;
     g_argv = argv;
   }
+  /* TCP/TLS writes to a peer that closed must return EPIPE/ECONNRESET as
+   * IoError, not kill the process. Linux delivers SIGPIPE by default. */
+  signal(SIGPIPE, SIG_IGN);
 }
 
 MnWord mn_arg_count(void) { return mn_int_to_word((int64_t)g_argc); }

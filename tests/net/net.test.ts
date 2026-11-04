@@ -13,7 +13,7 @@ const CERTS = join(ROOT, "tests/net/certs");
 function runNative(
   fixture: string,
   env: NodeJS.ProcessEnv = {},
-): { status: number | null; stdout: string; stderr: string } {
+): { status: number | null; stdout: string; stderr: string; signal: NodeJS.Signals | null } {
   const dir = mkdtempSync(join(tmpdir(), "menard-net-"));
   const binary = join(dir, "out");
   try {
@@ -34,7 +34,12 @@ function runNative(
       { cwd: ROOT, encoding: "utf8", timeout: 180_000 },
     );
     if (built.status !== 0) {
-      return { status: built.status, stdout: built.stdout, stderr: built.stderr };
+      return {
+        status: built.status,
+        stdout: built.stdout,
+        stderr: built.stderr,
+        signal: built.signal,
+      };
     }
     const native = spawnSync(binary, [], {
       cwd: ROOT,
@@ -42,7 +47,12 @@ function runNative(
       timeout: 60_000,
       env: { ...process.env, ...env },
     });
-    return { status: native.status, stdout: native.stdout, stderr: native.stderr };
+    return {
+      status: native.status,
+      stdout: native.stdout ?? "",
+      stderr: native.stderr ?? "",
+      signal: native.signal,
+    };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -87,6 +97,7 @@ describe("Build F net", () => {
       MENARD_TLS_SNI_CERT: join(CERTS, "sni-a.crt"),
       MENARD_TLS_SNI_KEY: join(CERTS, "sni-a.key"),
     });
+    expect(r.signal).toBeNull();
     expect(r.stderr).not.toContain("panic");
     expect(r.stderr).not.toContain("error:");
     expect(r.status).toBe(0);

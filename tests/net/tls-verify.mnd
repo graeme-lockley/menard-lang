@@ -79,8 +79,9 @@ let step-bad-path() -> Int {
                     1
                   }
                 | Ok(c) -> {
+                    ; Only need the server to observe the bad cert path; do not
+                    ; start a TLS handshake against a peer that never speaks TLS.
                     defer Net.close(c)
-                    Net.tls-client-insecure-timeout(c, "localhost", 200)
                     match (Task.join(acceptor))
                       | Ok(0) -> 0
                       | _ -> 1
