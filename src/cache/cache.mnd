@@ -3,7 +3,7 @@
 ; timestamp; both live only here.
 ;
 ; An interface is a list of forms the reader accepts:
-;   mni(5)
+;   mni(6)
 ;   src(HASH)
 ;   dep(HASH, "abs")
 ;   init("sym") or init("-")
@@ -25,7 +25,7 @@ import std/sys
 import std/string-buffer as Buf
 
 ; Version 5 invalidates objects whose print formatters use Cons/Nil list syntax.
-let iface-version = 5
+let iface-version = 6
 
 pub record DepRec {
   hash: Int

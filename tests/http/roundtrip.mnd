@@ -1,6 +1,5 @@
 ; CONC-04: HTTP server + client on an ephemeral port with wait-cell readiness.
 import std/http as Http
-pub import std/io (IoError)
 import std/map as Map
 import std/task as Task
 import std/net as Net

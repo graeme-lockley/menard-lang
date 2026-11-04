@@ -1,7 +1,6 @@
 ; CONC-03: TLS peer verification, SNI, and typed errors.
 ; Expects MENARD_TLS_CA_FILE (and optional MENARD_TLS_SNI_*) from the harness.
 import std/net as Net
-pub import std/io (IoError)
 import std/task as Task
 import std/sched as Sched
 
@@ -63,7 +62,7 @@ let step-bad-path() -> Int {
                   | Ok(conn) -> {
                       defer Net.close(conn)
                       match (Net.tls-server(conn, "tests/net/certs/no-such.crt", key))
-                        | Err(NotFound) -> 0
+                        | Err(Net.NotFound) -> 0
                         | Err(_) -> 2
                         | Ok(tls) -> {
                             Net.tls-close(tls)
@@ -140,7 +139,7 @@ let step-wrong-host() -> Int {
     | Ok(c) -> {
         defer Net.close(c)
         match (Net.tls-client(c, "wrong.example"))
-          | Err(TlsVerifyFailed) -> {
+          | Err(Net.TlsVerifyFailed) -> {
               Task.cancel(server)
               Task.join(server)
               0
