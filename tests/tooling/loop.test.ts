@@ -13,7 +13,7 @@ import { join } from "node:path";
 
 import { extractCriteria, extractReviewSection, readState, runStreaming, slug, tail, writeState } from "../../tools/loop/lib.ts";
 import { executePrompt, reviewPrompt } from "../../tools/loop/prompts.ts";
-import { auditAgentCommands, describeToolCall, issueRef, nextCandidate, planFromToolCall, planMissing, renderCursorEvent, withCoverage } from "../../tools/loop/run.ts";
+import { auditAgentCommands, describeToolCall, issueRef, nextCandidate, planFromToolCall, planMissing, prBase, renderCursorEvent, withCoverage } from "../../tools/loop/run.ts";
 import type { Row } from "../../tools/next.ts";
 
 const REVIEW = join(import.meta.dir, "..", "..", "docs", "reviews", "2026-10-24-build-f.md");
@@ -216,6 +216,14 @@ describe("runStreaming", () => {
   test("kills a command that overruns its timeout", async () => {
     const result = await runStreaming(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { timeoutMs: 300 });
     expect(result.timedOut).toBe(true);
+  });
+});
+
+describe("prBase", () => {
+  test("strips the remote prefix GitHub will not accept", () => {
+    expect(prBase("origin/main")).toBe("main");
+    expect(prBase("main")).toBe("main");
+    expect(prBase("origin/release/1.x")).toBe("release/1.x");
   });
 });
 
