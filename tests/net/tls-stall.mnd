@@ -1,6 +1,5 @@
 ; CONC-03: stalled TLS handshake parks off the mutator; other tasks run.
 import std/net as Net
-pub import std/io (IoError)
 import std/task as Task
 import std/sched as Sched
 
@@ -52,7 +51,7 @@ let main() -> Int {
                     match (Task.join(ticker))
                       | Ok(5) -> {
                           match (Task.join(hs))
-                            | Ok(Err(Timeout)) -> {
+                            | Ok(Err(Net.Timeout)) -> {
                                 Task.cancel(acceptor)
                                 Task.join(acceptor)
                                 println("live")

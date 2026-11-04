@@ -1298,7 +1298,7 @@ record PoolLine {
   nbytes: Int
 }
 
-let singleton-index(name: Str) -> Int =
+let singleton-index-bare(name: Str) -> Int =
   cond
     | name == "Nil" -> 0
     | name == "None" -> 1
@@ -1316,6 +1316,11 @@ let singleton-index(name: Str) -> Int =
     | name == "TlsVerifyFailed" -> 13
     | name == "TlsHandshakeFailed" -> 14
     | else -> -1
+
+let singleton-index(name: Str) -> Int {
+  let bare = singleton-index-bare(name)
+  if (bare >= 0) -> bare | singleton-index-bare(strip-import-prefix(name))
+}
 
 let emitted-ctor-tag(name: Str, ctors: Map Str CtorSpec) -> Int =
   match (Map.lookup(name, ctors))
@@ -1966,15 +1971,28 @@ let builtin-ctor-tag-of(hn: Str) -> Maybe Int =
     | hn == "TlsHandshakeFailed" -> Some(37)
     | else -> None
 
+; Prefixed import spellings (`__import_Net_NotFound`) share tags/arities
+; with the bare constructor (LANG-16 re-exports under aliases).
 let ctor-tag-of(hn: Str, pool: StrPool) -> Maybe Int =
   match (builtin-ctor-tag-of(hn))
     | Some(t) -> Some(t)
     | None ->
-      match (Map.lookup(hn, str-pool-ctors(pool)))
-        | Some(spec) -> Some(ctor-spec-tag(spec))
-        | None -> None
+      match (builtin-ctor-tag-of(strip-import-prefix(hn)))
+        | Some(t) -> Some(t)
+        | None ->
+          match (Map.lookup(hn, str-pool-ctors(pool)))
+            | Some(spec) -> Some(ctor-spec-tag(spec))
+            | None ->
+              match (Map.lookup(strip-import-prefix(hn), str-pool-ctors(pool)))
+                | Some(spec) -> Some(ctor-spec-tag(spec))
+                | None -> None
 
 let seam-fixed-arity(hn: Str) -> Maybe Int =
+  match (seam-fixed-arity-bare(hn))
+    | Some(n) -> Some(n)
+    | None -> seam-fixed-arity-bare(strip-import-prefix(hn))
+
+let seam-fixed-arity-bare(hn: Str) -> Maybe Int =
   cond
     | hn == "SpawnOutput" -> Some(3)
     | hn == "Other" || hn == "Exited" || hn == "Signalled" -> Some(1)
@@ -1992,7 +2010,10 @@ let ctor-arity-of(hn: Str, pool: StrPool) -> Int =
         | else ->
           match (Map.lookup(hn, str-pool-ctors(pool)))
             | Some(spec) -> ctor-spec-arity(spec)
-            | None -> -1
+            | None ->
+              match (Map.lookup(strip-import-prefix(hn), str-pool-ctors(pool)))
+                | Some(spec) -> ctor-spec-arity(spec)
+                | None -> -1
 
 let ctor-extern-abs(hn: Str, ns: Int) -> Int =
   cond

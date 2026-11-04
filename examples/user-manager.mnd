@@ -3,7 +3,6 @@
 ;      `./mn inter examples/user-manager.mnd`
 
 import std/actor as Actor
-pub import std/task (Cancelled)
 import std/list as List
 import std/map as Map
 import std/string as String

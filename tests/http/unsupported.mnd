@@ -1,11 +1,10 @@
 ; CONC-10: Http.request under mn inter yields Err(NetErr(Unsupported)).
 import std/http as Http
-pub import std/io (IoError)
 import std/map as Map
 
 let main() -> Int =
   match (Http.request("127.0.0.1", 9, Http.Request(Http.GET, "/", Map.empty(), "")))
-    | Err(Http.NetErr(Unsupported)) -> {
+    | Err(Http.NetErr(Http.Unsupported)) -> {
         println("Unsupported")
         1
       }

@@ -1,6 +1,5 @@
 ; CONC-03: without MENARD_TLS_CA_FILE, a self-signed peer is TlsVerifyFailed.
 import std/net as Net
-pub import std/io (IoError)
 import std/task as Task
 import std/sched as Sched
 
@@ -12,7 +11,7 @@ let main() -> Int {
   let port-cell = ref(0)
   let server = Task.spawn(fn () = {
     match (Net.listen(0))
-      | Err(Unsupported) -> {
+      | Err(Net.Unsupported) -> {
           println("Unsupported")
           Sched.notify(ready)
           1
@@ -56,7 +55,7 @@ let main() -> Int {
     | Ok(c) -> {
         defer Net.close(c)
         match (Net.tls-client(c, "localhost"))
-          | Err(TlsVerifyFailed) -> {
+          | Err(Net.TlsVerifyFailed) -> {
               Task.cancel(server)
               Task.join(server)
               println("rejected")

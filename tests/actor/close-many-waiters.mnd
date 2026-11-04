@@ -2,7 +2,6 @@
 ; Empty and full waiter sets cannot coexist on one queue, so each set uses
 ; its own bounded mailbox; both exercise notify-all past the old 64 cap.
 import std/actor as Actor
-pub import std/task (Cancelled)
 import std/task as Tsk
 
 let n() -> Int =

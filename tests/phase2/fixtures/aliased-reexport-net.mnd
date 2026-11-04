@@ -1,0 +1,15 @@
+; LANG-16: alias-only import carries re-exported IoError; Net.IoError is usable.
+import std/net as Net
+
+let classify(e: Net.IoError) -> Int =
+  match (e)
+    | Net.Unsupported -> 1
+    | _ -> 0
+
+let main() -> Int =
+  match (Net.listen(0))
+    | Err(e) -> classify(e)
+    | Ok(fd) -> {
+        Net.close(fd)
+        0
+      }

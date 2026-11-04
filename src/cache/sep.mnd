@@ -421,30 +421,165 @@ record Export {
   stubs: List Ast
 }
 
-let collect-exports(forms: List Ast, path: Str, fns: List FnRec, names: List Str, stubs: List Ast) -> Export =
+; Primary name of a stub form (`type IoError`, `let stdin`, `extern listen`, …).
+let stub-primary-name(stub: Ast) -> Maybe Str =
+  match (unwrap-pub(stub))
+    | ParenNode(_ :: name :: _, _) -> bare-name(name)
+    | _ -> None
+
+let stubs-have-primary(stubs: List Ast, name: Str) -> Bool =
+  match (stubs)
+    | [] -> false
+    | s :: rest ->
+      match (stub-primary-name(s))
+        | Some(n) ->
+          if (n == name) -> true | stubs-have-primary(rest, name)
+        | None -> stubs-have-primary(rest, name)
+
+; Keep the first stub for a name when a module both defines and re-exports it
+; transitively (deps are walked before the module in surface-of).
+let filter-new-stubs(stubs: List Ast, existing: List Ast) -> List Ast =
+  match (stubs)
+    | [] -> []
+    | s :: rest ->
+      match (stub-primary-name(s))
+        | Some(n) ->
+          if (stubs-have-primary(existing, n)) ->
+            filter-new-stubs(rest, existing) |
+            s :: filter-new-stubs(rest, existing)
+        | None -> s :: filter-new-stubs(rest, existing)
+
+let import-sym-names(xs: List Ast) -> List Str =
+  match (xs)
+    | [] -> []
+    | h :: t ->
+      match (sym-str(h))
+        | Some(n) -> n :: import-sym-names(t)
+        | None -> import-sym-names(t)
+
+; `None` = whole-module re-export; `Some(names)` = selective list.
+let reexport-name-list(form: Ast) -> Maybe (Maybe (List Str)) =
+  match (unwrap-pub(form))
+    | ParenNode(h :: _ :: rest, _) ->
+      match (sym-str(h))
+        | Some("import") ->
+          match (rest)
+            | [] -> Some(None)
+            | ParenNode(names, _) :: _ -> Some(Some(import-sym-names(names)))
+            | _ -> None
+        | _ -> None
+    | _ -> None
+
+let all-stub-primaries(stubs: List Ast, acc: List Str) -> List Str =
+  match (stubs)
+    | [] -> acc
+    | s :: rest ->
+      match (stub-primary-name(s))
+        | Some(n) -> all-stub-primaries(rest, n :: acc)
+        | None -> all-stub-primaries(rest, acc)
+
+let all-fn-names(fns: List FnRec, acc: List Str) -> List Str =
+  match (fns)
+    | [] -> acc
+    | FnRec(n, _, _) :: rest -> all-fn-names(rest, n :: acc)
+
+let dep-export-names(stubs: List Ast, fns: List FnRec) -> List Str =
+  all-fn-names(fns, all-stub-primaries(stubs, []))
+
+let stub-selected(stub: Ast, names: List Str) -> Bool =
+  match (stub-primary-name(stub))
+    | Some(n) -> has-str(names, n)
+    | None -> false
+
+let pick-reexport-stubs(stubs: List Ast, names: List Str, acc: List Ast) -> List Ast =
+  match (stubs)
+    | [] -> reverse(acc)
+    | s :: rest ->
+      if (stub-selected(s, names)) ->
+        pick-reexport-stubs(rest, names, s :: acc) |
+        pick-reexport-stubs(rest, names, acc)
+
+let pick-reexport-fns(fns: List FnRec, names: List Str, acc: List FnRec) -> List FnRec =
+  match (fns)
+    | [] -> reverse-fns(acc, [])
+    | FnRec(n, link, ar) :: rest ->
+      if (has-str(names, n)) ->
+        pick-reexport-fns(rest, names, FnRec(n, link, ar) :: acc) |
+        pick-reexport-fns(rest, names, acc)
+
+let reverse-fns(xs: List FnRec, acc: List FnRec) -> List FnRec =
+  match (xs)
+    | [] -> acc
+    | x :: rest -> reverse-fns(rest, x :: acc)
+
+let append-fn-recs(xs: List FnRec, ys: List FnRec) -> List FnRec =
+  match (xs)
+    | [] -> ys
+    | x :: rest -> x :: append-fn-recs(rest, ys)
+
+; Type name plus nested constructors for a re-exported stub.
+let reexport-stub-names(stub: Ast, acc: List Str) -> List Str =
+  match (stub-primary-name(stub))
+    | Some(n) -> ctor-names-of(stub, n :: acc)
+    | None -> ctor-names-of(stub, acc)
+
+let reexport-stubs-names(stubs: List Ast, acc: List Str) -> List Str =
+  match (stubs)
+    | [] -> acc
+    | s :: rest -> reexport-stubs-names(rest, reexport-stub-names(s, acc))
+
+let collect-exports(forms: List Ast, path: Str, done: Map Str Iface, fns: List FnRec, names: List Str, stubs: List Ast) -> Export =
   match (forms)
     | [] -> Export(fns, names, stubs)
     | f :: rest ->
-      if (is-pub(f)) -> collect-pub(f, rest, path, fns, names, stubs) | collect-exports(rest, path, fns, names, stubs)
+      if (is-pub(f)) -> collect-pub(f, rest, path, done, fns, names, stubs) | collect-exports(rest, path, done, fns, names, stubs)
 
-let collect-pub(form: Ast, rest: List Ast, path: Str, fns: List FnRec, names: List Str, stubs: List Ast) -> Export {
+let collect-reexport(form: Ast, rest: List Ast, path: Str, done: Map Str Iface, fns: List FnRec, names: List Str, stubs: List Ast) -> Export =
+  match (import-specs([form]))
+    | [] -> collect-exports(rest, path, done, fns, names, stubs)
+    | spec :: _ ->
+      match (reexport-name-list(form))
+        | None -> collect-exports(rest, path, done, fns, names, stubs)
+        | Some(sel) ->
+          match (Map.lookup(canonical-path(resolve-import(path, spec)), done))
+            | None -> collect-exports(rest, path, done, fns, names, stubs)
+            | Some(Iface(_, _, _, _, _, dep-fns, _, dep-stubs)) ->
+              {
+                let wanted =
+                  match (sel)
+                    | None -> dep-export-names(dep-stubs, dep-fns)
+                    | Some(ns) -> ns
+                let picked = pick-reexport-stubs(dep-stubs, wanted, [])
+                let picked-fns = pick-reexport-fns(dep-fns, wanted, [])
+                collect-exports(
+                  rest,
+                  path,
+                  done,
+                  append-fn-recs(picked-fns, fns),
+                  reexport-stubs-names(picked, names),
+                  append-asts(picked, stubs)
+                )
+              }
+
+let collect-pub(form: Ast, rest: List Ast, path: Str, done: Map Str Iface, fns: List FnRec, names: List Str, stubs: List Ast) -> Export {
   let k = kind-of(form)
   cond
+    | k == "import" -> collect-reexport(form, rest, path, done, fns, names, stubs)
     | k == "defn" ->
       match (defn-rest(form))
-        | None -> collect-exports(rest, path, fns, names, stubs)
+        | None -> collect-exports(rest, path, done, fns, names, stubs)
         | Some(r) ->
           match (defn-name(form))
-            | None -> collect-exports(rest, path, fns, names, stubs)
+            | None -> collect-exports(rest, path, done, fns, names, stubs)
             | Some(n) ->
               match (extern-stub(form))
-                | None -> collect-exports(rest, path, fns, names, stubs)
-                | Some(stub) -> collect-exports(rest, path, push-fn(fns, n, link-of(path, n), fn-arity(r)), names, stub :: stubs)
-    | k == "variant" -> collect-exports(rest, path, fns, ctor-names-of(form, names), unwrap-pub(form) :: stubs)
-    | k == "runtime" -> collect-exports(rest, path, fns, names, unwrap-pub(form) :: stubs)
-    | k == "defrec" || k == "alias" || k == "extern" -> collect-exports(rest, path, fns, ctor-names-of(form, names), unwrap-pub(form) :: stubs)
-    | k == "let" -> collect-exports(rest, path, fns, names, unwrap-pub(form) :: stubs)
-    | else -> collect-exports(rest, path, fns, names, stubs)
+                | None -> collect-exports(rest, path, done, fns, names, stubs)
+                | Some(stub) -> collect-exports(rest, path, done, push-fn(fns, n, link-of(path, n), fn-arity(r)), names, stub :: stubs)
+    | k == "variant" -> collect-exports(rest, path, done, fns, ctor-names-of(form, names), unwrap-pub(form) :: stubs)
+    | k == "runtime" -> collect-exports(rest, path, done, fns, names, unwrap-pub(form) :: stubs)
+    | k == "defrec" || k == "alias" || k == "extern" -> collect-exports(rest, path, done, fns, ctor-names-of(form, names), unwrap-pub(form) :: stubs)
+    | k == "let" -> collect-exports(rest, path, done, fns, names, unwrap-pub(form) :: stubs)
+    | else -> collect-exports(rest, path, done, fns, names, stubs)
 }
 
 let empty-surface() -> Surface =
@@ -463,12 +598,14 @@ let surface-add-fns(fns: List FnRec, acc: List FnRec) -> List FnRec =
       surface-add-fns(rest, FnRec(n, link, ar) :: surface-drop-fn(acc, n))
 
 ; Stubs are typechecked in this order, so a dependency's variant
-; has to precede the alias that names it.
+; has to precede the alias that names it. Skip a stub whose primary
+; name is already present (re-export copies of transitive types).
 let surface-add(iface: Iface, acc: Surface) -> Surface =
   match (iface)
     | Iface(_, _, _, _, _, fns, ctors, stubs) ->
       match (acc)
-        | Surface(af, ac, as) -> Surface(surface-add-fns(fns, af), append-ctors(ctors, ac), append-asts(as, stubs))
+        | Surface(af, ac, as) ->
+          Surface(surface-add-fns(fns, af), append-ctors(ctors, ac), append-asts(as, filter-new-stubs(stubs, as)))
 
 let append-ctors(xs: List CtorRec, ys: List CtorRec) -> List CtorRec =
   match (xs)
@@ -577,10 +714,22 @@ let stub-name-shadowed(stub: Ast, names: Map Str Str) -> Bool =
         | None -> false
     | _ -> false
 
+; Nested variant/record constructor names inside type stubs.
+let prefix-name-list(names: List Str, prefix: Str, acc: Map Str Str) -> Map Str Str =
+  match (names)
+    | [] -> acc
+    | n :: rest -> prefix-name-list(rest, prefix, Map.set(n, String.concat(prefix, n), acc))
+
+let stub-nested-renames(stubs: List Ast, prefix: Str, acc: Map Str Str) -> Map Str Str =
+  match (stubs)
+    | [] -> acc
+    | stub :: rest ->
+      stub-nested-renames(rest, prefix, prefix-name-list(ctor-names-of(stub, []), prefix, acc))
+
 ; Prefixed names for every export an aliased import exposes: values, types,
 ; and constructors. Applied to the whole stub AST so signatures stay coherent.
 let alias-export-renames(stubs: List Ast, ctors: List CtorRec, prefix: Str, acc: Map Str Str) -> Map Str Str =
-  alias-ctor-renames(ctors, prefix, qualified-renames(stubs, prefix, acc))
+  alias-ctor-renames(ctors, prefix, stub-nested-renames(stubs, prefix, qualified-renames(stubs, prefix, acc)))
 
 ; When the same module is also bare-imported, types/ctors already use their
 ; original names. Only value stubs are renamed so `Http.serve` and bare
@@ -658,9 +807,72 @@ let append-strs(xs: List Str, ys: List Str) -> List Str =
     | [] -> ys
     | x :: rest -> x :: append-strs(rest, ys)
 
+; Type stub primary names already on the surface (bare imports).
+let surface-type-names(stubs: List Ast, acc: List Str) -> List Str =
+  match (stubs)
+    | [] -> acc
+    | s :: rest ->
+      match (type-stub-name(s))
+        | Some(n) -> surface-type-names(rest, n :: acc)
+        | None -> surface-type-names(rest, acc)
+
+; Re-exported (or other) type names that already appear unprefixed — share
+; identity via dual-type-alias instead of forking a renamed nominal.
+let shared-type-names(stubs: List Ast, exposed-types: List Str, acc: List Str) -> List Str =
+  match (stubs)
+    | [] -> acc
+    | s :: rest ->
+      match (type-stub-name(s))
+        | Some(n) ->
+          if (has-str(exposed-types, n) && not(has-str(acc, n))) ->
+            shared-type-names(rest, exposed-types, n :: acc) |
+            shared-type-names(rest, exposed-types, acc)
+        | None -> shared-type-names(rest, exposed-types, acc)
+
+let unshared-type-stubs(stubs: List Ast, shared: List Str) -> List Ast =
+  match (stubs)
+    | [] -> []
+    | s :: rest ->
+      match (type-stub-name(s))
+        | None -> unshared-type-stubs(rest, shared)
+        | Some(n) ->
+          if (has-str(shared, n)) ->
+            unshared-type-stubs(rest, shared) |
+            s :: unshared-type-stubs(rest, shared)
+
+; Drop shared type names (and their nested ctors) from the rename map so
+; signatures keep the bare spelling. `dual-type-alias` cannot carry type
+; arguments (`__import_Sup_Pid a` is not a valid alias application).
+let drop-rename-keys(keys: List Str, renames: Map Str Str) -> Map Str Str =
+  match (keys)
+    | [] -> renames
+    | k :: rest -> drop-rename-keys(rest, Map.remove(k, renames))
+
+let shared-nested-names(stubs: List Ast, shared: List Str, acc: List Str) -> List Str =
+  match (stubs)
+    | [] -> acc
+    | s :: rest ->
+      match (type-stub-name(s))
+        | Some(n) ->
+          if (has-str(shared, n)) ->
+            shared-nested-names(rest, shared, ctor-names-of(s, n :: acc)) |
+            shared-nested-names(rest, shared, acc)
+        | None -> shared-nested-names(rest, shared, acc)
+
+let dual-type-aliases-for(names: List Str, prefix: Str, seen: List Str) -> List Ast =
+  match (names)
+    | [] -> []
+    | n :: rest ->
+      if (has-str(seen, n)) ->
+        dual-type-aliases-for(rest, prefix, seen) |
+        dual-type-alias(prefix, n) :: dual-type-aliases-for(rest, prefix, n :: seen)
+
 ; Alias imports expose `__import_Alias_*` spellings. When the module's types
 ; are already bare-exposed, only values are renamed and type aliases keep
 ; `Alias.Type` on the same identity; otherwise every export is renamed.
+; Per-name: a re-export whose defining type is already bare (e.g. IoError
+; via `pub import std/io` while `import std/net as Net`) keeps the bare
+; spelling in signatures so identity is shared without a forked nominal.
 let alias-surfaces-for(from: Str, forms: List Ast, done: Map Str Iface, bare: List Str, acc: Surface) -> Surface =
   alias-surfaces-with(from, forms, done, bare-exposed-paths(bare, done), acc)
 
@@ -683,11 +895,25 @@ let alias-surfaces-with(from: Str, forms: List Ast, done: Map Str Iface, exposed
                         {
                           let prefix = import-alias-prefix(name)
                           let dual = has-str(exposed, path)
+                          let shared =
+                            if (dual) ->
+                              [] |
+                              shared-type-names(stubs, surface-type-names(as, []), [])
+                          let full-renames = alias-export-renames(stubs, ctors, prefix, Map.empty())
+                          let renames = drop-rename-keys(shared-nested-names(stubs, shared, []), full-renames)
                           let renamed =
                             if (dual) ->
                               rename-module-forms(value-stubs(stubs), alias-value-renames(stubs, prefix, Map.empty())) |
-                              rename-module-forms(stubs, alias-export-renames(stubs, ctors, prefix, Map.empty()))
-                          let aliases = if (dual) -> dual-type-aliases(stubs, prefix, []) | []
+                              append-asts(
+                                rename-module-forms(value-stubs(stubs), renames),
+                                rename-module-forms(unshared-type-stubs(stubs, shared), renames)
+                              )
+                          ; Shared names stay bare in signatures; dual aliases still
+                          ; bind Alias.Name for nullary type annotations / ctors.
+                          let aliases =
+                            if (dual) ->
+                              dual-type-aliases(stubs, prefix, []) |
+                              dual-type-aliases-for(shared, prefix, [])
                           let next-ctors = append-ctors(qualify-ctor-recs(ctors, prefix), ac)
                           alias-surfaces-with(from, rest, done, exposed, Surface(append-fns(qualified-fns(fns, prefix), af), next-ctors, append-asts(as, append-asts(renamed, aliases))))
                         }
@@ -849,9 +1075,9 @@ let filter-deps-in(deps: List DepRec, paths: List Str) -> List DepRec =
 let compile-forms-open(abs: Str, src: Str, display: Str, forms: List Ast, direct: List DepRec, ctx: Ctx) -> Result Iface Str {
   let started = now-ms()
   let for-test = suite-member(ctx, abs) || ctx-for-test(ctx) && abs == ctx-entry(ctx)
-  let exported = collect-exports(forms, abs, [], [], [])
-  let body0 = prepare-body(strip-module-forms(forms), for-test)
   let done = deref(ctx-done(ctx))
+  let exported = collect-exports(forms, abs, done, [], [], [])
+  let body0 = prepare-body(strip-module-forms(forms), for-test)
   let bare-paths = module-bare-paths(abs, forms, direct)
   let surface = alias-surfaces-for(abs, forms, done, bare-paths, direct-surfaces(bare-paths, done, surface-of(bare-dep-recs(abs, forms, direct), done)))
   match (surface)

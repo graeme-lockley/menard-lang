@@ -1,6 +1,5 @@
 ; Build E: mailbox multi-sender/waiter, Actor.call, death, registry, escalate.
 import std/actor as Actor
-pub import std/task (Cancelled)
 import std/task as Tsk
 import std/list as List
 import std/map as Map

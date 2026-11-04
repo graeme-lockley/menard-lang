@@ -1,0 +1,15 @@
+; LANG-16: import M as A plus pub import M (…) must not unbind A.Ctor.
+import std/json as Json
+pub import std/json (Json)
+
+let describe(j: Json.Json) -> Str =
+  match (j)
+    | Json.JsonFloat(_) -> "float"
+    | Json.JsonNull -> "null"
+    | _ -> "other"
+
+let main() -> Int {
+  println(describe(Json.JsonFloat(1.5)))
+  println(describe(Json.JsonNull))
+  0
+}
