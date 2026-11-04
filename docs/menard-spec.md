@@ -1468,11 +1468,21 @@ parameterised type satisfies a predicate exactly when its instantiation does.
 | `Float` | **yes** | monotonic bit order (below) |
 | `Ref`, `StringBuffer` | **no** | mutable, identity-bearing, hence run-dependent |
 | record | if all fields orderable | lexicographic, declaration order |
-| variant | if all payloads orderable | constructor tag, then payload |
+| variant | if all payloads orderable | constructor tag (below), then payload |
 | `(List T)`, `(Arr T n)` | if `T` orderable | lexicographic, then length |
-| `(Maybe T)`, `(Result T E)` | if components orderable | constructor tag, then payload |
+| `(Maybe T)`, `(Result T E)` | if components orderable | constructor tag (below), then payload |
 | `(Map K V)` | if `K` and `V` orderable | **lexicographic over entries sorted by `K`** (§2.11.O) |
 | user nominal type with parameters | if the instantiation is | per the above rules |
+
+**Constructor tag** means the numeric tag assigned to each constructor. Built-ins
+have fixed tags (`Nil`=0, `Cons`=1, `None`=2, `Some`=3, `Ok`=4, `Err`=5, then
+the IoError/Spawn table). User constructors — including those of surface `type`
+variants, and the same rule for the built-in `Maybe` / `Result` cases above —
+receive successive tags in **declaration order** within the compilation unit
+(starting after the reserved runtime range). Distinct constructors therefore
+compare by that declaration order, not by constructor name. Lists remain
+lexicographic-then-length (§2.12 table row for `(List T)`); `Cons`/`Nil` are not
+ordered by their numeric tags when treated as lists.
 
 **Showable(T)** — has exactly one spelling:
 

@@ -1,5 +1,7 @@
 ; LIB-06: Map keys for every orderable type — set/lookup/has/keys
 ; match compare order on both hosts (interpreter + native).
+; LANG-18 / OTH-03: Color is reverse-alpha so declaration tags disagree
+; with alphabetical ctor-name order.
 import std/map as Map
 
 record Point {
@@ -7,9 +9,8 @@ record Point {
   y: Int
 }
 
-; Names sort alphabetically in declaration order so host ctor-name
-; compare matches native declaration-tag order for these keys.
 type Color =
+  | Z
   | A
   | B(Int)
   | C(Int, Int)
@@ -83,15 +84,19 @@ let main() -> Int {
   println(Map.lookup(Point(0, 9), mr))
   println(Map.has(Point(1, 0), mr))
 
-  ; Variant
+  ; Variant — Z first by declaration tag (not alphabetical A)
   let mv = Map.empty()
     |> Map.set(B(2), "g2")
+    |> Map.set(Z, "z")
     |> Map.set(A, "r")
     |> Map.set(C(1, 0), "b")
     |> Map.set(B(1), "g1")
   println(Map.keys(mv))
+  println(Map.lookup(Z, mv))
   println(Map.lookup(A, mv))
   println(Map.lookup(B(1), mv))
+  println(compare(Z, A))
+  println(compare(A, B(0)))
 
   ; Tuple / product
   let mt = Map.empty()
@@ -118,8 +123,7 @@ let main() -> Int {
   println(Map.keys(mm))
   println(Map.lookup(inner-a, mm))
 
-  ; keys order matches compare (records / products; variant order is
-  ; visible in Map.keys above — host name order vs native tags agree for A/B/C)
+  ; keys order matches compare
   println(compare(Point(0, 9), Point(1, 0)))
   println(compare((1, 9), (2, 0)))
   0

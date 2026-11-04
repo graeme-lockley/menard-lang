@@ -1,0 +1,65 @@
+; LANG-18: variant constructor order is declaration-order tags, not
+; alphabetical names. Reverse-alpha declaration is the counterexample.
+import std/list as List
+import std/map as Map
+
+type Color =
+  | Z
+  | A
+  | B(Int)
+  | C(Int, Int)
+
+type Inner =
+  | Z2
+  | A2
+
+type Outer =
+  | Wrap(Inner)
+  | Box(Inner)
+
+let main() -> Int {
+  ; compare: Z < A by declaration (alphabetical would invert)
+  println(compare(Z, A))
+  println(compare(A, Z))
+  println(compare(Z, B(0)))
+  println(compare(B(1), B(2)))
+  println(compare(Ok(1), Err(1)))
+  println(compare(None, Some(0)))
+
+  ; List.sort
+  println(List.sort([C(1, 2), B(1), Z, A]))
+
+  ; Map set / lookup / replacement / keys
+  let m0 = Map.empty()
+    |> Map.set(B(1), "old")
+    |> Map.set(Z, "z")
+    |> Map.set(C(1, 0), "c")
+    |> Map.set(A, "a")
+    |> Map.set(B(1), "replaced")
+  println(Map.keys(m0))
+  println(Map.lookup(Z, m0))
+  println(Map.lookup(B(1), m0))
+  println(Map.has(A, m0))
+  println(Map.has(C(9, 9), m0))
+
+  ; Nested: Wrap before Box by declaration (alphabetical: Box < Wrap)
+  println(compare(Wrap(Z2), Box(Z2)))
+  println(compare(Wrap(Z2), Wrap(A2)))
+  let mn = Map.empty()
+    |> Map.set(Box(A2), "ba")
+    |> Map.set(Wrap(Z2), "wz")
+    |> Map.set(Wrap(A2), "wa")
+  println(Map.keys(mn))
+
+  ; Maybe / Result as map keys
+  let mm = Map.empty()
+    |> Map.set(Some(1), "s")
+    |> Map.set(None, "n")
+  println(Map.keys(mm))
+  let mr = Map.empty()
+    |> Map.set(Err(0), "e")
+    |> Map.set(Ok(0), "o")
+  println(Map.keys(mr))
+
+  0
+}

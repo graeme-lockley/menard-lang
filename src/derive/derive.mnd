@@ -164,13 +164,35 @@ let eq-clauses(ctors: List DeriveCtor) -> List Ast =
     | [] -> []
     | c :: rest -> append-ast([ctor-pat(c, "a"), eq-one(c)], eq-clauses(rest))
 
-let cmp-one(c: DeriveCtor) -> Ast =
-  paren([sy("match"), sy("b"), ctor-pat(c, "b"), cmp-fields(binders("a", dc-arity(c), 0), binders("b", dc-arity(c), 0)), sy("_"), int-lit(1)])
+; Cross-constructor order is declaration index (LANG-18), matching numeric
+; shape tags — not the old `_ -> 1` fallback that made every unequal pair
+; report `a > b`.
+let cmp-sign(a-idx: Int, b-idx: Int) -> Int =
+  cond
+    | a-idx < b-idx -> -1
+    | a-idx > b-idx -> 1
+    | else -> 0
 
-let cmp-clauses(ctors: List DeriveCtor) -> List Ast =
+let cmp-b-arm(a-ctor: DeriveCtor, a-idx: Int, b-ctor: DeriveCtor, b-idx: Int) -> List Ast {
+  let body = if (a-idx == b-idx) -> cmp-fields(binders("a", dc-arity(a-ctor), 0), binders("b", dc-arity(b-ctor), 0)) | int-lit(cmp-sign(a-idx, b-idx))
+  [ctor-pat(b-ctor, "b"), body]
+}
+
+let cmp-b-arms(a-ctor: DeriveCtor, a-idx: Int, all: List DeriveCtor, b-idx: Int) -> List Ast =
+  match (all)
+    | [] -> []
+    | b-ctor :: rest -> append-ast(cmp-b-arm(a-ctor, a-idx, b-ctor, b-idx), cmp-b-arms(a-ctor, a-idx, rest, b-idx + 1))
+
+let cmp-one-at(c: DeriveCtor, a-idx: Int, all: List DeriveCtor) -> Ast =
+  paren(sy("match") :: sy("b") :: cmp-b-arms(c, a-idx, all, 0))
+
+let cmp-clauses-at(ctors: List DeriveCtor, a-idx: Int, all: List DeriveCtor) -> List Ast =
   match (ctors)
     | [] -> []
-    | c :: rest -> append-ast([ctor-pat(c, "a"), cmp-one(c)], cmp-clauses(rest))
+    | c :: rest -> append-ast([ctor-pat(c, "a"), cmp-one-at(c, a-idx, all)], cmp-clauses-at(rest, a-idx + 1, all))
+
+let cmp-clauses(ctors: List DeriveCtor) -> List Ast =
+  cmp-clauses-at(ctors, 0, ctors)
 
 let defn-1(name: Str, ty: Str, ret: Str, body: Ast) -> Ast =
   paren([sy("defn"), sy(name), paren([sy("v:"), sy(ty)]), sy("->"), sy(ret), body])

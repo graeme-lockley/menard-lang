@@ -32,6 +32,7 @@ import type { Host } from "../host/host.ts";
 import { ExitSignal, type IoError, type SpawnError, type SpawnStatus } from "../host/host.ts";
 import { showValue, equalValue, compareValue, dumpValue } from "./derive.ts";
 import { canonicalFloat } from "./float-order.ts";
+import { registerUserCtor } from "./ctor-tags.ts";
 import { decodeSymBytes, specialFormOf, Sf } from "./resolve.ts";
 import { accelFor, getAccel, runAccel, setAccel } from "./accel.ts";
 import {
@@ -369,6 +370,8 @@ function defineTop(ast: Ast, env: Env): void {
       const ce = ast.elems[i]!;
       if (ce.tag !== "list" || ce.elems.length < 1 || ce.elems[0]!.tag !== "sym") continue;
       const cname = symName(ce.elems[0]!);
+      // Declaration-order tags (LANG-18); skip builtins inside registerUserCtor.
+      registerUserCtor(cname);
       if (envGet(env, cname)) continue;
       const arity = ce.elems.length - 1;
       // LANG-07: a nullary constructor is the variant value itself.
@@ -394,6 +397,8 @@ function defineTop(ast: Ast, env: Env): void {
           ? symName(namePart.elems[0]!)
           : null;
     if (!name) return;
+    // Tag-table parity with lower.mnd collect-defrec-decl (LANG-18).
+    registerUserCtor(name);
     if (envGet(env, name)) return;
     const fieldNames: string[] = [];
     for (let i = 2; i < ast.elems.length; i++) {

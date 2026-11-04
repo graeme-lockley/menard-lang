@@ -3,6 +3,7 @@ import { mapEntries, mapGet, mapSize } from "../builtins/collections.ts";
 import { formatFloat } from "./float-text.ts";
 import { compareFloat } from "./float-order.ts";
 import { printChar } from "../reader/print.ts";
+import { ctorTag } from "./ctor-tags.ts";
 
 export function showValue(v: Value): string {
   switch (v.tag) {
@@ -227,7 +228,11 @@ export function compareValue(a: Value, b: Value): number {
       ) {
         return compareListVariants(a, bb);
       }
-      if (a.ctor !== bb.ctor) return a.ctor < bb.ctor ? -1 : 1;
+      if (a.ctor !== bb.ctor) {
+        const ta = ctorTag(a.ctor);
+        const tb = ctorTag(bb.ctor);
+        return ta < tb ? -1 : 1;
+      }
       const n = Math.min(a.payloads.length, bb.payloads.length);
       for (let i = 0; i < n; i++) {
         const c = compareValue(a.payloads[i]!, bb.payloads[i]!);
