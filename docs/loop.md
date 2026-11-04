@@ -31,6 +31,33 @@ need judgement to Cursor, with a written contract for each.
 The agent never runs `git commit`, `git push`, or `gh pr create`. Every prompt
 says so; the driver is the only place those commands appear.
 
+## Skills, not prompts
+
+The method lives in two skills under `.agents/skills/`, in the same format as
+the skills used when driving Cursor by hand:
+
+- `menard-plan` — how to research an item, and the shape of the plan it must
+  produce, including the AC evidence table;
+- `menard-implement` — the implementation method with the harness overrides:
+  no commit, no full suite, write the summary file.
+
+The prompts in `tools/loop/prompts.ts` carry only the task data and the machine
+contract: the item, the AC ids, the output paths, the JSON shape. Changing how
+the loop plans or implements means editing a skill, and the change applies to
+manual sessions too.
+
+## Acceptance criteria as ids
+
+The review's `- [ ]` bullets become `AC1 … ACn` (saved as `acs.json` in the run
+directory). The plan's evidence table must have one row per id, and the review
+verdict must have one entry per id. Both are checked by the driver:
+
+- a plan that misses an AC is retried once, then stops the run **before** the
+  implementation — a bad plan costs five minutes, not twenty;
+- a verdict that misses an AC is marked `satisfied: false` with the missing ids
+  added to `gaps`, so they go to the fix round instead of being silently
+  accepted.
+
 ## What "next" means
 
 `make loop` uses the same report as `make next`: the lowest open phase, rows
@@ -111,8 +138,9 @@ It returns JSON, not prose, so the driver can act on it:
 }
 ```
 
-The verdict is not trusted blindly either: an unparseable verdict stops the
-run rather than passing it. Fail closed, always.
+Each criterion entry is keyed by its AC id; the driver fails a verdict that
+omits one. The verdict is not trusted blindly either: an unparseable verdict
+stops the run rather than passing it. Fail closed, always.
 
 ## What happens when it is red
 
@@ -169,6 +197,7 @@ The raw NDJSON is kept in `cursor-<stage>.log` beside the rendered text.
     run.log               every command and decision, in order, stamped
     plan.md               the plan the implementation followed (captured from
                           the plan artifact, not the chat narration)
+    acs.json              the acceptance criteria as AC1 … ACn
     summary.md            the implementer's account of what changed
     agent-summary.md      where the implementer writes that account
     fix-<n>.md            repair notes, one per round
@@ -210,6 +239,10 @@ three ways a loop run corrupts itself.
 
 - **Gate steps** are `gateSteps()` in `tools/loop/run.ts`. Add a step there and
   it is run, logged, and reported like the rest; nothing else needs to change.
+- **The method** is in `.agents/skills/menard-plan` and
+  `.agents/skills/menard-implement`. If plans are thin, fix `menard-plan`;
+  if implementations cut corners, fix `menard-implement`. The prompts should
+  stay thin, carrying only task data and the machine contract.
 - **Prompt contracts** are `tools/loop/prompts.ts`, one function per phase. If
   the review is finding the same class of gap repeatedly, tighten the review
   prompt rather than the implement prompt — the reviewer is the one that has

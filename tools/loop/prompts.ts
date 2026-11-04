@@ -1,28 +1,33 @@
 /**
- * The three prompt contracts the loop depends on: plan, implement (and fix),
- * and an adversarial review with a machine-readable verdict.
+ * The prompt contracts the loop depends on: plan, implement (and fix), and an
+ * adversarial review with a machine-readable verdict.
  *
- * These are the part of the loop that is judgement, so they are written as
- * contracts rather than as chat: fixed sections out, fixed rules in.
+ * The method lives in the skills under `.agents/skills/` — the same skills a
+ * person uses when driving Cursor by hand. A prompt here carries only the
+ * task data and the machine contract: acceptance-criteria ids, output paths,
+ * and the JSON shape.
  */
 import type { Row } from "../next.ts";
+import type { AcceptanceCriterion } from "./lib.ts";
 
-const HOUSE_RULES = `Non-negotiable rules:
-1. Production quality. No stubs, TODOs, FIXMEs, disabled or skipped tests, dead code, or "follow-up" for anything in scope.
-2. Both routes agree. The interpreter and the native build must behave the same, or the difference is documented, typed, and tested — see the review's standing acceptance criteria. A fix on one path is not a fix.
-3. Evidence, not claims. Every acceptance criterion needs a test that fails without the change.
-4. Never weaken a gate. Do not delete, skip, or loosen a test, assertion, lint, or check to get green.
-5. Focused diff. No unrelated refactors, renames, or formatting churn.
-6. Docs are part of the change: update exactly the documents the review names, and docs/backlog.md as its "Definition of done" requires.
-7. Do not commit, amend, push, stage, or open a pull request. Leave the working tree dirty for the driver.`;
+const NO_COMMIT = "Do not commit, stage, push, or open a pull request — the driver owns the git boundary.";
+const NO_GATE =
+  "Do not run the full suite (`make test`, `make ci`, `./mn test`, `make check-fixed-point`); the driver runs the gate immediately after you finish.";
 
-const GATE_OWNERSHIP = `The driver owns the full gate. It runs 'make', 'make ci', './mn test', and 'make check-fixed-point' when the change needs it, immediately after you finish.
-Do not run those yourself, and do not run 'make test' or 'make bootstrap': repeating the suite only duplicates the driver's run.
-Iterate with the narrowest targeted check instead: 'bun test <file>', './mn run <fixture>', 'make typecheck'.`;
+function criteriaBlock(criteria: AcceptanceCriterion[]): string {
+  if (criteria.length === 0) return "(the review section has no acceptance criteria; its Scope is the contract)";
+  return criteria.map((criterion) => `- ${criterion.id}: ${criterion.text}`).join("\n");
+}
 
-export function planPrompt(input: { row: Row; specification: string; reviewFile: string }): string {
-  const { row, specification, reviewFile } = input;
-  return `You are planning one item of the Menard backlog. The repository is the working directory.
+export function planPrompt(input: {
+  row: Row;
+  specification: string;
+  reviewFile: string;
+  criteria: AcceptanceCriterion[];
+  skillPath: string;
+}): string {
+  const { row, specification, reviewFile, criteria, skillPath } = input;
+  return `Read ${skillPath} and follow it. It defines the plan's required shape, and the driver checks that shape.
 
 Item: ${row.id} — ${row.title}
 Area: ${row.area} · priority ${row.priority} · phase ${row.phase}
@@ -30,43 +35,39 @@ Issue: ${row.issue}
 Review anchor: ${reviewFile}#${row.id.toLowerCase()}
 Backlog row: docs/backlog.md
 
-The review section below is the specification. Its acceptance criteria are the contract; every one must be met.
+Acceptance criteria — the evidence table must have one row per id:
+
+${criteriaBlock(criteria)}
+
+The review section, which is the specification:
 
 <specification>
 ${specification}
 </specification>
 
-Read the code before planning: the files named in Scope, their tests, and the nearest existing pattern for the same kind of change. Do not invent APIs.
-
-Output a plan with exactly these sections:
-
-## Scope
-Which files and modules change, and what each one gets.
-
-## Acceptance criteria → evidence
-A table with one row per acceptance criterion: the criterion, the change that satisfies it, and the test or command that proves it. "It works" is not evidence; name the test.
-
-## Steps
-Ordered steps that each leave the tree buildable. For each: the change, and the command that verifies it.
-
-## Agreement and regression
-How the interpreter and the native build stay in agreement, which existing tests could break, and the regression test that would have caught this bug.
-
-## Out of scope
-What this item deliberately does not do.
-
-Rules:
-- Plan for production quality, not for a first draft.
-- Prefer the smallest diff that satisfies the criteria.
-- The compiler bootstraps itself, so a change under src/ or stdlib/ may have to keep the fixed point green; say how you will check that.
-- Never weaken a check to get green.
-
-Output only the plan. Do not edit files.`;
+Write the plan with the plan tool, or as your final message if the tool is unavailable. Do not edit files.`;
 }
 
-export function executePrompt(input: { row: Row; plan: string; reviewFile: string; summaryPath: string }): string {
-  const { row, plan, reviewFile, summaryPath } = input;
-  return `You are implementing ${row.id} in the Menard repository. The working directory is the repo root.
+export function executePrompt(input: {
+  row: Row;
+  plan: string;
+  reviewFile: string;
+  summaryPath: string;
+  criteria: AcceptanceCriterion[];
+  skillPath: string;
+}): string {
+  const { row, plan, reviewFile, summaryPath, criteria, skillPath } = input;
+  return `Read ${skillPath} and follow it for this item.
+
+Item: ${row.id} — ${row.title}
+Review anchor: ${reviewFile}#${row.id.toLowerCase()}
+
+Acceptance criteria:
+
+${criteriaBlock(criteria)}
+
+${NO_COMMIT}
+${NO_GATE}
 
 Follow this plan:
 
@@ -74,18 +75,7 @@ Follow this plan:
 ${plan}
 </plan>
 
-The contract is the acceptance criteria at ${reviewFile}#${row.id.toLowerCase()}; the plan's evidence table is how you prove them.
-
-${HOUSE_RULES}
-
-${GATE_OWNERSHIP}
-
-Before you finish, write your summary to ${summaryPath} (create the file):
-- Files changed, grouped by purpose.
-- A criterion-by-criterion statement of what satisfies each one.
-- Anything you could not do, and why. Do not claim success you have not verified.
-
-The driver reads that file for the commit message and PR body, so write it there rather than only replying in chat.`;
+Before you finish, write your summary to ${summaryPath} (create the file): files changed grouped by purpose, one line per acceptance-criterion id saying what satisfies it, and anything you could not do. The driver reads that file for the commit message and PR body.`;
 }
 
 export function fixPrompt(input: {
@@ -96,14 +86,18 @@ export function fixPrompt(input: {
   gateOutput: string;
   gaps: string[];
   summaryPath: string;
+  criteria: AcceptanceCriterion[];
+  skillPath: string;
 }): string {
-  const { row, plan, reviewFile, failedGate, gateOutput, gaps, summaryPath } = input;
+  const { row, plan, reviewFile, failedGate, gateOutput, gaps, summaryPath, criteria, skillPath } = input;
   const gate =
     failedGate === null
       ? "The gate passed, but an independent review found the work incomplete."
       : `The gate failed at: ${failedGate}`;
   const gapList = gaps.length === 0 ? "(the reviewer reported no gaps)" : gaps.map((gap) => `- ${gap}`).join("\n");
-  return `You are fixing ${row.id} in the Menard repository. The previous attempt did not pass.
+  return `Read ${skillPath} and follow it. You are fixing ${row.id}; the previous attempt did not pass.
+
+Review anchor: ${reviewFile}#${row.id.toLowerCase()}
 
 ${gate}
 
@@ -115,28 +109,30 @@ ${gateOutput}
 ${gapList}
 </review-gaps>
 
+Acceptance criteria:
+
+${criteriaBlock(criteria)}
+
+${NO_COMMIT}
+${NO_GATE}
+
 <plan>
 ${plan}
 </plan>
 
-The contract is still the acceptance criteria at ${reviewFile}#${row.id.toLowerCase()}. Fix the causes. Do not work around the checks, and do not edit a test to match broken behaviour.
-
-${HOUSE_RULES}
-
-${GATE_OWNERSHIP}
-
-Before you finish, write your summary to ${summaryPath} (overwrite it): what you changed, and how each failing check is now satisfied.`;
+Fix the causes. Do not work around the checks, and do not edit a test to match broken behaviour. When you are done, overwrite ${summaryPath} with what you changed and how each failing check is now satisfied.`;
 }
 
 export function reviewPrompt(input: {
   row: Row;
   specification: string;
+  criteria: AcceptanceCriterion[];
   base: string;
   stat: string;
   changed: string;
   diff: string;
 }): string {
-  const { row, specification, base, stat, changed, diff } = input;
+  const { row, specification, criteria, base, stat, changed, diff } = input;
   return `You are an adversarial reviewer with fresh context. Assume nothing the implementer wrote; check the repository itself. The working directory is the repo root.
 
 This session is read-only: shell commands are rejected, so you cannot run the suite. The driver has already run the gate and it passed. Judge from the diff, the code, and the tests.
@@ -161,6 +157,10 @@ Diff (truncated when long):
 ${diff}
 </diff>
 
+Acceptance criteria — key every verdict entry by its id. A missing id fails the review:
+
+${criteriaBlock(criteria)}
+
 The specification:
 <specification>
 ${specification}
@@ -176,5 +176,5 @@ For every acceptance criterion, decide met / partial / missing by reading the co
 Read the files you need; do not modify files, do not commit, do not push.
 
 Output JSON only, with no prose before or after:
-{"satisfied": true, "criteria": [{"criterion": "...", "status": "met|partial|missing", "evidence": "path:line or test name"}], "gaps": ["..."], "notes": "one paragraph"}`;
+{"satisfied": true, "criteria": [{"criterion": "AC1", "status": "met|partial|missing", "evidence": "path:line or test name"}], "gaps": ["..."], "notes": "one paragraph"}`;
 }

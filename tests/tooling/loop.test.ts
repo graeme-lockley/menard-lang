@@ -11,9 +11,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { extractReviewSection, readState, runStreaming, slug, tail, writeState } from "../../tools/loop/lib.ts";
+import { extractCriteria, extractReviewSection, readState, runStreaming, slug, tail, writeState } from "../../tools/loop/lib.ts";
 import { executePrompt, reviewPrompt } from "../../tools/loop/prompts.ts";
-import { auditAgentCommands, describeToolCall, issueRef, planFromToolCall, renderCursorEvent } from "../../tools/loop/run.ts";
+import { auditAgentCommands, describeToolCall, issueRef, planFromToolCall, planMissing, renderCursorEvent, withCoverage } from "../../tools/loop/run.ts";
 import type { Row } from "../../tools/next.ts";
 
 const REVIEW = join(import.meta.dir, "..", "..", "docs", "reviews", "2026-10-24-build-f.md");
@@ -219,16 +219,61 @@ describe("runStreaming", () => {
   });
 });
 
+describe("acceptance criteria", () => {
+  const section = extractReviewSection(readFileSync(REVIEW, "utf8"), "CONC-05") ?? "";
+
+  test("extracts stable ids from the review section", () => {
+    const criteria = extractCriteria(section);
+    expect(criteria.length).toBe(6);
+    expect(criteria[0]?.id).toBe("AC1");
+    expect(criteria[0]?.text).toContain("Actor.call");
+    expect(criteria[5]?.id).toBe("AC6");
+  });
+
+  test("a plan covers an AC only with a table row keyed by its id", () => {
+    const plan = "| AC | Change | Evidence | Command |\n| --- | --- | --- | --- |\n| AC1 | x | t | c |";
+    expect(planMissing(plan, [{ id: "AC1", text: "" }])).toEqual([]);
+    expect(planMissing(plan, [{ id: "AC1", text: "" }, { id: "AC2", text: "" }])).toEqual(["AC2"]);
+  });
+
+  test("a verdict that skips an AC fails the review", () => {
+    const verdict = { satisfied: true, criteria: [{ criterion: "AC1", status: "met", evidence: "" }], gaps: [], notes: "" };
+    const covered = withCoverage(verdict, [{ id: "AC1", text: "" }, { id: "AC2", text: "" }]);
+    expect(covered.satisfied).toBe(false);
+    expect(covered.gaps.join(" ")).toContain("AC2");
+    expect(withCoverage(verdict, [{ id: "AC1", text: "" }]).satisfied).toBe(true);
+  });
+});
+
 describe("prompt contracts", () => {
+  const criteria = [{ id: "AC1", text: "a criterion" }];
+  const skill = "/repo/.agents/skills/menard-implement/SKILL.md";
+
   test("the implement prompt carries the plan and forbids committing", () => {
-    const prompt = executePrompt({ row, plan: "## Scope\nactor.mnd", reviewFile: "docs/reviews/x.md", summaryPath: "/tmp/loop/agent-summary.md" });
+    const prompt = executePrompt({
+      row,
+      plan: "## Scope\nactor.mnd",
+      reviewFile: "docs/reviews/x.md",
+      summaryPath: "/tmp/loop/agent-summary.md",
+      criteria,
+      skillPath: skill,
+    });
     expect(prompt).toContain("## Scope");
     expect(prompt).toContain("Do not commit");
     expect(prompt).toContain("docs/reviews/x.md#conc-05");
+    expect(prompt).toContain(skill);
+    expect(prompt).toContain("AC1");
   });
 
   test("the implement prompt sends the summary to a file", () => {
-    const prompt = executePrompt({ row, plan: "## Scope", reviewFile: "docs/reviews/x.md", summaryPath: "/tmp/loop/agent-summary.md" });
+    const prompt = executePrompt({
+      row,
+      plan: "## Scope",
+      reviewFile: "docs/reviews/x.md",
+      summaryPath: "/tmp/loop/agent-summary.md",
+      criteria,
+      skillPath: skill,
+    });
     expect(prompt).toContain("/tmp/loop/agent-summary.md");
   });
 
@@ -236,6 +281,7 @@ describe("prompt contracts", () => {
     const prompt = reviewPrompt({
       row,
       specification: "### CONC-05\n- [ ] a criterion",
+      criteria,
       base: "main",
       stat: "1 file changed",
       changed: "stdlib/actor.mnd",

@@ -234,6 +234,27 @@ export function extractReviewSection(markdown: string, id: string): string | nul
   return text === "" ? null : text;
 }
 
+export type AcceptanceCriterion = { id: string; text: string };
+
+/**
+ * Pull the acceptance criteria out of a review section and give them stable
+ * ids. The plan and the review are keyed to these ids, which is what makes
+ * coverage checkable instead of a matter of prose.
+ */
+export function extractCriteria(section: string): AcceptanceCriterion[] {
+  const lines = section.split("\n");
+  const start = lines.findIndex((line) => /^\s*\*\*acceptance criteria/i.test(line));
+  if (start === -1) return [];
+  const criteria: AcceptanceCriterion[] = [];
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    if (/^\s*\*\*[A-Z]/.test(line) || /^#{1,6}\s/.test(line)) break;
+    const match = line.match(/^\s*[-*]\s+\[[ x]\]\s+(.+)$/);
+    if (match !== null) criteria.push({ id: `AC${criteria.length + 1}`, text: (match[1] ?? "").trim() });
+  }
+  return criteria;
+}
+
 /** Keep the end of a failure log: that is where the cause usually is. */
 export function tail(text: string, limit = 12000): string {
   const trimmed = text.trimEnd();
