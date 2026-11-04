@@ -70,14 +70,16 @@ Unit closes are no-ops. The hermetic oracle excludes `tests/net` and
 
 | Symbol | Notes |
 |---|---|
-| `mn_tcp_listen` / `accept` / `connect` / `read` / `write` / `close` | Non-blocking; park via wait cells + `mn_net_poll` |
+| `mn_tcp_listen` | Non-blocking listen; park via wait cells + `mn_net_poll` |
+| `mn_tcp_accept` / `mn_tcp_connect` / `mn_tcp_read` / `mn_tcp_write` / `mn_tcp_close` | Non-blocking; park via wait cells + `mn_net_poll` |
 | `mn_tcp_local_port` | `getsockname` → bound port (`Result Int IoError`); enables `listen(0)` |
-| `mn_tcp_accept_timeout` / `connect_timeout` / `read_timeout` / `write_timeout` | Relative ms; `Err(Timeout)` leaves the fd open (except connect, which closes) |
-| `mn_udp_bind` / `send` / `recv` / `close` | Same parking model |
-| `mn_tls_client(fd, host)` / `mn_tls_client_timeout` | Verified client: trust store, hostname, SNI; parks via `mn_park_fd` |
-| `mn_tls_client_insecure` / `_timeout` | Development-only; skips verify; still sends SNI |
-| `mn_tls_server` / `read` / `write` / `close` | OpenSSL over an existing TCP fd |
-| `mn_tls_*_timeout` | Relative-ms TLS handshake / read / write |
+| `mn_tcp_accept_timeout` / `mn_tcp_connect_timeout` / `mn_tcp_read_timeout` / `mn_tcp_write_timeout` | Relative ms; `Err(Timeout)` leaves the fd open (except connect, which closes) |
+| `mn_udp_bind` / `mn_udp_send` / `mn_udp_recv` / `mn_udp_close` | Same parking model |
+| `mn_tls_client` / `mn_tls_client_timeout` | Verified client: trust store, hostname, SNI; parks via `mn_park_fd` |
+| `mn_tls_client_insecure` / `mn_tls_client_insecure_timeout` | Development-only; skips verify; still sends SNI |
+| `mn_tls_server` / `mn_tls_server_timeout` | OpenSSL over an existing TCP fd |
+| `mn_tls_read` / `mn_tls_write` / `mn_tls_close` | TLS I/O over a handshake id |
+| `mn_tls_read_timeout` / `mn_tls_write_timeout` | Relative-ms TLS read / write |
 
 ## App-facing seam symbols
 

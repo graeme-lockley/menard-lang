@@ -873,13 +873,13 @@ Any other duplicate `pub` name is an error. A name in the list that the
 imported module does not publish is an import error.
 
 **And `extern` is confined** (§2.15): either to the seam's modules
-(`stdlib/sys.mnd`, `io.mnd`, `fs.mnd`, `proc.mnd`, `time.mnd`) declaring **`mn_*`
-only** (Runtime ABI), or to **FFI modules** whose path contains `/ffi/` and is
-not under `stdlib/`, declaring **non-`mn_*` only** (foreign link symbols). The
-runtime's own headers stay internal. That confinement is the marker of the
-ambient vs foreign boundary (§2.11.B), and it is *checkable*, where a naming
-convention would not be. Foreign calls convert at an explicit bridge; they are
-not the Runtime ABI calling convention.
+(`stdlib/sys.mnd`, `io.mnd`, `fs.mnd`, `proc.mnd`, `time.mnd`, `sched.mnd`,
+`net.mnd`) declaring **`mn_*` only** (Runtime ABI), or to **FFI modules** whose
+path contains `/ffi/` and is not under `stdlib/`, declaring **non-`mn_*` only**
+(foreign link symbols). The runtime's own headers stay internal. That
+confinement is the marker of the ambient vs foreign boundary (§2.11.B), and it
+is *checkable*, where a naming convention would not be. Foreign calls convert
+at an explicit bridge; they are not the Runtime ABI calling convention.
 
 ### 2.8 The surface: four tiers
 
@@ -1416,8 +1416,8 @@ filesystem so that corpus tests are hermetic (§2.15).
 
 **This obligation is governed by a structural marker rather than a naming one.**
 Everything it applies to is an `extern`-backed wrapper confined to
-`stdlib/sys.mnd`, `io.mnd`, `fs.mnd`, `proc.mnd` and `time.mnd` (§2.15), so the boundary is
-visible to the compiler and to a lint.
+`stdlib/sys.mnd`, `io.mnd`, `fs.mnd`, `proc.mnd`, `time.mnd`, `sched.mnd` and
+`net.mnd` (§2.15), so the boundary is visible to the compiler and to a lint.
 
 **The spawning case is the clearest instance of this rule.** A child process
 inherits the environment and the working directory, so a child's behaviour is
@@ -1732,16 +1732,16 @@ value reachable from an argument.
 
 **The OS boundary is marked by `extern`.** Every ambient operation is an
 `extern`-backed wrapper. Seam `extern` bindings are confined to `stdlib/sys.mnd`,
-`io.mnd`, `fs.mnd`, `proc.mnd` and `time.mnd` and declare **`mn_*` only** (§2.7).
-Foreign FFI may declare non-`mn_*` `extern` only in modules whose path contains
-`/ffi/` (not under `stdlib/`). So the boundary is **structural and enforceable**:
-a module cannot reach `write(2)` without importing a seam module, and a CI lint
-can refuse a misplaced `extern`. `std/time` wraps the wall clock (`mn_now_ms`);
-filesystem metadata such as `mtime` stays on `std/fs`. Cooperative task
-deadlines use a separate monotonic clock (`mn_mono_ms`) and
-`mn_task_wait_until` / `mn_task_sleep_ms` on the internal task seam
-(`std/sched`) — not process-child timeouts (still refused in Tier 2).
-Public timeout wrappers live on `std/task`, `std/actor`, `std/net`, and
+`io.mnd`, `fs.mnd`, `proc.mnd`, `time.mnd`, `sched.mnd` and `net.mnd` and declare
+**`mn_*` only** (§2.7). Foreign FFI may declare non-`mn_*` `extern` only in
+modules whose path contains `/ffi/` (not under `stdlib/`). So the boundary is
+**structural and enforceable**: a module cannot reach `write(2)` without
+importing a seam module, and a CI lint can refuse a misplaced `extern`.
+`std/time` wraps the wall clock (`mn_now_ms`); filesystem metadata such as
+`mtime` stays on `std/fs`. Cooperative task deadlines use a separate monotonic
+clock (`mn_mono_ms`) and `mn_task_wait_until` / `mn_task_sleep_ms` on the
+internal task seam (`std/sched`) — not process-child timeouts (still refused in
+Tier 2). Public timeout wrappers live on `std/task`, `std/actor`, `std/net`, and
 `std/http`. On timeout, mailbox queues and TCP fds stay intact unless a
 documented rule says otherwise (e.g. a failed `connect-timeout` closes the
 socket). The interpreter advances a virtual monotonic clock to the next
@@ -2941,7 +2941,7 @@ These are the invariants the implementation watches. Each row is a way the repre
 | **Representation invariant violated** (odd instant or static object as a slot value, unaligned object) | Medium | Collector frees live objects; intermittent corruption | Stated as invariants, not conventions; asserted in heap-verify over the whole corpus **and the static pool**; invariants named in the definition of done |
 | **`dump` output compared byte-for-byte, or `dump` called from a diagnostic path** (§2.16) | Medium | A flaky suite that looks like a determinism bug, or diagnostics that differ between the interpreter and a native build | §2.16 states the two-kinds-of-stderr rule; `dump` is captured on fd 2 and asserted structurally (§3.7) |
 | **Debug text routed to fd 1**, or stderr merged into the artifact | Low | Directly breaks the fixed point — the one way §2.16's isolation fails | `dump` has no value form and no accessor (§2.16); §3.6 requires the gate to compare the artifact alone |
-| **An ambient call is missed in an audit** (§2.15) | Medium | A path or environment value reaches emitted bytes with no signal to the reader | The boundary is the `extern` confinement in four named modules — checkable by lint (§2.7, §3.6); `find-on-path` keeps `PATH` lookup in visible code |
+| **An ambient call is missed in an audit** (§2.15) | Medium | A path or environment value reaches emitted bytes with no signal to the reader | The boundary is the `extern` confinement in the named seam modules (`sys`, `io`, `fs`, `proc`, `time`, `sched`, `net`) — checkable by lint (§2.7, §3.6); `find-on-path` keeps `PATH` lookup in visible code |
 | **The `!` convention is over-read** — taken for a checkable guarantee rather than a naming habit | Low | A reader trusts a marker nothing enforces | §2.15 limits the check to the six published names in `stdlib/`; it does not propagate |
 | **A shell-string escape hatch appears** ("just let me run this command") (§2.15) | Medium | Unbounded ambient state in one string: quoting, globbing, `PATH`, expansion — invisible in the source and untestable | The argv form is a strict superset for every build use, and the refusal is permanent; the temptation is recorded so it is recognised |
 | **`spawn` silently gets a `PATH` search**, or the toolchain is "whatever is on `PATH`" | Medium | The build depends on ambient state that no Menard source mentions; "which `clang` did I get?" | §2.15 rule 2: no implicit lookup; `find-on-path` in visible prelude code; `mn --print-toolchain` |
@@ -3081,8 +3081,9 @@ in two well-understood places.
       each row: map keys are sorted (`tests/corpus/determinism.mnd`), an
       absolute path and an alias name are absent from bitcode, `-0.0` has one
       spelling and matches `f*`, overflow wraps the same way as `1 / 0`
-      panics (`tests/phase2/oracle/div-zero.mnd`), `extern` stays in the four
-      seam modules, and `hash-mix` is the constants `131` and `2147483647`.
+      panics (`tests/phase2/oracle/div-zero.mnd`), `extern` stays in the seam
+      modules (`sys`, `io`, `fs`, `proc`, `time`, `sched`, `net`) or `/ffi/`, and
+      `hash-mix` is the constants `131` and `2147483647`.
 - [x] The reference interpreter agrees with programs compiled by stage0 and by
       stage1 on the hermetic corpus (`tests/corpus/oracle.test.ts`, run from
       `make check-fixed-point` with `MENARD_STAGE1`). Stage2 is byte-identical
@@ -3146,9 +3147,10 @@ in two well-understood places.
       operations that mutate, and `Buf.append-show!` — and on nothing that merely
       touches the OS or the filesystem. The compiler's local helpers are outside
       that surface.
-- [x] **Every ambient operation is `extern`-backed and lives in one of four
-      `stdlib` modules**, and the confinement is enforced by a lint, so §2.11.B's
-      audit does not rest on a naming habit.
+- [x] **Every ambient operation is `extern`-backed and lives in one of the seam
+      `stdlib` modules** (`sys`, `io`, `fs`, `proc`, `time`, `sched`, `net`), and
+      the confinement is enforced by a lint, so §2.11.B's audit does not rest on
+      a naming habit.
 - [x] **There is no shell**: no Menard program can construct a command string.
       All process execution goes through `spawn`/`spawn-capture` with an argv
       list, and no `PATH` lookup is implicit.

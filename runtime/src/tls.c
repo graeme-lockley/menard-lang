@@ -186,23 +186,42 @@ static int verify_failed_after_handshake(SSL *ssl) {
   return 0;
 }
 
-static MnWord map_handshake_failure(SSL *ssl) {
-  long vr = SSL_get_verify_result(ssl);
-  if (vr != X509_V_OK) {
+/* OpenSSL 3+ reports abrupt peer close as SSL_ERROR_SSL with this reason
+ * (older releases used SSL_ERROR_SYSCALL). Treat as transport either way. */
+static int openssl_unexpected_eof(void) {
+#ifdef SSL_R_UNEXPECTED_EOF_WHILE_READING
+  unsigned long e = ERR_peek_last_error();
+  return ERR_GET_REASON(e) == SSL_R_UNEXPECTED_EOF_WHILE_READING;
+#else
+  return 0;
+#endif
+}
+
+/* CONC-19: classify via SSL_get_error. Verify → TlsVerifyFailed; protocol
+ * SSL_ERROR_SSL → TlsHandshakeFailed; transport (SYSCALL / ZERO_RETURN /
+ * unexpected EOF / …) → Other(errno or EIO). Never print OpenSSL text. */
+static MnWord map_handshake_terminal(SSL *ssl, int ssl_err, int saved_errno) {
+  if (SSL_get_verify_result(ssl) != X509_V_OK) {
     drain_openssl_errors();
     return io_tls_verify_failed();
   }
+  if (ssl_err == SSL_ERROR_SSL && !openssl_unexpected_eof()) {
+    drain_openssl_errors();
+    return io_tls_handshake_failed();
+  }
   drain_openssl_errors();
-  return io_tls_handshake_failed();
+  return io_other(saved_errno != 0 ? saved_errno : EIO);
 }
 
 static MnWord handshake_loop(SSL *ssl, int fd, int64_t deadline_mono) {
   for (;;) {
+    errno = 0;
     int r = SSL_do_handshake(ssl);
     if (r == 1) {
       return MN_EMPTY;
     }
     int err = SSL_get_error(ssl, r);
+    int saved_errno = errno;
     if (err == SSL_ERROR_WANT_READ) {
       MnWord p = park_tls(fd, POLLIN, deadline_mono);
       if (p != MN_EMPTY) {
@@ -217,7 +236,7 @@ static MnWord handshake_loop(SSL *ssl, int fd, int64_t deadline_mono) {
       }
       continue;
     }
-    return map_handshake_failure(ssl);
+    return map_handshake_terminal(ssl, err, saved_errno);
   }
 }
 
@@ -384,17 +403,16 @@ static MnWord tls_read_deadline(MnTlsConn *c, int64_t max, int64_t deadline_mono
     return io_other(ENOMEM);
   }
   for (;;) {
+    errno = 0;
     int n = SSL_read(c->ssl, buf, (int)max);
     if (n > 0) {
       MnWord s = mn_str_new((int64_t)(uintptr_t)buf, (int64_t)n);
       free(buf);
       return mn_ok(s);
     }
-    if (n == 0) {
-      free(buf);
-      return mn_ok(mn_str_new((int64_t)(uintptr_t)"", 0));
-    }
+    /* CONC-19: classify every n <= 0 via SSL_get_error — only ZERO_RETURN is EOF. */
     int err = SSL_get_error(c->ssl, n);
+    int saved_errno = errno;
     if (err == SSL_ERROR_WANT_READ) {
       MnWord p = park_tls(c->fd, POLLIN, deadline_mono);
       if (p != MN_EMPTY) {
@@ -411,9 +429,14 @@ static MnWord tls_read_deadline(MnTlsConn *c, int64_t max, int64_t deadline_mono
       }
       continue;
     }
+    if (err == SSL_ERROR_ZERO_RETURN) {
+      free(buf);
+      drain_openssl_errors();
+      return mn_ok(mn_str_new((int64_t)(uintptr_t)"", 0));
+    }
     free(buf);
     drain_openssl_errors();
-    return io_other(EIO);
+    return io_other(saved_errno != 0 ? saved_errno : EIO);
   }
 }
 

@@ -85,13 +85,20 @@ Live status is [docs/backlog.md](docs/backlog.md): one row per review item, with
 
 Menard is released under the [MIT Licence](LICENSE).
 
+## Security
+
+Vulnerability reporting and the threat model are in [SECURITY.md](SECURITY.md).
+Unsafe-boundary detail (TLS, HTTP, FFI) is in [docs/security.md](docs/security.md).
+
 ## Layout
 
 | Path | What it is |
 | --- | --- |
+| [SECURITY.md](SECURITY.md) | Supported versions, disclosure, threat model |
 | [docs/README.md](docs/README.md) | Map of the documentation |
 | [docs/guide.md](docs/guide.md) | The language, in reading order |
 | [docs/stdlib.md](docs/stdlib.md) | The standard library |
+| [docs/security.md](docs/security.md) | Unsafe boundary, TLS and HTTP policy |
 | [docs/syntax.md](docs/syntax.md) | Syntax, and how the surface lowers |
 | [docs/menard-spec.md](docs/menard-spec.md) | The specification |
 | [docs/decisions.md](docs/decisions.md) | Why the language is shaped this way |

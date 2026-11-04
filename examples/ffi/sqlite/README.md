@@ -1,11 +1,17 @@
 # SQLite — Menard FFI proving ground
 
 Cross-platform binding to SQLite via a thin C bridge. Not part of `stdlib/` or
-the Runtime ABI (`mn_*`).
+the Runtime ABI (`mn_*`). This tree is the standing **FFI proving ground**
+([docs/design/ffi.md](../../../docs/design/ffi.md)).
 
 ```
 sqlite.mnd  →  extern sql_*  →  sql_ffi.c  →  sql_bridge.c  →  libsqlite3
 ```
+
+**C-library safety.** Menard's GC does not make libsqlite3 memory-safe. Trust
+the C library and the bridge: pointer lifetimes, buffer ownership, and NULs in
+`Str` follow [docs/security.md](../../../docs/security.md) and the FFI guide.
+A bug in libsqlite3 or in `sql_*.c` is outside Menard's memory-safety claim.
 
 ## Why SQLite (not EventKit)
 
