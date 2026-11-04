@@ -42,8 +42,7 @@ describe("backlog next", () => {
     expect(report.cycles).toEqual([]);
     expect(rows.find((r) => r.id === "CONC-10")?.status).toBe("done");
     expect(rows.find((r) => r.id === "LANG-07")?.status).toBe("done");
-    // A ready Phase 0 item keeps the same point after LANG-07 landed.
-    expect(report.startNow.map((r) => r.id)).toContain("LANG-10");
+    expect(rows.find((r) => r.id === "LANG-10")?.status).toBe("done");
   });
 
   test("starts only fully unblocked rows in the current phase", () => {

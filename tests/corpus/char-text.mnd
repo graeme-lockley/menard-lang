@@ -1,0 +1,29 @@
+; LANG-10: canonical Char text. Printed spellings must agree across
+; interpreter, stage0 and stage1. Cover printable, escaped, and non-BMP
+; via show, println, and a show/round-trip string compare.
+
+let main() -> Int {
+  ; show path
+  println(show('A'))
+  println(show('\n'))
+  println(show('\r'))
+  println(show('\t'))
+  println(show('\\'))
+  println(show('\''))
+  println(show('\u{1F600}'))
+  println(show('\u{0}'))
+  println(show('\u{7F}'))
+  println(show('\u{E9}'))
+  ; println of Char (typed rewrite / host tag)
+  println('A')
+  println('\n')
+  println('\'')
+  println('\u{1F600}')
+  ; round-trip: show text equals the expected literal spelling
+  println(show('A') == "'A'")
+  println(show('\n') == "'\\n'")
+  println(show('\'') == "'\\''")
+  println(show('\\') == "'\\\\'")
+  println(show('\u{1F600}') == "'\\u{1F600}'")
+  0
+}

@@ -5,13 +5,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mapNew, mapSet } from "../../host/src/builtins/collections.ts";
 import { showValue } from "../../host/src/interp/derive.ts";
-import { vBool, vInt, vStr, vVariant } from "../../host/src/interp/value.ts";
+import { vBool, vChar, vInt, vStr, vVariant } from "../../host/src/interp/value.ts";
 
 const ROOT = join(import.meta.dir, "../..");
 const fixture = "tests/phase2/fixtures/print-values.mnd";
 const expected = [
   'Input: [1,2], Tokens: [["1", "2"]]',
   "true false () -42 1.5",
+  "'A' '\\n' '\\'' '\\u{1F600}'",
+  "'A' '\\n' '\\'' '\\u{1F600}'",
   "(Point 7 true) Red (Rgb 1 2 3)",
   "[true, false] [[1, 2], [3]]",
   '(Some "hello") (Ok 42)',
@@ -37,6 +39,13 @@ test("interpreter list representations share literal formatting", () => {
   const keys = mapSet(mapNew(), vStr(new TextEncoder().encode("a")), vBool(true));
   expect(showValue({ tag: "map", map: keys })).toBe('{"a" => true}');
   expect(showValue({ tag: "map", map: mapNew() })).toBe("{}");
+});
+
+test("Char show uses character literals (LANG-10)", () => {
+  expect(showValue(vChar(65))).toBe("'A'");
+  expect(showValue(vChar(10))).toBe("'\\n'");
+  expect(showValue(vChar(39))).toBe("'\\''");
+  expect(showValue(vChar(0x1f600))).toBe("'\\u{1F600}'");
 });
 
 describe.skipIf(!Bun.which("clang"))("print and println value formatting", () => {

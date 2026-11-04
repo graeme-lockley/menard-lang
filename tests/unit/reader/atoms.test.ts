@@ -269,7 +269,7 @@ describe("character literals", () => {
     expect(charValue("'\\''")).toBe(39n);
     expect(charValue("'\\\\'")).toBe(92n);
     expect(charValue("'\\u{1F600}'")).toBe(0x1f600n);
-    expect(new TextDecoder().decode(print(mustRead("'\\u{1F600}'")))).toBe("'\\u{1f600}'");
+    expect(new TextDecoder().decode(print(mustRead("'\\u{1F600}'")))).toBe("'\\u{1F600}'");
   });
 
   test("an unclosed quote is a symbol", () => {

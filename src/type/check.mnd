@@ -2697,7 +2697,8 @@ let print-format-body(env: TypeEnv, t: Type) -> Ast =
     | TProduct(ts) -> print-product-body(env, ts)
     | TParam(_) | TVar(_, _) ->
       print-error("print: cannot format an unresolved type parameter")
-    | TInt | TFloat | TChar | TStr -> print-call("show", [print-sym("v")])
+    | TChar -> print-call("show-char", [print-sym("v")])
+    | TInt | TFloat | TStr -> print-call("show", [print-sym("v")])
     | _ -> print-error(String.concat("print: type ", type-show(t), " is not supported"))
 
 let find-print-note(sp: Span, notes: List PrintNote) -> Maybe (List Type) =
@@ -2747,6 +2748,7 @@ let is-print-formattable(t: Type) -> Bool =
   match (t)
     | TBool -> true
     | TUnit -> true
+    | TChar -> true
     | TList(_) -> true
     | TMaybe(_) -> true
     | TResult(_, _) -> true

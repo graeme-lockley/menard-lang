@@ -358,7 +358,7 @@ let ascii-printables() -> Str =
   " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
 
 let hex-digit(n: Int) -> Str =
-  String.slice(n, 1, "0123456789abcdef")
+  String.slice(n, 1, "0123456789ABCDEF")
 
 let hex-of(n: Int) -> Str =
   if (n < 16) -> hex-digit(n) | String.concat(hex-of(n / 16), hex-digit(n % 16))
