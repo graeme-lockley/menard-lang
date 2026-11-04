@@ -120,6 +120,19 @@ describe("Build F net", () => {
     expect(r.stdout).toContain("live");
   }, { timeout: 180_000 });
 
+  test.skipIf(!Bun.which("clang"))("native: TLS failure classification (CONC-19)", () => {
+    const r = runNative("tests/net/tls-classify.mnd", {
+      MENARD_TLS_CA_FILE: join(CERTS, "ca.crt"),
+    });
+    expect(r.signal).toBeNull();
+    expect(r.stderr).not.toContain("panic");
+    expect(r.stderr).not.toContain("error:");
+    expect(r.stdout).not.toContain("error:");
+    expect(r.stdout).not.toContain("panic");
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe("1\n2\n3\n4\n");
+  }, { timeout: 180_000 });
+
   test("inter: TLS module loads; net returns Unsupported (CONC-10)", () => {
     const r = runInter("tests/net/tls-reject.mnd");
     expect(r.stderr).not.toContain("panic");

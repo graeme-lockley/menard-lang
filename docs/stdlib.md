@@ -433,6 +433,20 @@ Parkable TCP/UDP and OpenSSL TLS. **Native only:** under `mn inter`, every
 
 `IoError` includes `Timeout` (tag 28), `TlsVerifyFailed` (29), `Unsupported` (tag 36; interpreter boundary), and `TlsHandshakeFailed` (37).
 
+**TLS outcome mapping** (native; CONC-19 refining CONC-03). Nonpositive `SSL_read` /
+handshake results are classified with `SSL_get_error` before deciding EOF.
+OpenSSL diagnostic text is never printed.
+
+| Outcome | Classification | `IoError` |
+| --- | --- | --- |
+| Chain / hostname / missing peer | verify | `TlsVerifyFailed` |
+| TLS protocol failure during handshake (`SSL_ERROR_SSL`, non-verify, not unexpected EOF) | handshake | `TlsHandshakeFailed` |
+| Transport during handshake (`SSL_ERROR_SYSCALL`, `SSL_ERROR_ZERO_RETURN`, abrupt peer close / unexpected EOF) | transport | `Other(errno)` (`errno` if set, else `EIO`) |
+| Clean TLS shutdown on read (`SSL_ERROR_ZERO_RETURN`) | EOF | `Ok("")` |
+| Abrupt close / reset / truncated record on read (`SSL_ERROR_SYSCALL` / `SSL_ERROR_SSL`) | transport | `Other(errno)` / `Other(EIO)` — never `Ok("")` |
+| Park deadline | timeout | `Timeout` |
+| Park cancel | cancel | `Other(-1)` (existing `mn_park_fd`) |
+
 ## Http / Rest
 
 `import std/http as Http` · `import std/rest as Rest`
