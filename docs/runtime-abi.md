@@ -74,7 +74,9 @@ Unit closes are no-ops. The hermetic oracle excludes `tests/net` and
 | `mn_tcp_local_port` | `getsockname` → bound port (`Result Int IoError`); enables `listen(0)` |
 | `mn_tcp_accept_timeout` / `connect_timeout` / `read_timeout` / `write_timeout` | Relative ms; `Err(Timeout)` leaves the fd open (except connect, which closes) |
 | `mn_udp_bind` / `send` / `recv` / `close` | Same parking model |
-| `mn_tls_client` / `server` / `read` / `write` / `close` | OpenSSL over an existing TCP fd; handshake parks cooperatively (no mutator `poll(-1)`) |
+| `mn_tls_client(fd, host)` / `mn_tls_client_timeout` | Verified client: trust store, hostname, SNI; parks via `mn_park_fd` |
+| `mn_tls_client_insecure` / `_timeout` | Development-only; skips verify; still sends SNI |
+| `mn_tls_server` / `read` / `write` / `close` | OpenSSL over an existing TCP fd |
 | `mn_tls_*_timeout` | Relative-ms TLS handshake / read / write |
 
 ## App-facing seam symbols
@@ -97,8 +99,8 @@ Unit closes are no-ops. The hermetic oracle excludes `tests/net` and
 | `mn_write_file` | `Io.write-file` | `Result Unit IoError` |
 
 `IoError`: `NotFound`, `Permission`, `Exists`, `IsADirectory`, `NotADirectory`,
-`InvalidPath`, `TooLarge`, `Other(Int)`, `Timeout`, `Unsupported` (tag 36;
-shared with `SpawnError.Unsupported`).
+`InvalidPath`, `TooLarge`, `Other(Int)`, `Timeout` (28), `TlsVerifyFailed` (29),
+`Unsupported` (36; shared with `SpawnError.Unsupported`), `TlsHandshakeFailed` (37).
 
 ### `std/fs`
 

@@ -1,8 +1,8 @@
 # Menard — Security notes
 
 Phase 0 trust edges for network and FFI. OTH-05 expands this into a full policy
-(TLS verification, disclosure, FFI). This page starts with the HTTP DoS model
-required by CONC-04.
+(disclosure, FFI). This page covers the HTTP DoS model (CONC-04) and TLS
+verification policy (CONC-03).
 
 ## HTTP DoS model (`std/http`)
 
@@ -29,5 +29,30 @@ Every public serve/request path takes a **relative millisecond deadline**
 (CONC-02). A stalled peer cannot hold a connection forever; timed-out I/O
 surfaces as `NetErr(Timeout)` (or the connection is dropped on the server).
 
-TLS peer verification, SNI, and OpenSSL hardening are CONC-03 / OTH-05 — not
-covered here yet.
+## TLS policy (`std/net`)
+
+TLS is **native-only** (interpreter → `Err(Unsupported)`). OpenSSL backs the seam.
+
+**Default client** (`Net.tls-client(fd, host)` / `tls-client-timeout`):
+
+- Peer certificate required (`SSL_VERIFY_PEER`)
+- Chain verified against the **system trust store** (`SSL_CTX_set_default_verify_paths`)
+- Hostname checked (`SSL_set1_host`) for `host`
+- **SNI** sent (`SSL_set_tlsext_host_name`) for `host`
+- Failures map to typed `IoError`: `TlsVerifyFailed` (chain/hostname),
+  `TlsHandshakeFailed` (other handshake), `Timeout`, or `Other` — OpenSSL
+  error text is never printed to the program’s stdout/stderr
+
+**Insecure opt-out** (`Net.tls-client-insecure` / `tls-client-insecure-timeout`):
+skips peer verification and hostname checking. **Development only** — never the
+default. SNI is still sent so local SNI-aware servers work.
+
+**Ops / test hooks** (env, not public Menard API):
+
+| Env | Effect |
+| --- | --- |
+| `MENARD_TLS_CA_FILE` | Extra PEM trust roots loaded in addition to the system store |
+| `MENARD_TLS_SNI_NAME` / `MENARD_TLS_SNI_CERT` / `MENARD_TLS_SNI_KEY` | Server SNI callback selects an alternate cert for the named host |
+
+`tls-server` loads cert/key from paths; a missing path is `NotFound`. Handshakes
+park via `mn_park_fd` (CONC-02) and do not block the mutator.

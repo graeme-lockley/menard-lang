@@ -21,7 +21,9 @@ let reason(e: IoError) -> Str =
     | TooLarge -> "File too large"
     | Exists -> "File exists"
     | Timeout -> "Timed out"
+    | TlsVerifyFailed -> "TLS peer verification failed"
     | Unsupported -> "Operation not supported"
+    | TlsHandshakeFailed -> "TLS handshake failed"
     | Other(_) -> "Input/output error"
 
 let report(path: Str, e: IoError) -> Unit {

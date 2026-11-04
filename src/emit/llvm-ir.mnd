@@ -192,8 +192,9 @@ pub let pool-kind-ctor = 1
 
 pub let pool-kind-float = 2
 
-; `Nil`, `None`, and the ten payload-free `IoError` / `SpawnError` objects.
-pub let static-singleton-count = 12
+; `Nil`, `None`, and the payload-free `IoError` / `SpawnError` objects
+; (including Timeout and TLS verify/handshake failures).
+pub let static-singleton-count = 15
 
 pub let pool-obj-kind(o: PoolObj) -> Int =
   match (o)
@@ -239,7 +240,7 @@ pub let pool-extra-constants(objs: List PoolObj) -> Int =
 ; How many module-scope value ids the fixed runtime externs occupy.
 ; Defined here so the id helpers below can see it. The order those
 ; externs are declared in is documented with `extern-write-stdout-abs`.
-pub let extern-count = 139
+pub let extern-count = 141
 
 ; Cstring globals, then two globals per emitted object (shape, object),
 ; then the fixed runtime singletons. Function externs begin at this id.
@@ -268,7 +269,9 @@ pub let singleton-symbol(i: Int) -> Str =
     | i == 9 -> "mn_static_not_executable"
     | i == 10 -> "mn_static_invalid_argument"
     | i == 11 -> "mn_static_too_many_arguments"
-    | else -> "mn_static_timeout"
+    | i == 12 -> "mn_static_timeout"
+    | i == 13 -> "mn_static_tls_verify_failed"
+    | else -> "mn_static_tls_handshake_failed"
 
 pub record LlvmModule {
   funcs: List LFunc
@@ -725,6 +728,13 @@ pub let extern-tls-write-timeout-abs(num-strings: Int) -> Int =
 pub let extern-tcp-local-port-abs(num-strings: Int) -> Int =
   num-strings + 138
 
+; CONC-03 insecure TLS clients.
+pub let extern-tls-client-insecure-abs(num-strings: Int) -> Int =
+  num-strings + 139
+
+pub let extern-tls-client-insecure-timeout-abs(num-strings: Int) -> Int =
+  num-strings + 140
+
 ; Builtin constructor tags — must match runtime/src/variants.c.
 pub let tag-nil = 0
 
@@ -740,7 +750,7 @@ pub let tag-err = 5
 
 ; Caml-style n-tuple `(e1, e2, …)` — a fixed, reserved tag clear of the
 ; builtin ctor tags above, the str/ref/sb/float/map/closure tags in
-; `runtime/src/equal.c`, the IoError/Spawn ctor-tag range (20-36, see
+; `runtime/src/equal.c`, the IoError/Spawn ctor-tag range (20-37, see
 ; `builtin-ctor-tag-of` in lower.mnd), and well below `user-ctor-tag-base`.
 pub let tag-tuple = 50
 

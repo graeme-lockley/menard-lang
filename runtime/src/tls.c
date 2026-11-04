@@ -1,31 +1,41 @@
 /*
- * OpenSSL TLS byte-stream seam (Build F). Same backend on all platforms.
- * Wraps an already-connected TCP fd. Cooperative poll on WANT_READ/WRITE.
+ * OpenSSL TLS byte-stream seam (Build F / CONC-03).
+ * Wraps an already-connected TCP fd. Verified clients check the peer
+ * against the system trust store (+ optional MENARD_TLS_CA_FILE), send
+ * SNI, and check the hostname. Handshake parks via mn_park_fd.
  */
 #include "gc_internal.h"
 #include "menard.h"
 
 #include <errno.h>
 #include <poll.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <openssl/err.h>
 #include <openssl/ssl.h>
+#include <openssl/x509v3.h>
 
 #define HDR ((int64_t)sizeof(void *))
 #define TAG_IO_OTHER 27
 #define MAX_TLS 64
+#define SNI_NAME_MAX 256
 
 typedef struct MnTlsConn {
   SSL *ssl;
   int fd;
   int alive;
+  char servername[SNI_NAME_MAX];
 } MnTlsConn;
 
 static MnTlsConn conns[MAX_TLS];
 static SSL_CTX *client_ctx = NULL;
+static SSL_CTX *client_insecure_ctx = NULL;
 static SSL_CTX *server_ctx = NULL;
+static SSL_CTX *server_sni_ctx = NULL;
+static char server_sni_name[SNI_NAME_MAX];
 static int openssl_ready = 0;
 
 static MnShape shape_io_other = {
@@ -35,6 +45,14 @@ static MnWord io_other(int err) {
   MnWord *obj = (MnWord *)mn_alloc(HDR + 8, &shape_io_other);
   obj[1] = mn_int_to_word((int64_t)err);
   return mn_err((MnWord)obj);
+}
+
+static MnWord io_tls_verify_failed(void) {
+  return mn_err((MnWord)&mn_static_tls_verify_failed);
+}
+
+static MnWord io_tls_handshake_failed(void) {
+  return mn_err((MnWord)&mn_static_tls_handshake_failed);
 }
 
 static char *word_to_cstr(MnWord s) {
@@ -50,6 +68,64 @@ static char *word_to_cstr(MnWord s) {
   return buf;
 }
 
+/* Drain OpenSSL's error queue without printing — CONC-03: no text leaks. */
+static void drain_openssl_errors(void) {
+  while (ERR_get_error() != 0) {
+  }
+}
+
+static int load_verify_paths(SSL_CTX *ctx) {
+  if (SSL_CTX_set_default_verify_paths(ctx) != 1) {
+    drain_openssl_errors();
+    /* Continue — MENARD_TLS_CA_FILE may still supply roots. */
+  }
+  const char *ca = getenv("MENARD_TLS_CA_FILE");
+  if (ca != NULL && ca[0] != '\0') {
+    if (SSL_CTX_load_verify_locations(ctx, ca, NULL) != 1) {
+      drain_openssl_errors();
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int sni_callback(SSL *ssl, int *ad, void *arg) {
+  (void)ad;
+  (void)arg;
+  const char *name = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+  if (name != NULL && server_sni_ctx != NULL && server_sni_name[0] != '\0' &&
+      strcmp(name, server_sni_name) == 0) {
+    SSL_set_SSL_CTX(ssl, server_sni_ctx);
+  }
+  return SSL_TLSEXT_ERR_OK;
+}
+
+static void maybe_load_sni_server_ctx(void) {
+  const char *name = getenv("MENARD_TLS_SNI_NAME");
+  const char *cert = getenv("MENARD_TLS_SNI_CERT");
+  const char *key = getenv("MENARD_TLS_SNI_KEY");
+  if (name == NULL || name[0] == '\0' || cert == NULL || key == NULL) {
+    return;
+  }
+  if (strlen(name) >= SNI_NAME_MAX) {
+    return;
+  }
+  server_sni_ctx = SSL_CTX_new(TLS_server_method());
+  if (server_sni_ctx == NULL) {
+    drain_openssl_errors();
+    return;
+  }
+  if (SSL_CTX_use_certificate_file(server_sni_ctx, cert, SSL_FILETYPE_PEM) != 1 ||
+      SSL_CTX_use_PrivateKey_file(server_sni_ctx, key, SSL_FILETYPE_PEM) != 1) {
+    drain_openssl_errors();
+    SSL_CTX_free(server_sni_ctx);
+    server_sni_ctx = NULL;
+    return;
+  }
+  memcpy(server_sni_name, name, strlen(name) + 1);
+  SSL_CTX_set_tlsext_servername_callback(server_ctx, sni_callback);
+}
+
 static void ensure_openssl(void) {
   if (openssl_ready) {
     return;
@@ -58,10 +134,18 @@ static void ensure_openssl(void) {
   SSL_load_error_strings();
   OpenSSL_add_all_algorithms();
   client_ctx = SSL_CTX_new(TLS_client_method());
+  client_insecure_ctx = SSL_CTX_new(TLS_client_method());
   server_ctx = SSL_CTX_new(TLS_server_method());
-  if (client_ctx == NULL || server_ctx == NULL) {
+  if (client_ctx == NULL || client_insecure_ctx == NULL || server_ctx == NULL) {
     mn_panic("mn_tls: SSL_CTX_new failed");
   }
+  SSL_CTX_set_verify(client_ctx, SSL_VERIFY_PEER, NULL);
+  if (!load_verify_paths(client_ctx)) {
+    /* Paths partially loaded; handshakes will fail closed on verify. */
+  }
+  SSL_CTX_set_verify(client_insecure_ctx, SSL_VERIFY_NONE, NULL);
+  server_sni_name[0] = '\0';
+  maybe_load_sni_server_ctx();
   openssl_ready = 1;
 }
 
@@ -71,6 +155,7 @@ static int alloc_conn(SSL *ssl, int fd) {
       conns[i].ssl = ssl;
       conns[i].fd = fd;
       conns[i].alive = 1;
+      conns[i].servername[0] = '\0';
       return i;
     }
   }
@@ -87,6 +172,28 @@ static MnTlsConn *get_conn(int id) {
 /* Cooperative park — never blocks the mutator with poll(..., -1). */
 static MnWord park_tls(int fd, short events, int64_t deadline_mono) {
   return mn_park_fd(fd, events, deadline_mono);
+}
+
+static int verify_failed_after_handshake(SSL *ssl) {
+  if (SSL_get_verify_result(ssl) != X509_V_OK) {
+    return 1;
+  }
+  X509 *peer = SSL_get_peer_certificate(ssl);
+  if (peer == NULL) {
+    return 1;
+  }
+  X509_free(peer);
+  return 0;
+}
+
+static MnWord map_handshake_failure(SSL *ssl) {
+  long vr = SSL_get_verify_result(ssl);
+  if (vr != X509_V_OK) {
+    drain_openssl_errors();
+    return io_tls_verify_failed();
+  }
+  drain_openssl_errors();
+  return io_tls_handshake_failed();
 }
 
 static MnWord handshake_loop(SSL *ssl, int fd, int64_t deadline_mono) {
@@ -110,22 +217,69 @@ static MnWord handshake_loop(SSL *ssl, int fd, int64_t deadline_mono) {
       }
       continue;
     }
-    return io_other(EIO);
+    return map_handshake_failure(ssl);
   }
 }
 
-static MnWord tls_client_deadline(int fd, int64_t deadline_mono) {
+static void capture_servername(MnTlsConn *c) {
+  const char *name = SSL_get_servername(c->ssl, TLSEXT_NAMETYPE_host_name);
+  if (name == NULL) {
+    c->servername[0] = '\0';
+    return;
+  }
+  size_t n = strlen(name);
+  if (n >= SNI_NAME_MAX) {
+    n = SNI_NAME_MAX - 1;
+  }
+  memcpy(c->servername, name, n);
+  c->servername[n] = '\0';
+}
+
+static MnWord tls_client_deadline(int fd, MnWord host_w, int insecure,
+                                  int64_t deadline_mono) {
   ensure_openssl();
-  SSL *ssl = SSL_new(client_ctx);
-  if (ssl == NULL) {
+  char *host = word_to_cstr(host_w);
+  if (host == NULL) {
     return io_other(ENOMEM);
   }
+  if (host[0] == '\0') {
+    free(host);
+    return io_other(EINVAL);
+  }
+  SSL_CTX *ctx = insecure ? client_insecure_ctx : client_ctx;
+  SSL *ssl = SSL_new(ctx);
+  if (ssl == NULL) {
+    free(host);
+    drain_openssl_errors();
+    return io_other(ENOMEM);
+  }
+  if (SSL_set_tlsext_host_name(ssl, host) != 1) {
+    free(host);
+    SSL_free(ssl);
+    drain_openssl_errors();
+    return io_tls_handshake_failed();
+  }
+  if (!insecure) {
+    X509_VERIFY_PARAM *param = SSL_get0_param(ssl);
+    if (param == NULL ||
+        X509_VERIFY_PARAM_set1_host(param, host, strlen(host)) != 1) {
+      free(host);
+      SSL_free(ssl);
+      drain_openssl_errors();
+      return io_tls_verify_failed();
+    }
+  }
+  free(host);
   SSL_set_fd(ssl, fd);
   SSL_set_connect_state(ssl);
   MnWord hs = handshake_loop(ssl, fd, deadline_mono);
   if (hs != MN_EMPTY) {
     SSL_free(ssl);
     return hs;
+  }
+  if (!insecure && verify_failed_after_handshake(ssl)) {
+    SSL_free(ssl);
+    return io_tls_verify_failed();
   }
   int id = alloc_conn(ssl, fd);
   if (id < 0) {
@@ -135,16 +289,31 @@ static MnWord tls_client_deadline(int fd, int64_t deadline_mono) {
   return mn_ok(mn_int_to_word((int64_t)id));
 }
 
-MnWord mn_tls_client(MnWord fd_tagged) {
-  return tls_client_deadline((int)mn_word_to_int(fd_tagged), -1);
+MnWord mn_tls_client(MnWord fd_tagged, MnWord host) {
+  return tls_client_deadline((int)mn_word_to_int(fd_tagged), host, 0, -1);
 }
 
-MnWord mn_tls_client_timeout(MnWord fd_tagged, MnWord ms_tagged) {
+MnWord mn_tls_client_timeout(MnWord fd_tagged, MnWord host, MnWord ms_tagged) {
   int64_t ms = mn_word_to_int(ms_tagged);
   if (ms < 0) {
     ms = 0;
   }
-  return tls_client_deadline((int)mn_word_to_int(fd_tagged), mn_mono_now_ms() + ms);
+  return tls_client_deadline((int)mn_word_to_int(fd_tagged), host, 0,
+                             mn_mono_now_ms() + ms);
+}
+
+MnWord mn_tls_client_insecure(MnWord fd_tagged, MnWord host) {
+  return tls_client_deadline((int)mn_word_to_int(fd_tagged), host, 1, -1);
+}
+
+MnWord mn_tls_client_insecure_timeout(MnWord fd_tagged, MnWord host,
+                                      MnWord ms_tagged) {
+  int64_t ms = mn_word_to_int(ms_tagged);
+  if (ms < 0) {
+    ms = 0;
+  }
+  return tls_client_deadline((int)mn_word_to_int(fd_tagged), host, 1,
+                             mn_mono_now_ms() + ms);
 }
 
 static MnWord tls_server_deadline(int fd, MnWord cert_path, MnWord key_path,
@@ -157,16 +326,23 @@ static MnWord tls_server_deadline(int fd, MnWord cert_path, MnWord key_path,
     free(kpath);
     return io_other(ENOMEM);
   }
+  if (access(cpath, R_OK) != 0 || access(kpath, R_OK) != 0) {
+    free(cpath);
+    free(kpath);
+    return mn_err((MnWord)&mn_static_not_found);
+  }
   if (SSL_CTX_use_certificate_file(server_ctx, cpath, SSL_FILETYPE_PEM) != 1 ||
       SSL_CTX_use_PrivateKey_file(server_ctx, kpath, SSL_FILETYPE_PEM) != 1) {
     free(cpath);
     free(kpath);
-    return io_other(EINVAL);
+    drain_openssl_errors();
+    return mn_err((MnWord)&mn_static_invalid_path);
   }
   free(cpath);
   free(kpath);
   SSL *ssl = SSL_new(server_ctx);
   if (ssl == NULL) {
+    drain_openssl_errors();
     return io_other(ENOMEM);
   }
   SSL_set_fd(ssl, fd);
@@ -181,6 +357,7 @@ static MnWord tls_server_deadline(int fd, MnWord cert_path, MnWord key_path,
     SSL_free(ssl);
     return io_other(ENOMEM);
   }
+  capture_servername(&conns[id]);
   return mn_ok(mn_int_to_word((int64_t)id));
 }
 
@@ -235,6 +412,7 @@ static MnWord tls_read_deadline(MnTlsConn *c, int64_t max, int64_t deadline_mono
       continue;
     }
     free(buf);
+    drain_openssl_errors();
     return io_other(EIO);
   }
 }
@@ -296,6 +474,7 @@ static MnWord tls_write_deadline(MnTlsConn *c, MnWord data, int64_t deadline_mon
       continue;
     }
     free(buf);
+    drain_openssl_errors();
     return io_other(EIO);
   }
   free(buf);
@@ -332,5 +511,6 @@ MnWord mn_tls_close(MnWord id_tagged) {
   SSL_free(c->ssl);
   c->ssl = NULL;
   c->alive = 0;
+  c->servername[0] = '\0';
   return MN_UNIT;
 }
