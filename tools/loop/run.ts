@@ -55,6 +55,8 @@ type Options = {
   fixedPoint: boolean | null;
   cold: boolean;
   allowStaleBase: boolean;
+  drain: boolean;
+  maxItems: number;
   maxRounds: number;
   model: string | null;
 };
@@ -67,6 +69,7 @@ type Criterion = { criterion: string; status: string; evidence: string };
 type Verdict = { satisfied: boolean; criteria: Criterion[]; gaps: string[]; notes: string };
 
 const timings: { stage: string; ms: number }[] = [];
+let timingItem = "";
 let currentJournal: Journal | null = null;
 let currentState: State | null = null;
 
@@ -85,6 +88,8 @@ function parseArgs(argv: string[]): Options {
     fixedPoint: null,
     cold: false,
     allowStaleBase: false,
+    drain: false,
+    maxItems: 0,
     maxRounds: 2,
     model: null,
   };
@@ -136,6 +141,16 @@ function parseArgs(argv: string[]): Options {
       case "--allow-stale-base":
         options.allowStaleBase = true;
         break;
+      case "--drain":
+        options.drain = true;
+        break;
+      case "--max-items": {
+        const items = Number(value(index + 1, arg));
+        if (!Number.isInteger(items) || items < 0) die("--max-items needs a non-negative integer");
+        options.maxItems = items;
+        index += 1;
+        break;
+      }
       case "--help":
       case "-h":
         printHelp();
@@ -161,6 +176,8 @@ function printHelp(): void {
   --no-fixed-point   never run 'make check-fixed-point'
   --cold             clear ~/.menard before the gate (the first attempt does this anyway)
   --allow-stale-base accept a base that is behind origin (default: refuse)
+  --drain            keep going: one item after another until nothing is ready
+  --max-items N      stop a drain after N items (default: no limit)
   --model NAME       pass --model to cursor-agent
 `);
 }
@@ -279,7 +296,7 @@ async function timed<T>(stage: string, action: () => Promise<T>): Promise<T> {
   try {
     return await action();
   } finally {
-    timings.push({ stage, ms: Date.now() - started });
+    timings.push({ stage: `${timingItem}${stage}`, ms: Date.now() - started });
   }
 }
 
@@ -794,16 +811,31 @@ function requireCleanTree(): void {
   if (status !== "") die(`the working tree is dirty — commit or stash first:\n${status}`);
 }
 
-function pickRow(rows: Row[], report: ReturnType<typeof buildReport>, options: Options): Row {
+/**
+ * Drain mode reads the backlog from the base commit, not the working tree: a
+ * finished item is `done` only on its own branch, so the tree would either
+ * re-pick it or unblock work whose dependency is not merged.
+ */
+function readBacklog(options: Options): string {
+  if (!options.drain) return readFileSync(BACKLOG, "utf8");
+  const shown = run("git", ["show", `${options.base}:docs/backlog.md`], { cwd: ROOT });
+  return shown.code === 0 ? shown.stdout : readFileSync(BACKLOG, "utf8");
+}
+
+/** The next row this session has not already done. */
+export function nextCandidate(rows: Row[], completed: ReadonlySet<string>): Row | null {
+  const report = buildReport(rows);
+  return report.startNow.find((row) => row.issue !== "" && !completed.has(row.id)) ?? null;
+}
+
+function pickRow(rows: Row[], options: Options, completed: ReadonlySet<string>): Row | null {
   if (options.item !== null) {
     const match = rows.find((row) => row.id === options.item);
     if (match === undefined) die(`unknown item ${options.item}; see docs/backlog.md`);
     if (match.status === "done" || match.status === "wontfix") die(`${options.item} is already ${match.status}`);
     return match;
   }
-  const next = report.startNow.find((row) => row.issue !== "");
-  if (next === undefined) die("nothing ready to start has a GitHub issue; run 'make next' to see the queue");
-  return next;
+  return nextCandidate(rows, completed);
 }
 
 function branchName(row: Row): string {
@@ -822,14 +854,8 @@ function preflight(options: Options): void {
   }
 }
 
-async function main(): Promise<void> {
-  const options = parseArgs(process.argv.slice(2));
-  process.chdir(ROOT);
-  options.base = resolveBase(options.base);
-  preflight(options);
-
-  const rows = parseBacklog(readFileSync(BACKLOG, "utf8"));
-  const report = buildReport(rows);
+async function runItem(options: Options, completed: ReadonlySet<string>): Promise<string | null> {
+  const rows = parseBacklog(readBacklog(options));
 
   let state: State;
   let row: Row;
@@ -852,7 +878,9 @@ async function main(): Promise<void> {
       die("a run is already recorded in .loop/state.json — use --resume, or remove it to start fresh");
     }
     if (!options.dryRun) requireCleanTree();
-    row = pickRow(rows, report, options);
+    const next = pickRow(rows, options, completed);
+    if (next === null) return null;
+    row = next;
     state = {
       item: row.id,
       branch: branchName(row),
@@ -863,6 +891,7 @@ async function main(): Promise<void> {
     };
   }
 
+  timingItem = `${row.id} `;
   const artifactDir = join(ROOT, ".loop", options.dryRun ? `${row.id.toLowerCase()}-dry` : row.id.toLowerCase());
   if (options.dryRun) rmSync(artifactDir, { recursive: true, force: true });
   const journal = new Journal(artifactDir);
@@ -1056,9 +1085,8 @@ async function main(): Promise<void> {
   if (options.dryRun) {
     journal.mark(`[dry-run] git push -u origin ${state.branch}`);
     journal.mark(`[dry-run] gh pr create --base ${state.base} --head ${state.branch} --title ${JSON.stringify(subject)}`);
-    printTimeline(journal);
     journal.mark(`done — artifacts in ${journal.dir}`);
-    return;
+    return row.id;
   }
 
   await timed("pull request", async () => {
@@ -1080,8 +1108,42 @@ async function main(): Promise<void> {
   });
 
   rmSync(STATE, { force: true });
-  printTimeline(journal);
   journal.mark(`done — artifacts in ${journal.dir}`);
+  return row.id;
+}
+
+async function main(): Promise<void> {
+  const options = parseArgs(process.argv.slice(2));
+  process.chdir(ROOT);
+  options.base = resolveBase(options.base);
+  preflight(options);
+  if (options.resume && options.drain) die("--resume and --drain do not mix; finish the stopped item first");
+  if (options.item !== null && options.drain) die("--item and --drain do not mix");
+
+  if (!options.drain || options.dryRun) {
+    const id = await runItem(options, new Set());
+    if (currentJournal !== null) printTimeline(currentJournal);
+    if (id === null) process.stdout.write("\nNothing ready to start.\n");
+    return;
+  }
+
+  const completed = new Set<string>();
+  const startedAt = Date.now();
+  while (true) {
+    const itemStart = Date.now();
+    const id = await runItem(options, completed);
+    if (id === null) {
+      process.stdout.write(`\nNothing ready to start — drained ${completed.size} item(s) in ${formatDuration(Date.now() - startedAt)}.\n`);
+      break;
+    }
+    completed.add(id);
+    process.stdout.write(`\n=== ${id} complete in ${formatDuration(Date.now() - itemStart)} (${completed.size} drained) ===\n`);
+    if (options.maxItems > 0 && completed.size >= options.maxItems) {
+      process.stdout.write(`Stopped after ${options.maxItems} item(s) (--max-items).\n`);
+      break;
+    }
+  }
+  if (currentJournal !== null) printTimeline(currentJournal);
 }
 
 if (import.meta.main) {
