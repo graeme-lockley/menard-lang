@@ -229,6 +229,11 @@ function checkBaseFresh(base: string, allowStale: boolean, strict: boolean): str
   return message;
 }
 
+/** GitHub wants a branch name for --base; the driver tracks `origin/main`. */
+export function prBase(base: string): string {
+  return base.startsWith("origin/") ? base.slice("origin/".length) : base;
+}
+
 /** The blob hash of this file: the console says which harness is running. */
 function driverId(): string {
   const blob = run("git", ["hash-object", "tools/loop/run.ts"], { cwd: ROOT }).stdout.trim();
@@ -1001,7 +1006,14 @@ async function runItem(options: Options, completed: ReadonlySet<string>): Promis
 
   const skipGate = state.phase === "commit" || state.phase === "pr";
   let round = state.rounds;
-  let lastGate: GateResult = { ok: true, failed: null, output: "", skipped: false, fixedPoint: options.fixedPoint === true };
+  const stampedFixedPoint = readStamp(journal)?.signature.includes("check-fixed-point") ?? false;
+  let lastGate: GateResult = {
+    ok: true,
+    failed: null,
+    output: "",
+    skipped: false,
+    fixedPoint: options.fixedPoint ?? stampedFixedPoint,
+  };
 
   if (skipGate) {
     journal.mark("resuming after the gate: commit and PR only");
@@ -1100,7 +1112,7 @@ async function runItem(options: Options, completed: ReadonlySet<string>): Promis
     }
     const created = run(
       "gh",
-      ["pr", "create", "--base", state.base, "--head", state.branch, "--title", subject, "--body-file", journal.path("pr.md")],
+      ["pr", "create", "--base", prBase(state.base), "--head", state.branch, "--title", subject, "--body-file", journal.path("pr.md")],
       { cwd: ROOT },
     );
     if (created.code !== 0) throw new Error(`gh pr create failed:\n${created.stdout}\n${created.stderr}`);
