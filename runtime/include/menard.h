@@ -73,7 +73,9 @@ extern MnNullary mn_static_not_a_directory;
 extern MnNullary mn_static_invalid_path;
 extern MnNullary mn_static_too_large;
 extern MnNullary mn_static_timeout;
+extern MnNullary mn_static_tls_verify_failed;
 extern MnNullary mn_static_unsupported;
+extern MnNullary mn_static_tls_handshake_failed;
 extern MnNullary mn_static_not_executable;
 extern MnNullary mn_static_invalid_argument;
 extern MnNullary mn_static_too_many_arguments;
@@ -382,9 +384,12 @@ MnWord mn_udp_send(MnWord fd_tagged, MnWord host_str, MnWord port_tagged, MnWord
 MnWord mn_udp_recv(MnWord fd_tagged, MnWord max_tagged); /* → Result Str IoError */
 MnWord mn_udp_close(MnWord fd_tagged);         /* → Unit */
 
-/* OpenSSL TLS over an existing TCP fd (Build F). Handle is an Int id. */
-MnWord mn_tls_client(MnWord fd_tagged);        /* → Result Int IoError */
-MnWord mn_tls_client_timeout(MnWord fd_tagged, MnWord ms_tagged);
+/* OpenSSL TLS over an existing TCP fd (Build F / CONC-03). Handle is an Int id.
+ * Verified clients take a hostname for SNI + peer checks; insecure skips verify. */
+MnWord mn_tls_client(MnWord fd_tagged, MnWord host); /* → Result Int IoError */
+MnWord mn_tls_client_timeout(MnWord fd_tagged, MnWord host, MnWord ms_tagged);
+MnWord mn_tls_client_insecure(MnWord fd_tagged, MnWord host);
+MnWord mn_tls_client_insecure_timeout(MnWord fd_tagged, MnWord host, MnWord ms_tagged);
 MnWord mn_tls_server(MnWord fd_tagged, MnWord cert_path, MnWord key_path);
 MnWord mn_tls_server_timeout(MnWord fd_tagged, MnWord cert_path, MnWord key_path,
                              MnWord ms_tagged);

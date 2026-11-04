@@ -60,6 +60,9 @@ const stage1 = process.env.MENARD_STAGE1 ?? "";
 export const ORACLE_EXCLUSIONS: { path: string; reason: string }[] = [
   { path: "tests/net/echo.mnd", reason: "native-only networking (CONC-10)" },
   { path: "tests/net/timeouts.mnd", reason: "native-only networking (CONC-10)" },
+  { path: "tests/net/tls-verify.mnd", reason: "native-only TLS (CONC-03/10)" },
+  { path: "tests/net/tls-reject.mnd", reason: "native-only TLS (CONC-03/10)" },
+  { path: "tests/net/tls-stall.mnd", reason: "native-only TLS (CONC-03/10)" },
   { path: "tests/http/roundtrip.mnd", reason: "native-only networking (CONC-10)" },
   { path: "tests/http/hygiene.mnd", reason: "native-only networking (CONC-10)" },
   { path: "tests/http/unsupported.mnd", reason: "native-only networking (CONC-10)" },

@@ -152,6 +152,31 @@ timeout into cancel; exposing `mn_net_poll` as Platform API; sharing the
 
 ---
 
+## 2026-11-03 — TLS verify-by-default, SNI, typed errors (CONC-03)
+
+### The decision
+
+`Net.tls-client(fd, host)` requires a hostname, verifies the peer against the
+system trust store, checks the hostname, and sends SNI. The only skip path is
+`tls-client-insecure` (documented development-only). Handshake failures split
+into `IoError.TlsVerifyFailed` (tag 29) and `IoError.TlsHandshakeFailed`
+(tag 37); OpenSSL text must not leak. Optional `MENARD_TLS_CA_FILE` adds test
+roots; optional `MENARD_TLS_SNI_*` env selects an alternate server cert by SNI.
+Parking remains `mn_park_fd` (CONC-02) — this item does not reintroduce mutator
+`poll(-1)`.
+
+### Why
+
+Build F’s TLS client accepted any certificate and had no hostname/SNI. That is
+a security defect on a native-only network surface users will treat as HTTPS.
+
+### Rejected
+
+Verify-off by default; a single `Other(errno)` for all TLS failures; baking
+custom CA paths into the public Menard API (env hook is enough for tests/ops).
+
+---
+
 ## 2026-10-26 — Wait-cell `notify-all` + closed cell (CONC-01)
 
 ### The decision

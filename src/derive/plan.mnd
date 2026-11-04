@@ -133,8 +133,10 @@ let builtin-ctor-metas() -> Map Str CtorMeta {
   let m12 = Map.set("InvalidPath", CtorMeta("IoError", 0), m11)
   let m13 = Map.set("TooLarge", CtorMeta("IoError", 0), m12)
   let m14 = Map.set("Timeout", CtorMeta("IoError", 0), m13)
-  let m15 = Map.set("Unsupported", CtorMeta("IoError", 0), m14)
-  Map.set("Other", CtorMeta("IoError", 1), m15)
+  let m15 = Map.set("TlsVerifyFailed", CtorMeta("IoError", 0), m14)
+  let m16 = Map.set("Unsupported", CtorMeta("IoError", 0), m15)
+  let m17 = Map.set("TlsHandshakeFailed", CtorMeta("IoError", 0), m16)
+  Map.set("Other", CtorMeta("IoError", 1), m17)
 }
 
 let register-one-variant-ctor(type-name: Str, c: Ast, acc: Map Str CtorMeta) -> Map Str CtorMeta =

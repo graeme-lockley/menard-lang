@@ -16,7 +16,9 @@ export type IoError =
   | { tag: "TooLarge" }
   | { tag: "Other"; code: bigint }
   | { tag: "Timeout" }
-  | { tag: "Unsupported" };
+  | { tag: "TlsVerifyFailed" }
+  | { tag: "Unsupported" }
+  | { tag: "TlsHandshakeFailed" };
 
 /** Thrown by Host.exit — evaluator treats as program-requested termination. */
 export class ExitSignal {

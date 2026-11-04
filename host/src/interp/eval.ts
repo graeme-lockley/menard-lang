@@ -1515,7 +1515,8 @@ function installBuiltins(env: Env): void {
     "mn_tcp_listen", "mn_tcp_accept", "mn_tcp_accept_timeout", "mn_tcp_connect", "mn_tcp_connect_timeout",
     "mn_tcp_read", "mn_tcp_read_timeout", "mn_tcp_write", "mn_tcp_write_timeout", "mn_tcp_close", "mn_tcp_local_port",
     "mn_udp_bind", "mn_udp_send", "mn_udp_recv", "mn_udp_close",
-    "mn_tls_client", "mn_tls_client_timeout", "mn_tls_server", "mn_tls_server_timeout",
+    "mn_tls_client", "mn_tls_client_timeout", "mn_tls_client_insecure", "mn_tls_client_insecure_timeout",
+    "mn_tls_server", "mn_tls_server_timeout",
     "mn_tls_read", "mn_tls_read_timeout", "mn_tls_write", "mn_tls_write_timeout", "mn_tls_close",
     "Other",
     "Exited", "Signalled", "SpawnOutput",
@@ -1527,8 +1528,8 @@ function installBuiltins(env: Env): void {
   const nullaries = [
     "None", "Nil",
     "NotFound", "Permission", "Exists", "IsADirectory", "NotADirectory",
-    "InvalidPath", "TooLarge", "Timeout", "Unsupported",
-    "NotExecutable", "InvalidArgument", "TooManyArguments",
+    "InvalidPath", "TooLarge", "Timeout", "TlsVerifyFailed", "Unsupported",
+    "TlsHandshakeFailed", "NotExecutable", "InvalidArgument", "TooManyArguments",
   ];
   for (const n of nullaries) {
     envSet(env, n, vVariant(n));
@@ -1986,6 +1987,8 @@ function applyBuiltin(
     case "mn_udp_recv":
     case "mn_tls_client":
     case "mn_tls_client_timeout":
+    case "mn_tls_client_insecure":
+    case "mn_tls_client_insecure_timeout":
     case "mn_tls_server":
     case "mn_tls_server_timeout":
     case "mn_tls_read":
