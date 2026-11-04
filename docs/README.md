@@ -11,6 +11,7 @@ What to read when. Living language docs stay at this root so paths cited by the 
 | [syntax.md](syntax.md) | Syntax, and how the surface lowers |
 | [menard-spec.md](menard-spec.md) | The specification (normative rules) |
 | [runtime-abi.md](runtime-abi.md) | The `mn_*` runtime ABI |
+| [security.md](security.md) | Unsafe boundary, TLS and HTTP policy (see also root [SECURITY.md](../SECURITY.md)) |
 
 ## Process
 

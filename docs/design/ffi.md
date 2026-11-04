@@ -47,7 +47,11 @@ Menard can call a real foreign C library through an explicit conversion layer:
 - SQLite lives under [`examples/ffi/sqlite/`](../examples/ffi/sqlite/); `./mn` itself
   does **not** link libsqlite3.
 
-That is enough to close Build B’s “one foreign library” criterion.
+That is enough to close Build B’s “one foreign library” criterion. SQLite remains
+the **FFI proving ground**. Menard's GC does **not** make libsqlite3
+memory-safe: trust the C library and the bridge; see
+[examples/ffi/sqlite/README.md](../../examples/ffi/sqlite/README.md) and
+[security.md](../security.md).
 
 ### 1.2 What Build B did not solve
 
@@ -122,12 +126,26 @@ SYSTEM / VENDORED LIBS    libsqlite3, …
 
 | Layer | May declare `extern` | Linked into |
 |---|---|---|
-| Seam (`std/sys`, `io`, `fs`, `proc`, `time`) | `mn_*` only | Every native program (via runtime sources) |
+| Seam (`std/sys`, `io`, `fs`, `proc`, `time`, `sched`, `net`) | `mn_*` only | Every native program (via runtime sources) |
 | `/ffi/` modules (path contains `/ffi/`, not under `stdlib/`) | non-`mn_*` only | Only programs that import them |
 | Everywhere else | none | — |
 
 Conversions that touch tagged words live **only** in a small C file next to the
 bridge (`*_ffi.c`), never in Menard source or in `stdlib/`.
+
+### Machine-checkable FFI `extern` inventory
+
+Every non-`mn_*` `extern` under `/ffi/` must appear in this table (lint:
+`tests/unit/host/extern-lint.test.ts`). Current proving-ground symbols
+(`examples/ffi/sqlite/sqlite.mnd`):
+
+| Symbol | Role |
+|---|---|
+| `sql_open` | Open a DB path or `:memory:` |
+| `sql_close` | Close the connection |
+| `sql_exec` | DDL / DML with no row payload |
+| `sql_query` | Query → JSON array `Str` |
+| `sql_errmsg` | Last SQLite / bridge error text |
 
 ---
 

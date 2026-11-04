@@ -110,3 +110,28 @@ describe("published mutation names", () => {
     expect(offenders).toEqual([]);
   });
 });
+
+describe("extern doc entries (OTH-05)", () => {
+  test("every seam extern appears in runtime-abi.md; every /ffi/ extern in design/ffi.md", () => {
+    const abi = readFileSync(join(ROOT, "docs/runtime-abi.md"), "utf8");
+    const ffiDoc = readFileSync(join(ROOT, "docs/design/ffi.md"), "utf8");
+    const files: string[] = [];
+    mndFiles(ROOT, files);
+    const missing: string[] = [];
+    for (const file of files) {
+      const text = codeOf(file);
+      const names = externNames(text);
+      if (names.length === 0) continue;
+      if (seam.has(file)) {
+        for (const n of names) {
+          if (!abi.includes(n)) missing.push(`runtime-abi.md missing ${n} (${file.slice(ROOT.length + 1)})`);
+        }
+      } else if (isFfiPath(file)) {
+        for (const n of names) {
+          if (!ffiDoc.includes(n)) missing.push(`design/ffi.md missing ${n} (${file.slice(ROOT.length + 1)})`);
+        }
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+});

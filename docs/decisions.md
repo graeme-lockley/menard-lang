@@ -28,6 +28,35 @@ specification. Where a name changed, the entry that changed it says so.
 
 ---
 
+## 2026-11-04 — Security policy docs and seam list includes `sched` / `net` (OTH-05)
+
+### The decision
+
+Root [SECURITY.md](../SECURITY.md) states supported versions, private GitHub
+disclosure, the threat model (Menard memory safety; C/FFI/OpenSSL trusted;
+checksummed deps and offline-by-default as **policy**), and out of scope.
+[docs/security.md](security.md) is the unsafe-boundary doc (pointer lifetimes,
+`Str` bytes, ownership, no-shell-string, TLS, HTTP, native-only net/FFI). Spec
+§2.7 / §2.15 confinement lists `sys`, `io`, `fs`, `proc`, `time`, `sched`, `net`
+plus `/ffi/`, matching the lint and [runtime-abi.md](runtime-abi.md). Dependency
+checksum enforcement and `--offline` remain **OTH-04** (no `deps.mnd` here);
+today's `github:` cache-miss fetch is an acknowledged gap.
+
+### Why
+
+Build F shipped TLS/HTTP behaviour (CONC-03/04) without a disclosure process or
+an auditable unsafe-boundary write-up; §2.7 still omitted `sched`/`net` after
+those seams landed.
+
+### Rejected
+
+Implementing OTH-04 checksums in this item; claiming the current `github:` fetch
+is already safe; dual-host agreement for net/FFI; hard-blocking OTH-05 on
+unfinished OTH-04 (the dependency-integrity AC is policy here; enforcement is
+OTH-04).
+
+---
+
 ## 2026-11-04 — Variant constructor order is declaration-order tags (LANG-18)
 
 ### The decision
@@ -631,7 +660,7 @@ bearing choices; everything in the specification follows from them.
 | 24 | **Tag-based precise collection, with layout kinds; no static GC field maps** | With type parameters no static map can exist; alternatives (monomorphization, dictionary passing) cost far more | Invariants become load-bearing; marking marginally slower; unboxing, `Byte` and general mutable arrays forbidden forever |
 | 25 | **Two type views: canonical and display** | Aliases must never reach emitted bytes, but flattening them wrecks diagnostics | Two representations of types to keep straight |
 | 26 | **Casing enforced: upper = type/constructor, lower = value** | Cheap, catches `Int`/`int`, makes signatures readable | A naming rule users cannot opt out of |
-| 27 | **Private by default; `pub` to export**; `extern` never exported; confined to seam modules (`sys`, `io`, `fs`, `proc`, `time`) for `mn_*`, or to `/ffi/` modules for non-`mn_*` foreign symbols | Keeps the module boundary real; Runtime ABI ≠ foreign FFI; checkable ambient vs FFI markers | ~50 lines of visibility checking, plus the confinement lint; open emit for FFI prototypes |
+| 27 | **Private by default; `pub` to export**; `extern` never exported; confined to seam modules (`sys`, `io`, `fs`, `proc`, `time`, `sched`, `net`) for `mn_*`, or to `/ffi/` modules for non-`mn_*` foreign symbols | Keeps the module boundary real; Runtime ABI ≠ foreign FFI; checkable ambient vs FFI markers | ~50 lines of visibility checking, plus the confinement lint; open emit for FFI prototypes |
 | 28 | **The surface is four tiers, with a placement rule** | Compiler-known iff it needs per-type synthesis; runtime-backed iff it needs mutation or an opaque representation **and the compiler is a client on a hot path**; else prelude | Adding an operation means knowing which tier it belongs to |
 | 29 | **Aliases are nullary and transparent** | Parameters would make them type-level functions, i.e. the higher-kinded feature that is out | Cannot abstract over container shape with an alias |
 | 30 | **`!` marks observable mutation only; the OS boundary is marked by `extern`, not by a name** | One glyph for two ideas meant neither was reliable, and `!`-for-purity was a gesture at effects the language refuses (no propagation, no effect system) | The convention covers one special form and four functions and is still unchecked; the ambient audit moves from a naming habit to a lintable module boundary |
