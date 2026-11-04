@@ -86,7 +86,7 @@ test "a unicode character literal round-trips" = {
     | Ok(a) ->
       match (read(print-form(a)))
         | Err(_) -> false
-        | Ok(b) -> ast-equal(a, b) && print-form(a) == "'\\u{1f600}'"
+        | Ok(b) -> ast-equal(a, b) && print-form(a) == "'\\u{1F600}'"
 }
 
 test "an unclosed quote stays a symbol" = {
