@@ -31,8 +31,8 @@ import { join } from "node:path";
 
 import { buildReport, parseBacklog } from "../next.ts";
 import type { Row } from "../next.ts";
-import { extractReviewSection, git, Journal, readState, run, runStreaming, slug, tail, writeState } from "./lib.ts";
-import type { State } from "./lib.ts";
+import { extractCriteria, extractReviewSection, git, Journal, readState, run, runStreaming, slug, tail, writeState } from "./lib.ts";
+import type { AcceptanceCriterion, State } from "./lib.ts";
 import { executePrompt, fixPrompt, planPrompt, reviewPrompt } from "./prompts.ts";
 
 const ROOT = join(import.meta.dir, "..", "..");
@@ -40,6 +40,8 @@ const BACKLOG = join(ROOT, "docs", "backlog.md");
 const REVIEW = join(ROOT, "docs", "reviews", "2026-10-24-build-f.md");
 const STATE = join(ROOT, ".loop", "state.json");
 const REVIEW_FILE = "docs/reviews/2026-10-24-build-f.md";
+const PLAN_SKILL = join(ROOT, ".agents", "skills", "menard-plan", "SKILL.md");
+const IMPLEMENT_SKILL = join(ROOT, ".agents", "skills", "menard-implement", "SKILL.md");
 const GATE_STAMP = "gate.stamp.json";
 const CACHE_MARKER = "cache-cleared";
 const DIFF_LIMIT = 24000;
@@ -218,6 +220,39 @@ function driverId(): string {
 
 function hasPlanSections(text: string): boolean {
   return text.includes("## Scope") && text.includes("## Steps");
+}
+
+/** AC ids the plan's evidence table covers. */
+export function planCoverage(plan: string): Set<string> {
+  const covered = new Set<string>();
+  for (const line of plan.split("\n")) {
+    if (!line.trim().startsWith("|")) continue;
+    const first = (line.split("|")[1] ?? "").trim();
+    if (/^AC\d+$/.test(first)) covered.add(first);
+  }
+  return covered;
+}
+
+export function planMissing(plan: string, criteria: AcceptanceCriterion[]): string[] {
+  const covered = planCoverage(plan);
+  return criteria.filter((criterion) => !covered.has(criterion.id)).map((criterion) => criterion.id);
+}
+
+/** A verdict that skips an AC fails the review; the fix round gets the gap. */
+export function withCoverage(verdict: Verdict, criteria: AcceptanceCriterion[]): Verdict {
+  if (criteria.length === 0) return verdict;
+  const seen = new Set(verdict.criteria.map((entry) => entry.criterion.trim()));
+  const missing = criteria.filter((criterion) => !seen.has(criterion.id)).map((criterion) => criterion.id);
+  if (missing.length === 0) return verdict;
+  return { ...verdict, satisfied: false, gaps: [...verdict.gaps, `review verdict did not cover ${missing.join(", ")}`] };
+}
+
+/** The agent must not commit: the driver owns the boundary. */
+function guardAgentCommit(journal: Journal, before: string): void {
+  const after = git(["rev-parse", "HEAD"], { cwd: ROOT });
+  if (after === before) return;
+  git(["reset", "--soft", before], { cwd: ROOT });
+  journal.mark("! the agent committed; reset --soft so the driver owns the commit");
 }
 
 function readStamp(journal: Journal): GateStamp | null {
@@ -587,6 +622,7 @@ async function runReview(
   options: Options,
   row: Row,
   specification: string,
+  criteria: AcceptanceCriterion[],
   state: State,
   attempt: number,
 ): Promise<Verdict> {
@@ -602,7 +638,7 @@ async function runReview(
   const diff = rawDiff.length > DIFF_LIMIT ? `${rawDiff.slice(0, DIFF_LIMIT)}\n… truncated at ${DIFF_LIMIT} characters` : rawDiff;
 
   const reply = await askCursor(
-    reviewPrompt({ row, specification, base: state.base, stat, changed, diff }),
+    reviewPrompt({ row, specification, criteria, base: state.base, stat, changed, diff }),
     "ask",
     journal,
     options,
@@ -633,6 +669,7 @@ async function runReview(
       `reviewer produced no JSON verdict after a formatting retry; artifacts in ${journal.dir}. Commit the green tree without a verdict with: make loop ARGS="--resume --no-review"`,
     );
   }
+  verdict = withCoverage(verdict, criteria);
   journal.save(`review-${attempt}.json`, JSON.stringify(verdict, null, 2));
   journal.save("review.json", JSON.stringify(verdict, null, 2));
   for (const criterion of verdict.criteria) journal.mark(`  ${criterion.status.padEnd(8)} ${criterion.criterion}`);
@@ -701,7 +738,14 @@ function commitBody(row: Row, summary: string): string {
   return `Implements ${row.id} from the Build F review: ${cleanTitle(row)}.\n\n${bounded}\n\nItem: ${row.id}${closes}`;
 }
 
-function pullRequestBody(row: Row, summary: string, verdict: Verdict, options: Options, fixedPoint: boolean): string {
+function pullRequestBody(
+  row: Row,
+  summary: string,
+  verdict: Verdict,
+  options: Options,
+  fixedPoint: boolean,
+  criteria: AcceptanceCriterion[],
+): string {
   const checks = [
     "- [x] `make` (cold `~/.menard` on the first attempt)",
     "- [x] `make ci`",
@@ -717,6 +761,14 @@ function pullRequestBody(row: Row, summary: string, verdict: Verdict, options: O
     : "- [ ] Independent review pass: skipped (`--no-review`)";
   const notes = verdict.notes.trim() === "" ? "None." : verdict.notes.trim();
   const closes = row.issue === "" ? "—" : issueRef(row);
+  const coverage = criteria.length === 0
+    ? ""
+    : `## Acceptance criteria\n\n${criteria
+        .map((criterion) => {
+          const entry = verdict.criteria.find((candidate) => candidate.criterion.trim() === criterion.id);
+          return `- ${criterion.id} — ${entry?.status ?? "unreviewed"}`;
+        })
+        .join("\n")}\n\n`;
   return `## Item
 
 - Item: ${row.id}
@@ -727,7 +779,7 @@ function pullRequestBody(row: Row, summary: string, verdict: Verdict, options: O
 
 ${summary.trim()}
 
-## Checks
+${coverage}## Checks
 
 ${[...checks, review].join("\n")}
 
@@ -832,6 +884,14 @@ async function main(): Promise<void> {
   const specification = extractReviewSection(readFileSync(REVIEW, "utf8"), row.id);
   if (specification === null) die(`could not find ${row.id} in ${REVIEW}`);
 
+  const criteria = extractCriteria(specification);
+  if (criteria.length === 0) {
+    journal.mark("! no acceptance criteria found in the review section; plan and review coverage are unchecked");
+  } else {
+    journal.save("acs.json", JSON.stringify(criteria, null, 2));
+    journal.mark(`acceptance criteria: ${criteria.map((criterion) => criterion.id).join(", ")}`);
+  }
+
   if (!resuming && !options.dryRun) {
     journal.banner(`select ${row.id}`);
     journal.mark(`${row.id} — ${cleanTitle(row)} (${row.area}, ${row.priority}, ${issueRef(row)})`);
@@ -843,15 +903,18 @@ async function main(): Promise<void> {
   let plan = journal.read("plan.md");
   if (plan === null) {
     journal.banner("plan");
-    const first = await timed("plan", () =>
-      askCursor(planPrompt({ row, specification, reviewFile: REVIEW_FILE }), "plan", journal, options, 20, "plan"),
-    );
+    const request = planPrompt({ row, specification, reviewFile: REVIEW_FILE, criteria, skillPath: PLAN_SKILL });
+    const first = await timed("plan", () => askCursor(request, "plan", journal, options, 20, "plan"));
     let captured = first.plan ?? first.text;
-    if (!options.dryRun && !hasPlanSections(captured)) {
-      journal.mark("! captured plan is missing ## Scope / ## Steps — asking once more");
+    let missing = criteria.length === 0 ? [] : planMissing(captured, criteria);
+    const sectionsMissing = !hasPlanSections(captured);
+
+    if (!options.dryRun && (missing.length > 0 || sectionsMissing)) {
+      const lacking = [...missing, ...(sectionsMissing ? ["## Scope / ## Steps"] : [])].join(", ");
+      journal.mark(`! plan is missing ${lacking} — asking once more`);
       const retry = await timed("plan retry", () =>
         askCursor(
-          `${planPrompt({ row, specification, reviewFile: REVIEW_FILE })}\n\nYour previous reply was not a plan with the required sections. Return the plan itself, with its headings, as your final message.`,
+          `${request}\n\nYour previous reply did not cover: ${lacking}. Return the plan with the required headings and one table row per AC id, in the form | AC1 | change | evidence | command |.`,
           "plan",
           journal,
           options,
@@ -860,13 +923,23 @@ async function main(): Promise<void> {
         ),
       );
       const retried = retry.plan ?? retry.text;
-      if (hasPlanSections(retried)) captured = retried;
+      const retriedMissing = criteria.length === 0 ? [] : planMissing(retried, criteria);
+      if (retriedMissing.length === 0 && hasPlanSections(retried)) {
+        captured = retried;
+        missing = [];
+      }
     }
-    if (!options.dryRun && !hasPlanSections(captured)) {
-      journal.mark("! plan still lacks ## Scope / ## Steps; continuing with what was captured");
-    }
+
     plan = captured;
     journal.save("plan.md", plan);
+    if (!options.dryRun && missing.length > 0) {
+      throw new Error(
+        `plan does not cover ${missing.join(", ")}; the plan is in ${journal.path("plan.md")}. Add the missing rows and rerun with --resume.`,
+      );
+    }
+  } else if (criteria.length > 0) {
+    const missing = planMissing(plan, criteria);
+    if (missing.length > 0) journal.mark(`! existing plan does not cover ${missing.join(", ")} (delete plan.md to re-plan)`);
   }
 
   const agentSummaryPath = journal.path("agent-summary.md");
@@ -880,9 +953,18 @@ async function main(): Promise<void> {
   if (summary === null) {
     journal.banner("implement");
     rmSync(agentSummaryPath, { force: true });
+    const headBefore = git(["rev-parse", "HEAD"], { cwd: ROOT });
     const reply = await timed("implement", () =>
-      askCursor(executePrompt({ row, plan, reviewFile: REVIEW_FILE, summaryPath: agentSummaryPath }), "write", journal, options, 90, "implement"),
+      askCursor(
+        executePrompt({ row, plan, reviewFile: REVIEW_FILE, summaryPath: agentSummaryPath, criteria, skillPath: IMPLEMENT_SKILL }),
+        "write",
+        journal,
+        options,
+        90,
+        "implement",
+      ),
     );
+    guardAgentCommit(journal, headBefore);
     summary = readAgentSummary(reply.text);
     journal.save("summary.md", summary);
     saveState({ phase: "gate" });
@@ -901,7 +983,7 @@ async function main(): Promise<void> {
       const gate = await timed(`gate ${attempt}`, () => runGate(journal, options, state, attempt));
       lastGate = gate;
       const verdict = gate.ok
-        ? await timed(`review ${attempt}`, () => runReview(journal, options, row, specification, state, attempt))
+        ? await timed(`review ${attempt}`, () => runReview(journal, options, row, specification, criteria, state, attempt))
         : null;
       if (gate.ok && (verdict === null || verdict.satisfied)) break;
 
@@ -914,6 +996,7 @@ async function main(): Promise<void> {
 
       journal.banner(`fix (attempt ${attempt + 1})`);
       rmSync(agentSummaryPath, { force: true });
+      const fixHead = git(["rev-parse", "HEAD"], { cwd: ROOT });
       const fixReply = await timed(`fix ${attempt}`, () =>
         askCursor(
           fixPrompt({
@@ -924,6 +1007,8 @@ async function main(): Promise<void> {
             gateOutput: gate.ok ? "" : gate.output,
             gaps: verdict?.gaps ?? [],
             summaryPath: agentSummaryPath,
+            criteria,
+            skillPath: IMPLEMENT_SKILL,
           }),
           "write",
           journal,
@@ -932,6 +1017,7 @@ async function main(): Promise<void> {
           `fix-${attempt}`,
         ),
       );
+      guardAgentCommit(journal, fixHead);
       journal.save(`fix-${attempt}.md`, readAgentSummary(fixReply.text));
       round += 1;
       saveState({ rounds: round, phase: "gate" });
@@ -966,7 +1052,7 @@ async function main(): Promise<void> {
   saveState({ phase: "pr" });
 
   journal.banner("pull request");
-  journal.save("pr.md", pullRequestBody(row, summary, parsed, options, lastGate.fixedPoint));
+  journal.save("pr.md", pullRequestBody(row, summary, parsed, options, lastGate.fixedPoint, criteria));
   if (options.dryRun) {
     journal.mark(`[dry-run] git push -u origin ${state.branch}`);
     journal.mark(`[dry-run] gh pr create --base ${state.base} --head ${state.branch} --title ${JSON.stringify(subject)}`);
