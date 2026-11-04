@@ -13,7 +13,7 @@ import { join } from "node:path";
 
 import { extractCriteria, extractReviewSection, readState, runStreaming, slug, tail, writeState } from "../../tools/loop/lib.ts";
 import { executePrompt, reviewPrompt } from "../../tools/loop/prompts.ts";
-import { auditAgentCommands, describeToolCall, issueRef, planFromToolCall, planMissing, renderCursorEvent, withCoverage } from "../../tools/loop/run.ts";
+import { auditAgentCommands, describeToolCall, issueRef, nextCandidate, planFromToolCall, planMissing, renderCursorEvent, withCoverage } from "../../tools/loop/run.ts";
 import type { Row } from "../../tools/next.ts";
 
 const REVIEW = join(import.meta.dir, "..", "..", "docs", "reviews", "2026-10-24-build-f.md");
@@ -216,6 +216,33 @@ describe("runStreaming", () => {
   test("kills a command that overruns its timeout", async () => {
     const result = await runStreaming(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { timeoutMs: 300 });
     expect(result.timedOut).toBe(true);
+  });
+});
+
+describe("nextCandidate", () => {
+  const make = (id: string, overrides: Partial<Row> = {}): Row => ({
+    id,
+    title: id,
+    area: "Language",
+    priority: "P0",
+    phase: 0,
+    status: "ready",
+    blockers: [],
+    issue: "1",
+    ...overrides,
+  });
+
+  test("skips what this session already did, and keeps blocked work blocked", () => {
+    const rows = [make("LANG-01"), make("LANG-02", { blockers: ["LANG-01"] }), make("LANG-03")];
+    expect(nextCandidate(rows, new Set())?.id).toBe("LANG-01");
+    // LANG-01 is done in this session but not merged, so LANG-02 must stay blocked.
+    expect(nextCandidate(rows, new Set(["LANG-01"]))?.id).toBe("LANG-03");
+    expect(nextCandidate(rows, new Set(["LANG-01", "LANG-03"]))).toBeNull();
+  });
+
+  test("ignores rows without an issue", () => {
+    const rows = [make("LANG-01", { issue: "" }), make("LANG-02")];
+    expect(nextCandidate(rows, new Set())?.id).toBe("LANG-02");
   });
 });
 

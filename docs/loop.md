@@ -74,6 +74,25 @@ driver refuses a base that is behind its upstream unless you pass
 `--allow-stale-base`, and prints its own blob hash at startup so you can see which
 harness is running.
 
+## Draining the backlog
+
+`make loop ARGS=--drain` keeps going: after a PR is open it selects the next
+ready item and repeats, stopping when nothing is ready or when a step fails.
+
+Drain selects from the **base** backlog (`git show <base>:docs/backlog.md`),
+not the working tree, and skips items it has already done this session. That
+matters because a finished item is `done` only on its own branch: reading the
+tree would either pick the same item again, or start work whose dependency is
+not merged yet.
+
+- Each item gets its own branch from the base and its own PR.
+- A failure stops the drain, leaving that item's state and artifacts for
+  `--resume`.
+- `--max-items N` caps a drain.
+- `--drain` does not mix with `--item` or `--resume`.
+- It is cheapest on small, independent items. A dependency that only becomes
+  `done` in this session stays blocked, by design.
+
 ## The gate
 
 The gate is exactly the sequence in the PR template, in order:
@@ -228,6 +247,8 @@ make loop ARGS="--fixed-point"     # force make check-fixed-point into the gate
 make loop ARGS="--no-fixed-point"  # never run it (it is automatic for src/ and runtime/)
 make loop ARGS="--cold"            # clear ~/.menard again instead of reusing it
 make loop ARGS="--allow-stale-base" # branch from a base that is behind origin
+make loop ARGS="--drain"           # keep going until nothing is ready to start
+make loop ARGS="--drain --max-items 3"
 make loop ARGS="--model gpt-5"     # choose the Cursor model
 ```
 
