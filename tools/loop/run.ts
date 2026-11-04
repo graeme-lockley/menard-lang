@@ -57,6 +57,7 @@ type Options = {
   allowStaleBase: boolean;
   drain: boolean;
   maxItems: number;
+  refresh: boolean;
   maxRounds: number;
   model: string | null;
 };
@@ -90,6 +91,7 @@ function parseArgs(argv: string[]): Options {
     allowStaleBase: false,
     drain: false,
     maxItems: 0,
+    refresh: true,
     maxRounds: 2,
     model: null,
   };
@@ -144,6 +146,9 @@ function parseArgs(argv: string[]): Options {
       case "--drain":
         options.drain = true;
         break;
+      case "--no-fetch":
+        options.refresh = false;
+        break;
       case "--max-items": {
         const items = Number(value(index + 1, arg));
         if (!Number.isInteger(items) || items < 0) die("--max-items needs a non-negative integer");
@@ -176,6 +181,7 @@ function printHelp(): void {
   --no-fixed-point   never run 'make check-fixed-point'
   --cold             clear ~/.menard before the gate (the first attempt does this anyway)
   --allow-stale-base accept a base that is behind origin (default: refuse)
+  --no-fetch         do not fetch or fast-forward the base branch first
   --drain            keep going: one item after another until nothing is ready
   --max-items N      stop a drain after N items (default: no limit)
   --model NAME       pass --model to cursor-agent
@@ -216,6 +222,31 @@ function touchesCompiler(base: string): boolean {
 function resolveBase(base: string): string {
   if (base !== "main") return base;
   return run("git", ["rev-parse", "--verify", "--quiet", "origin/main"], { cwd: ROOT }).code === 0 ? "origin/main" : "main";
+}
+
+/**
+ * Fetch the base and fast-forward local <base> before the first branch is cut.
+ * Done once per session, so every item in a drain shares the same base.
+ */
+function refreshBase(journal: Journal, options: Options): void {
+  if (!options.refresh) {
+    journal.mark("base refresh skipped (--no-fetch)");
+    return;
+  }
+  const branch = prBase(options.base);
+  const fetched = run("git", ["fetch", "--quiet", "origin", branch], { cwd: ROOT, timeoutMs: 30_000 });
+  if (fetched.code !== 0) {
+    const reason = (fetched.stderr || fetched.stdout).trim().split("\n")[0] || "network error";
+    journal.mark(`! could not fetch origin/${branch}: ${reason} (continuing with the local ref)`);
+    return;
+  }
+  journal.mark(`fetched origin/${branch}`);
+  const current = git(["rev-parse", "--abbrev-ref", "HEAD"], { cwd: ROOT });
+  const fastForward = current === branch
+    ? run("git", ["merge", "--ff-only", `origin/${branch}`], { cwd: ROOT })
+    : run("git", ["fetch", "--quiet", "origin", `${branch}:${branch}`], { cwd: ROOT });
+  if (fastForward.code === 0) journal.mark(`fast-forwarded ${branch}`);
+  else journal.mark(`! ${branch} did not fast-forward (diverged?); branching from origin/${branch} anyway`);
 }
 
 /** A base behind its upstream drags old history into the PR. */
@@ -966,6 +997,7 @@ async function runItem(options: Options, completed: ReadonlySet<string>): Promis
   };
 
   journal.mark(`Menard loop — ${row.id}: ${cleanTitle(row)}`);
+  if (!resuming && !options.dryRun && completed.size === 0) refreshBase(journal, options);
   journal.mark(`driver ${driverId()} · base ${state.base}${options.dryRun ? " (dry run)" : ""}`);
   const baseWarning = checkBaseFresh(state.base, options.allowStaleBase, !options.dryRun);
   if (baseWarning !== null) journal.mark(`! ${baseWarning}`);

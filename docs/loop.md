@@ -79,6 +79,10 @@ driver refuses a base that is behind its upstream unless you pass
 `--allow-stale-base`, and prints its own blob hash at startup so you can see which
 harness is running.
 
+Before the first branch is cut, the driver fetches `<base>` and fast-forwards
+local `<base>` to it — once per session, so every item in a drain shares a base.
+`--no-fetch` skips that for offline work (and then a stale base stays stale).
+
 ## Draining the backlog
 
 `make loop ARGS=--drain` keeps going: after a PR is open it selects the next
@@ -256,6 +260,7 @@ make loop ARGS="--fixed-point"     # force make check-fixed-point into the gate
 make loop ARGS="--no-fixed-point"  # never run it (it is automatic for src/ and runtime/)
 make loop ARGS="--cold"            # clear ~/.menard again instead of reusing it
 make loop ARGS="--allow-stale-base" # branch from a base that is behind origin
+make loop ARGS="--no-fetch"        # do not fetch / fast-forward the base first
 make loop ARGS="--drain"           # keep going until nothing is ready to start
 make loop ARGS="--drain --max-items 3"
 make loop ARGS="--model gpt-5"     # choose the Cursor model
