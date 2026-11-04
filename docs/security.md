@@ -25,7 +25,7 @@ missing `Host` on HTTP/1.1 are **400**. Header names are matched case-insensitiv
 (lowercased on parse). Duplicate header names are **last-wins** (including
 `Set-Cookie`).
 
-Every public serve/request path takes a **relative millisecond deadline**
+Every public serve/request/read path takes a **relative millisecond deadline**
 (CONC-02). A stalled peer cannot hold a connection forever; timed-out I/O
 surfaces as `NetErr(Timeout)` (or the connection is dropped on the server).
 

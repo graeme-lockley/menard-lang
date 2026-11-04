@@ -443,13 +443,14 @@ Menard HTTP/1.1 (request line + headers + Content-Length body; no chunked encodi
 
 **Limits** (`Limits` / `default-limits()`): request line ≤ 8 KiB, header block ≤ 64 KiB, ≤ 100 headers, body ≤ 8 MiB. Exceeding a limit returns wire status **431** (headers/line) or **413** (body) and closes the connection before allocating the body. Protocol errors (bad request line, conflicting `Content-Length`, missing `Host` on HTTP/1.1, invalid `Content-Length`) return **400** as `BadRequest`. A short body is `Incomplete`. Extra bytes past `Content-Length` are not parsed as a second request — the one-shot handler closes the fd.
 
-**Deadlines.** Relative milliseconds (CONC-02). `serve` / `request` use a 30s default; `serve-timeout` / `request-timeout` take an explicit budget; `serve-timeout-limits` / `request-timeout-limits` also take `Limits`. `serve-on(listener, …)` runs the accept loop on an already-bound socket (use with `listen(0)` + `local-port`).
+**Deadlines.** Relative milliseconds (CONC-02). `serve` / `request` / `read-request` use a 30s default; `serve-timeout` / `request-timeout` / `read-request-timeout` take an explicit budget; `serve-timeout-limits` / `request-timeout-limits` / `read-request-timeout-limits` also take `Limits`. Public request-reading paths enforce `Limits` during accumulation (header block measured through `\r\n\r\n` only). `serve-on(listener, …)` runs the accept loop on an already-bound socket (use with `listen(0)` + `local-port`).
 
 | Name | |
 | --- | --- |
 | `Request` / `Response` / `Method` / `HttpError` / `Limits` | Core types. `HttpError` includes `BadRequest`, `HeaderLimit`, `BodyLimit`, `Incomplete`, `Closed`, `NetErr`. |
 | `default-limits()` | 8 KiB / 64 KiB / 100 headers / 8 MiB. |
-| `read-request` / `write-response` | Per-connection. |
+| `read-request` / `read-request-timeout` / `read-request-timeout-limits` | Per-connection request read (default or explicit relative-ms deadline + `Limits`). |
+| `write-response` | Per-connection response write. |
 | `serve` / `serve-timeout` / `serve-timeout-limits` / `serve-on` | Accept loop under `Task.scope`. |
 | `request` / `request-timeout` / `request-timeout-limits` | One-shot client (default or explicit deadline). |
 | `Rest.ok-json` / `not-found` / `path-segments` / `json-body` | REST helpers. |
