@@ -11,7 +11,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { extractCriteria, extractReviewSection, readState, runStreaming, slug, tail, writeState } from "../../tools/loop/lib.ts";
+import { extractCriteria, extractReviewSection, Journal, readState, runStreaming, slug, tail, writeState } from "../../tools/loop/lib.ts";
 import { executePrompt, reviewPrompt } from "../../tools/loop/prompts.ts";
 import { auditAgentCommands, describeToolCall, issueRef, nextCandidate, planFromToolCall, planMissing, prBase, renderCursorEvent, withCoverage } from "../../tools/loop/run.ts";
 import type { Row } from "../../tools/next.ts";
@@ -216,6 +216,22 @@ describe("runStreaming", () => {
   test("kills a command that overruns its timeout", async () => {
     const result = await runStreaming(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { timeoutMs: 300 });
     expect(result.timedOut).toBe(true);
+  });
+});
+
+describe("Journal.mark", () => {
+  test("stamps every line of a multi-line message", () => {
+    const dir = mkdtempSync(join(tmpdir(), "menard-loop-"));
+    try {
+      const journal = new Journal(dir);
+      journal.mark("FAILED: first\n\nsecond");
+      const lines = readFileSync(join(dir, "run.log"), "utf8").trimEnd().split("\n");
+      expect(lines.length).toBe(3);
+      expect(lines.every((line) => line.startsWith("["))).toBe(true);
+      expect(lines[2]).toContain("second");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

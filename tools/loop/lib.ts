@@ -154,12 +154,12 @@ export class Journal {
     process.stdout.write(line);
   }
 
-  /** A structural line: clock time plus elapsed, so the log can be read back. */
+  /** A structural line: clock time plus elapsed, on every line of a block. */
   mark(message: string): void {
     const clock = new Date().toTimeString().slice(0, 8);
     const elapsed = Math.floor((Date.now() - this.startedAt) / 1000);
-    const stamp = `+${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
-    this.log(`[${clock} ${stamp}] ${message}`);
+    const stamp = `[${clock} +${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}] `;
+    this.log(message.split("\n").map((line) => `${stamp}${line}`).join("\n"));
   }
 
   banner(title: string): void {

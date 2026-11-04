@@ -785,7 +785,7 @@ function pullRequestBody(
   const closes = row.issue === "" ? "—" : issueRef(row);
   const coverage = criteria.length === 0
     ? ""
-    : `## Acceptance criteria\n\n${criteria
+    : `## Acceptance criteria coverage\n\n${criteria
         .map((criterion) => {
           const entry = verdict.criteria.find((candidate) => candidate.criterion.trim() === criterion.id);
           return `- ${criterion.id} — ${entry?.status ?? "unreviewed"}`;
@@ -809,6 +809,33 @@ ${[...checks, review].join("\n")}
 
 ${notes}
 `;
+}
+
+function openPullRequestUrl(branch: string): string | null {
+  const result = run("gh", ["pr", "list", "--head", branch, "--state", "open", "--json", "url"], { cwd: ROOT });
+  if (result.code !== 0) throw new Error(`gh pr list failed:\n${result.stderr}`);
+  const pulls = JSON.parse(result.stdout) as { url?: string }[];
+  return pulls[0]?.url ?? null;
+}
+
+/**
+ * Push the run's branch. A resumed run may have been rebased, which rewrites
+ * history and makes a plain push fail; rewrite the remote only when nobody has
+ * an open PR on the branch.
+ */
+function pushBranch(journal: Journal, branch: string, hasOpenPull: boolean): void {
+  const first = run("git", ["push", "-u", "origin", branch], { cwd: ROOT });
+  if (first.code === 0) return;
+  const message = `${first.stdout}\n${first.stderr}`;
+  if (!/non-fast-forward|fetch first|rejected/i.test(message)) {
+    throw new Error(`git push failed:\n${message.trim()}`);
+  }
+  if (hasOpenPull) {
+    throw new Error(`git push was rejected for ${branch}, which already has an open PR; refusing to rewrite it. Push by hand.`);
+  }
+  journal.mark("! push rejected (the branch was rebased); retrying with --force-with-lease — no open PR exists");
+  const forced = run("git", ["push", "--force-with-lease", "-u", "origin", branch], { cwd: ROOT });
+  if (forced.code !== 0) throw new Error(`git push --force-with-lease failed:\n${forced.stdout}${forced.stderr}`);
 }
 
 function requireCleanTree(): void {
@@ -1102,12 +1129,10 @@ async function runItem(options: Options, completed: ReadonlySet<string>): Promis
   }
 
   await timed("pull request", async () => {
-    git(["push", "-u", "origin", state.branch], { cwd: ROOT });
-    const existing = run("gh", ["pr", "list", "--head", state.branch, "--state", "open", "--json", "url"], { cwd: ROOT });
-    if (existing.code !== 0) throw new Error(`gh pr list failed:\n${existing.stderr}`);
-    const openPulls = JSON.parse(existing.stdout) as { url: string }[];
-    if (openPulls.length > 0) {
-      journal.mark(`open PR already exists: ${openPulls[0]?.url ?? ""}`);
+    const existingUrl = openPullRequestUrl(state.branch);
+    pushBranch(journal, state.branch, existingUrl !== null);
+    if (existingUrl !== null) {
+      journal.mark(`open PR already exists: ${existingUrl}`);
       return;
     }
     const created = run(
