@@ -183,6 +183,10 @@ step that can fail. `make loop ARGS=--resume`:
 - re-runs the gate and the review from scratch, because those are the parts
   that must never be assumed.
 
+If a stopped branch was rebased, its push is rejected; the driver retries with
+`--force-with-lease`, but only when the branch has no open PR, so it never
+rewrites a branch somebody is reviewing.
+
 If the run had already reached the commit or PR step, it resumes there instead
 of repeating the gate. A resumed run whose tree matches the last green gate
 skips the gate as well. A failure is stored as `lastError` in the state file and
