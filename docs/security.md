@@ -39,9 +39,24 @@ TLS is **native-only** (interpreter → `Err(Unsupported)`). OpenSSL backs the s
 - Chain verified against the **system trust store** (`SSL_CTX_set_default_verify_paths`)
 - Hostname checked (`SSL_set1_host`) for `host`
 - **SNI** sent (`SSL_set_tlsext_host_name`) for `host`
-- Failures map to typed `IoError`: `TlsVerifyFailed` (chain/hostname),
-  `TlsHandshakeFailed` (other handshake), `Timeout`, or `Other` — OpenSSL
-  error text is never printed to the program’s stdout/stderr
+- Failures follow the typed mapping below (CONC-19); OpenSSL error text is
+  never printed to the program’s stdout/stderr
+
+**Typed failure mapping** (reuse existing `IoError` tags; no separate `TlsError`):
+
+| Outcome | `IoError` |
+| --- | --- |
+| Chain / hostname / missing peer certificate | `TlsVerifyFailed` |
+| TLS protocol failure during handshake (`SSL_ERROR_SSL`, non-verify, not unexpected EOF) | `TlsHandshakeFailed` |
+| Transport during handshake (syscall / abrupt peer close / unexpected EOF / `SSL_ERROR_ZERO_RETURN`) | `Other(errno)` (`errno` if set, else `EIO`) |
+| Clean TLS shutdown on read (`SSL_ERROR_ZERO_RETURN`) | `Ok("")` (EOF) |
+| Abrupt close / reset / truncated TLS record on read | `Other(errno)` / `Other(EIO)` — never `Ok("")` |
+| Park deadline | `Timeout` |
+| Park cancel | `Other(-1)` |
+
+Nonpositive TLS read results are classified through `SSL_get_error` before treating
+them as successful EOF. Useful transport errno is preserved; OpenSSL queue text is
+drained and discarded.
 
 **Insecure opt-out** (`Net.tls-client-insecure` / `tls-client-insecure-timeout`):
 skips peer verification and hostname checking. **Development only** — never the

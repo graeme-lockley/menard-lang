@@ -206,6 +206,32 @@ custom CA paths into the public Menard API (env hook is enough for tests/ops).
 
 ---
 
+## 2026-11-04 — TLS failure classification complete (CONC-19)
+
+### The decision
+
+Refine the CONC-03 taxonomy without new `IoError` tags. Handshake and read
+paths classify every nonpositive OpenSSL return through `SSL_get_error`:
+verify → `TlsVerifyFailed`; protocol `SSL_ERROR_SSL` → `TlsHandshakeFailed`;
+transport (`SSL_ERROR_SYSCALL`, abrupt close, truncated record, OpenSSL 3+
+`SSL_R_UNEXPECTED_EOF_WHILE_READING`) → `Other(errno)` (else `EIO`); clean
+shutdown on read (`SSL_ERROR_ZERO_RETURN`) → `Ok("")`. Transport failures
+during handshake are no longer collapsed into `TlsHandshakeFailed`. OpenSSL
+queue text is drained, never printed.
+
+### Why
+
+CONC-03’s mapper routed terminal transport failures through the handshake tag,
+and `SSL_read == 0` was treated as EOF before consulting `SSL_get_error`, hiding
+abrupt closes and truncated records.
+
+### Rejected
+
+A new `TlsError` type or extra `IoError` variants; collapsing all TLS failures
+into one tag (still rejected, as under CONC-03).
+
+---
+
 ## 2026-10-26 — Wait-cell `notify-all` + closed cell (CONC-01)
 
 ### The decision
