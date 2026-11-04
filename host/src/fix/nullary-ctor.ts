@@ -6,6 +6,7 @@
 import type { Ast } from "../reader/ast.ts";
 import { nameEquals } from "../reader/ast.ts";
 import { parseProgram } from "../reader/parse.ts";
+import { applyByteRewrites } from "./apply-rewrites.ts";
 
 const BUILTIN_NULLARIES = [
   "None",
@@ -119,17 +120,25 @@ function walkMatch(ast: Ast & { tag: "list" }, nullaries: Set<string>, out: Null
   }
 }
 
+/** Decode-friendly wrapper; prefers `applyByteRewrites` for TOOL-12 rules. */
 export function applyRewrites(source: string, rewrites: NullaryRewrite[]): string {
-  let out = source;
-  for (const r of rewrites) {
-    out = out.slice(0, r.start) + r.name + out.slice(r.end);
-  }
-  return out;
+  const enc = new TextEncoder();
+  const next = applyByteRewrites(
+    enc.encode(source),
+    rewrites.map((r) => ({ start: r.start, end: r.end, replacement: enc.encode(r.name) })),
+  );
+  return new TextDecoder().decode(next);
 }
 
 export type FixResult =
-  | { ok: true; source: string; rewrites: NullaryRewrite[]; changed: boolean }
+  | { ok: true; source: string; bytes: Uint8Array; rewrites: NullaryRewrite[]; changed: boolean }
   | { ok: false; error: string };
+
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
 
 /** Rewrite one source buffer. `extraNullaries` merges project-wide names. */
 export function fixNullaryCtor(
@@ -137,15 +146,25 @@ export function fixNullaryCtor(
   extraNullaries: Iterable<string> = [],
 ): FixResult {
   const bytes = typeof source === "string" ? new TextEncoder().encode(source) : source;
-  const text = typeof source === "string" ? source : new TextDecoder().decode(source);
   const parsed = parseProgram(bytes);
   if (!parsed.ok) {
     return { ok: false, error: parsed.error.message };
   }
   const nullaries = collectNullaryNames(parsed.forms, [...BUILTIN_NULLARIES, ...extraNullaries]);
   const rewrites = findNullaryRewrites(parsed.forms, nullaries);
-  const next = applyRewrites(text, rewrites);
-  return { ok: true, source: next, rewrites, changed: next !== text };
+  const enc = new TextEncoder();
+  const nextBytes = applyByteRewrites(
+    bytes,
+    rewrites.map((r) => ({ start: r.start, end: r.end, replacement: enc.encode(r.name) })),
+  );
+  const next = new TextDecoder().decode(nextBytes);
+  return {
+    ok: true,
+    source: next,
+    bytes: nextBytes,
+    rewrites,
+    changed: !bytesEqual(bytes, nextBytes),
+  };
 }
 
 /** Text-level rewrite used for repo migration (also fixes `| Name() ->` patterns). */

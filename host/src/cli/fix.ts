@@ -50,15 +50,15 @@ export function runFix(args: FixCliArgs): number {
 
   let status = 0;
   for (const file of args.files) {
-    let text: string;
+    let bytes: Uint8Array;
     try {
-      text = readFileSync(file, "utf8");
+      bytes = new Uint8Array(readFileSync(file));
     } catch (e) {
       console.error(`error: cannot read ${file}: ${e}`);
       status = 1;
       continue;
     }
-    const result = fixNullaryCtor(text);
+    const result = fixNullaryCtor(bytes);
     if (!result.ok) {
       console.error(`error: ${file}: ${result.error}`);
       status = 1;
@@ -67,7 +67,7 @@ export function runFix(args: FixCliArgs): number {
     if (!result.changed) continue;
     reportRewrites(file, result.rewrites);
     if (!args.dryRun) {
-      writeFileSync(file, result.source);
+      writeFileSync(file, result.bytes);
     }
   }
   return status;
