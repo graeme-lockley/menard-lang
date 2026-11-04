@@ -1492,6 +1492,15 @@ showing a map means emitting its entries in sorted order, which needs an order o
 the keys, not merely a spelling. `StringBuffer` is not showable, and neither is
 `Ref`.
 
+**Built-in composites are derived.** `(List T)`, `(Maybe T)`, `(Result T E)`,
+`(Map K V)`, and products are showable by the same derive path as user records
+and variants (§2.8.4): the plan records each instantiation
+(`(List Int)`, `(Maybe Int)`, `(Map Str (Maybe Int))`, `Int * Str`, …), the
+emitter memoises one printer per instantiation, and nested fields call that
+type-directed printer rather than the scalar `mn_show` fallback. A native build
+that left composites on `mn_show` would print `#<obj>`; that class of bug is
+invisible to the bootstrap gate (§2.14).
+
 **Why `Ref` and `StringBuffer` are not showable.** For both types, **the value
 *is* the identity**; the contents are other values. So `show` could not be a
 function of the value:
@@ -1591,21 +1600,27 @@ same spelling, because the spelling is defined on bytes alone.
 | `Str` | `"` … `"`, with `\` and `"` backslash-escaped and nothing else escaped; non-ASCII bytes emitted raw |
 | `Sym` | `'` followed by the name bytes, unescaped |
 | `Float` | shortest round-trip decimal under a fixed grammar (optional `-`, digits, optional fraction, optional `e`/`E` with a mandatory sign on the exponent); always a float lexeme (contains `.` or `e`); `0.0` / `-0.0` distinct in text and under `=`; non-finites are `nan`, `inf`, `-inf`; every NaN is one quiet payload so `nan = nan` (§2.12). The C implementation (`mn_format_float`) is normative; the interpreter must match it byte for byte. |
-| record | `(Name f1 f2 …)` in declaration order |
-| variant | nullary: `Con`; with payload: `(Con payload…)` (LANG-01 will move payloads to call syntax) |
-| `(List T)` / `(Arr T n)` | `[e1 e2 …]` |
-| `(Map K V)` | `{k1 => v1, k2 => v2, …}` in sorted key order, the same spelling as a map literal |
-| `(Maybe T)` / `(Result T E)` | `(Some v)` / `None` / `(Ok v)` / `(Err e)` |
+| nullary constructor | bare name: `None`, `Red`, `Empty`, `JsonNull` — no parentheses |
+| constructor with payload | call syntax: `Some(1)`, `Ok(3)`, `Rgb(1, 2, 3)` — comma-space between fields |
+| record | `Point(1, 2)` — declaration order, same call syntax |
+| `(List T)` / `(Arr T n)` | `[1, 2, 3]` — comma-space between elements |
+| `(Map K V)` | `{"a" => 1, "b" => 2}` in sorted key order, the same spelling as a map literal |
+| product / n-tuple | `(1, "a", true)` |
+| `(Maybe T)` / `(Result T E)` | `None`, `Some(1)`, `Err("x")`, `Ok(3)` |
 | `Ref`, `StringBuffer`, `Fn` | **no spelling — a compile error to show** (§2.12). Debug output is a separate contract: §2.16 |
 
-A source literal may spell the same bytes with the escapes in [syntax.md](syntax.md) §1.4. Those spellings are decoded before the value exists. `show` keeps the one spelling in the table, raw bytes included, so a string that is not valid UTF-8 still has a spelling.
+**Round-trip.** Every spelling in this table is a valid Menard expression that
+reads back as a value equal to the original under `=`. Nested values compose:
+`[Some(1)]`, `Box(None)`, `Point(1, [2])`. A source literal may spell the same
+bytes with the escapes in [syntax.md](syntax.md) §1.4; those spellings are
+decoded before the value exists. `show` keeps the one spelling in the table, raw
+bytes included, so a string that is not valid UTF-8 still has a spelling.
 
-The exact punctuation is a detail and may be revised; what is **not** revisable
-is that the interpreter and the compiled program implement the *same* table, and
-that the table is total and injective over the bits of a value. The shortest-round-trip rule for `Float` is
-singled out because it is the one entry most likely to differ between an
-implementation using the host's native formatting and one using a hand-written
-formatter.
+What is **not** revisable is that the interpreter and the compiled program
+implement the *same* table, and that the table is total and injective over the
+bits of a value. The shortest-round-trip rule for `Float` is singled out because
+it is the one entry most likely to differ between an implementation using the
+host's native formatting and one using a hand-written formatter.
 
 ### 2.14 What the bootstrap gate proves, and what it does not
 
@@ -1640,6 +1655,12 @@ the largest program the project has.
 - **Bugs the interpreter and the runtime share.** A `Map` that aliases instead of
   persisting (§2.3) in both, or a canonical text form (§2.13) both get wrong,
   agrees with itself.
+
+One concrete instance of the second class is **`show` of a built-in composite
+printing `#<obj>`** while the interpreter prints `Some(1)` / `[1, 2]`: the
+compiler's own artifact does not depend on `show` of those values, so
+`bc0 == bc1` stays green. The hermetic corpus (`tests/corpus/show.mnd`) and the
+interpreter-versus-native oracle are what catch it, not the gate.
 
 §2.2 supplies a concrete instance of the second class: a naive multiply of two
 tagged words is natural to write, wrong, and **perfectly deterministic** — and it

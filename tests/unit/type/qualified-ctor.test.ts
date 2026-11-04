@@ -32,7 +32,7 @@ describe("aliased imports and constructors", () => {
       host,
     });
     expect(r.ok).toBe(true);
-    expect(new TextDecoder().decode(Buffer.concat(chunks))).toBe("(JsonFloat 1.5)\n");
+    expect(new TextDecoder().decode(Buffer.concat(chunks))).toBe("JsonFloat(1.5)\n");
   });
 
   test("constructors are not in unqualified scope", () => {
@@ -86,8 +86,7 @@ describe.skipIf(!Bun.which("clang"))("native aliased constructors", () => {
         { cwd: ROOT, encoding: "utf8", timeout: 120_000 },
       );
       expect(interpreted.status).toBe(0);
-      expect(interpreted.stdout).toBe("(JsonFloat 1.5)\nfloat\nint\nnull\n");
-
+      expect(interpreted.stdout).toBe("JsonFloat(1.5)\nfloat\nint\nnull\n");
       const checkBare = spawnSync(
         process.execPath,
         ["run", "host/src/cli/menard.ts", "run", "src/mn.mnd", "--", "check", "tests/negative/bad-qualified-ctor.mnd"],

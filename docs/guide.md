@@ -303,9 +303,14 @@ An alias is a name for a type, with no parameters of its own:
 `alias Age = Int`. It disappears before anything is emitted; diagnostics
 still show the name you wrote.
 
-`show` prints a value as a string. Records and variants you define get a
-derived `show`, along with equality and ordering. Prefer `print` /
-`println` when the bytes should reach stdout; `show` is the quoted form.
+`show` prints a value as a string in constructor-call form: `None`,
+`Some(1)`, `Point(1, 2)`, `[1, 2, 3]`, `{"a" => 1}`, `(1, "a", true)`.
+Records and variants you define get a derived `show`, along with equality
+and ordering; so do the built-in composites (`List`, `Maybe`, `Result`,
+`Map`, products). Prefer `print` / `println` when the bytes should reach
+stdout — they use the same text as `show` for non-`Str` arguments
+(`println(Some(1))` writes `Some(1)`); wrap with `show` when you want the
+quoted `Str` form.
 
 ## When things are missing or fail
 
@@ -361,7 +366,8 @@ xs |> List.append([4, 5])
 ```
 
 `List.append(extra, xs)` is `xs` followed by `extra`. The pipe reads left to
-right: start with `xs`, then append these.
+right: start with `xs`, then append these. `show([1, 2, 3])` and
+`println([1, 2, 3])` both write `[1, 2, 3]`.
 
 ### Maps
 
@@ -382,6 +388,9 @@ literal is the same idea written in place. Later entries win.
 ```
 let ages = { "ada" => 36, "bea" => 41 }
 ```
+
+`show` of a map is that same literal shape in key order:
+`show({"a" => 1})` is `{"a" => 1}`.
 
 ### Strings and characters
 
@@ -423,9 +432,11 @@ let main() -> Int {
 }
 ```
 
-`println` and `print` write showable values to standard output. `write`
-sends raw bytes. `exit` sets the status. A panic prints to standard error
-and exits `1`.
+`println` and `print` write showable values to standard output using the
+same canonical text as `show` (so `println((1, 2))` writes `(1, 2)`, and
+`println(Some(1))` writes `Some(1)`). `Str` arguments are written raw.
+`write` sends raw bytes to a file descriptor. `exit` sets the status. A
+panic prints to standard error and exits `1`.
 
 I/O that can fail returns a `Result`:
 

@@ -51,6 +51,20 @@ let f(x: T) -> Int =
     expect(diags.some((d) => d.code === "E_TYPE_SHOWABLE")).toBe(true);
   });
 
+  test("show rejects StringBuffer", () => {
+    const src = `let f(sb: StringBuffer) -> Str =
+  show(sb)`;
+    const diags = diagnose(src);
+    expect(diags.some((d) => d.code === "E_TYPE_SHOWABLE")).toBe(true);
+  });
+
+  test("show rejects Fn", () => {
+    const src = `let f(g: (Int) -> Int) -> Str =
+  show(g)`;
+    const diags = diagnose(src);
+    expect(diags.some((d) => d.code === "E_TYPE_SHOWABLE")).toBe(true);
+  });
+
   test("print rejects non-showable Ref", () => {
     const diags = diagnose("print(ref(1))");
     expect(diags.some((d) => d.code === "E_TYPE_SHOWABLE")).toBe(true);

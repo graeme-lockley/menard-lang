@@ -24,3 +24,23 @@ test "(show (Red)) plans show for the declared type, not the constructor" =
   match (plan-of("tests/phase2/fixtures/derive-show-variant.mnd"))
     | Some(p) -> p == "Color: show"
     | None -> false
+
+test "show([1, 2, 3]) plans (List Int)" =
+  match (plan-of("tests/phase2/fixtures/derive-show-list.mnd"))
+    | Some(p) -> p == "(List Int): show"
+    | None -> false
+
+test "show(Some(1)) plans (Maybe Int)" =
+  match (plan-of("tests/phase2/fixtures/derive-show-maybe.mnd"))
+    | Some(p) -> p == "(Maybe Int): show"
+    | None -> false
+
+test "show({\"a\" => Some(1)}) plans (Map Str (Maybe Int))" =
+  match (plan-of("tests/phase2/fixtures/derive-show-map.mnd"))
+    | Some(p) -> p == "(Map Str (Maybe Int)): show"
+    | None -> false
+
+test "show((1, \"a\")) plans Int * Str" =
+  match (plan-of("tests/phase2/fixtures/derive-show-product.mnd"))
+    | Some(p) -> p == "Int * Str: show"
+    | None -> false

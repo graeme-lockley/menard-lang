@@ -4,6 +4,32 @@ Breaking surface changes and how to rewrite existing code. Edition selection
 (OTH-10) can lag; each entry below is enough to migrate by hand or with
 `mn fix`.
 
+## LANG-01 — Constructor-call `show` text
+
+**Was.** Canonical `show` used Lisp-shaped spellings: `(Some 1)`,
+`(Point 1 2)`, `(Rgb 1 2 3)`, and nullaries were sometimes `(None)`. Native
+`show` of built-in composites often printed `#<obj>`.
+
+**Is.** Constructor-call text that matches source:
+
+| Kind | Text |
+| --- | --- |
+| nullary | `None`, `Red`, `Empty` |
+| payload / record | `Some(1)`, `Point(1, 2)`, `Rgb(1, 2, 3)` |
+| list / map / tuple | `[1, 2, 3]`, `{"a" => 1}`, `(1, "a", true)` |
+
+`print` / `println` use the same bytes. Every spelling re-parses to a value
+equal to the original.
+
+**Codemod.** TOOL-12 `mn fix --rule show-text` is deferred to Phase 4. Until
+it lands, rewrite test and doc expectations by hand (search for `(Some `,
+`(Ok `, `(Point `, `(Rgb `, `(Box `, `(Node `).
+
+**Edition.** Tied to OTH-10 when editions land; until then this is a flag-day
+change for anyone comparing against the old Lisp text.
+
+---
+
 ## LANG-07 — Nullary constructors are values
 
 **Was.** A nullary constructor was a zero-argument function. Programs wrote
