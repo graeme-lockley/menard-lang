@@ -13,7 +13,7 @@ import { join } from "node:path";
 
 import { extractCriteria, extractReviewSection, Journal, readState, runStreaming, slug, tail, writeState } from "../../tools/loop/lib.ts";
 import { executePrompt, reviewPrompt } from "../../tools/loop/prompts.ts";
-import { auditAgentCommands, describeToolCall, issueRef, nextCandidate, planFromToolCall, planMissing, prBase, renderCursorEvent, withCoverage } from "../../tools/loop/run.ts";
+import { auditAgentCommands, describeToolCall, issueRef, markRowDone, nextCandidate, planFromToolCall, planMissing, prBase, renderCursorEvent, withCoverage } from "../../tools/loop/run.ts";
 import type { Row } from "../../tools/next.ts";
 
 const REVIEW = join(import.meta.dir, "..", "..", "docs", "reviews", "2026-10-24-build-f.md");
@@ -216,6 +216,27 @@ describe("runStreaming", () => {
   test("kills a command that overruns its timeout", async () => {
     const result = await runStreaming(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { timeoutMs: 300 });
     expect(result.timedOut).toBe(true);
+  });
+});
+
+describe("markRowDone", () => {
+  const table = [
+    "| ID | Title | Area | Priority | Phase | Status | Blocked by | Issue | PR |",
+    "| --- | --- | --- | --- | ---: | --- | --- | --- | --- |",
+    "| [LANG-18](x) | t | Language | P0 | 0 | ready | — | [#58](y) | — |",
+  ].join("\n");
+
+  test("sets the status cell and leaves the rest of the row alone", () => {
+    const updated = markRowDone(table, "LANG-18");
+    expect(updated).not.toBeNull();
+    expect(updated).toContain("| done | — | [#58](y) | — |");
+    expect(updated).not.toContain("| ready |");
+  });
+
+  test("is a no-op when the row is already done, and null when it is missing", () => {
+    const done = table.replace("| ready |", "| done |");
+    expect(markRowDone(done, "LANG-18")).toBe(done);
+    expect(markRowDone(table, "LANG-99")).toBeNull();
   });
 });
 

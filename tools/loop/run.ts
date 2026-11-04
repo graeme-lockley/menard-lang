@@ -25,7 +25,7 @@
  *
  * State and every artifact live in .loop/, which is gitignored.
  */
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -838,6 +838,35 @@ function pushBranch(journal: Journal, branch: string, hasOpenPull: boolean): voi
   if (forced.code !== 0) throw new Error(`git push --force-with-lease failed:\n${forced.stdout}${forced.stderr}`);
 }
 
+/** Mark one row done in a backlog table. Null when the row is not there. */
+export function markRowDone(markdown: string, id: string): string | null {
+  const lines = markdown.split("\n");
+  const index = lines.findIndex((line) => line.startsWith(`| [${id}]`));
+  if (index === -1) return null;
+  const cells = (lines[index] ?? "").split("|");
+  if (cells.length < 10) return null;
+  if ((cells[6] ?? "").trim() === "done") return markdown;
+  cells[6] = " done ";
+  lines[index] = cells.join("|");
+  return lines.join("\n");
+}
+
+/**
+ * The definition of done requires the row to be `done` in the same PR, and a
+ * merged item left `ready` is selected again. Do not leave that to the agent.
+ */
+function ensureBacklogRow(journal: Journal, row: Row): void {
+  const before = readFileSync(BACKLOG, "utf8");
+  const after = markRowDone(before, row.id);
+  if (after === null) {
+    journal.mark(`! could not find the ${row.id} row in docs/backlog.md`);
+    return;
+  }
+  if (after === before) return;
+  writeFileSync(BACKLOG, after);
+  journal.mark(`marked ${row.id} done in docs/backlog.md`);
+}
+
 function requireCleanTree(): void {
   const status = run("git", ["status", "--porcelain"], { cwd: ROOT }).stdout.trimEnd();
   if (status !== "") die(`the working tree is dirty — commit or stash first:\n${status}`);
@@ -1098,6 +1127,8 @@ async function runItem(options: Options, completed: ReadonlySet<string>): Promis
   const parsed: Verdict = storedReview === null
     ? { satisfied: true, criteria: [], gaps: [], notes: "Review pass disabled." }
     : (JSON.parse(storedReview) as Verdict);
+
+  if (!options.dryRun) ensureBacklogRow(journal, row);
 
   journal.banner("commit");
   const subject = commitSubject(row);

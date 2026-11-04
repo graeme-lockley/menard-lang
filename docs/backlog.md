@@ -16,13 +16,13 @@
 
 | Phase | Theme | Items | Ready | In progress | Done |
 | --- | --- | ---: | ---: | ---: | ---: |
-| 0 | Truth, trust and the unsafe edges | 25 | 10 | 1 | 14 |
+| 0 | Truth, trust and the unsafe edges | 25 | 9 | 1 | 15 |
 | 1 | Daily loop and language decisions | 16 | 0 | 0 | 0 |
 | 2 | Standard library | 12 | 0 | 0 | 0 |
 | 3 | Operational concurrency | 11 | 0 | 0 | 0 |
 | 4 | Project and ecosystem | 17 | 0 | 0 | 0 |
 | 5 | Later | 9 | 0 | 0 | 0 |
-| **Total** | | **90** | **10** | **1** | **14** |
+| **Total** | | **90** | **9** | **1** | **15** |
 
 Priority mix: P0 = 25, P1 = 41, P2 = 19, P3 = 5.
 
@@ -52,7 +52,7 @@ Rows are ordered by phase, then priority, then area, then ID.
 | [LANG-10](reviews/2026-10-24-build-f.md#lang-10) | `Char` shows as a decimal number | Language | P1 | 0 | done | — | [#48](https://github.com/graeme-lockley/menard-lang/issues/48) | [#55](https://github.com/graeme-lockley/menard-lang/pull/55) |
 | [LANG-16](reviews/2026-10-24-build-f.md#lang-16) | Aliased imports must carry re-exported types | Language | P1 | 0 | done | LANG-04 | [#52](https://github.com/graeme-lockley/menard-lang/issues/52) | [#56](https://github.com/graeme-lockley/menard-lang/pull/56) |
 | [LANG-17](reviews/2026-10-24-build-f.md#lang-17) | Constructor migration must preserve Unicode source (corrective for LANG-07) | Language | P1 | 0 | ready | — | [#57](https://github.com/graeme-lockley/menard-lang/issues/57) | — |
-| [LANG-18](reviews/2026-10-24-build-f.md#lang-18) | Variant constructor order must agree across hosts (corrective for LIB-06) | Language | P0 | 0 | ready | — | [#58](https://github.com/graeme-lockley/menard-lang/issues/58) | — |
+| [LANG-18](reviews/2026-10-24-build-f.md#lang-18) | Variant constructor order must agree across hosts (corrective for LIB-06) | Language | P0 | 0 | done | — | [#58](https://github.com/graeme-lockley/menard-lang/issues/58) | [#64](https://github.com/graeme-lockley/menard-lang/pull/64) |
 | [CONC-10](reviews/2026-10-24-build-f.md#conc-10) | Interpreter stubs for net/TLS, and a defined oracle boundary | Concurrency | P1 | 0 | done | CONC-04 | [#23](https://github.com/graeme-lockley/menard-lang/issues/23) | [#51](https://github.com/graeme-lockley/menard-lang/pull/51) |
 | [CONC-18](reviews/2026-10-24-build-f.md#conc-18) | Close remaining HTTP limit and serialization holes (corrective for CONC-04) | Concurrency | P1 | 0 | ready | — | [#59](https://github.com/graeme-lockley/menard-lang/issues/59) | — |
 | [CONC-19](reviews/2026-10-24-build-f.md#conc-19) | Complete TLS failure classification (corrective for CONC-03) | Concurrency | P1 | 0 | ready | — | [#60](https://github.com/graeme-lockley/menard-lang/issues/60) | — |
