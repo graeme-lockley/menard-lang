@@ -1,0 +1,9 @@
+; LANG-16: alias-only import carries re-exported Cancelled for Actor.join.
+import std/actor as Actor
+
+let main() -> Int {
+  let a = Actor.spawn(fn (_mb) = ())
+  match (Actor.join(a))
+    | Ok(_) -> 0
+    | Err(_) -> 1
+}

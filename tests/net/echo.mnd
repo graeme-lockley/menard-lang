@@ -1,7 +1,6 @@
 ; Build F native TCP echo smoke (ephemeral port + wait-cell readiness).
-; Under mn inter, Net.listen returns Err(Unsupported) (CONC-10).
+; Under mn inter, Net.listen returns Err(Net.Unsupported) (CONC-10).
 import std/net as Net
-pub import std/io (IoError)
 import std/task as Task
 import std/sched as Sched
 
@@ -10,7 +9,7 @@ let main() -> Int {
   let port-cell = ref(0)
   let server = Task.spawn(fn () = {
     match (Net.listen(0))
-      | Err(Unsupported) -> {
+      | Err(Net.Unsupported) -> {
           println("Unsupported")
           Sched.notify(ready)
           1
@@ -22,7 +21,7 @@ let main() -> Int {
       | Ok(listener) -> {
           defer Net.close(listener)
           match (Net.local-port(listener))
-            | Err(Unsupported) -> {
+            | Err(Net.Unsupported) -> {
                 println("Unsupported")
                 Sched.notify(ready)
                 1

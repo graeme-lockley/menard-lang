@@ -16,13 +16,13 @@
 
 | Phase | Theme | Items | Ready | In progress | Done |
 | --- | --- | ---: | ---: | ---: | ---: |
-| 0 | Truth, trust and the unsafe edges | 25 | 11 | 1 | 13 |
+| 0 | Truth, trust and the unsafe edges | 25 | 10 | 1 | 14 |
 | 1 | Daily loop and language decisions | 16 | 0 | 0 | 0 |
 | 2 | Standard library | 12 | 0 | 0 | 0 |
 | 3 | Operational concurrency | 11 | 0 | 0 | 0 |
 | 4 | Project and ecosystem | 17 | 0 | 0 | 0 |
 | 5 | Later | 9 | 0 | 0 | 0 |
-| **Total** | | **90** | **11** | **1** | **13** |
+| **Total** | | **90** | **10** | **1** | **14** |
 
 Priority mix: P0 = 25, P1 = 41, P2 = 19, P3 = 5.
 
@@ -50,7 +50,7 @@ Rows are ordered by phase, then priority, then area, then ID.
 | [LANG-07](reviews/2026-10-24-build-f.md#lang-07) | Nullary constructors are values; the `None()`/`Red()` call form is removed | Language | P1 | 0 | done | — | [#47](https://github.com/graeme-lockley/menard-lang/issues/47) | [#53](https://github.com/graeme-lockley/menard-lang/pull/53) |
 | [LANG-09](reviews/2026-10-24-build-f.md#lang-09) | Operator-spacing diagnostics, and a real `help:` line | Language | P1 | 0 | ready | TOOL-03 | [#16](https://github.com/graeme-lockley/menard-lang/issues/16) | — |
 | [LANG-10](reviews/2026-10-24-build-f.md#lang-10) | `Char` shows as a decimal number | Language | P1 | 0 | done | — | [#48](https://github.com/graeme-lockley/menard-lang/issues/48) | [#55](https://github.com/graeme-lockley/menard-lang/pull/55) |
-| [LANG-16](reviews/2026-10-24-build-f.md#lang-16) | Aliased imports must carry re-exported types | Language | P1 | 0 | ready | LANG-04 | [#52](https://github.com/graeme-lockley/menard-lang/issues/52) | — |
+| [LANG-16](reviews/2026-10-24-build-f.md#lang-16) | Aliased imports must carry re-exported types | Language | P1 | 0 | done | LANG-04 | [#52](https://github.com/graeme-lockley/menard-lang/issues/52) | [#56](https://github.com/graeme-lockley/menard-lang/pull/56) |
 | [LANG-17](reviews/2026-10-24-build-f.md#lang-17) | Constructor migration must preserve Unicode source (corrective for LANG-07) | Language | P1 | 0 | ready | — | [#57](https://github.com/graeme-lockley/menard-lang/issues/57) | — |
 | [LANG-18](reviews/2026-10-24-build-f.md#lang-18) | Variant constructor order must agree across hosts (corrective for LIB-06) | Language | P0 | 0 | ready | — | [#58](https://github.com/graeme-lockley/menard-lang/issues/58) | — |
 | [CONC-10](reviews/2026-10-24-build-f.md#conc-10) | Interpreter stubs for net/TLS, and a defined oracle boundary | Concurrency | P1 | 0 | done | CONC-04 | [#23](https://github.com/graeme-lockley/menard-lang/issues/23) | [#51](https://github.com/graeme-lockley/menard-lang/pull/51) |

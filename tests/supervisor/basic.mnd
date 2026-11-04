@@ -1,6 +1,6 @@
 ; Build F: one-for-one start / stop / restart-child smoke.
 import std/actor as Actor
-pub import std/actor (Pid, Cancelled)
+pub import std/actor (Pid)
 import std/supervisor as Sup
 import std/list as List
 import std/task as Tsk

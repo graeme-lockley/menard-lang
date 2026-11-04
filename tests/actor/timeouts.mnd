@@ -1,6 +1,5 @@
 ; CONC-02: Mailbox receive-timeout / send-timeout.
 import std/actor as Actor
-pub import std/task (Cancelled)
 import std/task as Task
 
 let main() -> Int {

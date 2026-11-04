@@ -141,8 +141,29 @@ let find-proj-note(sp: Span, notes: List ProjNote) -> Maybe ProjNote =
     | note :: rest ->
       if (proj-note-matches(sp, note)) -> Some(note) | find-proj-note(sp, rest)
 
+; Dual import (`import M as A` plus a bare/pub import of `M`) keeps types
+; under their bare names and only renames values. `Alias.Ctor` still rewrites
+; to `__import_A_Ctor`; fall back to the bare ctor/value so identity is shared.
+let import-fallback-name(name: Str) -> Maybe Str {
+  let len = String.length(name)
+  if (len >= 9 && String.slice(0, 9, name) == "__import_") ->
+    Some(import-fallback-strip(name, 9, len)) |
+    None
+}
+
+let import-fallback-strip(n: Str, i: Int, len: Int) -> Str =
+  cond
+    | i >= len -> n
+    | String.byte(i, n) == 95 -> String.slice(i + 1, len - (i + 1), n)
+    | else -> import-fallback-strip(n, i + 1, len)
+
 let value-get(env: TypeEnv, name: Str) -> Maybe Scheme =
-  Map.lookup(name, deref(env.values))
+  match (Map.lookup(name, deref(env.values)))
+    | Some(s) -> Some(s)
+    | None ->
+      match (import-fallback-name(name))
+        | None -> None
+        | Some(bare) -> Map.lookup(bare, deref(env.values))
 
 let value-set(env: TypeEnv, name: Str, s: Scheme) -> Unit =
   set!(env.values, Map.set(name, s, deref(env.values)))
@@ -154,7 +175,12 @@ let type-set(env: TypeEnv, name: Str, td: TypeDef) -> Unit =
   set!(env.types, Map.set(name, td, deref(env.types)))
 
 let ctor-get(env: TypeEnv, name: Str) -> Maybe CtorInfo =
-  Map.lookup(name, deref(env.ctors))
+  match (Map.lookup(name, deref(env.ctors)))
+    | Some(c) -> Some(c)
+    | None ->
+      match (import-fallback-name(name))
+        | None -> None
+        | Some(bare) -> Map.lookup(bare, deref(env.ctors))
 
 let ctor-set(env: TypeEnv, name: Str, c: CtorInfo) -> Unit =
   set!(env.ctors, Map.set(name, c, deref(env.ctors)))

@@ -801,7 +801,11 @@ import github:owner/repo@v1.2.0/console ; ~/.menard/deps/owner/repo/v1.2.0/conso
   types and constructors are all qualified**: `import std/json as Json` gives
   `Json.encode`, `Json.Json`, and `Json.JsonFloat(1.5)`. The unqualified
   `JsonFloat(1.5)` is not in scope; a bare import is how a module's names are
-  merged.
+  merged. **Exports include re-exports**: names published with `pub import`
+  are available under the alias as `Alias.Name` (for example
+  `import std/net as Net` yields `Net.IoError` when `std/net` re-exports
+  `IoError`). Combining `import M as A` with `pub import M (…)` does not
+  unbind `A.Ctor` for constructors `M` still exports.
 
   Qualified exports have distinct function bindings in separate compilation,
   so `Maybe.map` can coexist with `map` from a bare `std/list` import.
@@ -862,10 +866,11 @@ conversation. It is **not** needed for anything in §2.8.2: `Map` and
 `pub` may prefix a bare import. `pub import path` re-exports every public name
 of that module. `pub import path (A, B)` re-exports those names; a type also
 re-exports its constructors. A qualifier and a name list do not combine, and
-`pub` still may not prefix `extern`. A repeated re-export is allowed, the same
-way a repeated `pub alias` is allowed. Any other duplicate `pub` name is an
-error. A name in the list that the imported module does not publish is an
-import error.
+`pub` still may not prefix `extern`. A selective name list requires `pub`:
+there is no private selective import; re-export is the selective form. A
+repeated re-export is allowed, the same way a repeated `pub alias` is allowed.
+Any other duplicate `pub` name is an error. A name in the list that the
+imported module does not publish is an import error.
 
 **And `extern` is confined** (§2.15): either to the seam's modules
 (`stdlib/sys.mnd`, `io.mnd`, `fs.mnd`, `proc.mnd`, `time.mnd`) declaring **`mn_*`

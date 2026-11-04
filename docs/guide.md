@@ -514,8 +514,12 @@ them qualified and they stay distinct.
 
 `pub import` republishes names. With no list, every public name of that
 module is republished, and a type brings its constructors. With a list, only
-those names are republished. A public signature may name an imported public
-type. It may not name a type this file declares and leaves private.
+those names are republished. Names a module re-exports are part of its
+exports: `import std/net as Net` alone gives `Net.listen` and `Net.IoError`,
+because `std/net` does `pub import std/io (IoError)`. A selective import
+list still requires `pub` (re-export is the selective form; there is no
+private name list). A public signature may name an imported public type.
+It may not name a type this file declares and leaves private.
 
 Imports do not cycle.
 

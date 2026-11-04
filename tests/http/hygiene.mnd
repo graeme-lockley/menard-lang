@@ -1,6 +1,5 @@
 ; CONC-04: header case, Host/CL validation, limits, ephemeral ports, deadlines.
 import std/http as Http
-pub import std/io (IoError)
 import std/map as Map
 import std/task as Task
 import std/net as Net

@@ -285,6 +285,36 @@ not a prerequisite for publishing the source.
 
 ---
 
+## 2026-11-04 — Aliased imports carry re-exported types (LANG-16)
+
+### The decision
+
+An `import … as Alias` binds every export of the module under the alias,
+including names the module re-exports with `pub import`. After
+`import std/net as Net`, write `Net.listen` and `Net.IoError` without a
+separate `pub import std/io (IoError)`. The same holds for `Actor.Cancelled`
+via `std/actor`'s re-export of `Cancelled`. Re-exports stay qualified under
+the alias; they are not merged into unqualified scope. A selective import
+name list still requires `pub` (re-export is the selective form). Combining
+`import M as A` with `pub import M (…)` must not unbind `A.Ctor`.
+
+### Why
+
+LANG-04 made aliased imports qualify a module's own types and constructors.
+Re-exports were missing from the native iface, so call sites that only
+aliased `std/net` or `std/actor` failed with `unknown type IoError` /
+`Cancelled` and papered over it with redundant `pub import`s from the
+defining module. The re-export exists to hide that detail.
+
+### Rejected
+
+Merging re-exports into unqualified scope under `as` was rejected: it
+contradicts the LANG-04 / §2.7 rule that `as` qualifies. Allowing a
+non-`pub` selective import was deferred; every selective list republishes,
+and alias-only use removes the need for leaf workarounds.
+
+---
+
 ## 2026-10-24 — Aliased imports qualify types and constructors
 
 ### The decision

@@ -201,7 +201,10 @@ import github:owner/repo@v1.2.0/console
 An aliased import binds the module's exports under the alias. Values, types
 and constructors are all qualified: `import std/json as Json` gives
 `Json.encode`, `Json.Json`, and `Json.JsonFloat(1.5)`. `JsonFloat(1.5)` without
-the alias is not in scope. A bare import merges those names instead.
+the alias is not in scope. A bare import merges those names instead. Exports
+include names the module re-exports with `pub import`, so
+`import std/net as Net` carries `Net.IoError` when `std/net` re-exports
+`IoError`. A name list on import still requires `pub`.
 
 extern mn_exists(path: Str) -> Bool
 

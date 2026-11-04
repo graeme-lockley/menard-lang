@@ -4,7 +4,6 @@
 ; Notify-then-park: after Sched.wait(ready) returns, the peer has continued
 ; into its next park (receive / wait) — same pattern as tests/defer/basic.mnd.
 import std/actor as Actor
-pub import std/task (Cancelled)
 import std/task as Tsk
 import std/sched as Sched
 
