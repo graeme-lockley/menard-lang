@@ -42,7 +42,12 @@ the skills used when driving Cursor by hand:
   no commit, no full suite, write the summary file.
 
 The prompts in `tools/loop/prompts.ts` carry only the task data and the machine
-contract: the item, the AC ids, the output paths, the JSON shape. Changing how
+contract: the item, the AC ids, the output paths, the JSON shape.
+
+The driver also marks the item's `docs/backlog.md` row `done` before committing.
+The definition of done requires that in the same PR, and an item merged while
+still `ready` is selected again — which is exactly how LANG-18 came back a
+second time. Changing how
 the loop plans or implements means editing a skill, and the change applies to
 manual sessions too.
 
