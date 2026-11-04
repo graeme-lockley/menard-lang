@@ -28,6 +28,35 @@ specification. Where a name changed, the entry that changed it says so.
 
 ---
 
+## 2026-11-04 — Variant constructor order is declaration-order tags (LANG-18)
+
+### The decision
+
+Distinct variant constructors compare by **numeric constructor tag**, assigned
+in **declaration order** (builtins fixed as in the runtime/`lower.mnd` table;
+user constructors from `user-ctor-tag-base`). The host interpreter registers the
+same tags and uses them in `compare`; native `mn_compare` shape tags are
+unchanged. Derived `compare_T` (rewrite of surface `compare` on user variants)
+also orders by declaration index. Spec §2.12 states this rule for user variants
+and for `Maybe` / `Result`.
+
+### Why
+
+Host `compare` previously ordered by constructor **name**. Native `mn_compare`
+ordered by declaration-order tags, but derived `compare_T` used a `_ -> 1`
+fallback that made every unequal pair report `a > b`. A type declared `Z | A`
+therefore disagreed across hosts (and even native Map-via-`mn_compare` vs
+surface `compare`). Declaration order matches the tags already emitted and is
+stable under rename-for-style.
+
+### Rejected
+
+Alphabetical constructor-name order (would require retagging native and would
+reorder under cosmetic renames). Keeping the `A | B | C` corpus dodge that hid
+the disagreement.
+
+---
+
 ## 2026-10-31 — Map keys use `compare`; AVL not HAMT (LIB-06)
 
 ### The decision
