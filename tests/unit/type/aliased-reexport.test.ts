@@ -15,11 +15,16 @@ function hostDiagnose(rel: string) {
 }
 
 function mnCheck(rel: string) {
-  return spawnSync("./mn", ["check", rel, "--clean"], {
-    cwd: ROOT,
-    encoding: "utf8",
-    timeout: 120_000,
-  });
+  // Host CI has no ./mn binary; bootstrap like qualified-ctor.test.ts.
+  return spawnSync(
+    process.execPath,
+    ["run", "host/src/cli/menard.ts", "run", "src/mn.mnd", "--", "check", rel, "--clean"],
+    {
+      cwd: ROOT,
+      encoding: "utf8",
+      timeout: 120_000,
+    },
+  );
 }
 
 describe("LANG-16 aliased re-exports", () => {
