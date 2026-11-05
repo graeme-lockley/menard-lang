@@ -50,7 +50,7 @@ const KEYWORDS = new Set([
   "when",
 ]);
 
-export type LexErr = { span: Span; message: string };
+export type LexErr = { span: Span; message: string; help?: string };
 
 function isLetter(b: number): boolean {
   return (b >= 0x41 && b <= 0x5a) || (b >= 0x61 && b <= 0x7a);
@@ -73,6 +73,28 @@ function isIdentCont(b: number): boolean {
     b === 0x3a || // :
     b === 0x40 // @
   );
+}
+
+/** Simple atom after a glued `==`/`!=`: `[A-Za-z_][A-Za-z0-9_]*` or `[0-9]+`. */
+function peekSimpleAtom(src: Uint8Array, at: number): string | null {
+  if (at >= src.length) return null;
+  const b = src[at]!;
+  let end = at;
+  if (isLetter(b) || b === 0x5f) {
+    end++;
+    while (end < src.length) {
+      const c = src[end]!;
+      if (!(isLetter(c) || isDigit(c) || c === 0x5f)) break;
+      end++;
+    }
+    return Buffer.from(src.subarray(at, end)).toString("utf8");
+  }
+  if (isDigit(b)) {
+    end++;
+    while (end < src.length && isDigit(src[end]!)) end++;
+    return Buffer.from(src.subarray(at, end)).toString("utf8");
+  }
+  return null;
 }
 
 const OPS = ["==", "!=", "<=", ">=", "&&", "||", "->", "::", "|>", "=>", "+", "-", "*", "/", "%", "<", ">", "=", "|", "?"];
@@ -167,9 +189,14 @@ export function lex(src: Uint8Array): { ok: true; toks: Tok[] } | { ok: false; e
   let bol = true;
   let atLineStart = true;
 
-  const err = (start: number, end: number, message: string): { ok: false; error: LexErr } => ({
+  const err = (
+    start: number,
+    end: number,
+    message: string,
+    help?: string,
+  ): { ok: false; error: LexErr } => ({
     ok: false,
-    error: { span: { start, end }, message },
+    error: { span: { start, end }, message, help },
   });
 
   const peek = (k = 0) => (i + k < src.length ? src[i + k]! : -1);
@@ -573,7 +600,8 @@ export function lex(src: Uint8Array): { ok: true; toks: Tok[] } | { ok: false; e
       ) {
         bump();
       }
-      if (peek() === 0x21) {
+      // `a!=b`: do not absorb `!` into the ident; leave `!=` for the glued-eq help path.
+      if (peek() === 0x21 && peek(1) !== 0x3d) {
         const bangAt = i;
         bump();
         if (isIdentCont(peek()) || peek() === 0x21) {
@@ -607,6 +635,29 @@ export function lex(src: Uint8Array): { ok: true; toks: Tok[] } | { ok: false; e
 
     if (b === 0x3f) return err(start, start + 1, "operator ? requires whitespace on both sides");
     if (b === 0x3d && peek(1) === 0x3e) return err(start, start + 2, "operator => requires whitespace on both sides");
+
+    // Glued `==` / `!=`: keep the message, attach a spacing help when both
+    // sides are recoverable identifiers or simple atoms.
+    const gluedEq =
+      (b === 0x3d && peek(1) === 0x3d) || (b === 0x21 && peek(1) === 0x3d);
+    if (gluedEq) {
+      const op = b === 0x21 ? "!=" : "==";
+      const leftTok = toks.length > 0 ? toks[toks.length - 1]! : null;
+      const left =
+        leftTok &&
+        (leftTok.kind === "ident" ||
+          leftTok.kind === "kw" ||
+          leftTok.kind === "int" ||
+          leftTok.kind === "float" ||
+          leftTok.kind === "sym")
+          ? leftTok.text
+          : null;
+      const right = peekSimpleAtom(src, start + 2);
+      const help =
+        left && right ? `did you mean ${left} ${op} ${right}?` : undefined;
+      return err(start, start + 1, "unexpected character", help);
+    }
+
     return err(start, start + 1, `unexpected character`);
   }
 

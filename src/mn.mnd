@@ -42,6 +42,7 @@ import "./diag/report.mnd"
 import "./cache/cache.mnd"
 import "./cache/sep.mnd"
 import "./test/run.mnd"
+import "./fmt/format.mnd"
 import std/cli
 import std/fs
 import std/io
@@ -54,7 +55,7 @@ import std/time
 
 ; Flags the driver understands. A valued flag consumes the next word.
 let mn-flags() -> List Flag =
-  [Flag("--dump-after=reader", false), Flag("--dump-after=desugar", false), Flag("--dump-after=type", false), Flag("--dump-after=close", false), Flag("--dump-after=root", false), Flag("--dump-after=derive", false), Flag("--show-result", false), Flag("--clean", false), Flag("--verbose", false), Flag("--show-output", false), Flag("--quiet", false), Flag("--json", false), Flag("-o", true), Flag("--cc", true), Flag("--runtime", true)]
+  [Flag("--help", false), Flag("--dump-after=reader", false), Flag("--dump-after=desugar", false), Flag("--dump-after=type", false), Flag("--dump-after=close", false), Flag("--dump-after=root", false), Flag("--dump-after=derive", false), Flag("--show-result", false), Flag("--clean", false), Flag("--verbose", false), Flag("--show-output", false), Flag("--quiet", false), Flag("--json", false), Flag("-o", true), Flag("--cc", true), Flag("--runtime", true)]
 
 let argv-onto(i: Int, n: Int, acc: List Str) -> List Str =
   if (i >= n) -> reverse(acc) | argv-onto(i + 1, n, arg(i) :: acc)
@@ -63,7 +64,7 @@ let argv() -> List Str =
   argv-onto(0, arg-count(), [])
 
 let known-mode(s: Str) -> Bool =
-  s == "check" || s == "emit" || s == "build" || s == "run" || s == "test" || s == "inter"
+  s == "check" || s == "emit" || s == "build" || s == "run" || s == "test" || s == "inter" || s == "fmt"
 
 let starts-with-dash(s: Str) -> Bool =
   String.length(s) > 0 && String.byte(0, s) == 45
@@ -151,6 +152,12 @@ let test-paths() -> List Str =
     | [] -> []
     | _ :: rest -> rest
 
+; Every path after `fmt`.
+let fmt-paths() -> List Str =
+  match (positionals(argv(), mn-flags()))
+    | [] -> []
+    | _ :: rest -> rest
+
 let prog-args() -> List Str =
   args-after(argv())
 
@@ -173,7 +180,7 @@ let parse-code(msg: Str) -> Str =
 
 let report-parse-error(path: Str, src: Str, e: ParseError) -> Unit =
   match (e)
-    | ParseError(sp, msg) -> report-span(path, src, sp, "error", parse-code(msg), msg)
+    | ParseError(sp, msg, help) -> report-span-help(path, src, sp, "error", parse-code(msg), msg, help)
 
 let report-casing-error(path: Str, src: Str, e: CasingError) -> Unit =
   match (e)
@@ -219,10 +226,85 @@ let fail-cannot-read(path: Str) -> Unit {
 }
 
 let usage() -> Unit {
-  write-line(2, "usage: mn <check|emit|build|run|test|inter> <file.mnd> [out.bc] [-o bin] [--cc path] [--runtime dir] [--clean] [--quiet] [--json] [--verbose] [--show-output] [--show-result] [--dump-after=reader|desugar|type|close|root|derive]")
+  write-line(2, "usage: mn <check|emit|build|run|test|inter|fmt> <file.mnd> [out.bc] [-o bin] [--cc path] [--runtime dir] [--clean] [--quiet] [--json] [--verbose] [--show-output] [--show-result] [--dump-after=reader|desugar|type|close|root|derive]")
   write-line(2, "       mn <file.mnd> [arg…]")
   exit(2)
 }
+
+let print-commands-help() -> Unit {
+  write-line(stdout, "mn commands:")
+  write-line(stdout, "  check   Typecheck a .mnd file")
+  write-line(stdout, "  emit    Emit bitcode for a .mnd file")
+  write-line(stdout, "  build   Compile a .mnd file to a native binary")
+  write-line(stdout, "  run     Compile and run a .mnd file")
+  write-line(stdout, "  test    Run colocated *.test.mnd suites")
+  write-line(stdout, "  inter   Interpret a .mnd file on the host")
+  write-line(stdout, "  fmt     Format .mnd files (operator spacing)")
+  exit(0)
+}
+
+let help-check() -> Unit {
+  write-line(stdout, "usage: mn check [--json] [--quiet] [--dump-after=…] <file.mnd>")
+  write-line(stdout, "  --json    Machine-readable diagnostics on stdout")
+  write-line(stdout, "  --quiet   Suppress progress on stderr")
+  exit(0)
+}
+
+let help-run() -> Unit {
+  write-line(stdout, "usage: mn run [--json] [--show-result] [--clean] [-o bin] <file.mnd> [-- arg…]")
+  write-line(stdout, "  --json          Machine-readable diagnostics on stdout")
+  write-line(stdout, "  --show-result   Print the final non-Unit value")
+  write-line(stdout, "  --clean         Ignore the compile cache")
+  exit(0)
+}
+
+let help-build() -> Unit {
+  write-line(stdout, "usage: mn build [--json] [--clean] [-o bin] [--cc path] [--runtime dir] <file.mnd>")
+  write-line(stdout, "  --json      Machine-readable diagnostics on stdout")
+  write-line(stdout, "  -o bin      Output binary path")
+  write-line(stdout, "  --clean     Ignore the compile cache")
+  exit(0)
+}
+
+let help-emit() -> Unit {
+  write-line(stdout, "usage: mn emit [--dump-after=…] <file.mnd> [out.bc]")
+  write-line(stdout, "  --dump-after=…   Dump an intermediate form and stop")
+  exit(0)
+}
+
+let help-test() -> Unit {
+  write-line(stdout, "usage: mn test [--json] [--verbose] [--show-output] [--quiet] [--clean] [paths…]")
+  write-line(stdout, "  --json          Machine-readable diagnostics on stdout")
+  write-line(stdout, "  --verbose       Print each test name")
+  write-line(stdout, "  --show-output   Show program stdout/stderr")
+  exit(0)
+}
+
+let help-inter() -> Unit {
+  write-line(stdout, "usage: mn inter <file.mnd>")
+  write-line(stdout, "  Interpret on the TypeScript host without emitting a binary")
+  exit(0)
+}
+
+let help-fmt() -> Unit {
+  write-line(stdout, "usage: mn fmt <file.mnd…>")
+  write-line(stdout, "  Rewrite files with canonical operator spacing; identifiers are left alone")
+  exit(0)
+}
+
+let print-command-help(mode: Str) -> Unit =
+  cond
+    | mode == "check" -> help-check()
+    | mode == "run" -> help-run()
+    | mode == "build" -> help-build()
+    | mode == "emit" -> help-emit()
+    | mode == "test" -> help-test()
+    | mode == "inter" -> help-inter()
+    | mode == "fmt" -> help-fmt()
+    | else -> usage()
+
+let has-help() -> Bool =
+  driver-has("--help")
 
 ; ---------------------------------------------------------------------------
 ; Shared front end: read-all → (dump reader) → casing → desugar → (dump
@@ -742,6 +824,52 @@ let run-cached-existing(file: Str, bin: Str, do-link: Bool, and-run: Bool) -> Un
       }
 }
 
+let fmt-one(path: Str) -> Int =
+  match (read-file(path))
+    | Err(_) ->
+      {
+        write-line(2, String.concat("error: cannot read ", path))
+        1
+      }
+    | Ok(src) ->
+      match (format-source(src))
+        | Err(FormatError(msg, _)) ->
+          {
+            write-line(2, String.concat("error: ", String.concat(path, String.concat(": ", msg))))
+            1
+          }
+        | Ok(out) ->
+          cond
+            | out == src -> 0
+            | else ->
+              match (write-file(path, out))
+                | Ok(_) -> 0
+                | Err(_) ->
+                  {
+                    write-line(2, String.concat("error: cannot write ", path))
+                    1
+                  }
+
+let fmt-files(paths: List Str, status: Int) -> Int =
+  match (paths)
+    | [] -> status
+    | p :: rest ->
+      {
+        let code = fmt-one(p)
+        fmt-files(rest, if (code > status) -> code | status)
+      }
+
+let run-fmt() -> Unit {
+  let paths = fmt-paths()
+  cond
+    | length(paths) == 0 ->
+      {
+        write-line(2, "error: expected one or more .mnd files")
+        usage()
+      }
+    | else -> exit(fmt-files(paths, 0))
+}
+
 let dispatch(mode: Str, file: Str, has-out: Bool, out: Str, bin: Str, dump-after-reader: Bool, dump-after-desugar: Bool, dump-after-type: Bool, dump-after-close: Bool, dump-after-root: Bool, dump-after-derive: Bool) -> Unit =
   cond
     | mode == "check" ->
@@ -770,6 +898,7 @@ let dispatch(mode: Str, file: Str, has-out: Bool, out: Str, bin: Str, dump-after
         if (has-json()) -> flush-diagnostics-json()
         exit(code)
       }
+    | mode == "fmt" -> run-fmt()
     | mode == "inter" -> run-inter(file)
     | else -> usage()
 
@@ -778,6 +907,9 @@ let main() -> Unit {
   let n = positional-count()
   let mode0 = positional-arg(0)
   cond
+    | has-help() && n == 0 -> print-commands-help()
+    | has-help() && n == 1 && known-mode(mode0) -> print-command-help(mode0)
+    | has-help() -> usage()
     | script-invocation() ->
       dispatch("run", arg(0), false, "", "", false, false, false, false, false, false)
     | n >= 2 || n == 1 && mode0 == "test" ->

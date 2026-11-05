@@ -1,6 +1,10 @@
 import { parseExpression, parseProgram } from "./parse.ts";
 
-export type ParseError = { span: { start: number; end: number }; message: string };
+export type ParseError = {
+  span: { start: number; end: number };
+  message: string;
+  help?: string;
+};
 export type ReadOk = { ok: true; ast: import("./ast.ts").Ast };
 export type ReadErr = { ok: false; error: ParseError };
 export type ReadResult = ReadOk | ReadErr;

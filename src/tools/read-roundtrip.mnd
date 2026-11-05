@@ -21,7 +21,7 @@ let fail(msg: Str) -> Unit {
 
 let fail-parse(path: Str, e: ParseError) -> Unit =
   match (e)
-    | ParseError(_, msg) -> fail(String.concat(path, ": parse error: ", msg))
+    | ParseError(_, msg, _) -> fail(String.concat(path, ": parse error: ", msg))
 
 let compare-roundtrip(path: Str, forms: List Ast, forms2: List Ast) -> Unit =
   cond

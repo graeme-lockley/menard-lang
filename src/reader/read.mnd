@@ -12,6 +12,7 @@ import std/string-buffer as Buf
 pub record ParseError {
   span: Span
   message: Str
+  help: Maybe Str
 }
 
 record Tok {
@@ -93,7 +94,10 @@ let locate-span(start: Int, end: Int, line: Int) -> Span =
           if (map-line != 0) -> Span(map-base + (start - ls), map-base + (end - ls), 1, map-line) | if (saw) -> Span(start, start, 0, line) | Span(start, end, 0, line)
 
 let perr-at(start: Int, end: Int, line: Int, message: Str) -> ParseError =
-  ParseError(locate-span(start, end, line), message)
+  ParseError(locate-span(start, end, line), message, None)
+
+let perr-at-help(start: Int, end: Int, line: Int, message: Str, help: Maybe Str) -> ParseError =
+  ParseError(locate-span(start, end, line), message, help)
 
 let tok-span(t: Tok) -> Span =
   Span(t.start, t.end, t.origin, t.line)
@@ -114,7 +118,7 @@ let make-tok(kind: Str, text: Str, start: Int, end: Int, col: Int, ind: Int, bol
 }
 
 let perr[a](t: Tok, message: Str) -> Result a ParseError =
-  Err(ParseError(tok-span(t), message))
+  Err(ParseError(tok-span(t), message, None))
 
 let is-letter(b: Int) -> Bool =
   (b >= 65 && b <= 90) || (b >= 97 && b <= 122)
@@ -662,8 +666,9 @@ let scan-ident(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), st
             }
           | else -> ()
       }
+  ; `a!=b`: leave `!=` for the glued-eq help path.
   cond
-    | is-none(deref(failed)) && lex-peek(lx, 0) == 33 ->
+    | is-none(deref(failed)) && lex-peek(lx, 0) == 33 && lex-peek(lx, 1) != 61 ->
       {
         lex-bump(lx)
         if (is-ident-cont(lex-peek(lx, 0)) || lex-peek(lx, 0) == 33) -> set!(failed, Some(perr-at(start, deref(lx.pos) + 1, line, "'!' may appear only as the final character of an identifier")))
@@ -738,7 +743,54 @@ let scan-real(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError)) -> 
     | is-letter(b) || b == 95 -> scan-ident(lx, toks, failed, start, col, ind, bol, line)
     | b == 63 -> set!(failed, Some(perr-at(start, start + 1, line, "operator ? requires whitespace on both sides")))
     | b == 61 && lex-peek(lx, 1) == 62 -> set!(failed, Some(perr-at(start, start + 2, line, "operator => requires whitespace on both sides")))
+    | (b == 61 || b == 33) && lex-peek(lx, 1) == 61 ->
+      set!(failed, Some(glued-eq-err(lx, toks, start, line, b)))
     | else -> set!(failed, Some(perr-at(start, start + 1, line, "unexpected character")))
+}
+
+let tok-atom-text(t: Tok) -> Maybe Str =
+  cond
+    | t.kind == "ident" || t.kind == "kw" || t.kind == "int" || t.kind == "float" || t.kind == "sym" -> Some(t.text)
+    | else -> None
+
+let last-atom-text(toks: List Tok) -> Maybe Str =
+  match (toks)
+    | [] -> None
+    | t :: _ -> tok-atom-text(t)
+
+let peek-simple-atom-from(src: Str, at: Int, n: Int) -> Maybe Str =
+  cond
+    | at >= n -> None
+    | is-letter(String.byte(at, src)) || String.byte(at, src) == 95 ->
+      Some(String.slice(at, peek-ident-end(src, at + 1, n) - at, src))
+    | is-digit(String.byte(at, src)) ->
+      Some(String.slice(at, peek-digits-end(src, at + 1, n) - at, src))
+    | else -> None
+
+let peek-ident-end(src: Str, i: Int, n: Int) -> Int =
+  cond
+    | i >= n -> i
+    | is-letter(String.byte(i, src)) || is-digit(String.byte(i, src)) || String.byte(i, src) == 95 ->
+      peek-ident-end(src, i + 1, n)
+    | else -> i
+
+let peek-digits-end(src: Str, i: Int, n: Int) -> Int =
+  cond
+    | i >= n -> i
+    | is-digit(String.byte(i, src)) -> peek-digits-end(src, i + 1, n)
+    | else -> i
+
+let glued-eq-err(lx: Lex, toks: Ref (List Tok), start: Int, line: Int, b: Int) -> ParseError {
+  let op =
+    if (b == 33) -> "!=" | "=="
+  let help =
+    match (last-atom-text(deref(toks)))
+      | None -> None
+      | Some(left) ->
+        match (peek-simple-atom-from(lx.src, start + 2, lx.n))
+          | None -> None
+          | Some(right) -> Some(String.concat("did you mean ", left, " ", op, " ", right, "?"))
+  perr-at-help(start, start + 1, line, "unexpected character", help)
 }
 
 let is-punct(b: Int) -> Bool =

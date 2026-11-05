@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Thin Menard check/run/fix CLI (Phase 1 host).
+ * Thin Menard check/run/fmt/fix CLI (Phase 1 host).
  * Exit: 0 ok, 1 program error/panic, 2 interpreter fault / usage
  * `(exit n)` ends the program with status `n & 0xff`.
  * Otherwise an `Int` returned from `main` is that status, as in the native binary.
@@ -20,18 +20,44 @@ import {
 } from "../diagnostic/index.ts";
 import { createLiveHost } from "../host/index.ts";
 import { withInternalGuard } from "./guard.ts";
-import { parseCliArgs } from "./args.ts";
+import {
+  formatCommandHelp,
+  formatCommandsHelp,
+  parseCliArgs,
+  parseCliHelp,
+} from "./args.ts";
 import { parseFixArgs, runFix } from "./fix.ts";
+import { parseFmtArgs, runFmt } from "./fmt.ts";
 
 function usage(): never {
   console.error(
     "usage: menard <check|run> [--show-result] [--json] <file.mnd> [-- arg…]\n" +
+      "       menard fmt <file.mnd…>\n" +
       "       menard fix [--dry-run] [--rule name] <file.mnd…>",
   );
   process.exit(2);
 }
 
 const argv = process.argv.slice(2);
+const help = parseCliHelp(argv);
+if (help) {
+  if (help.kind === "commands") {
+    process.stdout.write(formatCommandsHelp());
+  } else {
+    process.stdout.write(formatCommandHelp(help.cmd));
+  }
+  process.exit(0);
+}
+
+if (argv[0] === "fmt") {
+  const parsed = parseFmtArgs(argv.slice(1));
+  if ("error" in parsed) {
+    console.error(`error: ${parsed.error}`);
+    usage();
+  }
+  process.exit(runFmt(parsed));
+}
+
 if (argv[0] === "fix") {
   const parsed = parseFixArgs(argv.slice(1));
   if ("error" in parsed) {

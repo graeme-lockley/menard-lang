@@ -3,6 +3,7 @@ import { nameEquals } from "../reader/ast.ts";
 import { declarationNames } from "../interp/modules.ts";
 import type { Diagnostic } from "../diagnostic/diagnostic.ts";
 import { diagnostic } from "../diagnostic/diagnostic.ts";
+import { operatorSpacingHelp } from "../diagnostic/operator-spacing.ts";
 import {
   type Type,
   type TypeDef,
@@ -1212,10 +1213,10 @@ function infer(
         if (scheme) return instantiate(env, scheme);
         // An aliased import keeps constructors under the alias. If one is
         // reached unqualified, report it rather than dereferencing undefined.
-        err(env, "E_TYPE_UNBOUND", `unbound variable ${n}`, ast.span);
+        err(env, "E_TYPE_UNBOUND", `unbound variable ${n}`, ast.span, undefined, operatorSpacingHelp(n));
         return freshVar(env);
       }
-      err(env, "E_TYPE_UNBOUND", `unbound variable ${n}`, ast.span);
+      err(env, "E_TYPE_UNBOUND", `unbound variable ${n}`, ast.span, undefined, operatorSpacingHelp(n));
       return freshVar(env);
     }
     case "list": {

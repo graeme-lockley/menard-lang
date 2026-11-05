@@ -1,0 +1,17 @@
+; Format a Menard source string via read → print.
+; Spaces AST binary operators; never rewrites identifier bytes (LANG-09 AC7).
+; Twin of host/src/fmt/format.ts.
+
+import "../reader/ast.mnd"
+import "../reader/read.mnd"
+import "../reader/print.mnd"
+
+pub record FormatError {
+  message: Str
+  help: Maybe Str
+}
+
+pub let format-source(src: Str) -> Result Str FormatError =
+  match (read-all(src))
+    | Ok(forms) -> Ok(print-form-all(forms))
+    | Err(ParseError(_, msg, help)) -> Err(FormatError(msg, help))

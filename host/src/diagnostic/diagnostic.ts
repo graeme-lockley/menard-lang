@@ -32,7 +32,7 @@ export function diagnostic( partial: Diagnostic): Diagnostic {
 }
 
 export function parseErrorToDiagnostic(
-  error: { span: Span; message: string },
+  error: { span: Span; message: string; help?: string },
   code = "E_PARSE",
 ): Diagnostic {
   return {
@@ -41,6 +41,7 @@ export function parseErrorToDiagnostic(
     code,
     message: error.message,
     span: error.span,
+    help: error.help,
   };
 }
 

@@ -176,7 +176,7 @@ let report-at(abs: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str) -> Un
 
 let report-parse(abs: Str, src: Str, e: ParseError) -> Unit =
   match (e)
-    | ParseError(sp, msg) -> report-at(abs, src, sp, "error", parse-code(msg), msg)
+    | ParseError(sp, msg, help) -> report-at-help(abs, src, sp, "error", parse-code(msg), msg, help)
 
 let report-casing(abs: Str, src: Str, e: CasingError) -> Unit =
   match (e)

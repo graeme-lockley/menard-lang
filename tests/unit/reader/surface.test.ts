@@ -198,10 +198,30 @@ let g(xs: List Int, ys: List Int) -> Int =
   });
 
   test("operators need whitespace and bangs stay final", () => {
-    expect(read("a==b").ok).toBe(false);
+    const glued = read("a==b");
+    expect(glued.ok).toBe(false);
+    if (!glued.ok) {
+      expect(glued.error.message).toBe("unexpected character");
+      expect(glued.error.help).toBe("did you mean a == b?");
+    }
+    const ne = read("a!=b");
+    expect(ne.ok).toBe(false);
+    if (!ne.ok) {
+      expect(ne.error.message).toBe("unexpected character");
+      expect(ne.error.help).toBe("did you mean a != b?");
+    }
     const bang = read("a!b");
     expect(bang.ok).toBe(false);
     if (!bang.ok) expect(bang.error.message).toContain("'!'");
+  });
+
+  test("printer spaces binary ops and preserves glued ident bytes", () => {
+    const spaced = mustRead("1  +  2");
+    expect(text(print(spaced))).toBe("1 + 2");
+    const glued = mustRead("n+1");
+    expect(text(print(glued))).toBe("n+1");
+    const again = mustRead(text(print(glued)));
+    expect(astEqual(glued, again)).toBe(true);
   });
 
   test("tabs in the indent are a lexical error", () => {
