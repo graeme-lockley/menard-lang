@@ -23,6 +23,8 @@ export type Diagnostic = {
   message: string;
   span: Span;
   notes?: DiagnosticNote[];
+  /** Actionable fix hint; omitted from JSON when absent. Printed as `help: …`. */
+  help?: string;
 };
 
 export function diagnostic( partial: Diagnostic): Diagnostic {

@@ -161,6 +161,7 @@ describe("CLI argv after --", () => {
       cmd: "run",
       file: "main.mnd",
       showResult: true,
+      json: false,
       argv: ["a", "b"],
     });
   });
@@ -171,6 +172,18 @@ describe("CLI argv after --", () => {
       cmd: "check",
       file: "f.mnd",
       showResult: false,
+      json: false,
+      argv: [],
+    });
+  });
+
+  test("parseCliArgs accepts --json", () => {
+    const p = parseCliArgs(["check", "--json", "f.mnd"]);
+    expect(p).toEqual({
+      cmd: "check",
+      file: "f.mnd",
+      showResult: false,
+      json: true,
       argv: [],
     });
   });

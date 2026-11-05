@@ -59,7 +59,7 @@ Rows are ordered by phase, then priority, then area, then ID.
 | [OTH-05](reviews/2026-10-24-build-f.md#oth-05) | Security policy: TLS verification, HTTP limits, FFI and disclosure | Other | P1 | 0 | done | CONC-03, CONC-04, CONC-10 | [#27](https://github.com/graeme-lockley/menard-lang/issues/27) | — |
 | [TOOL-01](reviews/2026-10-24-build-f.md#tool-01) | `mn fmt` and `mn fmt --check` | Tooling | P0 | 1 | todo | LANG-09 | — | — |
 | [TOOL-02](reviews/2026-10-24-build-f.md#tool-02) | `--version`, `--help`, and `--print-toolchain` | Tooling | P0 | 1 | todo | — | — | — |
-| [TOOL-03](reviews/2026-10-24-build-f.md#tool-03) | Machine-readable diagnostics: `--json` and a stable schema | Tooling | P0 | 1 | todo | LANG-04 | — | — |
+| [TOOL-03](reviews/2026-10-24-build-f.md#tool-03) | Machine-readable diagnostics: `--json` and a stable schema | Tooling | P0 | 1 | done | LANG-04 | — | — |
 | [DOC-03](reviews/2026-10-24-build-f.md#doc-03) | `AGENTS.md` and a one-page reference | Documentation | P0 | 1 | todo | DOC-01 | — | — |
 | [LANG-05](reviews/2026-10-24-build-f.md#lang-05) | Expected-type propagation stops at lambda bodies, so field and tuple projections need annotations | Language | P1 | 1 | todo | LANG-01 | — | — |
 | [LANG-06](reviews/2026-10-24-build-f.md#lang-06) | `?` propagates; `??` supplies the default | Language | P1 | 1 | todo | LANG-12, LANG-15 | — | — |

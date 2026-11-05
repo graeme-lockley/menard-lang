@@ -14,3 +14,21 @@ export type { LineMap, LineCol } from "./line-map.ts";
 export { buildLineMap, offsetToLineCol, lineBytes } from "./line-map.ts";
 
 export { formatDiagnostic, formatDiagnostics } from "./format.ts";
+
+export type {
+  JsonSpan,
+  JsonDiagnostic,
+  DiagnosticsDocument,
+  JsonPanicFrame,
+  PanicDocument,
+  PanicFrameLike,
+} from "./json.ts";
+export {
+  DIAGNOSTICS_VERSION,
+  spanToJson,
+  diagnosticToJson,
+  diagnosticsToJson,
+  formatDiagnosticsJson,
+  panicToJson,
+  formatPanicJson,
+} from "./json.ts";

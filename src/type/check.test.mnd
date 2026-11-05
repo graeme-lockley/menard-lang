@@ -28,7 +28,7 @@ let desugared(path: Str) -> Maybe (List Ast) =
 let type-codes-have(es: List TypeError, code: Str) -> Bool =
   match (es)
     | [] -> false
-    | TypeError(_, c, _) :: rest ->
+    | TypeError(_, c, _, _) :: rest ->
       if (c == code) -> true | type-codes-have(rest, code)
 
 let type-has-code(path: Str, code: Str) -> Bool =

@@ -205,7 +205,14 @@ function installBuiltins(env: TypeEnv): void {
   void F;
 }
 
-function err(env: TypeEnv, code: string, message: string, span: Span, notes?: Diagnostic["notes"]): void {
+function err(
+  env: TypeEnv,
+  code: string,
+  message: string,
+  span: Span,
+  notes?: Diagnostic["notes"],
+  help?: string,
+): void {
   // A type annotation can be visited twice (scheme collection and body
   // checking). Report the same code/message/span once.
   if (
@@ -227,6 +234,7 @@ function err(env: TypeEnv, code: string, message: string, span: Span, notes?: Di
       message,
       span,
       notes,
+      help,
     }),
   );
 }
@@ -492,6 +500,8 @@ function unify(env: TypeEnv, a: Type, b: Type, s: Subst, span: Span): boolean {
         "E_TYPE_ARITY",
         `function arity mismatch: expected ${ta.params.length}, found ${tb.params.length}`,
         span,
+        undefined,
+        "check the call: expected and found argument counts must match",
       );
       return false;
     }
@@ -1656,6 +1666,8 @@ function checkLambdaAgainst(
       "E_TYPE_ARITY",
       `function arity mismatch: expected ${exp.params.length}, found ${pelems.length}`,
       ast.span,
+      undefined,
+      "check the call: expected and found argument counts must match",
     );
   }
   for (let i = 0; i < pelems.length; i++) {
@@ -1880,7 +1892,14 @@ function bindPattern(
       const argPats = symStr(head) === "project" ? [] : pat.elems.slice(1);
       const resolved = resolveQualifiedCtor(env, projectAst);
       if (!resolved) {
-        err(env, "E_TYPE_UNBOUND", "unknown constructor", pat.span);
+        err(
+          env,
+          "E_TYPE_UNBOUND",
+          "unknown constructor",
+          pat.span,
+          undefined,
+          "check the spelling, or qualify the constructor with its import alias",
+        );
         return;
       }
       const { name: cn, ctor } = resolved;
@@ -1975,6 +1994,17 @@ function bindPattern(
         const p = pat.elems[i + 1];
         if (p) bindPattern(env, p, payloads[i]!, local, subst, new Set());
       }
+      return;
+    }
+    if (cn) {
+      err(
+        env,
+        "E_TYPE_UNBOUND",
+        "unknown constructor",
+        pat.span,
+        undefined,
+        "check the spelling, or qualify the constructor with its import alias",
+      );
     }
   }
 }
@@ -2041,7 +2071,8 @@ function inferApp(
       "E_TYPE_NULLARY_CALL",
       `nullary constructor ${nullaryName} cannot be called`,
       ast.span,
-      [{ message: `help: remove the parentheses; ${nullaryName} is a value` }],
+      undefined,
+      `remove the parentheses; ${nullaryName} is a value`,
     );
     return env.values.has(nullaryName)
       ? instantiate(env, env.values.get(nullaryName)!)
@@ -2087,6 +2118,8 @@ function inferApp(
       "E_TYPE_ARITY",
       `function arity mismatch: expected ${calleeFn.params.length}, found ${argAsts.length}`,
       ast.span,
+      undefined,
+      "check the call: expected and found argument counts must match",
     );
   }
   if (hn === "show") {
@@ -2108,6 +2141,8 @@ function inferApp(
         "E_TYPE_ORDERABLE",
         `type ${typeShow(a0)} is not orderable`,
         ast.elems[1]?.span ?? ast.span,
+        undefined,
+        "only Int, Float, Str, Char, Bool, and variants of those are orderable",
       );
     }
   }
@@ -2122,6 +2157,8 @@ function inferApp(
         "E_TYPE_ORDERABLE",
         `type ${typeShow(keyT)} is not orderable`,
         ast.elems[mapKeyIdx + 1]?.span ?? ast.span,
+        undefined,
+        "only Int, Float, Str, Char, Bool, and variants of those are orderable",
       );
     }
   }

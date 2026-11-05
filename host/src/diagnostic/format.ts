@@ -84,6 +84,10 @@ export function formatDiagnostic(
   const gw = gutterWidth(loc.line);
   formatSnippet(out, src, map, diag.span, gw);
 
+  if (diag.help !== undefined) {
+    pushStr(out, `help: ${diag.help}\n`);
+  }
+
   if (diag.notes) {
     for (const note of diag.notes) {
       pushStr(out, `  = note: ${note.message}\n`);

@@ -390,18 +390,22 @@ let is-word-type(ast: Ast) -> Bool =
 ; Heap object types are still one `i64` word (a pointer) — List/Maybe/Result
 ; for slice 3C; more shapes land in later slices. User nominals (`Ast`,
 ; `Span`, `Type`, …) are the same ABI: a tagged heap pointer in an `i64`.
-; After private-symbol uniquify, names look like `__m3_Span` — strip the
-; `__mN_` prefix before the Upper-initial check.
+; After private-symbol uniquify, names look like `__m3_Span` (flatten) or
+; `__q1635669332_Span` (sep `link-of`) — strip either prefix before the
+; Upper-initial check so bare nominals stay word-ABI.
 let is-raw-upper-name(n: Str) -> Bool =
   String.length(n) > 0 && {
     let b = String.byte(0, n)
     b >= 65 && b <= 90
   }
 
-; `__m12_Foo` → `Foo`; otherwise identity.
+; `__m12_Foo` / `__q1635669332_Foo` → `Foo`; otherwise identity.
 let strip-uniq-prefix(n: Str) -> Str {
   let len = String.length(n)
-  if (len >= 4 && String.byte(0, n) == 95 && String.byte(1, n) == 95 && String.byte(2, n) == 109) -> strip-uniq-prefix-digits(n, 3, len) | n
+  cond
+    | len >= 4 && String.byte(0, n) == 95 && String.byte(1, n) == 95 && (String.byte(2, n) == 109 || String.byte(2, n) == 113) ->
+      strip-uniq-prefix-digits(n, 3, len)
+    | else -> n
 }
 
 let strip-uniq-prefix-digits(n: Str, i: Int, len: Int) -> Str =

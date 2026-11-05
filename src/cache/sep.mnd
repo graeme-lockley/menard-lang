@@ -163,13 +163,16 @@ let parse-code(msg: Str) -> Str =
 
 ; Origin 0 is the file being compiled. Origin 1 is the source a
 ; generated `@test` module was extracted from.
-let report-at(abs: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str) -> Unit =
-  if (sp.origin == 0) -> report-span(display-path(abs), src, sp, sev, code, msg) | {
+let report-at-help(abs: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str, help: Maybe Str) -> Unit =
+  if (sp.origin == 0) -> report-span-help(display-path(abs), src, sp, sev, code, msg, help) | {
     let orig = doctest-origin(abs)
     match (read-file(orig))
-      | Ok(text) -> report-span(display-path(orig), text, sp, sev, code, msg)
-      | Err(_) -> report-span(display-path(abs), src, sp, sev, code, msg)
+      | Ok(text) -> report-span-help(display-path(orig), text, sp, sev, code, msg, help)
+      | Err(_) -> report-span-help(display-path(abs), src, sp, sev, code, msg, help)
   }
+
+let report-at(abs: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str) -> Unit =
+  report-at-help(abs, src, sp, sev, code, msg, None)
 
 let report-parse(abs: Str, src: Str, e: ParseError) -> Unit =
   match (e)
@@ -191,9 +194,9 @@ let report-desugar(abs: Str, src: Str, es: List DesugarError) -> Unit =
 let report-types(abs: Str, src: Str, es: List TypeError) -> Unit =
   match (es)
     | [] -> ()
-    | TypeError(sp, code, msg) :: rest ->
+    | TypeError(sp, code, msg, help) :: rest ->
       {
-        report-at(abs, src, sp, "error", code, msg)
+        report-at-help(abs, src, sp, "error", code, msg, help)
         report-types(abs, src, rest)
       }
 
@@ -1234,10 +1237,10 @@ let since(started: Int) -> Int {
   if (d < 0) -> 0 | d
 }
 
-; Same rule as `mn.mnd`'s `note-compiling`: a tty, and not `--quiet`.
+; Same rule as `mn.mnd`'s `note-compiling`: a tty, and not `--quiet` / `--json`.
 let note-progress(verb: Str, abs: Str, ctx: Ctx, ms: Int) -> Unit =
   cond
-    | ctx-quiet(ctx) || not(isatty(2)) -> ()
+    | ctx-quiet(ctx) || json-mode-on() || not(isatty(2)) -> ()
     | else ->
       {
         write(stderr, progress-line(verb, display-path(abs), ms))
@@ -1268,7 +1271,7 @@ let note-linking(abs: Str, ctx: Ctx, ms: Int) -> Unit =
 
 let note-link-label(label: Str, ctx: Ctx, ms: Int) -> Unit =
   cond
-    | ctx-quiet(ctx) || not(isatty(2)) -> ()
+    | ctx-quiet(ctx) || json-mode-on() || not(isatty(2)) -> ()
     | else ->
       {
         write(stderr, progress-line("Linking", label, ms))
