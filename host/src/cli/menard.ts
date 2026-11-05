@@ -7,12 +7,17 @@
  *
  * print/println/dump write live to process streams during evaluation.
  * Pass --show-result to also print the final non-Unit value (REPL-style).
+ * Pass --json for machine-readable diagnostics (see docs/diagnostics.md).
  * Pass program args after `--`: `menard run main.mnd -- arg1 arg2`
  * Set MENARD_STACK=1 to include a stack trace on internal faults.
  */
 import { readFileSync } from "node:fs";
 import { diagnose, run, formatRunErrors, showValue } from "../interp/index.ts";
-import { formatDiagnostics } from "../diagnostic/index.ts";
+import {
+  formatDiagnostics,
+  formatDiagnosticsJson,
+  formatPanicJson,
+} from "../diagnostic/index.ts";
 import { createLiveHost } from "../host/index.ts";
 import { withInternalGuard } from "./guard.ts";
 import { parseCliArgs } from "./args.ts";
@@ -20,7 +25,7 @@ import { parseFixArgs, runFix } from "./fix.ts";
 
 function usage(): never {
   console.error(
-    "usage: menard <check|run> [--show-result] <file.mnd> [-- arg…]\n" +
+    "usage: menard <check|run> [--show-result] [--json] <file.mnd> [-- arg…]\n" +
       "       menard fix [--dry-run] [--rule name] <file.mnd…>",
   );
   process.exit(2);
@@ -39,7 +44,7 @@ if (argv[0] === "fix") {
 const showStack = process.env.MENARD_STACK === "1";
 const parsed = parseCliArgs(argv);
 if (!parsed) usage();
-const { cmd, file, showResult, argv: progArgv } = parsed;
+const { cmd, file, showResult, json, argv: progArgv } = parsed;
 
 withInternalGuard(
   () => {
@@ -56,6 +61,10 @@ withInternalGuard(
 
     if (cmd === "check") {
       const diags = diagnose(source, { path, host });
+      if (json) {
+        process.stdout.write(formatDiagnosticsJson(diags, source, path));
+        process.exit(diags.length === 0 ? 0 : 1);
+      }
       if (diags.length === 0) {
         process.exit(0);
       }
@@ -75,8 +84,29 @@ withInternalGuard(
       process.exit(result.exitCode ?? fromMain);
     }
 
-    if (result.kind === "diagnostics" || result.kind === "panic") {
-      process.stderr.write(formatRunErrors(result, source, path));
+    if (result.kind === "diagnostics") {
+      if (json) {
+        process.stdout.write(formatDiagnosticsJson(result.diagnostics, source, path));
+      } else {
+        process.stderr.write(formatRunErrors(result, source, path));
+      }
+      process.exit(1);
+    }
+
+    if (result.kind === "panic") {
+      if (json) {
+        process.stderr.write(
+          formatPanicJson(
+            result.message,
+            result.sitePath ?? path,
+            result.span,
+            result.frames ?? [],
+            source,
+          ),
+        );
+      } else {
+        process.stderr.write(formatRunErrors(result, source, path));
+      }
       process.exit(1);
     }
 

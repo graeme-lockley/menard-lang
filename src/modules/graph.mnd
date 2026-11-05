@@ -905,7 +905,7 @@ let forms-with-bootstrap(forms: List Ast, inits: List Str, entry: EntryMain) -> 
 let pub-private-ok(forms: List Ast) -> Result Unit Str =
   match (check-pub-private-forms(forms))
     | [] -> Ok(())
-    | TypeError(_, code, msg) :: _ -> Err(String.concat(code, ": ", msg))
+    | TypeError(_, code, msg, _) :: _ -> Err(String.concat(code, ": ", msg))
 
 ; Strip imports/pub, uniquify privates, rename `main`, lift top-level
 ; expressions into this module's init.

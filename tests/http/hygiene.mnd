@@ -232,7 +232,7 @@ let main() -> Int {
   let p3 = deref(port3)
   let ok-timeout =
     match (Http.request-timeout("127.0.0.1", p3, Http.Request(Http.GET, "/", Map.empty(), ""), 50))
-      | Err(Http.NetErr(Timeout)) -> 1
+      | Err(Http.NetErr(Http.Timeout)) -> 1
       | Err(_) -> 1
       | Ok(_) -> 0
   println(ok-timeout)
@@ -299,7 +299,7 @@ let main() -> Int {
   stop(s4)
 
   ; --- CONC-18: slow-peer on public read-request-timeout ---
-  ; Peer stays silent well past the 50ms budget. Success requires NetErr(Timeout)
+  ; Peer stays silent well past the 50ms budget. Success requires NetErr(Http.Timeout)
   ; within ~200ms — not any Err after peer close (unbounded Net.read would pass that).
   match (Net.listen(0))
     | Err(_) -> println(0)
@@ -324,7 +324,7 @@ let main() -> Int {
                     let t0 = Sched.mono-ms()
                     let ok-slow =
                       match (Http.read-request-timeout(conn, 50))
-                        | Err(Http.NetErr(Timeout)) -> {
+                        | Err(Http.NetErr(Http.Timeout)) -> {
                             let elapsed = Sched.mono-ms() - t0
                             if (elapsed < 200) -> 1 | 0
                           }

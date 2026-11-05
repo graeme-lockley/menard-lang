@@ -155,16 +155,17 @@ let explain-file(path: Str, lines: List Str, originals: Map Str Str) -> Unit =
         | Err(_) -> ()
         | Ok(forms) -> explain-parsed(path, src, source-path(path, originals), forms, lines)
 
-let file-line(path: Str, ok: Bool, on: Bool) -> Unit {
-  write(stdout, path)
-  write(stdout, " ... ")
-  write(
-    stdout,
-    if (ok) -> paint(on, "[32m", "ok") | paint(on, "[31m", "FAILED")
-  )
-  write(stdout, "\n")
-  ()
-}
+let file-line(path: Str, ok: Bool, on: Bool) -> Unit =
+  if (json-mode-on()) -> () | {
+    write(stdout, path)
+    write(stdout, " ... ")
+    write(
+      stdout,
+      if (ok) -> paint(on, "[32m", "ok") | paint(on, "[31m", "FAILED")
+    )
+    write(stdout, "\n")
+    ()
+  }
 
 let rev-strs(xs: List Str, acc: List Str) -> List Str =
   match (xs)
@@ -233,8 +234,8 @@ let finish-acc(acc: RunAcc, verbose: Bool, show-output: Bool, on: Bool, exit-bad
       }
 
 let report-suite-error(msg: Str, started: Int, on: Bool) -> Int {
-  if (String.length(msg) > 0) -> report-plain(msg)
-  summary(Counts(0, 1), now-ms() - started, on)
+  if (String.length(msg) > 0 && not(json-mode-on())) -> report-plain(msg)
+  if (not(json-mode-on())) -> summary(Counts(0, 1), now-ms() - started, on)
   1
 }
 
@@ -329,7 +330,7 @@ let run-files(path: Str, files: List Str, originals: Map Str Str, clean: Bool, v
             let exit-bad = status-exit-code(st) != 0
             let acc = take-lines(split-lines(text), RunAcc("", [], 0, 0), verbose, show-output, on, originals)
             let totals = finish-acc(acc, verbose, show-output, on, exit-bad, err, originals)
-            summary(totals, now-ms() - started, on)
+            if (not(json-mode-on())) -> summary(totals, now-ms() - started, on)
             match (totals)
               | Counts(_, f) ->
                 if (f > 0) -> 1 | 0

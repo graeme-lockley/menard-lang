@@ -35,6 +35,7 @@ pub record TypeError {
   span: Span
   code: Str
   message: Str
+  help: Maybe Str
 }
 
 ; ---------------------------------------------------------------------------
@@ -196,11 +197,14 @@ let alias-set(env: TypeEnv, name: Str, t: Type) -> Unit =
 let diag-exists(diags: List TypeError, code: Str, message: Str, span: Span) -> Bool =
   match (diags)
     | [] -> false
-    | TypeError(s, c, m) :: rest ->
+    | TypeError(s, c, m, _) :: rest ->
       if (s.start == span.start && s.end == span.end && s.origin == span.origin && c == code && m == message) -> true | diag-exists(rest, code, message, span)
 
 let err!(env: TypeEnv, code: Str, message: Str, span: Span) -> Unit =
-  if (diag-exists(deref(env.diags), code, message, span)) -> () | set!(env.diags, TypeError(span, code, message) :: deref(env.diags))
+  err-help!(env, code, message, span, None)
+
+let err-help!(env: TypeEnv, code: Str, message: Str, span: Span, help: Maybe Str) -> Unit =
+  if (diag-exists(deref(env.diags), code, message, span)) -> () | set!(env.diags, TypeError(span, code, message, help) :: deref(env.diags))
 
 let fresh-var(env: TypeEnv, name: Str) -> Type {
   let id = deref(env.next-var)
@@ -458,7 +462,7 @@ let unify-fn-params(env: TypeEnv, pa: List Type, pb: List Type, ra: Type, rb: Ty
       if (unify-list-pairwise(env, pa, pb, span)) -> unify(env, ra, rb, span) | false
     | else ->
       {
-        err!(env, "E_TYPE_ARITY", String.concat("function arity mismatch: expected ", show(length(pa)), ", found ", show(length(pb))), span)
+        err-help!(env, "E_TYPE_ARITY", String.concat("function arity mismatch: expected ", show(length(pa)), ", found ", show(length(pb))), span, Some("check the call: expected and found argument counts must match"))
         false
       }
 
@@ -1588,7 +1592,7 @@ let check-lambda-against(env: TypeEnv, elems: List Ast, sp: Span, expected: Type
           {
             let pelems = lambda-param-elems(parts.params)
             if (length(pelems) != length(ps)) ->
-              err!(env, "E_TYPE_ARITY", String.concat("function arity mismatch: expected ", show(length(ps)), ", found ", show(length(pelems))), sp)
+              err-help!(env, "E_TYPE_ARITY", String.concat("function arity mismatch: expected ", show(length(ps)), ", found ", show(length(pelems))), sp, Some("check the call: expected and found argument counts must match"))
             infer-lambda-with(env, parts, local, ps, Some(ret))
           }
         | None -> infer-lambda(env, elems, sp, local)
@@ -1724,7 +1728,15 @@ let bind-pattern-ctor-info(env: TypeEnv, cname: Str, ctor: CtorInfo, arg-pats: L
 
 let bind-pattern-ctor-named(env: TypeEnv, cname-ast: Ast, arg-pats: List Ast, psp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
   match (sym-str(cname-ast))
-    | None -> ()
+    | None ->
+      ; Unresolved `Alias.Ctor` project head (before rewrite) or other non-sym.
+      err-help!(
+        env,
+        "E_TYPE_UNBOUND",
+        "unknown constructor",
+        psp,
+        Some("check the spelling, or qualify the constructor with its import alias")
+      )
     | Some(cname) -> bind-pattern-ctor-kind(env, cname, arg-pats, psp, scrut, loc, covered)
 
 let bind-pattern-ctor-kind(env: TypeEnv, cname: Str, arg-pats: List Ast, psp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
@@ -1739,7 +1751,14 @@ let bind-pattern-ctor-kind(env: TypeEnv, cname: Str, arg-pats: List Ast, psp: Sp
     | cname == "tuple" -> bind-tuple-pat(env, arg-pats, psp, scrut, loc, covered)
     | else ->
       match (ctor-get(env, cname))
-        | None -> ()
+        | None ->
+          err-help!(
+            env,
+            "E_TYPE_UNBOUND",
+            "unknown constructor",
+            psp,
+            Some("check the spelling, or qualify the constructor with its import alias")
+          )
         | Some(ctor) -> bind-pattern-ctor-info(env, cname, ctor, arg-pats, psp, scrut, loc, covered)
 
 let fresh-vars-for-asts(xs: List Ast, env: TypeEnv) -> List Type =
@@ -1972,9 +1991,12 @@ let first-span-or(args: List Ast, fallback: Span) -> Span =
     | a :: _ -> ast-span(a)
     | [] -> fallback
 
-let check-predicate-arg(env: TypeEnv, arg-types: List Type, args: List Ast, sp: Span, pred: (Type) -> Bool, code: Str, label: Str) -> Unit {
+let check-predicate-arg(env: TypeEnv, arg-types: List Type, args: List Ast, sp: Span, pred: (Type) -> Bool, code: Str, label: Str) -> Unit =
+  check-predicate-arg-help(env, arg-types, args, sp, pred, code, label, None)
+
+let check-predicate-arg-help(env: TypeEnv, arg-types: List Type, args: List Ast, sp: Span, pred: (Type) -> Bool, code: Str, label: Str, help: Maybe Str) -> Unit {
   let t = apply-subst(env, first-type-or-fresh(arg-types, env))
-  if (pred(t)) -> () | err!(env, code, String.concat("type ", type-show(t), " is ", label), first-span-or(args, sp))
+  if (pred(t)) -> () | err-help!(env, code, String.concat("type ", type-show(t), " is ", label), first-span-or(args, sp), help)
 }
 
 ; Bare name, or the field of `(project Alias Name)`.
@@ -2022,8 +2044,8 @@ let check-map-key-at(env: TypeEnv, arg-types: List Type, args: List Ast, sp: Spa
           | is-orderable(t) -> ()
           | else ->
             match (nth-ast(args, idx))
-              | Some(a) -> err!(env, "E_TYPE_ORDERABLE", String.concat("type ", type-show(t), " is not orderable"), ast-span(a))
-              | None -> err!(env, "E_TYPE_ORDERABLE", String.concat("type ", type-show(t), " is not orderable"), sp)
+              | Some(a) -> err-help!(env, "E_TYPE_ORDERABLE", String.concat("type ", type-show(t), " is not orderable"), ast-span(a), Some("only Int, Float, Str, Char, Bool, and variants of those are orderable"))
+              | None -> err-help!(env, "E_TYPE_ORDERABLE", String.concat("type ", type-show(t), " is not orderable"), sp, Some("only Int, Float, Str, Char, Bool, and variants of those are orderable"))
       }
 
 let check-show-compare(env: TypeEnv, head: Ast, arg-types: List Type, args: List Ast, sp: Span) -> Unit =
@@ -2033,7 +2055,7 @@ let check-show-compare(env: TypeEnv, head: Ast, arg-types: List Type, args: List
         note-show!(sp, first-type-or-fresh(arg-types, env))
         check-predicate-arg(env, arg-types, args, sp, is-showable, "E_TYPE_SHOWABLE", "not showable")
       }
-    | is-sym(head, "compare") -> check-predicate-arg(env, arg-types, args, sp, is-orderable, "E_TYPE_ORDERABLE", "not orderable")
+    | is-sym(head, "compare") -> check-predicate-arg-help(env, arg-types, args, sp, is-orderable, "E_TYPE_ORDERABLE", "not orderable", Some("only Int, Float, Str, Char, Bool, and variants of those are orderable"))
     | else -> check-map-key-orderable(env, head, arg-types, args, sp)
 
 let is-lambda-ast(a: Ast) -> Bool =
@@ -2068,7 +2090,7 @@ let infer-app-core(env: TypeEnv, head: Ast, args: List Ast, sp: Span, local: Map
     | TFn(ps, ret) ->
       {
         if (length(args) != length(ps)) ->
-          err!(env, "E_TYPE_ARITY", String.concat("function arity mismatch: expected ", show(length(ps)), ", found ", show(length(args))), sp)
+          err-help!(env, "E_TYPE_ARITY", String.concat("function arity mismatch: expected ", show(length(ps)), ", found ", show(length(args))), sp, Some("check the call: expected and found argument counts must match"))
         let arg-types = infer-app-args-against(env, args, ps, local, [])
         check-show-compare(env, head, arg-types, args, sp)
         apply-subst(env, ret)
@@ -2114,7 +2136,7 @@ let instantiate-nullary-or-fresh(env: TypeEnv, name: Str) -> Type =
     | None -> fresh-var-anon(env)
 
 let infer-nullary-call(env: TypeEnv, name: Str, sp: Span) -> Type {
-  err!(env, "E_TYPE_NULLARY_CALL", String.concat("nullary constructor ", name, " cannot be called"), sp)
+  err-help!(env, "E_TYPE_NULLARY_CALL", String.concat("nullary constructor ", name, " cannot be called"), sp, Some(String.concat("remove the parentheses; ", name, " is a value")))
   instantiate-nullary-or-fresh(env, name)
 }
 
@@ -2947,7 +2969,7 @@ let finish-typecheck(forms: List Ast, errs: List TypeError, env: TypeEnv) -> Res
 let rest-to-type(es: List RestError) -> List TypeError =
   match (es)
     | [] -> []
-    | RestError(sp, code, msg) :: rest -> TypeError(sp, code, msg) :: rest-to-type(rest)
+    | RestError(sp, code, msg) :: rest -> TypeError(sp, code, msg, None) :: rest-to-type(rest)
 
 ; Typecheck a single-file program's top-level forms (post-desugar, post
 ; rest-pack). Two passes: collect every declared type and defn scheme
@@ -2975,9 +2997,9 @@ let typecheck-collected(forms: List Ast) -> Result (List Ast) (List TypeError) {
 let push-type-errs(env: TypeEnv, xs: List TypeError) -> Unit =
   match (xs)
     | [] -> ()
-    | TypeError(sp, code, msg) :: rest ->
+    | TypeError(sp, code, msg, help) :: rest ->
       {
-        err!(env, code, msg, sp)
+        err-help!(env, code, msg, sp, help)
         push-type-errs(env, rest)
       }
 
@@ -3135,7 +3157,7 @@ let consider-type-name(n: Str, sp: Span, declared: List Str, pubs: List Str, ali
       match (Map.lookup(n, aliases))
         | Some(target) -> walk-type-ast(target, declared, pubs, aliases, n :: expanding, acc)
         | None ->
-          if (member(n, declared) && not(member(n, pubs))) -> TypeError(sp, "E_PUB_PRIVATE_TYPE", String.concat("pub signature mentions private type ", n)) :: acc | acc
+          if (member(n, declared) && not(member(n, pubs))) -> TypeError(sp, "E_PUB_PRIVATE_TYPE", String.concat("pub signature mentions private type ", n), None) :: acc | acc
 
 let is-label(n: Str) -> Bool {
   let len = String.length(n)

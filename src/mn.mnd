@@ -54,7 +54,7 @@ import std/time
 
 ; Flags the driver understands. A valued flag consumes the next word.
 let mn-flags() -> List Flag =
-  [Flag("--dump-after=reader", false), Flag("--dump-after=desugar", false), Flag("--dump-after=type", false), Flag("--dump-after=close", false), Flag("--dump-after=root", false), Flag("--dump-after=derive", false), Flag("--show-result", false), Flag("--clean", false), Flag("--verbose", false), Flag("--show-output", false), Flag("--quiet", false), Flag("-o", true), Flag("--cc", true), Flag("--runtime", true)]
+  [Flag("--dump-after=reader", false), Flag("--dump-after=desugar", false), Flag("--dump-after=type", false), Flag("--dump-after=close", false), Flag("--dump-after=root", false), Flag("--dump-after=derive", false), Flag("--show-result", false), Flag("--clean", false), Flag("--verbose", false), Flag("--show-output", false), Flag("--quiet", false), Flag("--json", false), Flag("-o", true), Flag("--cc", true), Flag("--runtime", true)]
 
 let argv-onto(i: Int, n: Int, acc: List Str) -> List Str =
   if (i >= n) -> reverse(acc) | argv-onto(i + 1, n, arg(i) :: acc)
@@ -109,19 +109,32 @@ let has-show-output() -> Bool =
 let has-quiet() -> Bool =
   driver-has("--quiet")
 
+let has-json() -> Bool =
+  driver-has("--json")
+
 let opt(name: Str) -> Str =
   if (script-invocation()) -> "" | flag-value(argv(), name)
 
 ; Progress is for a person watching a terminal. A captured stderr stays
-; empty unless something failed. `--quiet` suppresses it even on a tty.
+; empty unless something failed. `--quiet` and `--json` suppress it.
 let note-compiling(path: Str, ms: Int) -> Unit =
   cond
-    | has-quiet() -> ()
+    | has-quiet() || has-json() -> ()
     | isatty(2) ->
       {
         write(stderr, progress-line("Compiling", display-path(canonical-path(path)), ms))
         ()
       }
+
+let fail-with-diags() -> Unit {
+  if (has-json()) -> flush-diagnostics-json()
+  exit(1)
+}
+
+let succeed-check() -> Unit {
+  if (has-json()) -> flush-diagnostics-json()
+  exit(0)
+}
 
 let explicit-out() -> Bool =
   String.length(opt("-o")) > 0
@@ -185,7 +198,7 @@ let nth-path(paths: List Str, i: Int, fallback: Str) -> Str =
 let report-type-errors(paths: List Str, es: List TypeError) -> Unit =
   match (es)
     | [] -> ()
-    | TypeError(sp, code, msg) :: rest ->
+    | TypeError(sp, code, msg, help) :: rest ->
       {
         let fallback =
           match (paths)
@@ -196,7 +209,7 @@ let report-type-errors(paths: List Str, es: List TypeError) -> Unit =
           match (read-file(p))
             | Ok(s) -> s
             | Err(_) -> ""
-        report-span(p, src, sp, "error", code, msg)
+        report-span-help(p, src, sp, "error", code, msg, help)
         report-type-errors(paths, rest)
       }
 
@@ -206,7 +219,7 @@ let fail-cannot-read(path: Str) -> Unit {
 }
 
 let usage() -> Unit {
-  write-line(2, "usage: mn <check|emit|build|run|test|inter> <file.mnd> [out.bc] [-o bin] [--cc path] [--runtime dir] [--clean] [--quiet] [--verbose] [--show-output] [--show-result] [--dump-after=reader|desugar|type|close|root|derive]")
+  write-line(2, "usage: mn <check|emit|build|run|test|inter> <file.mnd> [out.bc] [-o bin] [--cc path] [--runtime dir] [--clean] [--quiet] [--json] [--verbose] [--show-output] [--show-result] [--dump-after=reader|desugar|type|close|root|derive]")
   write-line(2, "       mn <file.mnd> [arg…]")
   exit(2)
 }
@@ -240,7 +253,7 @@ let front-end(path: Str, src: Str, dump-after-reader: Bool, dump-after-desugar: 
     | Err(e) ->
       {
         report-parse-error(path, src, e)
-        exit(1)
+        fail-with-diags()
       }
 
 let front-end-checked(path: Str, src: Str, forms: List Ast, dump-after-reader: Bool, dump-after-desugar: Bool, dump-after-type: Bool, dump-after-close: Bool, dump-after-root: Bool, dump-after-derive: Bool, on-ok: (List Ast, List Str) -> Unit) -> Unit {
@@ -250,7 +263,7 @@ let front-end-checked(path: Str, src: Str, forms: List Ast, dump-after-reader: B
     | Err(e) ->
       {
         report-casing-error(path, src, e)
-        exit(1)
+        fail-with-diags()
       }
 }
 
@@ -264,7 +277,7 @@ let front-end-desugared(path: Str, src: Str, forms: List Ast, dump-after-desugar
     | Err(es) ->
       {
         report-desugar-errors(path, src, es)
-        exit(1)
+        fail-with-diags()
       }
 
 ; A single file keeps the names the reader saw. An import graph is flattened
@@ -298,7 +311,7 @@ let front-end-typechecked(path: Str, forms: List Ast, paths: List Str, dump-afte
     | Err(es) ->
       {
         report-type-errors(paths, es)
-        exit(1)
+        fail-with-diags()
       }
 
 let front-end-closed(path: Str, forms: List Ast, paths: List Str, dump-after-close: Bool, dump-after-root: Bool, dump-after-derive: Bool, on-ok: (List Ast, List Str) -> Unit) -> Unit {
@@ -336,7 +349,7 @@ let with-source(path: Str, dump-after-reader: Bool, dump-after-desugar: Bool, du
 ; check
 
 let accept-check(forms: List Ast, paths: List Str) -> Unit =
-  exit(0)
+  succeed-check()
 
 let run-check(path: Str, dump-after-reader: Bool, dump-after-desugar: Bool, dump-after-type: Bool, dump-after-close: Bool, dump-after-root: Bool, dump-after-derive: Bool) -> Unit {
   let started = now-ms()
@@ -579,8 +592,12 @@ let link-rename(cc: Str, runtime: Str, bc: Str, link-out: Str, bin: Str) -> Unit
           | else -> exit(code)
       }
 
+; `MENARD_JSON_DIAG=1` makes the runtime write panic JSON on stderr.
+let run-argv(bin: Str) -> List Str =
+  if (has-json()) -> "/usr/bin/env" :: "MENARD_JSON_DIAG=1" :: bin :: child-args() | bin :: child-args()
+
 let run-built(bin: Str) -> Unit =
-  match (spawn(bin :: child-args()))
+  match (spawn(run-argv(bin)))
     | Err(_) -> fail-spawn(bin)
     | Ok(st) -> exit(status-exit-code(st))
 
@@ -697,19 +714,26 @@ let run-cached(file: Str, bin: Str, do-link: Bool, and-run: Bool) -> Unit =
 let run-cached-existing(file: Str, bin: Str, do-link: Bool, and-run: Bool) -> Unit {
   let cc = chosen-cc(opt("--cc"))
   let runtime = chosen-runtime(opt("--runtime"))
-  match (build-program(file, has-clean(), false, cc, runtime, bin, do-link, has-quiet()))
+  match (build-program(file, has-clean(), false, cc, runtime, bin, do-link, has-quiet() || has-json()))
     | Ok(out) ->
       cond
         | and-run -> run-built(out)
         | do-link ->
           {
-            write-line(2, String.concat("wrote ", out))
+            cond
+              | has-json() -> ()
+              | else ->
+                {
+                  write-line(2, String.concat("wrote ", out))
+                  ()
+                }
             exit(0)
           }
-        | else -> exit(0)
+        | else -> succeed-check()
     | Err(msg) ->
       {
-        if (String.length(msg) > 0) ->
+        if (has-json()) -> flush-diagnostics-json()
+        if (String.length(msg) > 0 && not(has-json())) ->
           {
             write-line(2, String.concat("error: ", msg))
             ()
@@ -732,21 +756,25 @@ let dispatch(mode: Str, file: Str, has-out: Bool, out: Str, bin: Str, dump-after
         true
       )
     | mode == "test" ->
-      exit(
-        run-suite(
-          test-paths(),
-          has-clean(),
-          has-verbose(),
-          has-show-output(),
-          has-quiet(),
-          chosen-cc(opt("--cc")),
-          chosen-runtime(opt("--runtime"))
-        )
-      )
+      {
+        let code =
+          run-suite(
+            test-paths(),
+            has-clean(),
+            has-verbose(),
+            has-show-output(),
+            has-quiet() || has-json(),
+            chosen-cc(opt("--cc")),
+            chosen-runtime(opt("--runtime"))
+          )
+        if (has-json()) -> flush-diagnostics-json()
+        exit(code)
+      }
     | mode == "inter" -> run-inter(file)
     | else -> usage()
 
 let main() -> Unit {
+  if (has-json()) -> set-json-mode(true)
   let n = positional-count()
   let mode0 = positional-arg(0)
   cond

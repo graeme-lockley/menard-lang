@@ -570,11 +570,18 @@ for tools), then:
 ./mn test
 ./mn test examples/sc.mnd --show-output
 ./mn inter examples/sc.mnd --show-result
+./mn check --json examples/loop-sum.mnd
 ```
 
 `run` compiles, links, and executes. `build` stops at the binary. `test`
 runs the `@test` lines. `inter` is the reference interpreter, useful when
 you want the oracle rather than the native binary.
+
+`check --json` (also `build --json`, `test --json`, and the compile phase of
+`run --json`) writes one versioned JSON object of diagnostics to stdout — the
+same schema the language server will publish. A runtime panic under
+`run --json` is a separate JSON object on stderr; the program's stdout is left
+alone. See [diagnostics.md](diagnostics.md) and [errors.md](errors.md).
 
 ## The compiler
 

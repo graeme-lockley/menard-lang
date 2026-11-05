@@ -3,12 +3,21 @@
 ; `path:line:col: error[CODE]: message`, a gutter, the source line, and
 ; carets. Column is a byte offset, matching `host/src/diagnostic`. Color
 ; is applied only when stderr is a terminal and `NO_COLOR` is unset, so
-; a pipe stays plain text.
+; a pipe stays plain text. Optional `help:` follows the caret block.
+; `--json` accumulates diagnostics and flushes one versioned object to
+; stdout (no color, no progress).
 
 import "../reader/ast.mnd"
 import std/console
 import std/io
+import std/json as Json
+import std/list
+import std/map as Map
 import std/string as String
+
+; JSON mode accumulates diagnostics and suppresses color/progress.
+let json-mode = ref(false)
+let json-diags = ref([])
 
 ; `Compiling` / `Linking` are light grey, the file name dark grey.
 ; Color follows stderr, same rule as diagnostics.
@@ -18,7 +27,7 @@ pub let progress-line(verb: Str, name: Str, ms: Int) -> Str {
 }
 
 let color-on() -> Bool =
-  tty-color(2)
+  tty-color(2) && not(deref(json-mode))
 
 let repeat-str(s: Str, n: Int, acc: Str) -> Str =
   if (n <= 0) -> acc | repeat-str(s, n - 1, String.concat(acc, s))
@@ -91,7 +100,12 @@ let caret-len(src: Str, sp: Span, col: Int, text: Str) -> Int {
   if (capped < 1) -> 1 | capped
 }
 
-let format-span(path: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str) -> Str {
+let help-suffix(help: Maybe Str) -> Str =
+  match (help)
+    | None -> ""
+    | Some(h) -> String.concat("help: ", h, "\n")
+
+let format-span-help(path: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str, help: Maybe Str) -> Str {
   let on = color-on()
   let line = loc-line(src, sp.start)
   let col = loc-col(src, sp.start)
@@ -100,13 +114,85 @@ let format-span(path: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str) ->
   let sev-color =
     if (sev == "warning") -> "[33m" | "[31m"
   let carets = caret-len(src, sp, col, text)
-  String.concat(paint(on, "[1m", path), ":", show(line), ":", show(col), ": ", paint(on, sev-color, sev), "[", code, "]: ", msg, "\n  |\n", pad-left(show(line), gw), " | ", text, "\n", repeat-str(" ", gw, ""), " | ", repeat-str(" ", col - 1, ""), paint(on, sev-color, repeat-str("^", carets, "")), "\n")
+  String.concat(paint(on, "[1m", path), ":", show(line), ":", show(col), ": ", paint(on, sev-color, sev), "[", code, "]: ", msg, "\n  |\n", pad-left(show(line), gw), " | ", text, "\n", repeat-str(" ", gw, ""), " | ", repeat-str(" ", col - 1, ""), paint(on, sev-color, repeat-str("^", carets, "")), "\n", help-suffix(help))
 }
 
-pub let report-span(path: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str) -> Unit {
-  write(stderr, format-span(path, src, sp, sev, code, msg))
+let format-span(path: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str) -> Str =
+  format-span-help(path, src, sp, sev, code, msg, None)
+
+; ---------------------------------------------------------------------------
+; JSON mode: accumulate then flush one object to stdout.
+
+record JsonDiag {
+  path: Str
+  src: Str
+  span: Span
+  severity: Str
+  code: Str
+  message: Str
+  help: Maybe Str
+}
+
+pub let set-json-mode(on: Bool) -> Unit {
+  set!(json-mode, on)
+  set!(json-diags, [])
+}
+
+pub let json-mode-on() -> Bool =
+  deref(json-mode)
+
+let reverse-diags(xs: List JsonDiag, acc: List JsonDiag) -> List JsonDiag =
+  match (xs)
+    | [] -> acc
+    | x :: rest -> reverse-diags(rest, x :: acc)
+
+let span-json(src: Str, sp: Span) -> Json.Json {
+  let line = loc-line(src, sp.start)
+  let col = loc-col(src, sp.start)
+  Json.JsonObject(Map.empty() |> Map.set("start", Json.JsonInt(sp.start)) |> Map.set("end", Json.JsonInt(sp.end)) |> Map.set("line", Json.JsonInt(line)) |> Map.set("column", Json.JsonInt(col)))
+}
+
+let diag-object(d: JsonDiag) -> Json.Json =
+  match (d)
+    | JsonDiag(path, src, sp, sev, code, msg, help) ->
+      {
+        let base = Map.empty() |> Map.set("code", Json.JsonStr(code)) |> Map.set("severity", Json.JsonStr(sev)) |> Map.set("message", Json.JsonStr(msg)) |> Map.set("path", Json.JsonStr(path)) |> Map.set("span", span-json(src, sp))
+        let with-help =
+          match (help)
+            | None -> base
+            | Some(h) -> Map.set("help", Json.JsonStr(h), base)
+        Json.JsonObject(with-help)
+      }
+
+let diags-to-json-list(xs: List JsonDiag, acc: List Json.Json) -> List Json.Json =
+  match (xs)
+    | [] -> reverse(acc)
+    | d :: rest -> diags-to-json-list(rest, diag-object(d) :: acc)
+
+pub let flush-diagnostics-json() -> Unit {
+  let items = reverse-diags(deref(json-diags), [])
+  set!(json-diags, [])
+  let doc = Json.JsonObject(Map.empty() |> Map.set("version", Json.JsonInt(1)) |> Map.set("diagnostics", Json.JsonArray(diags-to-json-list(items, []))))
+  write(stdout, Json.encode(doc))
+  write(stdout, "\n")
   ()
 }
+
+pub let report-span-help(path: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str, help: Maybe Str) -> Unit =
+  cond
+    | deref(json-mode) ->
+      {
+        set!(json-diags, JsonDiag(path, src, sp, sev, code, msg, help) :: deref(json-diags))
+        ()
+      }
+    | else ->
+      {
+        write(stderr, format-span-help(path, src, sp, sev, code, msg, help))
+        ()
+      }
+
+pub let report-span(path: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str) -> Unit =
+  report-span-help(path, src, sp, sev, code, msg, None)
 
 pub let report-plain(msg: Str) -> Unit {
   write(stderr, "error: ")

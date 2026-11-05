@@ -7,8 +7,8 @@ describe("E_TYPE_NULLARY_CALL", () => {
     const d = diags.find((x) => x.code === "E_TYPE_NULLARY_CALL");
     expect(d).toBeDefined();
     expect(d!.message).toContain("None");
-    expect(d!.notes?.some((n) => n.message.includes("help:"))).toBe(true);
-    expect(d!.notes?.some((n) => n.message.includes("None is a value"))).toBe(true);
+    expect(d!.help).toContain("remove the parentheses");
+    expect(d!.help).toContain("None is a value");
   });
 
   test("user nullary Red() is rejected", () => {

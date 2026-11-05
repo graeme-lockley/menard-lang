@@ -52,4 +52,68 @@ describe("formatDiagnostic", () => {
     expect(formatted).toContain("= note: x defined here");
     expect(formatted).toContain("1 | let x = 1");
   });
+
+  test("formats help after the caret block", () => {
+    const source = "None()";
+    const diag = {
+      severity: "error" as const,
+      category: "type" as const,
+      code: "E_TYPE_NULLARY_CALL",
+      message: "nullary constructor None cannot be called",
+      span: { start: 0, end: 6 },
+      help: "remove the parentheses; None is a value",
+    };
+    const formatted = formatDiagnostic(diag, source, "t.mnd");
+    expect(formatted).toContain("error[E_TYPE_NULLARY_CALL]");
+    expect(formatted).toContain("help: remove the parentheses; None is a value");
+    const helpIdx = formatted.indexOf("help:");
+    const caretIdx = formatted.lastIndexOf("^");
+    expect(helpIdx).toBeGreaterThan(caretIdx);
+  });
+
+  test("text help for orderable, arity, and unbound constructor", () => {
+    const orderable = formatDiagnostic(
+      {
+        severity: "error",
+        category: "type",
+        code: "E_TYPE_ORDERABLE",
+        message: "type (Fn x -> x) is not orderable",
+        span: { start: 0, end: 8 },
+        help: "only Int, Float, Str, Char, Bool, and variants of those are orderable",
+      },
+      "compare(fn (x) = x, fn (y) = y)",
+      "o.mnd",
+    );
+    expect(orderable).toContain("help: only Int, Float, Str, Char, Bool");
+
+    const arity = formatDiagnostic(
+      {
+        severity: "error",
+        category: "type",
+        code: "E_TYPE_ARITY",
+        message: "function arity mismatch: expected 2, found 1",
+        span: { start: 0, end: 4 },
+        help: "check the call: expected and found argument counts must match",
+      },
+      "f(1)",
+      "a.mnd",
+    );
+    expect(arity).toContain("help: check the call: expected and found argument counts must match");
+
+    const unbound = formatDiagnostic(
+      {
+        severity: "error",
+        category: "type",
+        code: "E_TYPE_UNBOUND",
+        message: "unknown constructor",
+        span: { start: 0, end: 8 },
+        help: "check the spelling, or qualify the constructor with its import alias",
+      },
+      "NoSuch(x)",
+      "u.mnd",
+    );
+    expect(unbound).toContain(
+      "help: check the spelling, or qualify the constructor with its import alias",
+    );
+  });
 });
