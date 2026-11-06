@@ -53,24 +53,24 @@ Rows are ordered by phase, then priority, then area, then ID.
 | [CONC-18](reviews/2026-10-24-build-f.md#conc-18) | Close remaining HTTP limit and serialization holes (corrective for CONC-04) | Concurrency | P1 | 0 | done | — | [#59](https://github.com/graeme-lockley/menard-lang/issues/59) | — |
 | [CONC-19](reviews/2026-10-24-build-f.md#conc-19) | Complete TLS failure classification (corrective for CONC-03) | Concurrency | P1 | 0 | done | — | [#60](https://github.com/graeme-lockley/menard-lang/issues/60) | — |
 | [OTH-05](reviews/2026-10-24-build-f.md#oth-05) | Security policy: TLS verification, HTTP limits, FFI and disclosure | Other | P1 | 0 | done | CONC-03, CONC-04, CONC-10 | [#27](https://github.com/graeme-lockley/menard-lang/issues/27) | — |
-| [TOOL-01](reviews/2026-10-24-build-f.md#tool-01) | `mn fmt` and `mn fmt --check` | Tooling | P0 | 1 | todo | LANG-09 | — | — |
-| [TOOL-02](reviews/2026-10-24-build-f.md#tool-02) | `--version`, `--help`, and `--print-toolchain` | Tooling | P0 | 1 | todo | — | — | — |
+| [TOOL-01](reviews/2026-10-24-build-f.md#tool-01) | `mn fmt` and `mn fmt --check` | Tooling | P0 | 1 | todo | LANG-09 | [#76](https://github.com/graeme-lockley/menard-lang/issues/76) | — |
+| [TOOL-02](reviews/2026-10-24-build-f.md#tool-02) | `--version`, `--help`, and `--print-toolchain` | Tooling | P0 | 1 | todo | — | [#77](https://github.com/graeme-lockley/menard-lang/issues/77) | — |
 | [TOOL-03](reviews/2026-10-24-build-f.md#tool-03) | Machine-readable diagnostics: `--json` and a stable schema | Tooling | P0 | 1 | done | LANG-04 | — | — |
 | [DOC-01](reviews/2026-10-24-build-f.md#doc-01) | Truth pass on the guide, with executable snippets | Documentation | P0 | 1 | ready | LANG-01, LANG-03, LANG-06, LANG-07, LANG-15, LIB-08, CONC-10 | [#28](https://github.com/graeme-lockley/menard-lang/issues/28) | — |
 | [DOC-02](reviews/2026-10-24-build-f.md#doc-02) | Specification conformance, the new language decisions, and honest sizing | Documentation | P0 | 1 | ready | LANG-01, LANG-02, LANG-03, LANG-06, LANG-07, LANG-11, LANG-15, CONC-01, CONC-03, CONC-04, CONC-10, DOC-01 | [#29](https://github.com/graeme-lockley/menard-lang/issues/29) | — |
-| [DOC-03](reviews/2026-10-24-build-f.md#doc-03) | `AGENTS.md` and a one-page reference | Documentation | P0 | 1 | todo | DOC-01 | — | — |
-| [LANG-05](reviews/2026-10-24-build-f.md#lang-05) | Expected-type propagation stops at lambda bodies, so field and tuple projections need annotations | Language | P1 | 1 | todo | LANG-01 | — | — |
-| [LANG-06](reviews/2026-10-24-build-f.md#lang-06) | `?` propagates; `??` supplies the default | Language | P1 | 1 | todo | LANG-12, LANG-15 | — | — |
-| [LANG-08](reviews/2026-10-24-build-f.md#lang-08) | The eight-argument closure limit is enforced only by the backend | Language | P1 | 1 | todo | — | — | — |
-| [LANG-11](reviews/2026-10-24-build-f.md#lang-11) | Local functions with explicit type parameters generalize per use | Language | P1 | 1 | todo | — | — | — |
-| [LANG-15](reviews/2026-10-24-build-f.md#lang-15) | Pin `defer` semantics, tests and documentation | Language | P1 | 1 | todo | LANG-12, CONC-02 | — | — |
-| [LIB-08](reviews/2026-10-24-build-f.md#lib-08) | Remove `Int.parse`; `Int.from-str` is the only integer parser | Libraries | P1 | 1 | todo | LANG-06 | — | — |
-| [DOC-04](reviews/2026-10-24-build-f.md#doc-04) | Contributor guide and architecture map | Documentation | P1 | 1 | todo | DOC-03 | — | — |
-| [DOC-05](reviews/2026-10-24-build-f.md#doc-05) | Error-code catalogue, with `help:` | Documentation | P1 | 1 | todo | LANG-04, LANG-09, TOOL-03 | — | — |
-| [DOC-07](reviews/2026-10-24-build-f.md#doc-07) | README refresh for Build F | Documentation | P1 | 1 | todo | TOOL-01, TOOL-02, TOOL-05, TOOL-09, TOOL-13, OTH-01 | — | — |
-| [DOC-08](reviews/2026-10-24-build-f.md#doc-08) | Decisions journal: index, status, and supersession | Documentation | P1 | 1 | todo | — | — | — |
-| [OTH-08](reviews/2026-10-24-build-f.md#oth-08) | Repository hygiene | Other | P1 | 1 | todo | OTH-01 | — | — |
-| [LANG-12](reviews/2026-10-24-build-f.md#lang-12) | Pin arithmetic, `return`, `defer` and loop semantics | Language | P2 | 1 | todo | — | — | — |
+| [DOC-03](reviews/2026-10-24-build-f.md#doc-03) | `AGENTS.md` and a one-page reference | Documentation | P0 | 1 | todo | DOC-01 | [#78](https://github.com/graeme-lockley/menard-lang/issues/78) | — |
+| [LANG-05](reviews/2026-10-24-build-f.md#lang-05) | Expected-type propagation stops at lambda bodies, so field and tuple projections need annotations | Language | P1 | 1 | todo | LANG-01 | [#79](https://github.com/graeme-lockley/menard-lang/issues/79) | — |
+| [LANG-06](reviews/2026-10-24-build-f.md#lang-06) | `?` propagates; `??` supplies the default | Language | P1 | 1 | todo | LANG-12, LANG-15 | [#80](https://github.com/graeme-lockley/menard-lang/issues/80) | — |
+| [LANG-08](reviews/2026-10-24-build-f.md#lang-08) | The eight-argument closure limit is enforced only by the backend | Language | P1 | 1 | todo | — | [#81](https://github.com/graeme-lockley/menard-lang/issues/81) | — |
+| [LANG-11](reviews/2026-10-24-build-f.md#lang-11) | Local functions with explicit type parameters generalize per use | Language | P1 | 1 | todo | — | [#82](https://github.com/graeme-lockley/menard-lang/issues/82) | — |
+| [LANG-15](reviews/2026-10-24-build-f.md#lang-15) | Pin `defer` semantics, tests and documentation | Language | P1 | 1 | todo | LANG-12, CONC-02 | [#83](https://github.com/graeme-lockley/menard-lang/issues/83) | — |
+| [LIB-08](reviews/2026-10-24-build-f.md#lib-08) | Remove `Int.parse`; `Int.from-str` is the only integer parser | Libraries | P1 | 1 | todo | LANG-06 | [#84](https://github.com/graeme-lockley/menard-lang/issues/84) | — |
+| [DOC-04](reviews/2026-10-24-build-f.md#doc-04) | Contributor guide and architecture map | Documentation | P1 | 1 | todo | DOC-03 | [#85](https://github.com/graeme-lockley/menard-lang/issues/85) | — |
+| [DOC-05](reviews/2026-10-24-build-f.md#doc-05) | Error-code catalogue, with `help:` | Documentation | P1 | 1 | todo | LANG-04, LANG-09, TOOL-03 | [#86](https://github.com/graeme-lockley/menard-lang/issues/86) | — |
+| [DOC-07](reviews/2026-10-24-build-f.md#doc-07) | README refresh for Build F | Documentation | P1 | 1 | todo | TOOL-01, TOOL-02, TOOL-05, TOOL-09, TOOL-13, OTH-01 | [#87](https://github.com/graeme-lockley/menard-lang/issues/87) | — |
+| [DOC-08](reviews/2026-10-24-build-f.md#doc-08) | Decisions journal: index, status, and supersession | Documentation | P1 | 1 | todo | — | [#88](https://github.com/graeme-lockley/menard-lang/issues/88) | — |
+| [OTH-08](reviews/2026-10-24-build-f.md#oth-08) | Repository hygiene | Other | P1 | 1 | todo | OTH-01 | [#89](https://github.com/graeme-lockley/menard-lang/issues/89) | — |
+| [LANG-12](reviews/2026-10-24-build-f.md#lang-12) | Pin arithmetic, `return`, `defer` and loop semantics | Language | P2 | 1 | todo | — | [#90](https://github.com/graeme-lockley/menard-lang/issues/90) | — |
 | [LIB-01](reviews/2026-10-24-build-f.md#lib-01) | Add `std/float`, including the total-order functions | Libraries | P0 | 2 | todo | LANG-02, LANG-03 | — | — |
 | [LIB-02](reviews/2026-10-24-build-f.md#lib-02) | Add `std/set` | Libraries | P0 | 2 | todo | LIB-04 | — | — |
 | [LIB-03](reviews/2026-10-24-build-f.md#lib-03) | Unicode text: `String.chars`, `String.from-chars`, and `Char` code points | Libraries | P0 | 2 | todo | — | — | — |
