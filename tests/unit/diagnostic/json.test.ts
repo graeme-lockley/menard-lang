@@ -71,6 +71,22 @@ describe("diagnostics JSON schema", () => {
     expect(JSON.stringify(j)).not.toContain('"help"');
   });
 
+  test("glued == and n+1 carry help in JSON", () => {
+    const glued = diagnose("a==b");
+    expect(glued[0]!.code).toBe("E_PARSE");
+    expect(glued[0]!.help).toBe("did you mean a == b?");
+    const gluedJson = diagnosticsToJson(glued, "a==b", "g.mnd").diagnostics[0]!;
+    expect(gluedJson.help).toBe("did you mean a == b?");
+
+    const unbound = diagnose("let x = n+1\n");
+    const u = unbound.find((d) => d.code === "E_TYPE_UNBOUND")!;
+    expect(u.help).toContain("`n + 1`");
+    const uJson = diagnosticsToJson(unbound, "let x = n+1\n", "u.mnd").diagnostics.find(
+      (d) => d.code === "E_TYPE_UNBOUND",
+    )!;
+    expect(uJson.help).toContain("`n + 1`");
+  });
+
   test("multi-error file yields one versioned object", () => {
     // Two independent top-level type errors in one source.
     const src = "true + 1\nNone()\n";
@@ -242,6 +258,38 @@ let main() -> Int =
   });
 
   describe.skipIf(!hasMn)("native ./mn --json", () => {
+      test("operator-spacing help matches host diagnose JSON", () => {
+        const file = join(ROOT, "tests/negative/bad-op-spacing-plus.mnd");
+        const host = diagnose(readFileSync(file), { path: file });
+        const h = host.find((d) => d.code === "E_TYPE_UNBOUND")!;
+        expect(h.help).toContain("`n + 1`");
+
+        const check = spawnSync(MN, ["check", "--json", file], {
+          encoding: "utf-8",
+          cwd: ROOT,
+        });
+        expect(check.status).toBe(1);
+        const doc = parseStdoutJson(check.stdout) as {
+          diagnostics: Array<{ code: string; help?: string; message: string }>;
+        };
+        const n = doc.diagnostics.find((d) => d.code === "E_TYPE_UNBOUND")!;
+        expect(n.message).toBe(h.message);
+        expect(n.help).toBe(h.help);
+
+        const eqFile = join(ROOT, "tests/negative/bad-op-spacing-eq.mnd");
+        const eqHost = diagnose(readFileSync(eqFile), { path: eqFile });
+        expect(eqHost[0]!.help).toBe("did you mean a == b?");
+        const eqCheck = spawnSync(MN, ["check", "--json", eqFile], {
+          encoding: "utf-8",
+          cwd: ROOT,
+        });
+        expect(eqCheck.status).toBe(1);
+        const eqDoc = parseStdoutJson(eqCheck.stdout) as {
+          diagnostics: Array<{ code: string; help?: string }>;
+        };
+        expect(eqDoc.diagnostics[0]!.help).toBe("did you mean a == b?");
+      });
+
       test("./mn check --json and ./mn build --json share the schema", () => {
         const file = join(ROOT, "tests/negative/bad-nullary-call.mnd");
         const check = spawnSync(MN, ["check", "--json", file], {

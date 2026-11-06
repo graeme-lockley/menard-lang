@@ -6,6 +6,7 @@ import {
   offsetToLineCol,
 } from "../../../host/src/diagnostic/index.ts";
 import { read } from "../../../host/src/reader/index.ts";
+import { diagnose } from "../../../host/src/interp/index.ts";
 
 describe("line map", () => {
   test("maps offsets to 1-based line/col in bytes", () => {
@@ -69,6 +70,27 @@ describe("formatDiagnostic", () => {
     const helpIdx = formatted.indexOf("help:");
     const caretIdx = formatted.lastIndexOf("^");
     expect(helpIdx).toBeGreaterThan(caretIdx);
+  });
+
+  test("glued == parse error prints help after the caret", () => {
+    const source = "a==b";
+    const r = read(source);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    const diag = parseErrorToDiagnostic(r.error);
+    const formatted = formatDiagnostic(diag, source, "t.mnd");
+    expect(formatted).toMatch(/^t\.mnd:1:\d+: error\[E_PARSE\]: unexpected character\n/);
+    expect(formatted).toContain("help: did you mean a == b?");
+    expect(formatted.indexOf("help:")).toBeGreaterThan(formatted.lastIndexOf("^"));
+  });
+
+  test("unbound n+1 prints spacing help after the caret", () => {
+    const source = "let x = n+1\n";
+    const d = diagnose(source).find((x) => x.code === "E_TYPE_UNBOUND")!;
+    const formatted = formatDiagnostic(d, source, "t.mnd");
+    expect(formatted).toContain("error[E_TYPE_UNBOUND]");
+    expect(formatted).toContain("help: operators need a space on both sides; did you mean `n + 1`?");
+    expect(formatted.indexOf("help:")).toBeGreaterThan(formatted.lastIndexOf("^"));
   });
 
   test("text help for orderable, arity, and unbound constructor", () => {

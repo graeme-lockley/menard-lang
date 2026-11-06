@@ -42,7 +42,11 @@ following may appear with no surrounding whitespace:
 
 So `String.concat`, `Buf.append-byte!`, `f+`, `f-`, `f*`, `f/`, `std/list`, and
 `github:owner/repo@v1.2.0/console` are each one identifier. `a-b` is one
-identifier, not a subtraction. `!` anywhere but the end is a lexical error.
+identifier, not a subtraction. `n+1` is likewise one identifier (not addition);
+the typer's unbound-variable diagnostic suggests spacing when the name looks
+like a missing binary operator — see [§1.3](#13-operators) and
+[errors.md](errors.md) (`E_TYPE_UNBOUND`). `!` anywhere but the end is a
+lexical error.
 
 Casing is unchanged and is checked by the parser and the typer, not the
 lexer: a type or constructor starts with an uppercase letter; a value,
@@ -55,7 +59,13 @@ A binary operator is a token only when whitespace stands on both sides. A
 newline counts as that whitespace. Without whitespace on both sides, `==`,
 `!=`, `<=`, `>=`, `&&`, `||`, and `->` are lexical errors, and `+ - * / % < >`
 are the identifier characters of [§1.2](#12-identifiers) when they occur
-inside an identifier.
+inside an identifier. Glued `==` / `!=` keep the message `unexpected character`
+and add a `help:` line such as `did you mean a == b?`. Glued arithmetic that
+lands as one identifier (`n+1`) is diagnosed later as `E_TYPE_UNBOUND` with a
+spacing `help:` — see [diagnostics.md](diagnostics.md) and
+[errors.md](errors.md). `mn fmt` rewrites spacing around a real binary
+operator in the AST and never rewrites an identifier's bytes (`n+1` stays
+`n+1`).
 
 | Token | Role |
 |---|---|

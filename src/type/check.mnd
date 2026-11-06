@@ -26,6 +26,7 @@
 
 import "../reader/ast.mnd"
 import "../desugar/rest.mnd"
+import "../diag/operator-spacing.mnd"
 import "./types.mnd"
 import std/list
 import std/string as String
@@ -1129,7 +1130,7 @@ let infer-sym-global(env: TypeEnv, name: Str, sp: Span) -> Type =
     | Some(s) -> instantiate(env, s)
     | None ->
       {
-        err!(env, "E_TYPE_UNBOUND", String.concat("unbound variable ", name), sp)
+        err-help!(env, "E_TYPE_UNBOUND", String.concat("unbound variable ", name), sp, operator-spacing-help(name))
         fresh-var-anon(env)
       }
 

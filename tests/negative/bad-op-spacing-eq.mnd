@@ -1,0 +1,5 @@
+; Glued `==` is a lexical error (LANG-09). Host and Menard readers must
+; agree on E_PARSE / "unexpected character".
+
+let main() -> Bool =
+  a==b

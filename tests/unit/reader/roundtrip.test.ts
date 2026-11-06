@@ -43,4 +43,11 @@ describe("read/print round-trip", () => {
     roundTrip("()");
     roundTrip("[(), ()]");
   });
+
+  test("binary ops print with one space; glued idents keep their bytes", () => {
+    const op = mustRead("1  +  2");
+    expect(new TextDecoder().decode(print(op))).toBe("1 + 2");
+    roundTrip("n+1");
+    expect(new TextDecoder().decode(print(mustRead("n+1")))).toBe("n+1");
+  });
 });

@@ -283,15 +283,19 @@ under DOC-05. Schema details: [diagnostics.md](diagnostics.md).
   "code": "E_PARSE",
   "severity": "error",
   "message": "unexpected character",
+  "help": "did you mean a == b?",
   "path": "a.mnd",
   "span": {
-    "start": 0,
-    "end": 1,
+    "start": 1,
+    "end": 2,
     "line": 1,
-    "column": 1
+    "column": 2
   }
 }
 ```
+
+Glued `a==b` / `a!=b` keep this code and message; `help` is present when both
+sides are recoverable. Other unexpected characters omit `help`.
 
 ## `E_PARSE_BANG`
 
@@ -689,6 +693,8 @@ under DOC-05. Schema details: [diagnostics.md](diagnostics.md).
 
 ## `E_TYPE_UNBOUND`
 
+Unknown constructor:
+
 ```json
 {
   "code": "E_TYPE_UNBOUND",
@@ -704,6 +710,27 @@ under DOC-05. Schema details: [diagnostics.md](diagnostics.md).
   }
 }
 ```
+
+Unbound variable that looks like a missing operator (`n+1`):
+
+```json
+{
+  "code": "E_TYPE_UNBOUND",
+  "severity": "error",
+  "message": "unbound variable n+1",
+  "help": "operators need a space on both sides; did you mean `n + 1`?",
+  "path": "a.mnd",
+  "span": {
+    "start": 8,
+    "end": 11,
+    "line": 1,
+    "column": 9
+  }
+}
+```
+
+Kebab names, trailing ops, module paths, package specs, and float-family
+names such as `f-1` stay unbound without a spacing `help`.
 
 ## `E_TYPE_UNKNOWN`
 

@@ -92,9 +92,8 @@ User panics never include a JavaScript / `MENARD_STACK` interpreter dump.
 Every emitted `E_*` code and a sample JSON object live in
 [errors.md](errors.md). Actionable codes that exist today carry `help` in both
 text and JSON (nullary call, orderability, function/closure arity, unbound
-constructor). Operator-spacing and `?`/`??` return-type diagnostics — and their
-`help` lines — are LANG-09 / LANG-06; this item only supplies the shared `help`
-field and plumbing those items will use.
+constructor, operator-spacing hints on `E_TYPE_UNBOUND` / glued `E_PARSE`).
+`?`/`??` return-type diagnostics and their `help` lines remain LANG-06.
 
 ## LSP
 

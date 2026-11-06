@@ -77,6 +77,12 @@ total order (`-inf < finite < +inf < nan`, with `-0.0 < 0.0`). `show` of a
 `Float` is a shortest round-trip spelling shared by both hosts (`1.0`, `0.1`,
 `1e+21`, `nan`, `inf`, `-inf`); `-0.0` is distinct from `0.0`, and `nan = nan`.
 
+Binary operators need a space on both sides. `n + 1` is addition; `n+1` is
+one identifier (and an unbound-variable error unless you defined that name).
+Kebab names (`is-negative`), float ops (`f+`, `f-1`), module paths
+(`std/list`), and package specs (`github:owner/repo@v1`) stay single
+identifiers and are not rewritten.
+
 A function names its arguments and its result.
 
 ```

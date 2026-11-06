@@ -4,7 +4,7 @@ import type { Span } from "./span.ts";
 import { lex, type Tok } from "./lex.ts";
 import { canonicalFloat } from "../interp/float-order.ts";
 
-export type ParseErr = { span: Span; message: string };
+export type ParseErr = { span: Span; message: string; help?: string };
 
 type R = { ok: true; ast: Ast } | { ok: false; error: ParseErr };
 type Rs = { ok: true; forms: Ast[] } | { ok: false; error: ParseErr };

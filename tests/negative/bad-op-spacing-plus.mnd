@@ -1,0 +1,6 @@
+; Glued `+` is one identifier; the typer reports E_TYPE_UNBOUND with a
+; spacing help line (LANG-09). Host and Menard typers must agree on code
+; and message.
+
+let main() -> Int =
+  n+1

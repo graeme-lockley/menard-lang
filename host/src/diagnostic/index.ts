@@ -13,6 +13,8 @@ export {
 export type { LineMap, LineCol } from "./line-map.ts";
 export { buildLineMap, offsetToLineCol, lineBytes } from "./line-map.ts";
 
+export { operatorSpacingHelp } from "./operator-spacing.ts";
+
 export { formatDiagnostic, formatDiagnostics } from "./format.ts";
 
 export type {
