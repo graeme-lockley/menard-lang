@@ -2,10 +2,10 @@
 
 **Source of truth for status.** The specification and acceptance criteria are the [Build F review](reviews/2026-10-24-build-f.md); this file is the live work queue. GitHub issues are the public work items and discussion, linked by the same ID. The review is deliberately not the tracker: do not tick its checkboxes.
 
-- **First item:** continue [LANG-01](reviews/2026-10-24-build-f.md#lang-01) (Char text via [LANG-10](reviews/2026-10-24-build-f.md#lang-10) is done); see `make next`.
-- **Phase 0 epic:** [#30](https://github.com/graeme-lockley/menard-lang/issues/30) — Phase 0 checklist (originally 18 items; LANG-07 and LANG-10 were promoted in to unblock `show`).
+- **First item:** see `make next` — phase 0 is closed, and phase 1 is open.
+- **Phase 0 epic:** [#30](https://github.com/graeme-lockley/menard-lang/issues/30) — Phase 0 checklist (originally 18 items; LANG-07 and LANG-10 were promoted in to unblock `show`; DOC-01, DOC-02, OTH-02 and OTH-03 moved out on 2026-11-06).
 - **Opened:** the original 18 Phase 0 issues were opened on 2026-10-24, all in the `v0.6 — Truth and trust` milestone.
-- **Phase 0** is the current focus. Everything else is `todo` until its phase opens.
+- **Phase 1** is the current focus; phase 0 closed on 2026-11-06, with its last four docs/CI items re-phased to 1, 3 and 4 because they depend on phase 1+ work. Everything else is `todo` until its phase opens.
 - **Statuses:** `todo` (not scheduled), `ready` (can start; see *Blocked by* for slices that must wait), `in-progress`, `blocked` (no useful slice can start), `review` (PR open), `done`, `wontfix`.
 - **Blocked by:** hard schedule prerequisites only — every named ID must be `done` (or `wontfix`) before the row can start. Peer “ship together” notes, doc/catalogue sync, and post-change codemods/editions belong in the review, not this column.
 - **Definition of done:** every acceptance criterion in the linked review item is satisfied, `make test` and `make check-fixed-point` are green, the named docs are updated, and this row is `done` in the same PR that closes the issue.
@@ -16,13 +16,13 @@
 
 | Phase | Theme | Items | Ready | In progress | Done |
 | --- | --- | ---: | ---: | ---: | ---: |
-| 0 | Truth, trust and the unsafe edges | 25 | 9 | 1 | 15 |
-| 1 | Daily loop and language decisions | 16 | 0 | 0 | 0 |
+| 0 | Truth, trust and the unsafe edges | 21 | 0 | 0 | 21 |
+| 1 | Daily loop and language decisions | 18 | 2 | 0 | 1 |
 | 2 | Standard library | 12 | 0 | 0 | 0 |
-| 3 | Operational concurrency | 11 | 0 | 0 | 0 |
-| 4 | Project and ecosystem | 17 | 0 | 0 | 0 |
+| 3 | Operational concurrency | 12 | 1 | 0 | 0 |
+| 4 | Project and ecosystem | 18 | 1 | 0 | 0 |
 | 5 | Later | 9 | 0 | 0 | 0 |
-| **Total** | | **90** | **9** | **1** | **15** |
+| **Total** | | **90** | **4** | **0** | **22** |
 
 Priority mix: P0 = 25, P1 = 41, P2 = 19, P3 = 5.
 
@@ -42,11 +42,7 @@ Rows are ordered by phase, then priority, then area, then ID.
 | [CONC-03](reviews/2026-10-24-build-f.md#conc-03) | TLS must verify the peer, send SNI, and not block the mutator | Concurrency | P0 | 0 | done | CONC-02, CONC-10 | [#20](https://github.com/graeme-lockley/menard-lang/issues/20) | — |
 | [CONC-04](reviews/2026-10-24-build-f.md#conc-04) | HTTP limits, header correctness, and connection hygiene | Concurrency | P0 | 0 | done | CONC-02 | [#21](https://github.com/graeme-lockley/menard-lang/issues/21) | — |
 | [CONC-05](reviews/2026-10-24-build-f.md#conc-05) | An actor's death must not hang its callers | Concurrency | P0 | 0 | done | CONC-01, CONC-02 | [#22](https://github.com/graeme-lockley/menard-lang/issues/22) | — |
-| [DOC-01](reviews/2026-10-24-build-f.md#doc-01) | Truth pass on the guide, with executable snippets | Documentation | P0 | 0 | ready | LANG-01, LANG-03, LANG-06, LANG-07, LANG-15, LIB-08, CONC-10 | [#28](https://github.com/graeme-lockley/menard-lang/issues/28) | — |
-| [DOC-02](reviews/2026-10-24-build-f.md#doc-02) | Specification conformance, the new language decisions, and honest sizing | Documentation | P0 | 0 | ready | LANG-01, LANG-02, LANG-03, LANG-06, LANG-07, LANG-11, LANG-15, CONC-01, CONC-03, CONC-04, CONC-10, DOC-01 | [#29](https://github.com/graeme-lockley/menard-lang/issues/29) | — |
 | [OTH-01](reviews/2026-10-24-build-f.md#oth-01) | Add an MIT licence | Other | P0 | 0 | done | — | [#24](https://github.com/graeme-lockley/menard-lang/issues/24) | [#34](https://github.com/graeme-lockley/menard-lang/pull/34) |
-| [OTH-02](reviews/2026-10-24-build-f.md#oth-02) | Harden CI, add OpenSSL and macOS, and run the new checks | Other | P0 | 0 | ready | TOOL-01, TOOL-03, TOOL-05, CONC-03, CONC-04, CONC-10, OTH-03 | [#25](https://github.com/graeme-lockley/menard-lang/issues/25) | — |
-| [OTH-03](reviews/2026-10-24-build-f.md#oth-03) | Build the regression corpus the P0 bugs prove is missing | Other | P0 | 0 | ready | LANG-01, LANG-02, LANG-03, LANG-04, LANG-06, LANG-07, LANG-15, LANG-18, CONC-01, CONC-03, CONC-04, CONC-06, LIB-06 | [#26](https://github.com/graeme-lockley/menard-lang/issues/26) | — |
 | [LANG-07](reviews/2026-10-24-build-f.md#lang-07) | Nullary constructors are values; the `None()`/`Red()` call form is removed | Language | P1 | 0 | done | — | [#47](https://github.com/graeme-lockley/menard-lang/issues/47) | [#53](https://github.com/graeme-lockley/menard-lang/pull/53) |
 | [LANG-09](reviews/2026-10-24-build-f.md#lang-09) | Operator-spacing diagnostics, and a real `help:` line | Language | P1 | 0 | done | TOOL-03 | [#16](https://github.com/graeme-lockley/menard-lang/issues/16) | — |
 | [LANG-10](reviews/2026-10-24-build-f.md#lang-10) | `Char` shows as a decimal number | Language | P1 | 0 | done | — | [#48](https://github.com/graeme-lockley/menard-lang/issues/48) | [#55](https://github.com/graeme-lockley/menard-lang/pull/55) |
@@ -60,6 +56,8 @@ Rows are ordered by phase, then priority, then area, then ID.
 | [TOOL-01](reviews/2026-10-24-build-f.md#tool-01) | `mn fmt` and `mn fmt --check` | Tooling | P0 | 1 | todo | LANG-09 | — | — |
 | [TOOL-02](reviews/2026-10-24-build-f.md#tool-02) | `--version`, `--help`, and `--print-toolchain` | Tooling | P0 | 1 | todo | — | — | — |
 | [TOOL-03](reviews/2026-10-24-build-f.md#tool-03) | Machine-readable diagnostics: `--json` and a stable schema | Tooling | P0 | 1 | done | LANG-04 | — | — |
+| [DOC-01](reviews/2026-10-24-build-f.md#doc-01) | Truth pass on the guide, with executable snippets | Documentation | P0 | 1 | ready | LANG-01, LANG-03, LANG-06, LANG-07, LANG-15, LIB-08, CONC-10 | [#28](https://github.com/graeme-lockley/menard-lang/issues/28) | — |
+| [DOC-02](reviews/2026-10-24-build-f.md#doc-02) | Specification conformance, the new language decisions, and honest sizing | Documentation | P0 | 1 | ready | LANG-01, LANG-02, LANG-03, LANG-06, LANG-07, LANG-11, LANG-15, CONC-01, CONC-03, CONC-04, CONC-10, DOC-01 | [#29](https://github.com/graeme-lockley/menard-lang/issues/29) | — |
 | [DOC-03](reviews/2026-10-24-build-f.md#doc-03) | `AGENTS.md` and a one-page reference | Documentation | P0 | 1 | todo | DOC-01 | — | — |
 | [LANG-05](reviews/2026-10-24-build-f.md#lang-05) | Expected-type propagation stops at lambda bodies, so field and tuple projections need annotations | Language | P1 | 1 | todo | LANG-01 | — | — |
 | [LANG-06](reviews/2026-10-24-build-f.md#lang-06) | `?` propagates; `??` supplies the default | Language | P1 | 1 | todo | LANG-12, LANG-15 | — | — |
@@ -85,6 +83,7 @@ Rows are ordered by phase, then priority, then area, then ID.
 | [DOC-06](reviews/2026-10-24-build-f.md#doc-06) | `docs/stdlib.md` completeness and accuracy, including the new modules | Documentation | P1 | 2 | todo | LIB-01, LIB-02, LIB-03, LIB-04, LIB-05, LIB-06, LIB-07, LIB-08, LIB-09, LIB-10, LIB-11, LIB-12, LIB-13 | — | — |
 | [LIB-13](reviews/2026-10-24-build-f.md#lib-13) | Seeded randomness and generative tests | Libraries | P2 | 2 | todo | LIB-01 | — | — |
 | [LIB-14](reviews/2026-10-24-build-f.md#lib-14) | Numeric helpers: powers, conversions, and integer formatting | Libraries | P3 | 2 | todo | LIB-01 | — | — |
+| [OTH-03](reviews/2026-10-24-build-f.md#oth-03) | Build the regression corpus the P0 bugs prove is missing | Other | P0 | 3 | ready | LANG-01, LANG-02, LANG-03, LANG-04, LANG-06, LANG-07, LANG-15, LANG-18, CONC-01, CONC-03, CONC-04, CONC-06, LIB-06 | [#26](https://github.com/graeme-lockley/menard-lang/issues/26) | — |
 | [CONC-06](reviews/2026-10-24-build-f.md#conc-06) | Harden supervision so it cannot hang or spin | Concurrency | P1 | 3 | todo | CONC-02, CONC-05 | — | — |
 | [CONC-07](reviews/2026-10-24-build-f.md#conc-07) | Bounded mailboxes: verify, expose, and finish the edges | Concurrency | P1 | 3 | todo | CONC-01, CONC-02 | — | — |
 | [CONC-08](reviews/2026-10-24-build-f.md#conc-08) | Make the registry type-safe | Concurrency | P1 | 3 | todo | — | — | — |
@@ -96,6 +95,7 @@ Rows are ordered by phase, then priority, then area, then ID.
 | [CONC-12](reviews/2026-10-24-build-f.md#conc-12) | Fairness and cancellation latency | Concurrency | P2 | 3 | todo | CONC-02 | — | — |
 | [CONC-13](reviews/2026-10-24-build-f.md#conc-13) | Parallelism ADR: state the model | Concurrency | P2 | 3 | todo | — | — | — |
 | [CONC-14](reviews/2026-10-24-build-f.md#conc-14) | Observability: depth, capacity, task list, trace | Concurrency | P2 | 3 | todo | CONC-07, CONC-10 | — | — |
+| [OTH-02](reviews/2026-10-24-build-f.md#oth-02) | Harden CI, add OpenSSL and macOS, and run the new checks | Other | P0 | 4 | ready | TOOL-01, TOOL-03, TOOL-05, CONC-03, CONC-04, CONC-10, OTH-03 | [#25](https://github.com/graeme-lockley/menard-lang/issues/25) | — |
 | [TOOL-04](reviews/2026-10-24-build-f.md#tool-04) | Language server (`mn lsp`) | Tooling | P1 | 4 | todo | TOOL-01, TOOL-03 | — | — |
 | [TOOL-05](reviews/2026-10-24-build-f.md#tool-05) | `mn doc`: a Menard documentation server and static site | Tooling | P1 | 4 | todo | CONC-02, CONC-04, CONC-15, CONC-16, LANG-15, TOOL-03, DOC-06 | — | — |
 | [TOOL-07](reviews/2026-10-24-build-f.md#tool-07) | Editor grammar and highlighting, including `defer` and the new show forms | Tooling | P1 | 4 | todo | TOOL-04 | — | — |
