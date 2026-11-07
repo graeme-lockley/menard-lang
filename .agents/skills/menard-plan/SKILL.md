@@ -22,9 +22,12 @@ follows, so it has to be specific enough to check.
    `docs/decisions.md`.
 3. For every AC, decide the change and the test that proves it. If you cannot
    name a test, the plan is not finished: say so rather than guessing.
-4. Keep the interpreter and the native build in agreement; say how you will
+4. If an AC claims live fidelity (samples match `mn check --json`, help matches
+   emitters, docs match code, …), the evidence row must name a **sync test**
+   that compares the claim to the live source — not a one-shot manual regen.
+5. Keep the interpreter and the native build in agreement; say how you will
    check that.
-5. Write the plan with the plan tool, or as your final message if the tool is
+6. Write the plan with the plan tool, or as your final message if the tool is
    unavailable, then stop.
 
 ## Required shape
@@ -56,6 +59,17 @@ would have caught the bug.
 ## Out of scope
 
 What this item deliberately does not do.
+
+Do **not** put an identifier in Out of scope if the review **Scope** or an AC
+requires it, unless you also add an explicit override line:
+
+```
+AC override: Scope names `E_FOO` for completeness; AC1 only requires emitted
+codes, so `E_FOO` is reserved-only (not a ### catalogue section).
+```
+
+The driver fails the plan when Out of scope declines a Scope/AC identifier
+without such an override (the DOC-05 failure mode).
 
 ## Rules
 

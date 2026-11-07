@@ -26,6 +26,7 @@
 import "../reader/ast.mnd"
 import "../desugar/rest.mnd"
 import "../diag/operator-spacing.mnd"
+import "../diag/helps.mnd"
 import "./types.mnd"
 import std/list
 import std/string as String
@@ -198,8 +199,13 @@ let diag-exists(diags: List TypeError, code: Str, message: Str, span: Span) -> B
 let err!(env: TypeEnv, code: Str, message: Str, span: Span) -> Unit =
   err-help!(env, code, message, span, None)
 
+let resolve-help(code: Str, help: Maybe Str) -> Maybe Str =
+  match (help)
+    | Some(h) -> Some(h)
+    | None -> catalogue-help(code)
+
 let err-help!(env: TypeEnv, code: Str, message: Str, span: Span, help: Maybe Str) -> Unit =
-  if (diag-exists(deref(env.diags), code, message, span)) -> () | set!(env.diags, TypeError(span, code, message, help) :: deref(env.diags))
+  if (diag-exists(deref(env.diags), code, message, span)) -> () | set!(env.diags, TypeError(span, code, message, resolve-help(code, help)) :: deref(env.diags))
 
 let fresh-var(env: TypeEnv, name: Str) -> Type {
   let id = deref(env.next-var)
@@ -2844,7 +2850,7 @@ let finish-typecheck(forms: List Ast, errs: List TypeError, env: TypeEnv) -> Res
 let rest-to-type(es: List RestError) -> List TypeError =
   match (es)
     | [] -> []
-    | RestError(sp, code, msg) :: rest -> TypeError(sp, code, msg, None) :: rest-to-type(rest)
+    | RestError(sp, code, msg) :: rest -> TypeError(sp, code, msg, catalogue-help(code)) :: rest-to-type(rest)
 
 ; Typecheck a single-file program's top-level forms (post-desugar, post
 ; rest-pack). Two passes: collect every declared type and defn scheme
@@ -3027,7 +3033,7 @@ let consider-type-name(n: Str, sp: Span, declared: List Str, pubs: List Str, ali
   match (Map.lookup(n, aliases))
     | Some(target) -> walk-type-ast(target, declared, pubs, aliases, n :: expanding, acc)
     | None ->
-      if (member(n, declared) && not(member(n, pubs))) -> TypeError(sp, "E_PUB_PRIVATE_TYPE", String.concat("pub signature mentions private type ", n), None) :: acc | acc
+      if (member(n, declared) && not(member(n, pubs))) -> TypeError(sp, "E_PUB_PRIVATE_TYPE", String.concat("pub signature mentions private type ", n), catalogue-help("E_PUB_PRIVATE_TYPE")) :: acc | acc
 
 let is-label(n: Str) -> Bool {
   let len = String.length(n)

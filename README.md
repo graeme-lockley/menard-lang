@@ -26,7 +26,7 @@ The full string calculator, with custom separators and a `Result` of every negat
 - **The library.** Lists, maps, strings, characters, maybe, and result, in [docs/stdlib.md](docs/stdlib.md). Files, processes, and the console sit beside them.
 - **`mn`.** `mn run` compiles and runs a program. `mn test` runs the `@test` lines in a module. `mn fmt` formats source; `mn fmt --check` fails CI on drift. `mn --version` and `mn --print-toolchain` report the compiler and the cc/runtime/Bun/LLVM/OpenSSL it will use.
 
-The guide is [docs/guide.md](docs/guide.md). The syntax reference is [docs/syntax.md](docs/syntax.md). Formatting is [docs/formatting.md](docs/formatting.md). Tooling is [docs/tooling.md](docs/tooling.md). The rules are [docs/menard-spec.md](docs/menard-spec.md).
+The guide is [docs/guide.md](docs/guide.md). The syntax reference is [docs/syntax.md](docs/syntax.md). Formatting is [docs/formatting.md](docs/formatting.md). Tooling is [docs/tooling.md](docs/tooling.md). Error codes are [docs/errors.md](docs/errors.md). The rules are [docs/menard-spec.md](docs/menard-spec.md).
 
 ## The compiler
 

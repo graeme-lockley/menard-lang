@@ -8,6 +8,7 @@
 ; stdout starts that file's pass/fail lines.
 ; Green and red only when stdout is a terminal and `NO_COLOR` is unset.
 import "../diag/report.mnd"
+import "../diag/helps.mnd"
 import "../reader/ast.mnd"
 import "../reader/read.mnd"
 import "../cache/cache.mnd"
@@ -123,7 +124,7 @@ let explain-one(path: Str, src: Str, shown: Str, original: Str, forms: List Ast,
     | Some(expr) ->
       {
         let sp = ast-span(expr)
-        if (sp.origin != 0) -> report-span(shown, original, sp, "error", "E_TEST", String.concat("assertion failed: ", name)) | report-span(path, src, sp, "error", "E_TEST", String.concat("assertion failed: ", name))
+        if (sp.origin != 0) -> report-span-help(shown, original, sp, "error", "E_TEST", String.concat("assertion failed: ", name), catalogue-help("E_TEST")) | report-span-help(path, src, sp, "error", "E_TEST", String.concat("assertion failed: ", name), catalogue-help("E_TEST"))
       }
     | None -> report-plain(String.concat("assertion failed: ", name))
 

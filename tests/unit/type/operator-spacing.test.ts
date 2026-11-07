@@ -22,7 +22,12 @@ describe("operator-spacing unbound help", () => {
       ["a*b", "a * b"],
       ["f(x-1)", "x - 1"],
     ] as const) {
-      const d = diagnose(src).find((x) => x.code === "E_TYPE_UNBOUND" && x.help);
+      const d = diagnose(src).find(
+        (x) =>
+          x.code === "E_TYPE_UNBOUND" &&
+          typeof x.help === "string" &&
+          x.help.includes("operators need a space"),
+      );
       expect(d, src).toBeDefined();
       expect(d!.help).toContain(`\`${spaced}\``);
     }
@@ -31,12 +36,14 @@ describe("operator-spacing unbound help", () => {
   test("suggest matrix: no false positives on unbound names", () => {
     // `f+` is a bound float intrinsic; the pure helper covers its rejection.
     // `g+` is unbound with a trailing op (empty right side) — no spacing help.
+    // DOC-05 still attaches the generic unbound catalogue help.
     for (const name of ["is-negative", "g+", "github:owner/repo@v1", "std/list", "f-1"]) {
       const d = diagnose(name).find(
         (x) => x.code === "E_TYPE_UNBOUND" && x.message.includes(name),
       );
       expect(d, name).toBeDefined();
-      expect(d!.help).toBeUndefined();
+      expect(d!.help).toBe("bind the name, or check the spelling");
+      expect(d!.help).not.toContain("operators need a space");
     }
   });
 });

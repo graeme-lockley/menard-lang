@@ -46,6 +46,8 @@ const GATE_STAMP = "gate.stamp.json";
 const STOP_FILE = join(ROOT, ".loop", "stop");
 const CACHE_MARKER = "cache-cleared";
 const DIFF_LIMIT = 24000;
+/** Documentation rewrites are the artefact under review; keep more of the diff. */
+const DOCS_DIFF_LIMIT = 120_000;
 
 type Options = {
   dryRun: boolean;
@@ -292,6 +294,98 @@ export function planMissing(plan: string, criteria: AcceptanceCriterion[]): stri
   return criteria.filter((criterion) => !covered.has(criterion.id)).map((criterion) => criterion.id);
 }
 
+/** Body of a `## Heading` section through the next `##` or end of text. */
+export function planSection(plan: string, heading: string): string {
+  const lines = plan.split("\n");
+  const start = lines.findIndex((line) => new RegExp(`^##\\s+${heading}\\s*$`, "i").test(line.trim()));
+  if (start === -1) return "";
+  let end = start + 1;
+  while (end < lines.length && !/^##\s+/.test(lines[end] ?? "")) end += 1;
+  return lines.slice(start + 1, end).join("\n").trim();
+}
+
+/** The review item's `**Scope.**` paragraph (through the next bold label or `---`). */
+export function specificationScope(specification: string): string {
+  const match = specification.match(/\*\*Scope\.\*\*\s*([\s\S]*?)(?=\n\*\*[A-Za-z]|\n---|\n#{1,3}\s|$)/i);
+  return (match?.[1] ?? "").trim();
+}
+
+/** Identifiers worth comparing across Scope/AC and Out of scope. */
+export function significantIds(text: string): Set<string> {
+  const ids = new Set<string>();
+  const keep = (raw: string): void => {
+    const id = raw.trim();
+    if (id.length < 4) return;
+    if (/^(E|W)_[A-Z0-9_]+$/.test(id)) {
+      ids.add(id);
+      return;
+    }
+    if (/\.(md|mnd|ts|c)$/.test(id) || id.includes("/")) {
+      ids.add(id);
+      return;
+    }
+    if (/^[A-Z][A-Z0-9_]{3,}$/.test(id)) {
+      ids.add(id);
+      return;
+    }
+    if (id.length >= 8) ids.add(id);
+  };
+  for (const match of text.matchAll(/`([^`]+)`/g)) keep(match[1] ?? "");
+  for (const match of text.matchAll(/\b((?:E|W)_[A-Z0-9_]+)\b/g)) keep(match[1] ?? "");
+  return ids;
+}
+
+/** Codes / ALL_CAPS ids — not paths (paths often appear in "don't generate X"). */
+function conflictWorthy(id: string): boolean {
+  return /^(E|W)_[A-Z0-9_]+$/.test(id) || (/^[A-Z][A-Z0-9_]{3,}$/.test(id) && id.includes("_"));
+}
+
+/**
+ * Out of scope must not quietly cancel Scope/AC requirements. An explicit
+ * `AC override:` line that names the conflicting id is the escape hatch when
+ * Scope is broader than an AC (e.g. reserved codes named in Scope but not emitted).
+ */
+export function planScopeConflicts(
+  plan: string,
+  specification: string,
+  criteria: AcceptanceCriterion[],
+): string[] {
+  const outOfScope = planSection(plan, "Out of scope");
+  if (outOfScope === "") return [];
+  const required = new Set(
+    [
+      ...significantIds(specificationScope(specification)),
+      ...criteria.flatMap((criterion) => [...significantIds(criterion.text)]),
+    ].filter(conflictWorthy),
+  );
+  if (required.size === 0) return [];
+  const declined = [...significantIds(outOfScope)].filter(conflictWorthy);
+  const hasOverride = /AC\s*override\s*:/i.test(outOfScope);
+  const conflicts: string[] = [];
+  for (const id of declined) {
+    if (!required.has(id)) continue;
+    if (hasOverride && outOfScope.includes(id)) continue;
+    conflicts.push(
+      `Out of scope declines \`${id}\`, but Scope/AC require it (add \`AC override: … ${id} …\` if intentional)`,
+    );
+  }
+  return conflicts;
+}
+
+/** Raise the review diff cap when the change is documentation-dominated. */
+export function reviewDiffLimit(changedFiles: string, area: string): number {
+  if (area === "Documentation") return DOCS_DIFF_LIMIT;
+  const files = changedFiles
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+  if (files.length === 0) return DIFF_LIMIT;
+  if (files.every((file) => file.startsWith("docs/") || file.startsWith(".agents/"))) {
+    return DOCS_DIFF_LIMIT;
+  }
+  return DIFF_LIMIT;
+}
+
 /** A verdict that skips an AC fails the review; the fix round gets the gap. */
 export function withCoverage(verdict: Verdict, criteria: AcceptanceCriterion[]): Verdict {
   if (criteria.length === 0) return verdict;
@@ -299,6 +393,67 @@ export function withCoverage(verdict: Verdict, criteria: AcceptanceCriterion[]):
   const missing = criteria.filter((criterion) => !seen.has(criterion.id)).map((criterion) => criterion.id);
   if (missing.length === 0) return verdict;
   return { ...verdict, satisfied: false, gaps: [...verdict.gaps, `review verdict did not cover ${missing.join(", ")}`] };
+}
+
+/** Partial/missing rows from a verdict, for the fix prompt. */
+export function openFindings(verdict: Verdict | null): Criterion[] {
+  if (verdict === null) return [];
+  return verdict.criteria.filter(
+    (entry) => entry.status === "partial" || entry.status === "missing",
+  );
+}
+
+/** Human handoff when the fix budget is spent. */
+export function formatHandoff(input: {
+  item: string;
+  attempt: number;
+  maxRounds: number;
+  failedGate: string | null;
+  gateOutput: string;
+  verdict: Verdict | null;
+  criteria: AcceptanceCriterion[];
+}): string {
+  const { item, attempt, maxRounds, failedGate, verdict, criteria, gateOutput } = input;
+  const findings = openFindings(verdict);
+  const gaps = verdict?.gaps ?? [];
+  const lines: string[] = [
+    `# ${item} — handoff after ${attempt} attempt(s)`,
+    "",
+    `Fix budget exhausted (\`--max-rounds ${maxRounds}\`). Artifacts stay in this directory.`,
+    "Fix by hand, then `make loop ARGS=--resume`.",
+    "",
+    "## Gate",
+    "",
+    failedGate === null ? "Gate passed; the independent review rejected the work." : `Failed at: \`${failedGate}\``,
+    "",
+  ];
+  if (failedGate !== null && gateOutput.trim() !== "") {
+    lines.push("```", tail(gateOutput, 4000), "```", "");
+  }
+  lines.push("## Review gaps", "");
+  if (gaps.length === 0) lines.push("(none)");
+  else for (const gap of gaps) lines.push(`- ${gap}`);
+  lines.push("", "## Partial / missing criteria", "");
+  if (findings.length === 0) lines.push("(none)");
+  else {
+    for (const finding of findings) {
+      const ac = criteria.find((criterion) => criterion.id === finding.criterion);
+      lines.push(`- **${finding.criterion}** (${finding.status}): ${finding.evidence || "(no evidence)"}`);
+      if (ac !== undefined) lines.push(`  - AC: ${ac.text}`);
+    }
+  }
+  lines.push(
+    "",
+    "## Suggested verification",
+    "",
+    "```bash",
+    "bun test tests/unit/diagnostic/catalogue.test.ts   # when DOC-05-shaped",
+    "make typecheck",
+    "make loop ARGS=--resume",
+    "```",
+    "",
+  );
+  return lines.join("\n");
 }
 
 /** The agent must not commit: the driver owns the boundary. */
@@ -689,10 +844,38 @@ async function runReview(
   const stat = run("git", ["diff", "--cached", "--stat", state.base], { cwd: ROOT }).stdout.trim();
   const changed = run("git", ["diff", "--cached", "--name-only", state.base], { cwd: ROOT }).stdout.trim();
   const rawDiff = run("git", ["diff", "--cached", state.base], { cwd: ROOT }).stdout;
-  const diff = rawDiff.length > DIFF_LIMIT ? `${rawDiff.slice(0, DIFF_LIMIT)}\n… truncated at ${DIFF_LIMIT} characters` : rawDiff;
+  const limit = reviewDiffLimit(changed, row.area);
+  const diff =
+    rawDiff.length > limit
+      ? `${rawDiff.slice(0, limit)}\n… truncated at ${limit} characters`
+      : rawDiff;
+
+  let priorVerdict: Verdict | null = null;
+  if (attempt > 1) {
+    const priorRaw = journal.read(`review-${attempt - 1}.json`) ?? journal.read("review.json");
+    if (priorRaw !== null) {
+      try {
+        priorVerdict = JSON.parse(priorRaw) as Verdict;
+      } catch {
+        priorVerdict = null;
+      }
+    }
+  }
 
   const reply = await askCursor(
-    reviewPrompt({ row, specification, criteria, base: state.base, stat, changed, diff }),
+    reviewPrompt({
+      row,
+      specification,
+      criteria,
+      base: state.base,
+      stat,
+      changed,
+      diff,
+      priorVerdict:
+        priorVerdict === null
+          ? null
+          : { gaps: priorVerdict.gaps, criteria: priorVerdict.criteria },
+    }),
     "ask",
     journal,
     options,
@@ -1030,14 +1213,19 @@ async function runItem(options: Options, completed: ReadonlySet<string>): Promis
     const first = await timed("plan", () => askCursor(request, "plan", journal, options, 20, "plan"));
     let captured = first.plan ?? first.text;
     let missing = criteria.length === 0 ? [] : planMissing(captured, criteria);
+    let scopeConflicts = planScopeConflicts(captured, specification, criteria);
     const sectionsMissing = !hasPlanSections(captured);
 
-    if (!options.dryRun && (missing.length > 0 || sectionsMissing)) {
-      const lacking = [...missing, ...(sectionsMissing ? ["## Scope / ## Steps"] : [])].join(", ");
-      journal.mark(`! plan is missing ${lacking} — asking once more`);
+    if (!options.dryRun && (missing.length > 0 || sectionsMissing || scopeConflicts.length > 0)) {
+      const lacking = [
+        ...missing,
+        ...(sectionsMissing ? ["## Scope / ## Steps"] : []),
+        ...scopeConflicts.map((conflict) => `scope conflict: ${conflict}`),
+      ].join(", ");
+      journal.mark(`! plan is incomplete (${lacking}) — asking once more`);
       const retry = await timed("plan retry", () =>
         askCursor(
-          `${request}\n\nYour previous reply did not cover: ${lacking}. Return the plan with the required headings and one table row per AC id, in the form | AC1 | change | evidence | command |.`,
+          `${request}\n\nYour previous reply had problems: ${lacking}. Return the plan with the required headings and one table row per AC id (| AC1 | change | evidence | command |). If Out of scope deliberately narrows Scope for an AC, add an \`AC override:\` line that names the conflicting identifier and the AC it serves.`,
           "plan",
           journal,
           options,
@@ -1047,9 +1235,15 @@ async function runItem(options: Options, completed: ReadonlySet<string>): Promis
       );
       const retried = retry.plan ?? retry.text;
       const retriedMissing = criteria.length === 0 ? [] : planMissing(retried, criteria);
-      if (retriedMissing.length === 0 && hasPlanSections(retried)) {
+      const retriedConflicts = planScopeConflicts(retried, specification, criteria);
+      if (retriedMissing.length === 0 && hasPlanSections(retried) && retriedConflicts.length === 0) {
         captured = retried;
         missing = [];
+        scopeConflicts = [];
+      } else if (hasPlanSections(retried)) {
+        captured = retried;
+        missing = retriedMissing;
+        scopeConflicts = retriedConflicts;
       }
     }
 
@@ -1060,9 +1254,20 @@ async function runItem(options: Options, completed: ReadonlySet<string>): Promis
         `plan does not cover ${missing.join(", ")}; the plan is in ${journal.path("plan.md")}. Add the missing rows and rerun with --resume.`,
       );
     }
+    if (!options.dryRun && scopeConflicts.length > 0) {
+      throw new Error(
+        `plan Out of scope conflicts with Scope/AC: ${scopeConflicts.join("; ")}. Edit ${journal.path("plan.md")} (or delete it to re-plan) and rerun with --resume.`,
+      );
+    }
   } else if (criteria.length > 0) {
     const missing = planMissing(plan, criteria);
     if (missing.length > 0) journal.mark(`! existing plan does not cover ${missing.join(", ")} (delete plan.md to re-plan)`);
+    const scopeConflicts = planScopeConflicts(plan, specification, criteria);
+    if (scopeConflicts.length > 0) {
+      journal.mark(
+        `! existing plan Out of scope conflicts with Scope/AC: ${scopeConflicts.join("; ")} (delete plan.md to re-plan)`,
+      );
+    }
   }
 
   const agentSummaryPath = journal.path("agent-summary.md");
@@ -1119,8 +1324,19 @@ async function runItem(options: Options, completed: ReadonlySet<string>): Promis
 
       if (round >= options.maxRounds) {
         saveState({ phase: "gate", rounds: round });
+        const handoff = formatHandoff({
+          item: row.id,
+          attempt,
+          maxRounds: options.maxRounds,
+          failedGate: gate.ok ? null : gate.failed,
+          gateOutput: gate.ok ? "" : gate.output,
+          verdict,
+          criteria,
+        });
+        journal.save("HANDOFF.md", handoff);
+        journal.mark(`wrote ${journal.path("HANDOFF.md")}`);
         throw new Error(
-          `not green after ${attempt} attempt(s). Artifacts: ${journal.dir}/gate-*.log, review.json. Fix by hand, then rerun with --resume.`,
+          `not green after ${attempt} attempt(s). See ${journal.path("HANDOFF.md")}. Fix by hand, then rerun with --resume.`,
         );
       }
 
@@ -1136,6 +1352,7 @@ async function runItem(options: Options, completed: ReadonlySet<string>): Promis
             failedGate: gate.ok ? null : gate.failed,
             gateOutput: gate.ok ? "" : gate.output,
             gaps: verdict?.gaps ?? [],
+            findings: openFindings(verdict),
             summaryPath: agentSummaryPath,
             criteria,
             skillPath: IMPLEMENT_SKILL,

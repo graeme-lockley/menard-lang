@@ -4,6 +4,7 @@ import {
   parseErrorToDiagnostic,
   buildLineMap,
   offsetToLineCol,
+  CATALOGUE_HELPS,
 } from "../../../host/src/diagnostic/index.ts";
 import { read } from "../../../host/src/reader/index.ts";
 import { diagnose } from "../../../host/src/interp/index.ts";
@@ -137,5 +138,25 @@ describe("formatDiagnostic", () => {
     expect(unbound).toContain(
       "help: check the spelling, or qualify the constructor with its import alias",
     );
+  });
+
+  test("every actionable catalogue help renders as text help:", () => {
+    for (const [code, help] of Object.entries(CATALOGUE_HELPS)) {
+      const formatted = formatDiagnostic(
+        {
+          severity: "error",
+          category: "type",
+          code,
+          message: `sample for ${code}`,
+          span: { start: 0, end: 1 },
+          help,
+        },
+        "x",
+        "t.mnd",
+      );
+      expect(formatted).toContain(`error[${code}]`);
+      expect(formatted).toContain(`help: ${help}`);
+      expect(formatted.indexOf("help:")).toBeGreaterThan(formatted.lastIndexOf("^"));
+    }
   });
 });

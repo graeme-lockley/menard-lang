@@ -1,4 +1,5 @@
 import type { Span } from "../reader/span.ts";
+import { catalogueHelp } from "./helps.ts";
 
 export type DiagnosticSeverity = "error" | "warning";
 
@@ -27,32 +28,35 @@ export type Diagnostic = {
   help?: string;
 };
 
-export function diagnostic( partial: Diagnostic): Diagnostic {
-  return partial;
+export function diagnostic(partial: Diagnostic): Diagnostic {
+  return {
+    ...partial,
+    help: partial.help ?? catalogueHelp(partial.code),
+  };
 }
 
 export function parseErrorToDiagnostic(
   error: { span: Span; message: string; help?: string },
   code = "E_PARSE",
 ): Diagnostic {
-  return {
+  return diagnostic({
     severity: "error",
     category: "syntax",
     code,
     message: error.message,
     span: error.span,
     help: error.help,
-  };
+  });
 }
 
 export function casingErrorToDiagnostic(
   error: { span: Span; message: string },
 ): Diagnostic {
-  return {
+  return diagnostic({
     severity: "error",
     category: "casing",
     code: "E_CASING",
     message: error.message,
     span: error.span,
-  };
+  });
 }
