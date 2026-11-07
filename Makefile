@@ -85,7 +85,10 @@ mn: VERSION
 test:
 	cd host && bun test --timeout 30000 --path-ignore-patterns '**/gc-stress/**' ../tests
 
+# `tsc` needs @types/bun from host/node_modules, which is gitignored: a fresh
+# checkout has none. Name the fix instead of emitting TS2688.
 typecheck:
+	@test -d host/node_modules/@types/bun || { echo "host dependencies missing — run: cd host && bun install --frozen-lockfile"; exit 1; }
 	cd host && bunx tsc --noEmit -p tsconfig.json
 
 # The review is the specification; the backlog is the status table. This
