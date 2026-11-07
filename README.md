@@ -24,7 +24,7 @@ The full string calculator, with custom separators and a `Result` of every negat
 - **Types.** `Int`, `Float`, `Bool`, `Char`, `Str`, records, and variants. Type parameters are written at the definition (`map[a, b]`) and filled in at the use. No inference, no macros.
 - **Modules.** One file is one module. `import std/list as List` qualifies the exports. `pub` publishes a name; everything else is private.
 - **The library.** Lists, maps, strings, characters, maybe, and result, in [docs/stdlib.md](docs/stdlib.md). Files, processes, and the console sit beside them.
-- **`mn`.** `mn run` compiles and runs a program. `mn test` runs the `@test` lines in a module. `mn fmt` formats source; `mn fmt --check` fails CI on drift.
+- **`mn`.** `mn run` compiles and runs a program. `mn test` runs the `@test` lines in a module. `mn fmt` formats source; `mn fmt --check` fails CI on drift. `mn --version` and `mn --print-toolchain` report the compiler and the cc/runtime/Bun/LLVM/OpenSSL it will use.
 
 The guide is [docs/guide.md](docs/guide.md). The syntax reference is [docs/syntax.md](docs/syntax.md). Formatting is [docs/formatting.md](docs/formatting.md). Tooling is [docs/tooling.md](docs/tooling.md). The rules are [docs/menard-spec.md](docs/menard-spec.md).
 
@@ -67,15 +67,20 @@ review, commit, PR — with [Cursor](https://cursor.com) as the implementer and
 ./mn inter examples/sc.mnd --show-result
 ./mn fmt examples/sc.mnd                 # rewrite in canonical style
 ./mn fmt --check examples/sc.mnd         # exit 1 with a diff if dirty
+./mn --version                           # Menard semver, git sha, build date, bun/clang/openssl/llvm, target
+./mn --print-toolchain                   # cc, runtime include/lib, bun, llvm, openssl paths
+./mn --help
 ```
 
-`make` bootstraps `./mn` with the interpreter and links it with clang. After that, `build` and `run` emit bitcode in process and spawn the recorded `cc`. Override the linker with `CC` or `MENARD_CC`, and the bootstrap host with `MENARD_BUN`.
+`make` bootstraps `./mn` with the interpreter and links it with clang. After that, `build` and `run` emit bitcode in process and spawn the recorded `cc`. Override the linker with `CC` or `MENARD_CC`, and the bootstrap host with `MENARD_BUN`. The semver string lives in the root `VERSION` file (`MENARD_VERSION` in the Makefile); both `make` and `make bootstrap` install a driver that reads that same file.
 
 The host CLI is still there for the interpreter alone:
 
 ```bash
 bun run host/src/cli/menard.ts check path/to/file.mnd
 bun run host/src/cli/menard.ts run path/to/file.mnd
+bun run host/src/cli/menard.ts --version
+bun run host/src/cli/menard.ts --print-toolchain
 ```
 
 Exit codes: `0` ok, `1` a program error or panic, `2` usage or an I/O fault.

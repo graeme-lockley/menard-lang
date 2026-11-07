@@ -55,7 +55,7 @@ import std/time
 
 ; Flags the driver understands. A valued flag consumes the next word.
 let mn-flags() -> List Flag =
-  [Flag("--help", false), Flag("--dump-after=reader", false), Flag("--dump-after=desugar", false), Flag("--dump-after=type", false), Flag("--dump-after=close", false), Flag("--dump-after=root", false), Flag("--dump-after=derive", false), Flag("--show-result", false), Flag("--clean", false), Flag("--verbose", false), Flag("--show-output", false), Flag("--quiet", false), Flag("--json", false), Flag("--check", false), Flag("--stdin", false), Flag("-o", true), Flag("--cc", true), Flag("--runtime", true)]
+  [Flag("--help", false), Flag("--version", false), Flag("--print-toolchain", false), Flag("--dump-after=reader", false), Flag("--dump-after=desugar", false), Flag("--dump-after=type", false), Flag("--dump-after=close", false), Flag("--dump-after=root", false), Flag("--dump-after=derive", false), Flag("--show-result", false), Flag("--clean", false), Flag("--verbose", false), Flag("--show-output", false), Flag("--quiet", false), Flag("--json", false), Flag("--check", false), Flag("--stdin", false), Flag("-o", true), Flag("--cc", true), Flag("--runtime", true)]
 
 let argv-onto(i: Int, n: Int, acc: List Str) -> List Str =
   if (i >= n) -> reverse(acc) | argv-onto(i + 1, n, arg(i) :: acc)
@@ -222,6 +222,7 @@ let fail-cannot-read(path: Str) -> Unit {
 let usage() -> Unit {
   write-line(2, "usage: mn <check|emit|build|run|test|inter|fmt> <file.mnd> [out.bc] [-o bin] [--cc path] [--runtime dir] [--clean] [--quiet] [--json] [--verbose] [--show-output] [--show-result] [--dump-after=reader|desugar|type|close|root|derive]")
   write-line(2, "       mn <file.mnd> [arg…]")
+  write-line(2, "       mn --version | --print-toolchain | --help")
   exit(2)
 }
 
@@ -234,6 +235,11 @@ let print-commands-help() -> Unit {
   write-line(stdout, "  test    Run colocated *.test.mnd suites")
   write-line(stdout, "  inter   Interpret a .mnd file on the host")
   write-line(stdout, "  fmt     Format .mnd files")
+  write-line(stdout, "")
+  write-line(stdout, "Global flags:")
+  write-line(stdout, "  --version           Print Menard, toolchain, and target versions")
+  write-line(stdout, "  --print-toolchain   Print cc, runtime, Bun, LLVM, and OpenSSL paths")
+  write-line(stdout, "  --help              Show this list")
   exit(0)
 }
 
@@ -298,6 +304,12 @@ let print-command-help(mode: Str) -> Unit =
 
 let has-help() -> Bool =
   driver-has("--help")
+
+let has-version() -> Bool =
+  driver-has("--version")
+
+let has-print-toolchain() -> Bool =
+  driver-has("--print-toolchain")
 
 ; ---------------------------------------------------------------------------
 ; Shared front end: read-all → (dump reader) → casing → desugar → (dump
@@ -699,6 +711,234 @@ let chosen-bun() -> Str =
       if (String.length(s) > 0) -> s | bun-on-path()
     | None -> bun-on-path()
 
+; ---------------------------------------------------------------------------
+; `--version` / `--print-toolchain`. Semver comes from the walk-up VERSION
+; file (same source Make's MENARD_VERSION reads). Toolchain probes reuse
+; chosen-cc / chosen-runtime / chosen-bun / openssl-* and spawn-capture.
+let capture-out(cmd: List Str) -> Str =
+  match (spawn-capture(cmd, ""))
+    | Err(_) -> ""
+    | Ok(SpawnOutput(_, out, _)) -> out
+
+let first-line(s: Str) -> Str =
+  match (String.lines(s))
+    | [] -> ""
+    | h :: _ -> String.trim(h)
+
+let version-after-word(word: Str, parts: List Str) -> Str =
+  match (parts)
+    | [] -> ""
+    | h :: t ->
+      if (h == word) ->
+        match (t)
+          | v :: _ -> v
+          | [] -> "" | version-after-word(word, t)
+
+let first-version-token(parts: List Str) -> Str =
+  match (parts)
+    | [] -> "unknown"
+    | h :: t ->
+      if (String.length(h) > 0 && String.is-digit-byte(String.byte(0, h))) -> h | first-version-token(t)
+
+let extract-version(text: Str) -> Str {
+  let parts = String.words(first-line(text))
+  let after = version-after-word("version", parts)
+  if (String.length(after) > 0) -> after | first-version-token(parts)
+}
+
+let read-version-file(path: Str) -> Str =
+  match (read-file(path))
+    | Ok(s) ->
+      {
+        let t = String.trim(s)
+        if (String.length(t) > 0) -> t | "0.0.0"
+      }
+    | Err(_) -> "0.0.0"
+
+let menard-version-from(dir: Str) -> Str {
+  let marker = Path.join("VERSION", dir)
+  if (exists(marker)) -> read-version-file(marker) |
+  if (dir == "/") -> "0.0.0" |
+  {
+    let up = Path.dirname(dir)
+    if (up == dir) -> "0.0.0" | menard-version-from(up)
+  }
+}
+
+let menard-version() -> Str =
+  menard-version-from(cwd())
+
+let git-bin() -> Str =
+  match (find-on-path("git"))
+    | Some(g) -> g
+    | None -> ""
+
+let git-sha() -> Str {
+  let g = git-bin()
+  if (String.length(g) == 0) -> "unknown" |
+  {
+    let out = String.trim(first-line(capture-out([g, "rev-parse", "--short", "HEAD"])))
+    if (String.length(out) > 0) -> out | "unknown"
+  }
+}
+
+let git-dirty() -> Bool {
+  let g = git-bin()
+  if (String.length(g) == 0) -> false | String.length(String.trim(capture-out([g, "status", "--porcelain"]))) > 0
+}
+
+let menard-version-line() -> Str {
+  let sha = git-sha()
+  let base = String.concat("menard ", String.concat(menard-version(), String.concat(" (", sha)))
+  if (git-dirty()) -> String.concat(base, ", dirty)") | String.concat(base, ")")
+}
+
+let find-project-mnd(dir: Str) -> Str {
+  let marker = Path.join("project.mnd", dir)
+  if (exists(marker)) -> marker |
+  if (dir == "/") -> "" |
+  {
+    let up = Path.dirname(dir)
+    if (up == dir) -> "" | find-project-mnd(up)
+  }
+}
+
+; Minimal TOOL-09 preview: `package "name" @ "version"`. Absent or unparsed → no line.
+let quoted-after(prefix: Str, s: Str) -> Str {
+  let i = String.index-of(prefix, s)
+  match (i)
+    | None -> ""
+    | Some(n) ->
+      {
+        let rest = String.drop(n + String.length(prefix), s)
+        match (String.index-of("\"", rest))
+          | None -> ""
+          | Some(end) -> String.slice(0, end, rest)
+      }
+}
+
+let project-line-from(src: Str) -> Str {
+  let name = quoted-after("package \"", src)
+  let ver = quoted-after("@ \"", src)
+  if (String.length(name) == 0 || String.length(ver) == 0) -> "" | String.concat("project ", String.concat(name, String.concat(" ", ver)))
+}
+
+let maybe-project-line() -> Str {
+  let path = find-project-mnd(cwd())
+  if (String.length(path) == 0) -> "" |
+  match (read-file(path))
+    | Ok(src) -> project-line-from(src)
+    | Err(_) -> ""
+}
+
+let probe-bun-version(bun: Str) -> Str =
+  if (String.length(bun) == 0) -> "unknown" | extract-version(capture-out([bun, "--version"]))
+
+let probe-clang-version(cc: Str) -> Str =
+  if (String.length(cc) == 0) -> "unknown" | extract-version(capture-out([cc, "--version"]))
+
+; Prefer `llvm-config --version` (PATH, then beside cc); clang --version is last resort.
+let llvm-config-version(bin: Str) -> Str {
+  let out = String.trim(first-line(capture-out([bin, "--version"])))
+  if (String.length(out) > 0) -> extract-version(out) | ""
+}
+
+let probe-llvm-version(cc: Str) -> Str {
+  match (find-on-path("llvm-config"))
+    | Some(cfg) ->
+      {
+        let v = llvm-config-version(cfg)
+        if (String.length(v) > 0) -> v | probe-clang-version(cc)
+      }
+    | None ->
+      {
+        let beside = Path.join("llvm-config", Path.dirname(cc))
+        if (String.length(cc) > 0 && exists(beside)) ->
+          {
+            let v = llvm-config-version(beside)
+            if (String.length(v) > 0) -> v | probe-clang-version(cc)
+          } | probe-clang-version(cc)
+      }
+}
+
+let build-date() -> Str {
+  let g = git-bin()
+  if (String.length(g) == 0) -> "unknown" |
+  {
+    let out = String.trim(first-line(capture-out([g, "log", "-1", "--format=%cs"])))
+    if (String.length(out) > 0) -> out | "unknown"
+  }
+}
+
+let probe-target(cc: Str) -> Str {
+  let printed = String.trim(first-line(capture-out([cc, "-print-target-triple"])))
+  if (String.length(printed) > 0) -> printed |
+  {
+    let t = clang-target-triple(cc)
+    if (String.length(t) > 0) -> t | "unknown"
+  }
+}
+
+let openssl-bin() -> Str =
+  match (find-on-path("openssl"))
+    | Some(b) -> b
+    | None -> ""
+
+let probe-openssl-version() -> Str {
+  let b = openssl-bin()
+  if (String.length(b) == 0) -> "unknown" | extract-version(capture-out([b, "version"]))
+}
+
+let flag-path-prefix(prefix: Str, flags: List Str) -> Str =
+  match (flags)
+    | [] -> ""
+    | h :: t ->
+      if (String.starts-with(prefix, h) && String.length(h) > String.length(prefix)) -> String.drop(String.length(prefix), h) | flag-path-prefix(prefix, t)
+
+let openssl-include-path() -> Str =
+  flag-path-prefix("-I", openssl-cflags())
+
+let openssl-lib-path() -> Str =
+  flag-path-prefix("-L", openssl-libs())
+
+let maybe-write-line(line: Str) -> Unit =
+  if (String.length(line) == 0) -> () |
+  {
+    write-line(stdout, line)
+    ()
+  }
+
+let print-version() -> Unit {
+  write-line(stdout, menard-version-line())
+  maybe-write-line(maybe-project-line())
+  write-line(stdout, String.concat("built ", build-date()))
+  let cc = chosen-cc(opt("--cc"))
+  let bun = chosen-bun()
+  write-line(stdout, String.concat("bun ", probe-bun-version(bun)))
+  write-line(stdout, String.concat("clang ", probe-clang-version(cc)))
+  write-line(stdout, String.concat("openssl ", probe-openssl-version()))
+  write-line(stdout, String.concat("llvm ", probe-llvm-version(cc)))
+  write-line(stdout, String.concat("target ", probe-target(cc)))
+  exit(0)
+}
+
+let print-toolchain() -> Unit {
+  let cc = chosen-cc(opt("--cc"))
+  let runtime = chosen-runtime(opt("--runtime"))
+  let bun = chosen-bun()
+  let bun-line =
+    if (String.length(bun) > 0) -> bun | "unknown"
+  write-line(stdout, String.concat("cc: ", cc))
+  write-line(stdout, String.concat("runtime include: ", Path.join("include", runtime)))
+  write-line(stdout, String.concat("runtime lib: ", runtime))
+  write-line(stdout, String.concat("bun: ", bun-line))
+  write-line(stdout, String.concat("llvm: ", probe-llvm-version(cc)))
+  write-line(stdout, String.concat("openssl include: ", openssl-include-path()))
+  write-line(stdout, String.concat("openssl lib: ", openssl-lib-path()))
+  write-line(stdout, String.concat("openssl: ", probe-openssl-version()))
+  exit(0)
+}
+
 let append-strs(a: List Str, b: List Str) -> List Str =
   match (a)
     | [] -> b
@@ -866,6 +1106,8 @@ let main() -> Unit {
   if (has-json()) -> set-json-mode(true)
   let n = positional-count()
   let mode0 = positional-arg(0)
+  if (has-version()) -> print-version() |
+  if (has-print-toolchain()) -> print-toolchain() |
   if (has-help() && n == 0) -> print-commands-help() |
   if (has-help() && n == 1 && known-mode(mode0)) -> print-command-help(mode0) |
   if (has-help()) -> usage() |

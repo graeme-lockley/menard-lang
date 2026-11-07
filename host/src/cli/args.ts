@@ -49,7 +49,12 @@ export function formatCommandsHelp(): string {
     "  check   Typecheck a .mnd file\n" +
     "  run     Typecheck and run a .mnd file\n" +
     "  fmt     Format .mnd files\n" +
-    "  fix     Apply fix suggestions to .mnd files\n"
+    "  fix     Apply fix suggestions to .mnd files\n" +
+    "\n" +
+    "Global flags:\n" +
+    "  --version           Print Menard, toolchain, and target versions\n" +
+    "  --print-toolchain   Print cc, runtime, Bun, LLVM, and OpenSSL paths\n" +
+    "  --help              Show this list\n"
   );
 }
 
