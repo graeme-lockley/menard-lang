@@ -43,6 +43,7 @@ const REVIEW_FILE = "docs/reviews/2026-10-24-build-f.md";
 const PLAN_SKILL = join(ROOT, ".agents", "skills", "menard-plan", "SKILL.md");
 const IMPLEMENT_SKILL = join(ROOT, ".agents", "skills", "menard-implement", "SKILL.md");
 const GATE_STAMP = "gate.stamp.json";
+const STOP_FILE = join(ROOT, ".loop", "stop");
 const CACHE_MARKER = "cache-cleared";
 const DIFF_LIMIT = 24000;
 
@@ -1230,6 +1231,13 @@ async function main(): Promise<void> {
   const completed = new Set<string>();
   const startedAt = Date.now();
   while (true) {
+    // A drain has no natural end, so it checks for a stop request between
+    // items: `touch .loop/stop` finishes the current feature, then stops.
+    if (existsSync(STOP_FILE)) {
+      rmSync(STOP_FILE, { force: true });
+      process.stdout.write(`\nStop requested (.loop/stop) — stopped after ${completed.size} item(s).\n`);
+      break;
+    }
     const itemStart = Date.now();
     const id = await runItem(options, completed);
     if (id === null) {
@@ -1243,6 +1251,9 @@ async function main(): Promise<void> {
       break;
     }
   }
+  // A stop request that arrived during the last item must not leak into the
+  // next run.
+  rmSync(STOP_FILE, { force: true });
   if (currentJournal !== null) printTimeline(currentJournal);
 }
 

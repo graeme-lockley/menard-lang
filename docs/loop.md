@@ -102,6 +102,25 @@ not merged yet.
 - It is cheapest on small, independent items. A dependency that only becomes
   `done` in this session stays blocked, by design.
 
+### Stopping a drain
+
+A drain has no natural end, so it checks `.loop/stop` between items. From
+another terminal:
+
+```bash
+touch .loop/stop
+```
+
+The current feature runs to its PR, then the drain exits with
+`Stop requested (.loop/stop) — stopped after N item(s)` and removes the file.
+A stop request that arrives too late for one run is cleared rather than
+leaking into the next.
+
+`Ctrl-C` is the blunt instrument: it aborts the current step (the agent session
+dies with it), leaving the state and artifacts for `--resume`. Use it when you
+want to stop mid-feature, not between features. To bound a run up front,
+`--max-items N` is better than either.
+
 ## The gate
 
 The gate is exactly the sequence in the PR template, in order:
