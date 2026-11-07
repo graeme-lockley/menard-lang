@@ -1,6 +1,5 @@
 ; Fixture for src/derive/plan.test.mnd: show of a list literal plans
 ; `(List Int)`, the type-show-shaped instantiation key.
-
 let use-show() -> Str =
   show([1, 2, 3])
 

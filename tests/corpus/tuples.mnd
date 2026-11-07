@@ -2,7 +2,6 @@
 ; patterns (match/let/params), and the runtime's generic `=`/`compare`
 ; (no derive.mnd/lower.mnd changes needed for those two — see the shape-tag
 ; + slot-count comparison in runtime/src/equal.c).
-
 let swap(p: Int * Int) -> Int * Int =
   match (p)
     | (a, b) -> (b, a)

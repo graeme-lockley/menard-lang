@@ -4,7 +4,6 @@
 ; SpawnStatus tags are the C values 30 and 31. NotFound, Permission, and
 ; Unsupported are the IoError singletons; they are listed here so a
 ; SpawnError match is exhaustive, and they stay registered as IoError.
-
 pub type SpawnStatus =
   | Exited(Int)
   | Signalled(Int)

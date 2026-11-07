@@ -156,13 +156,15 @@ describe("strings", () => {
     if (a.tag === "str") expect([...a.bytes]).toEqual([0x61, 0x0a, 0x62]);
   });
 
-  test("an escaped newline round-trips through the raw show spelling", () => {
+  test("an escaped newline round-trips through the printer spelling", () => {
+    // Value `show` keeps newline bytes raw; the AST printer used by `mn fmt`
+    // emits `\n` so formatted sources stay LF line-oriented (no raw CR).
     const a = mustRead('"\\n"');
     expect(a.tag).toBe("str");
     if (a.tag !== "str") return;
     expect([...a.bytes]).toEqual([0x0a]);
     const printed = print(a);
-    expect([...printed]).toEqual([0x22, 0x0a, 0x22]);
+    expect([...printed]).toEqual([0x22, 0x5c, 0x6e, 0x22]); // "\n"
     expect(astEqual(a, mustRead(printed))).toBe(true);
   });
 

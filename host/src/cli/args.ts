@@ -48,14 +48,18 @@ export function formatCommandsHelp(): string {
     "menard commands:\n" +
     "  check   Typecheck a .mnd file\n" +
     "  run     Typecheck and run a .mnd file\n" +
-    "  fmt     Format .mnd files (operator spacing)\n" +
+    "  fmt     Format .mnd files\n" +
     "  fix     Apply fix suggestions to .mnd files\n"
   );
 }
 
 export function formatCommandHelp(cmd: "check" | "run" | "fix" | "fmt"): string {
   if (cmd === "fmt") {
-    return "usage: menard fmt <file.mnd…>\n";
+    return (
+      "usage: menard fmt [--check] [--stdin] <file.mnd…>\n" +
+      "  --check   Exit 1 with a unified diff on stderr when a file is not formatted\n" +
+      "  --stdin   Read source from stdin; write formatted source to stdout\n"
+    );
   }
   if (cmd === "fix") {
     return (

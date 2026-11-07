@@ -1,7 +1,6 @@
 ; Slice 3F — persistent Map.
 ; Prints both entries and the size.
 ; Run with: `./mn run examples/map-env.mnd`
-
 import std/map as Map
 
 let print-got(v: Maybe Int) -> Unit =
@@ -10,11 +9,7 @@ let print-got(v: Maybe Int) -> Unit =
     | None -> print("none")
 
 let main() -> Unit {
-  let m =
-    Map.empty()
-    |> Map.set(1, 10)
-    |> Map.set(2, 20)
-
+  let m = Map.empty() |> Map.set(1, 10) |> Map.set(2, 20)
   print("1 -> ")
   print-got(Map.lookup(1, m))
   print(", 2 -> ")

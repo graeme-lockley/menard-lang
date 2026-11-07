@@ -1,7 +1,6 @@
 ; Rest parameters: literal calls, the empty call, splicing a list, and a
 ; fixed parameter in front of the rest. `sum(xs)` is a one-element call
 ; and is covered by tests/negative/bad-rest-wrap.mnd.
-
 import std/string as String
 
 let sum(...xs: List Int) -> Int =

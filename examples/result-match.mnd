@@ -1,7 +1,6 @@
 ; Slice 3C — Result + match.
 ; Prints the unwrapped Ok and the fallback for Err.
 ; Run with: `./mn run examples/result-match.mnd`
-
 let unwrap-or-zero(r: Result Int Str) -> Int =
   match (r)
     | Ok(n) -> n

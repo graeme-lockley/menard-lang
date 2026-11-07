@@ -7,39 +7,45 @@ import std/sched as Sched
 
 let handler(req: Http.Request) -> Http.Response =
   match (req)
-    | Http.Request(_, path, _, _) ->
-      Http.Response(200, Map.set("Content-Type", "text/plain", Map.empty()), path)
+    | Http.Request(_, path, _, _) -> Http.Response(200, Map.set("Content-Type", "text/plain", Map.empty()), path)
 
 let main() -> Int {
   let ready = Sched.wait-new()
   let port-cell = ref(0)
-  let server = Task.spawn(fn () = {
-    match (Net.listen(0))
-      | Err(_) -> 1
-      | Ok(listener) -> {
-          defer Net.close(listener)
-          match (Net.local-port(listener))
-            | Err(_) -> 1
-            | Ok(port) -> {
-                set!(port-cell, port)
-                Sched.notify(ready)
-                match (Http.serve-on(listener, 5000, Http.default-limits(), handler))
-                  | Ok(_) -> 0
-                  | Err(_) -> 1
-              }
-        }
-  })
+  let server =
+    Task.spawn(
+      fn () {
+        match (Net.listen(0))
+          | Err(_) -> 1
+          | Ok(listener) ->
+            {
+              defer Net.close(listener)
+              match (Net.local-port(listener))
+                | Err(_) -> 1
+                | Ok(port) ->
+                  {
+                    set!(port-cell, port)
+                    Sched.notify(ready)
+                    match (Http.serve-on(listener, 5000, Http.default-limits(), handler))
+                      | Ok(_) -> 0
+                      | Err(_) -> 1
+                  }
+            }
+      }
+    )
   Sched.wait(ready)
   let port = deref(port-cell)
   match (Http.request-timeout("127.0.0.1", port, Http.Request(Http.GET, "/hi", Map.empty(), ""), 2000))
-    | Ok(Http.Response(code, _, body)) -> {
+    | Ok(Http.Response(code, _, body)) ->
+      {
         println(code)
         println(body)
         Task.cancel(server)
         Task.join(server)
         0
       }
-    | Err(_) -> {
+    | Err(_) ->
+      {
         println(0)
         Task.cancel(server)
         Task.join(server)

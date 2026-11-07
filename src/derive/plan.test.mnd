@@ -1,7 +1,6 @@
 ; Derive plan. Fixture paths are from the repo root, and are also found
 ; when `./mn test` is run from a subdirectory. `--dump-after=derive`
 ; stays in tests/phase2/derive.test.ts.
-
 import "../reader/read.mnd"
 import "../test/paths.mnd"
 import "./plan.mnd"

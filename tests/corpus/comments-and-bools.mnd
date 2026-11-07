@@ -1,6 +1,6 @@
 ; Comments, bools, and nested lists
 
-  ; identity
+; identity
 let flag(b: Bool) -> Bool =
   b
 

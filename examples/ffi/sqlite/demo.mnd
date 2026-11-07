@@ -5,7 +5,6 @@
 ;   ./build/sqlite query <db-path> <sql>
 ;
 ; Works on any host with libsqlite3. Interpreter: sql_* unbound.
-
 import "./sqlite.mnd"
 import std/json
 import std/list
@@ -57,8 +56,7 @@ let show-row(row: Map Str Json) -> Unit {
         {
           match (Map.lookup(k, row))
             | None -> ()
-            | Some(v) ->
-              println("  ", k, "=", show-cell(v))
+            | Some(v) -> println("  ", k, "=", show-cell(v))
           recur(t)
         }
 }
@@ -79,45 +77,50 @@ let with-db(path: Str, body: () -> Int) -> Int =
       }
 
 let cmd-demo() -> Int =
-  with-db(":memory:", fn () = {
-    match (exec("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT NOT NULL);"))
-      | Err(e) -> fail(e)
-      | Ok(_) ->
-        match (exec("INSERT INTO notes (body) VALUES ('hello'), ('sqlite'), ('ffi');"))
-          | Err(e) -> fail(e)
-          | Ok(_) ->
-            match (query("SELECT id, body FROM notes ORDER BY id;"))
-              | Err(e) -> fail(e)
-              | Ok(rows) ->
-                {
-                  map(show-row, rows)
-                  println("(", show(length(rows)), " rows)")
-                  0
-                }
-  })
+  with-db(
+    ":memory:",
+    fn () {
+      match (exec("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT NOT NULL);"))
+        | Err(e) -> fail(e)
+        | Ok(_) ->
+          match (exec("INSERT INTO notes (body) VALUES ('hello'), ('sqlite'), ('ffi');"))
+            | Err(e) -> fail(e)
+            | Ok(_) ->
+              match (query("SELECT id, body FROM notes ORDER BY id;"))
+                | Err(e) -> fail(e)
+                | Ok(rows) ->
+                  {
+                    map(show-row, rows)
+                    println("(", show(length(rows)), " rows)")
+                    0
+                  }
+    }
+  )
 
 let cmd-exec(path: Str, sql: Str) -> Int =
-  with-db(path, fn () =
-    match (exec(sql))
-      | Err(e) -> fail(e)
-      | Ok(_) -> 0)
+  with-db(
+    path,
+    fn () =
+      match (exec(sql))
+        | Err(e) -> fail(e)
+        | Ok(_) -> 0
+  )
 
 let cmd-query(path: Str, sql: Str) -> Int =
-  with-db(path, fn () =
-    match (query-json(sql))
-      | Err(e) -> fail(e)
-      | Ok(raw) ->
-        {
-          println(raw)
-          0
-        })
+  with-db(
+    path,
+    fn () =
+      match (query-json(sql))
+        | Err(e) -> fail(e)
+        | Ok(raw) ->
+          {
+            println(raw)
+            0
+          }
+  )
 
 let main() -> Int =
   match (arg-count())
     | 0 -> usage()
     | n ->
-      cond
-        | arg(0) == "demo" && n == 1 -> cmd-demo()
-        | arg(0) == "exec" && n == 3 -> cmd-exec(arg(1), arg(2))
-        | arg(0) == "query" && n == 3 -> cmd-query(arg(1), arg(2))
-        | else -> usage()
+      if (arg(0) == "demo" && n == 1) -> cmd-demo() | if (arg(0) == "exec" && n == 3) -> cmd-exec(arg(1), arg(2)) | if (arg(0) == "query" && n == 3) -> cmd-query(arg(1), arg(2)) | usage()

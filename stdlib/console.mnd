@@ -1,6 +1,5 @@
 ; ANSI color for a terminal, and plain text everywhere else.
 ; @module std/console
-
 import std/fs
 import std/sys
 import std/string as String

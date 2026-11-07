@@ -32,7 +32,7 @@ import { parseFmtArgs, runFmt } from "./fmt.ts";
 function usage(): never {
   console.error(
     "usage: menard <check|run> [--show-result] [--json] <file.mnd> [-- arg…]\n" +
-      "       menard fmt <file.mnd…>\n" +
+      "       menard fmt [--check] [--stdin] <file.mnd…>\n" +
       "       menard fix [--dry-run] [--rule name] <file.mnd…>",
   );
   process.exit(2);

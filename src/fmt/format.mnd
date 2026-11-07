@@ -1,10 +1,12 @@
-; Format a Menard source string via read → print.
+; Format a Menard source string: CRLF reject, read, attach trivia, emit.
 ; Spaces AST binary operators; never rewrites identifier bytes (LANG-09 AC7).
+; Preserves full-line comments, shebangs, and #source / @test lines (TOOL-01).
 ; Twin of host/src/fmt/format.ts.
-
 import "../reader/ast.mnd"
 import "../reader/read.mnd"
-import "../reader/print.mnd"
+import "./trivia.mnd"
+import "./attach.mnd"
+import "./emit.mnd"
 
 pub record FormatError {
   message: Str
@@ -12,6 +14,13 @@ pub record FormatError {
 }
 
 pub let format-source(src: Str) -> Result Str FormatError =
-  match (read-all(src))
-    | Ok(forms) -> Ok(print-form-all(forms))
-    | Err(ParseError(_, msg, help)) -> Err(FormatError(msg, help))
+  match (scan-trivia(src))
+    | Err(TriviaError(msg, help)) -> Err(FormatError(msg, help))
+    | Ok(items) ->
+      match (read-all(src))
+        | Err(ParseError(_, msg, help)) -> Err(FormatError(msg, help))
+        | Ok(forms) ->
+          {
+            let attached = attach-trivia(items, forms)
+            Ok(emit-source(forms, attached))
+          }

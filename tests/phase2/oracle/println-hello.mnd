@@ -6,7 +6,6 @@
 ; print the same bytes to fd 1 before computing `main`'s `Int` result —
 ; see `tests/phase2/oracle.test.ts`'s stdout-comparing fixture entry for
 ; this file.
-
 println("Hello, oracle!")
 
 let main() -> Int =

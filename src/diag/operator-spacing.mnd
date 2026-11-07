@@ -1,10 +1,9 @@
 ; Pure heuristic for unbound names that look like a binary operator
 ; missing spaces. Twin of host/src/diagnostic/operator-spacing.ts.
-
 import std/string as String
 
 let is-letter(b: Int) -> Bool =
-  (b >= 65 && b <= 90) || (b >= 97 && b <= 122)
+  b >= 65 && b <= 90 || b >= 97 && b <= 122
 
 let is-digit(b: Int) -> Bool =
   b >= 48 && b <= 57
@@ -19,67 +18,36 @@ let letter-start(s: Str) -> Bool =
   String.length(s) > 0 && is-ident-start(String.byte(0, s))
 
 let all-digits(s: Str, i: Int, n: Int) -> Bool =
-  cond
-    | i >= n -> n > 0
-    | is-digit(String.byte(i, s)) -> all-digits(s, i + 1, n)
-    | else -> false
+  if (i >= n) -> n > 0 | if (is-digit(String.byte(i, s))) -> all-digits(s, i + 1, n) | false
 
 let is-simple-int(s: Str) -> Bool =
   all-digits(s, 0, String.length(s))
 
 let is-simple-ident(s: Str, i: Int, n: Int) -> Bool =
-  cond
-    | n == 0 -> false
-    | i == 0 ->
-      if (is-ident-start(String.byte(0, s))) -> is-simple-ident(s, 1, n) | false
-    | i >= n -> true
-    | is-letter(String.byte(i, s)) || is-digit(String.byte(i, s)) || String.byte(i, s) == 95 ->
-      is-simple-ident(s, i + 1, n)
-    | else -> false
+  if (n == 0) -> false |
+  if (i == 0) ->
+    if (is-ident-start(String.byte(0, s))) -> is-simple-ident(s, 1, n) | false | if (i >= n) -> true | if (is-letter(String.byte(i, s)) || is-digit(String.byte(i, s)) || String.byte(i, s) == 95) -> is-simple-ident(s, i + 1, n) | false
 
 let is-simple-atom(s: Str) -> Bool =
   is-simple-ident(s, 0, String.length(s)) || is-simple-int(s)
 
 ; First index of a single-byte op, or -1 when none / more than one.
 let find-op-split(name: Str, i: Int, n: Int, found: Int) -> Int =
-  cond
-    | i >= n -> found
-    | is-op-byte(String.byte(i, name)) ->
-      if (found >= 0) -> -2 | find-op-split(name, i + 1, n, i)
-    | else -> find-op-split(name, i + 1, n, found)
+  if (i >= n) -> found |
+  if (is-op-byte(String.byte(i, name))) ->
+    if (found >= 0) -> -2 | find-op-split(name, i + 1, n, i) | find-op-split(name, i + 1, n, found)
 
 pub let operator-spacing-help(name: Str) -> Maybe Str {
-  cond
-    | String.contains(":", name) || String.contains("@", name) -> None
-    | else ->
-      {
-        let n = String.length(name)
-        let split = find-op-split(name, 0, n, -1)
-        cond
-          | split < 0 -> None
-          | else ->
-            {
-              let left = String.slice(0, split, name)
-              let right = String.slice(split + 1, n - split - 1, name)
-              let op = String.slice(split, 1, name)
-              cond
-                | String.length(left) == 0 || String.length(right) == 0 -> None
-                | not(is-simple-atom(left)) || not(is-simple-atom(right)) -> None
-                | op == "-" && letter-start(right) -> None
-                | op == "/" && letter-start(left) && letter-start(right) -> None
-                | op == "-" && left == "f" && is-simple-int(right) -> None
-                | else ->
-                  Some(
-                    String.concat(
-                      "operators need a space on both sides; did you mean `",
-                      left,
-                      " ",
-                      op,
-                      " ",
-                      right,
-                      "`?"
-                    )
-                  )
-            }
-      }
+  if (String.contains(":", name) || String.contains("@", name)) -> None |
+  {
+    let n = String.length(name)
+    let split = find-op-split(name, 0, n, -1)
+    if (split < 0) -> None |
+    {
+      let left = String.slice(0, split, name)
+      let right = String.slice(split + 1, n - split - 1, name)
+      let op = String.slice(split, 1, name)
+      if (String.length(left) == 0 || String.length(right) == 0) -> None | if (not(is-simple-atom(left)) || not(is-simple-atom(right))) -> None | if (op == "-" && letter-start(right)) -> None | if (op == "/" && letter-start(left) && letter-start(right)) -> None | if (op == "-" && left == "f" && is-simple-int(right)) -> None | Some(String.concat("operators need a space on both sides; did you mean `", left, " ", op, " ", right, "`?"))
+    }
+  }
 }

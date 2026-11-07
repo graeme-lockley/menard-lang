@@ -1,7 +1,6 @@
 ; Slice 3A — `loop` / `recur` over Int bindings.
 ; Prints: sum of 0 through 10 is 55
 ; Run with: `./mn run examples/loop-sum.mnd`
-
 let sum-to(n: Int) -> Int =
   loop (i = 0, acc = 0)
     if (i > n) -> acc | recur(i + 1, acc + i)

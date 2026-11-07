@@ -1,0 +1,89 @@
+; Line-oriented unified diff of original vs formatted source.
+; Twin of host/src/fmt/diff.ts.
+import std/string as String
+import std/list
+
+let nl() -> Str =
+  String.from-char('\n')
+
+let split-lines(s: Str) -> List Str {
+  let n = String.length(s)
+  let raw = split-lines-from(s, 0, n, 0, [])
+  if (n > 0 && String.byte(n - 1, s) == 10) -> drop-trailing-empty(reverse(raw)) | reverse(raw)
+}
+
+; `xs` is in file order. Drop a final empty line (from a trailing LF).
+let drop-trailing-empty(xs: List Str) -> List Str =
+  match (reverse(xs))
+    | [] -> []
+    | "" :: rest -> reverse(rest)
+    | h :: t -> reverse(h :: t)
+
+let split-lines-from(s: Str, i: Int, n: Int, start: Int, acc: List Str) -> List Str =
+  if (i >= n) -> String.slice(start, n - start, s) :: acc | if (String.byte(i, s) == 10) -> split-lines-from(s, i + 1, n, i + 1, String.slice(start, i - start, s) :: acc) | split-lines-from(s, i + 1, n, start, acc)
+
+type Edit =
+  | Eq(Str)
+  | Del(Str)
+  | Add(Str)
+
+let edits(a: List Str, b: List Str) -> List Edit =
+  reverse(edits-go(a, b, []))
+
+let edits-go(a: List Str, b: List Str, acc: List Edit) -> List Edit =
+  match (a, b)
+    | ([], []) -> acc
+    | (ha :: ta, hb :: tb) ->
+      if (ha == hb) -> edits-go(ta, tb, Eq(ha) :: acc) | if (member(ha, tb)) -> edits-go(a, tb, Add(hb) :: acc) | if (member(hb, ta)) -> edits-go(ta, b, Del(ha) :: acc) | edits-go(ta, tb, Add(hb) :: Del(ha) :: acc)
+    | (ha :: ta, []) -> edits-go(ta, [], Del(ha) :: acc)
+    | ([], hb :: tb) -> edits-go([], tb, Add(hb) :: acc)
+
+let member(x: Str, xs: List Str) -> Bool =
+  match (xs)
+    | [] -> false
+    | h :: t -> h == x || member(x, t)
+
+pub let unified-diff(before: Str, after: Str, path: Str) -> Str {
+  let a = split-lines(before)
+  let b = split-lines(after)
+  let es = edits(a, b)
+  if (only-eq(es)) -> "" |
+  {
+    let hunk = render-hunk(es)
+    String.concat("--- ", String.concat(path, String.concat(nl(), String.concat("+++ ", String.concat(path, String.concat(nl(), hunk))))))
+  }
+}
+
+let only-eq(xs: List Edit) -> Bool =
+  match (xs)
+    | [] -> true
+    | Eq(_) :: rest -> only-eq(rest)
+    | _ -> false
+
+let render-hunk(es: List Edit) -> Str {
+  let a-count = count-a(es)
+  let b-count = count-b(es)
+  let header = String.concat("@@ -1,", String.concat(String.from-int(a-count), String.concat(" +1,", String.concat(String.from-int(b-count), String.concat(" @@", nl())))))
+  String.concat(header, String.concat(render-edits(es), nl()))
+}
+
+let count-a(xs: List Edit) -> Int =
+  match (xs)
+    | [] -> 0
+    | Eq(_) :: rest -> 1 + count-a(rest)
+    | Del(_) :: rest -> 1 + count-a(rest)
+    | Add(_) :: rest -> count-a(rest)
+
+let count-b(xs: List Edit) -> Int =
+  match (xs)
+    | [] -> 0
+    | Eq(_) :: rest -> 1 + count-b(rest)
+    | Add(_) :: rest -> 1 + count-b(rest)
+    | Del(_) :: rest -> count-b(rest)
+
+let render-edits(xs: List Edit) -> Str =
+  match (xs)
+    | [] -> ""
+    | Eq(t) :: rest -> String.concat(" ", String.concat(t, String.concat(nl(), render-edits(rest))))
+    | Del(t) :: rest -> String.concat("-", String.concat(t, String.concat(nl(), render-edits(rest))))
+    | Add(t) :: rest -> String.concat("+", String.concat(t, String.concat(nl(), render-edits(rest))))

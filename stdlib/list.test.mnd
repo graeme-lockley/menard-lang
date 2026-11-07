@@ -1,6 +1,5 @@
 ; Qualified names stay distinct from the unqualified list operations.
 ; These do not belong on a list function: they check the import.
-
 import std/list
 import std/maybe as Maybe
 import std/result as Result

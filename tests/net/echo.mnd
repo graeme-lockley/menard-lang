@@ -7,66 +7,81 @@ import std/sched as Sched
 let main() -> Int {
   let ready = Sched.wait-new()
   let port-cell = ref(0)
-  let server = Task.spawn(fn () = {
-    match (Net.listen(0))
-      | Err(Net.Unsupported) -> {
-          println("Unsupported")
-          Sched.notify(ready)
-          1
-        }
-      | Err(_) -> {
-          Sched.notify(ready)
-          1
-        }
-      | Ok(listener) -> {
-          defer Net.close(listener)
-          match (Net.local-port(listener))
-            | Err(Net.Unsupported) -> {
-                println("Unsupported")
-                Sched.notify(ready)
-                1
-              }
-            | Err(_) -> {
-                Sched.notify(ready)
-                1
-              }
-            | Ok(port) -> {
-                set!(port-cell, port)
-                Sched.notify(ready)
-                match (Net.accept(listener))
-                  | Err(_) -> 0
-                  | Ok(conn) -> {
-                      defer Net.close(conn)
-                      match (Net.read(conn, 64))
-                        | Err(_) -> 0
-                        | Ok(data) -> {
-                            Net.write(conn, data)
-                            0
-                          }
-                    }
-              }
-        }
-  })
+  let server =
+    Task.spawn(
+      fn () {
+        match (Net.listen(0))
+          | Err(Net.Unsupported) ->
+            {
+              println("Unsupported")
+              Sched.notify(ready)
+              1
+            }
+          | Err(_) ->
+            {
+              Sched.notify(ready)
+              1
+            }
+          | Ok(listener) ->
+            {
+              defer Net.close(listener)
+              match (Net.local-port(listener))
+                | Err(Net.Unsupported) ->
+                  {
+                    println("Unsupported")
+                    Sched.notify(ready)
+                    1
+                  }
+                | Err(_) ->
+                  {
+                    Sched.notify(ready)
+                    1
+                  }
+                | Ok(port) ->
+                  {
+                    set!(port-cell, port)
+                    Sched.notify(ready)
+                    match (Net.accept(listener))
+                      | Err(_) -> 0
+                      | Ok(conn) ->
+                        {
+                          defer Net.close(conn)
+                          match (Net.read(conn, 64))
+                            | Err(_) -> 0
+                            | Ok(data) ->
+                              {
+                                Net.write(conn, data)
+                                0
+                              }
+                        }
+                  }
+            }
+      }
+    )
   Sched.wait(ready)
   let port = deref(port-cell)
   match (Net.connect("127.0.0.1", port))
-    | Err(_) -> {
+    | Err(_) ->
+      {
         println("connect-fail")
         Task.cancel(server)
         Task.join(server)
         1
       }
-    | Ok(c) -> {
+    | Ok(c) ->
+      {
         defer Net.close(c)
         Net.write(c, "ping")
         match (Net.read(c, 64))
-          | Err(_) -> {
+          | Err(_) ->
+            {
               println("read-fail")
               Task.cancel(server)
               Task.join(server)
               1
             }
-          | Ok(got) -> {
+          | Ok(got) ->
+            {
               println(got)
               Task.join(server)
               0

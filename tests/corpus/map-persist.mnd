@@ -1,5 +1,4 @@
 ; Map.set returns a new map. The map that was updated stays as it was.
-
 import std/map as Map
 
 let main() -> Int {

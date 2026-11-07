@@ -33,8 +33,9 @@ describe("desugar", () => {
     expect(desugared("f+(1.0, 2.0, 3.0)")).toBe("f+(f+(1.0, 2.0), 3.0)");
     expect(desugared("f-(1.5)")).toBe("f-(0.0, 1.5)");
     expect(desugared("1 < 2 < 3")).toBe("if (1 < 2) -> 2 < 3 | false");
+    // Nested if stays `if` (printer never rewrites to `cond` — TOOL-01 AC4).
     expect(desugared("1 < 2 < 3 < 4")).toBe(
-      "cond\n  | 1 < 2 ->\n    if (2 < 3) -> 3 < 4 | false\n  | else -> false",
+      "if (1 < 2) ->\n  if (2 < 3) -> 3 < 4 | false | false",
     );
     expect(desugared("1 == 2 == 3")).toBe("if (1 == 2) -> 2 == 3 | false");
   });
@@ -61,20 +62,21 @@ describe("desugar", () => {
   });
 
   test("|> appends the left value as the last argument", () => {
+    // Projected callees print as `List.filter(...)`, not `(List.filter)(...)`.
     expect(desugared("tokens |> List.map(I.parse) |> List.filter(fn (n) = n <= 1000)")).toBe(
-      "(List.filter)(fn (n) = n <= 1000, (List.map)(I.parse, tokens))",
+      "List.filter(fn (n) = n <= 1000, List.map(I.parse, tokens))",
     );
     expect(desugared("input |> String.drop(idx + 1) |> String.split-using(separators)")).toBe(
-      "(String.split-using)(separators, (String.drop)(idx + 1, input))",
+      "String.split-using(separators, String.drop(idx + 1, input))",
     );
     expect(desugared("numbers |> List.filter(is-negative) |> Err()")).toBe(
-      "Err((List.filter)(is-negative, numbers))",
+      "Err(List.filter(is-negative, numbers))",
     );
     expect(desugared("numbers |> List.fold(fn (a, n) = a + n, 0)")).toBe(
-      "(List.fold)(fn (a, n) = a + n, 0, numbers)",
+      "List.fold(fn (a, n) = a + n, 0, numbers)",
     );
-    expect(desugared("s |> String.drop(n)")).toBe("(String.drop)(n, s)");
-    expect(desugared("s |> String.index-of-from(sep, i)")).toBe("(String.index-of-from)(sep, i, s)");
+    expect(desugared("s |> String.drop(n)")).toBe("String.drop(n, s)");
+    expect(desugared("s |> String.index-of-from(sep, i)")).toBe("String.index-of-from(sep, i, s)");
   });
 
   test("a map literal becomes map-set and a spread mentions map-keys once", () => {

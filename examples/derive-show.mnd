@@ -1,7 +1,6 @@
 ; User record and variant. `show` must print the same text on the
 ; interpreter and on a native binary.
 ; Run with: `./mn run examples/derive-show.mnd`
-
 record Point {
   x: Int
   y: Int

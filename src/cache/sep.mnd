@@ -6,7 +6,6 @@
 ;
 ; `mn emit` does not use this path. It still lowers one flat module so
 ; the fixed-point gate stays a single deterministic bitcode file.
-
 import "../reader/ast.mnd"
 import "../reader/read.mnd"
 import "../reader/casing.mnd"
@@ -133,12 +132,10 @@ let snoc-str(xs: List Str, x: Str) -> List Str =
   append-strs(xs, [x])
 
 let drop-n(n: Int, xs: List Ast) -> List Ast =
-  cond
-    | n <= 0 -> xs
-    | else ->
-      match (xs)
-        | [] -> []
-        | _ :: rest -> drop-n(n - 1, rest)
+  if (n <= 0) -> xs |
+  match (xs)
+    | [] -> []
+    | _ :: rest -> drop-n(n - 1, rest)
 
 let is-head(form: Ast, name: Str) -> Bool =
   match (form)
@@ -155,16 +152,13 @@ let unwrap-pub(form: Ast) -> Ast =
     | _ -> form
 
 let parse-code(msg: Str) -> Str =
-  cond
-    | String.contains("unclosed", msg) -> "E_PARSE_UNCLOSED"
-    | String.contains("'!'", msg) -> "E_PARSE_BANG"
-    | String.contains("unterminated", msg) -> "E_PARSE_STRING"
-    | else -> "E_PARSE"
+  if (String.contains("unclosed", msg)) -> "E_PARSE_UNCLOSED" | if (String.contains("'!'", msg)) -> "E_PARSE_BANG" | if (String.contains("unterminated", msg)) -> "E_PARSE_STRING" | "E_PARSE"
 
 ; Origin 0 is the file being compiled. Origin 1 is the source a
 ; generated `@test` module was extracted from.
 let report-at-help(abs: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str, help: Maybe Str) -> Unit =
-  if (sp.origin == 0) -> report-span-help(display-path(abs), src, sp, sev, code, msg, help) | {
+  if (sp.origin == 0) -> report-span-help(display-path(abs), src, sp, sev, code, msg, help) |
+  {
     let orig = doctest-origin(abs)
     match (read-file(orig))
       | Ok(text) -> report-span-help(display-path(orig), text, sp, sev, code, msg, help)
@@ -215,12 +209,10 @@ let after-arrow(xs: List Ast) -> Maybe Ast =
     | x :: rest ->
       match (sym-str(x))
         | Some(n) ->
-          cond
-            | n == "->" ->
-              match (rest)
-                | r :: _ -> Some(r)
-                | [] -> None
-            | else -> after-arrow(rest)
+          if (n == "->") ->
+            match (rest)
+              | r :: _ -> Some(r)
+              | [] -> None | after-arrow(rest)
         | None -> after-arrow(rest)
 
 let defn-rest(form: Ast) -> Maybe (List Ast) =
@@ -302,12 +294,10 @@ let top-let-name(form: Ast) -> Maybe Str =
     | ParenNode(h :: rest, _) ->
       match (sym-str(h))
         | Some(n) ->
-          cond
-            | n == "let" ->
-              match (rest)
-                | name :: _ -> bare-name(name)
-                | [] -> None
-            | else -> None
+          if (n == "let") ->
+            match (rest)
+              | name :: _ -> bare-name(name)
+              | [] -> None | None
         | None -> None
     | _ -> None
 
@@ -351,12 +341,10 @@ let push-fn(fns: List FnRec, name: Str, link: Str, arity: Int) -> List FnRec =
   match (fns)
     | [] -> [FnRec(name, link, arity)]
     | FnRec(n, _, _) :: _ ->
-      cond
-        | n == name -> fns
-        | else ->
-          match (fns)
-            | h :: rest -> h :: push-fn(rest, name, link, arity)
-            | [] -> [FnRec(name, link, arity)]
+      if (n == name) -> fns |
+      match (fns)
+        | h :: rest -> h :: push-fn(rest, name, link, arity)
+        | [] -> [FnRec(name, link, arity)]
 
 let kind-of(form: Ast) -> Str =
   match (unwrap-pub(form))
@@ -374,19 +362,17 @@ let ctor-names-of(form: Ast, acc: List Str) -> List Str =
     | ParenNode(h :: rest, _) ->
       match (sym-str(h))
         | Some(n) ->
-          cond
-            | n == "variant" ->
-              match (rest)
-                | _ :: ctors -> variant-ctor-names(ctors, acc)
-                | [] -> acc
-            | n == "defrec" ->
-              match (rest)
-                | name :: _ ->
-                  match (bare-name(name))
-                    | Some(dn) -> dn :: acc
-                    | None -> acc
-                | [] -> acc
-            | else -> acc
+          if (n == "variant") ->
+            match (rest)
+              | _ :: ctors -> variant-ctor-names(ctors, acc)
+              | [] -> acc |
+          if (n == "defrec") ->
+            match (rest)
+              | name :: _ ->
+                match (bare-name(name))
+                  | Some(dn) -> dn :: acc
+                  | None -> acc
+              | [] -> acc | acc
         | None -> acc
     | _ -> acc
 
@@ -447,9 +433,7 @@ let filter-new-stubs(stubs: List Ast, existing: List Ast) -> List Ast =
     | s :: rest ->
       match (stub-primary-name(s))
         | Some(n) ->
-          if (stubs-have-primary(existing, n)) ->
-            filter-new-stubs(rest, existing) |
-            s :: filter-new-stubs(rest, existing)
+          if (stubs-have-primary(existing, n)) -> filter-new-stubs(rest, existing) | s :: filter-new-stubs(rest, existing)
         | None -> s :: filter-new-stubs(rest, existing)
 
 let import-sym-names(xs: List Ast) -> List Str =
@@ -498,17 +482,13 @@ let pick-reexport-stubs(stubs: List Ast, names: List Str, acc: List Ast) -> List
   match (stubs)
     | [] -> reverse(acc)
     | s :: rest ->
-      if (stub-selected(s, names)) ->
-        pick-reexport-stubs(rest, names, s :: acc) |
-        pick-reexport-stubs(rest, names, acc)
+      if (stub-selected(s, names)) -> pick-reexport-stubs(rest, names, s :: acc) | pick-reexport-stubs(rest, names, acc)
 
 let pick-reexport-fns(fns: List FnRec, names: List Str, acc: List FnRec) -> List FnRec =
   match (fns)
     | [] -> reverse-fns(acc, [])
     | FnRec(n, link, ar) :: rest ->
-      if (has-str(names, n)) ->
-        pick-reexport-fns(rest, names, FnRec(n, link, ar) :: acc) |
-        pick-reexport-fns(rest, names, acc)
+      if (has-str(names, n)) -> pick-reexport-fns(rest, names, FnRec(n, link, ar) :: acc) | pick-reexport-fns(rest, names, acc)
 
 let reverse-fns(xs: List FnRec, acc: List FnRec) -> List FnRec =
   match (xs)
@@ -554,35 +534,22 @@ let collect-reexport(form: Ast, rest: List Ast, path: Str, done: Map Str Iface, 
                     | Some(ns) -> ns
                 let picked = pick-reexport-stubs(dep-stubs, wanted, [])
                 let picked-fns = pick-reexport-fns(dep-fns, wanted, [])
-                collect-exports(
-                  rest,
-                  path,
-                  done,
-                  append-fn-recs(picked-fns, fns),
-                  reexport-stubs-names(picked, names),
-                  append-asts(picked, stubs)
-                )
+                collect-exports(rest, path, done, append-fn-recs(picked-fns, fns), reexport-stubs-names(picked, names), append-asts(picked, stubs))
               }
 
 let collect-pub(form: Ast, rest: List Ast, path: Str, done: Map Str Iface, fns: List FnRec, names: List Str, stubs: List Ast) -> Export {
   let k = kind-of(form)
-  cond
-    | k == "import" -> collect-reexport(form, rest, path, done, fns, names, stubs)
-    | k == "defn" ->
-      match (defn-rest(form))
-        | None -> collect-exports(rest, path, done, fns, names, stubs)
-        | Some(r) ->
-          match (defn-name(form))
-            | None -> collect-exports(rest, path, done, fns, names, stubs)
-            | Some(n) ->
-              match (extern-stub(form))
-                | None -> collect-exports(rest, path, done, fns, names, stubs)
-                | Some(stub) -> collect-exports(rest, path, done, push-fn(fns, n, link-of(path, n), fn-arity(r)), names, stub :: stubs)
-    | k == "variant" -> collect-exports(rest, path, done, fns, ctor-names-of(form, names), unwrap-pub(form) :: stubs)
-    | k == "runtime" -> collect-exports(rest, path, done, fns, names, unwrap-pub(form) :: stubs)
-    | k == "defrec" || k == "alias" || k == "extern" -> collect-exports(rest, path, done, fns, ctor-names-of(form, names), unwrap-pub(form) :: stubs)
-    | k == "let" -> collect-exports(rest, path, done, fns, names, unwrap-pub(form) :: stubs)
-    | else -> collect-exports(rest, path, done, fns, names, stubs)
+  if (k == "import") -> collect-reexport(form, rest, path, done, fns, names, stubs) |
+  if (k == "defn") ->
+    match (defn-rest(form))
+      | None -> collect-exports(rest, path, done, fns, names, stubs)
+      | Some(r) ->
+        match (defn-name(form))
+          | None -> collect-exports(rest, path, done, fns, names, stubs)
+          | Some(n) ->
+            match (extern-stub(form))
+              | None -> collect-exports(rest, path, done, fns, names, stubs)
+              | Some(stub) -> collect-exports(rest, path, done, push-fn(fns, n, link-of(path, n), fn-arity(r)), names, stub :: stubs) | if (k == "variant") -> collect-exports(rest, path, done, fns, ctor-names-of(form, names), unwrap-pub(form) :: stubs) | if (k == "runtime") -> collect-exports(rest, path, done, fns, names, unwrap-pub(form) :: stubs) | if (k == "defrec" || k == "alias" || k == "extern") -> collect-exports(rest, path, done, fns, ctor-names-of(form, names), unwrap-pub(form) :: stubs) | if (k == "let") -> collect-exports(rest, path, done, fns, names, unwrap-pub(form) :: stubs) | collect-exports(rest, path, done, fns, names, stubs)
 }
 
 let empty-surface() -> Surface =
@@ -597,8 +564,7 @@ let surface-drop-fn(fns: List FnRec, name: Str) -> List FnRec =
 let surface-add-fns(fns: List FnRec, acc: List FnRec) -> List FnRec =
   match (fns)
     | [] -> acc
-    | FnRec(n, link, ar) :: rest ->
-      surface-add-fns(rest, FnRec(n, link, ar) :: surface-drop-fn(acc, n))
+    | FnRec(n, link, ar) :: rest -> surface-add-fns(rest, FnRec(n, link, ar) :: surface-drop-fn(acc, n))
 
 ; Stubs are typechecked in this order, so a dependency's variant
 ; has to precede the alias that names it. Skip a stub whose primary
@@ -607,8 +573,7 @@ let surface-add(iface: Iface, acc: Surface) -> Surface =
   match (iface)
     | Iface(_, _, _, _, _, fns, ctors, stubs) ->
       match (acc)
-        | Surface(af, ac, as) ->
-          Surface(surface-add-fns(fns, af), append-ctors(ctors, ac), append-asts(as, filter-new-stubs(stubs, as)))
+        | Surface(af, ac, as) -> Surface(surface-add-fns(fns, af), append-ctors(ctors, ac), append-asts(as, filter-new-stubs(stubs, as)))
 
 let append-ctors(xs: List CtorRec, ys: List CtorRec) -> List CtorRec =
   match (xs)
@@ -655,9 +620,7 @@ let with-basics-bare(deps: List DepRec, bare: List Str) -> List Str =
   match (deps)
     | [] -> bare
     | DepRec(_, p) :: rest ->
-      if (is-basics-path(p) && not(has-str(bare, p))) ->
-        p :: with-basics-bare(rest, bare) |
-        with-basics-bare(rest, bare)
+      if (is-basics-path(p) && not(has-str(bare, p))) -> p :: with-basics-bare(rest, bare) | with-basics-bare(rest, bare)
 
 let module-bare-paths(from: Str, forms: List Ast, deps: List DepRec) -> List Str =
   with-basics-bare(deps, bare-import-paths(from, forms))
@@ -671,11 +634,12 @@ let direct-surfaces(paths: List Str, done: Map Str Iface, acc: Surface) -> Surfa
         | None -> direct-surfaces(rest, done, acc)
         | Some(Iface(_, _, _, _, _, fns, _, stubs)) ->
           match (acc)
-            | Surface(af, ac, as) -> {
-              let values = value-stubs(stubs)
-              let previous = drop-shadowed-values(as, qualified-renames(values, "", Map.empty()))
-              direct-surfaces(rest, done, Surface(surface-add-fns(fns, af), ac, append-asts(previous, values)))
-            }
+            | Surface(af, ac, as) ->
+              {
+                let values = value-stubs(stubs)
+                let previous = drop-shadowed-values(as, qualified-renames(values, "", Map.empty()))
+                direct-surfaces(rest, done, Surface(surface-add-fns(fns, af), ac, append-asts(previous, values)))
+              }
 
 let value-stubs(stubs: List Ast) -> List Ast =
   match (stubs)
@@ -686,8 +650,7 @@ let value-stubs(stubs: List Ast) -> List Ast =
 let qualified-fns(fns: List FnRec, prefix: Str) -> List FnRec =
   match (fns)
     | [] -> []
-    | FnRec(n, link, ar) :: rest ->
-      FnRec(String.concat(prefix, n), link, ar) :: qualified-fns(rest, prefix)
+    | FnRec(n, link, ar) :: rest -> FnRec(String.concat(prefix, n), link, ar) :: qualified-fns(rest, prefix)
 
 let qualified-renames(stubs: List Ast, prefix: Str, acc: Map Str Str) -> Map Str Str =
   match (stubs)
@@ -726,8 +689,7 @@ let prefix-name-list(names: List Str, prefix: Str, acc: Map Str Str) -> Map Str 
 let stub-nested-renames(stubs: List Ast, prefix: Str, acc: Map Str Str) -> Map Str Str =
   match (stubs)
     | [] -> acc
-    | stub :: rest ->
-      stub-nested-renames(rest, prefix, prefix-name-list(ctor-names-of(stub, []), prefix, acc))
+    | stub :: rest -> stub-nested-renames(rest, prefix, prefix-name-list(ctor-names-of(stub, []), prefix, acc))
 
 ; Prefixed names for every export an aliased import exposes: values, types,
 ; and constructors. Applied to the whole stub AST so signatures stay coherent.
@@ -743,15 +705,13 @@ let alias-value-renames(stubs: List Ast, prefix: Str, acc: Map Str Str) -> Map S
 let alias-ctor-renames(ctors: List CtorRec, prefix: Str, acc: Map Str Str) -> Map Str Str =
   match (ctors)
     | [] -> acc
-    | CtorRec(n, _, _) :: rest ->
-      alias-ctor-renames(rest, prefix, Map.set(n, String.concat(prefix, n), acc))
+    | CtorRec(n, _, _) :: rest -> alias-ctor-renames(rest, prefix, Map.set(n, String.concat(prefix, n), acc))
 
 ; Keep the dependency's ctor tags; only the spelling is module-local.
 let qualify-ctor-recs(ctors: List CtorRec, prefix: Str) -> List CtorRec =
   match (ctors)
     | [] -> []
-    | CtorRec(n, t, a) :: rest ->
-      CtorRec(String.concat(prefix, n), t, a) :: qualify-ctor-recs(rest, prefix)
+    | CtorRec(n, t, a) :: rest -> CtorRec(String.concat(prefix, n), t, a) :: qualify-ctor-recs(rest, prefix)
 
 ; Type names in stubs (defrec / variant / alias) for dual-import aliases.
 let type-stub-name(stub: Ast) -> Maybe Str =
@@ -775,9 +735,7 @@ let dual-type-aliases(stubs: List Ast, prefix: Str, seen: List Str) -> List Ast 
       match (type-stub-name(stub))
         | None -> dual-type-aliases(rest, prefix, seen)
         | Some(n) ->
-          if (has-str(seen, n)) ->
-            dual-type-aliases(rest, prefix, seen) |
-            dual-type-alias(prefix, n) :: dual-type-aliases(rest, prefix, n :: seen)
+          if (has-str(seen, n)) -> dual-type-aliases(rest, prefix, seen) | dual-type-alias(prefix, n) :: dual-type-aliases(rest, prefix, n :: seen)
 
 ; Paths whose type stubs already appear unprefixed: direct bare imports and
 ; every module reachable from them. Aliasing one of these must not rename
@@ -796,8 +754,7 @@ let bare-exposed-walk(paths: List Str, done: Map Str Iface, seen: Ref (Map Str B
             set!(seen, Map.set(path, true, deref(seen)))
             match (Map.lookup(path, done))
               | None -> bare-exposed-walk(rest, done, seen, path :: acc)
-              | Some(Iface(_, deps, _, _, _, _, _, _)) ->
-                bare-exposed-walk(append-strs(dep-paths(deps), rest), done, seen, path :: acc)
+              | Some(Iface(_, deps, _, _, _, _, _, _)) -> bare-exposed-walk(append-strs(dep-paths(deps), rest), done, seen, path :: acc)
           }
 
 let dep-paths(deps: List DepRec) -> List Str =
@@ -827,9 +784,7 @@ let shared-type-names(stubs: List Ast, exposed-types: List Str, acc: List Str) -
     | s :: rest ->
       match (type-stub-name(s))
         | Some(n) ->
-          if (has-str(exposed-types, n) && not(has-str(acc, n))) ->
-            shared-type-names(rest, exposed-types, n :: acc) |
-            shared-type-names(rest, exposed-types, acc)
+          if (has-str(exposed-types, n) && not(has-str(acc, n))) -> shared-type-names(rest, exposed-types, n :: acc) | shared-type-names(rest, exposed-types, acc)
         | None -> shared-type-names(rest, exposed-types, acc)
 
 let unshared-type-stubs(stubs: List Ast, shared: List Str) -> List Ast =
@@ -839,9 +794,7 @@ let unshared-type-stubs(stubs: List Ast, shared: List Str) -> List Ast =
       match (type-stub-name(s))
         | None -> unshared-type-stubs(rest, shared)
         | Some(n) ->
-          if (has-str(shared, n)) ->
-            unshared-type-stubs(rest, shared) |
-            s :: unshared-type-stubs(rest, shared)
+          if (has-str(shared, n)) -> unshared-type-stubs(rest, shared) | s :: unshared-type-stubs(rest, shared)
 
 ; Drop shared type names (and their nested ctors) from the rename map so
 ; signatures keep the bare spelling. `dual-type-alias` cannot carry type
@@ -857,18 +810,14 @@ let shared-nested-names(stubs: List Ast, shared: List Str, acc: List Str) -> Lis
     | s :: rest ->
       match (type-stub-name(s))
         | Some(n) ->
-          if (has-str(shared, n)) ->
-            shared-nested-names(rest, shared, ctor-names-of(s, n :: acc)) |
-            shared-nested-names(rest, shared, acc)
+          if (has-str(shared, n)) -> shared-nested-names(rest, shared, ctor-names-of(s, n :: acc)) | shared-nested-names(rest, shared, acc)
         | None -> shared-nested-names(rest, shared, acc)
 
 let dual-type-aliases-for(names: List Str, prefix: Str, seen: List Str) -> List Ast =
   match (names)
     | [] -> []
     | n :: rest ->
-      if (has-str(seen, n)) ->
-        dual-type-aliases-for(rest, prefix, seen) |
-        dual-type-alias(prefix, n) :: dual-type-aliases-for(rest, prefix, n :: seen)
+      if (has-str(seen, n)) -> dual-type-aliases-for(rest, prefix, seen) | dual-type-alias(prefix, n) :: dual-type-aliases-for(rest, prefix, n :: seen)
 
 ; Alias imports expose `__import_Alias_*` spellings. When the module's types
 ; are already bare-exposed, only values are renamed and type aliases keep
@@ -899,24 +848,15 @@ let alias-surfaces-with(from: Str, forms: List Ast, done: Map Str Iface, exposed
                           let prefix = import-alias-prefix(name)
                           let dual = has-str(exposed, path)
                           let shared =
-                            if (dual) ->
-                              [] |
-                              shared-type-names(stubs, surface-type-names(as, []), [])
+                            if (dual) -> [] | shared-type-names(stubs, surface-type-names(as, []), [])
                           let full-renames = alias-export-renames(stubs, ctors, prefix, Map.empty())
                           let renames = drop-rename-keys(shared-nested-names(stubs, shared, []), full-renames)
                           let renamed =
-                            if (dual) ->
-                              rename-module-forms(value-stubs(stubs), alias-value-renames(stubs, prefix, Map.empty())) |
-                              append-asts(
-                                rename-module-forms(value-stubs(stubs), renames),
-                                rename-module-forms(unshared-type-stubs(stubs, shared), renames)
-                              )
+                            if (dual) -> rename-module-forms(value-stubs(stubs), alias-value-renames(stubs, prefix, Map.empty())) | append-asts(rename-module-forms(value-stubs(stubs), renames), rename-module-forms(unshared-type-stubs(stubs, shared), renames))
                           ; Shared names stay bare in signatures; dual aliases still
                           ; bind Alias.Name for nullary type annotations / ctors.
                           let aliases =
-                            if (dual) ->
-                              dual-type-aliases(stubs, prefix, []) |
-                              dual-type-aliases-for(shared, prefix, [])
+                            if (dual) -> dual-type-aliases(stubs, prefix, []) | dual-type-aliases-for(shared, prefix, [])
                           let next-ctors = append-ctors(qualify-ctor-recs(ctors, prefix), ac)
                           alias-surfaces-with(from, rest, done, exposed, Surface(append-fns(qualified-fns(fns, prefix), af), next-ctors, append-asts(as, append-asts(renamed, aliases))))
                         }
@@ -975,20 +915,10 @@ let rt(runtime: Str, name: Str) -> Str =
 ; `-lssl -lcrypto`. Override with MENARD_OPENSSL_CFLAGS / MENARD_OPENSSL_LIBS
 ; (space-separated) when needed.
 let openssl-cflags-default() -> List Str =
-  cond
-    | exists("/opt/homebrew/opt/openssl@3/include") ->
-      ["-I/opt/homebrew/opt/openssl@3/include"]
-    | exists("/usr/local/opt/openssl@3/include") ->
-      ["-I/usr/local/opt/openssl@3/include"]
-    | else -> []
+  if (exists("/opt/homebrew/opt/openssl@3/include")) -> ["-I/opt/homebrew/opt/openssl@3/include"] | if (exists("/usr/local/opt/openssl@3/include")) -> ["-I/usr/local/opt/openssl@3/include"] | []
 
 let openssl-libs-default() -> List Str =
-  cond
-    | exists("/opt/homebrew/opt/openssl@3/lib") ->
-      ["-L/opt/homebrew/opt/openssl@3/lib", "-lssl", "-lcrypto"]
-    | exists("/usr/local/opt/openssl@3/lib") ->
-      ["-L/usr/local/opt/openssl@3/lib", "-lssl", "-lcrypto"]
-    | else -> ["-lssl", "-lcrypto"]
+  if (exists("/opt/homebrew/opt/openssl@3/lib")) -> ["-L/opt/homebrew/opt/openssl@3/lib", "-lssl", "-lcrypto"] | if (exists("/usr/local/opt/openssl@3/lib")) -> ["-L/usr/local/opt/openssl@3/lib", "-lssl", "-lcrypto"] | ["-lssl", "-lcrypto"]
 
 let openssl-cflags() -> List Str =
   match (getenv("MENARD_OPENSSL_CFLAGS"))
@@ -1006,15 +936,7 @@ let rt-third-party(runtime: Str, name: Str) -> Str =
   Path.join(name, Path.join("third_party", runtime))
 
 let link-argv(cc: Str, runtime: Str, objs: List Str, out: Str) -> List Str =
-  append-strs(
-    append-strs(
-      append-strs(
-        append-strs(
-          [cc, "-std=c11", "-D_DEFAULT_SOURCE", "-Wall", "-Wextra", "-O2", String.concat("-I", Path.join("include", runtime)), String.concat("-I", Path.join("third_party", runtime))],
-          openssl-cflags()),
-        objs),
-      [rt(runtime, "alloc.c"), rt(runtime, "gc.c"), rt(runtime, "panic.c"), rt(runtime, "print.c"), rt(runtime, "shadow.c"), rt(runtime, "variants.c"), rt(runtime, "str.c"), rt(runtime, "float_text.c"), rt(runtime, "char_text.c"), rt-third-party(runtime, "ryu/d2s.c"), rt(runtime, "map.c"), rt(runtime, "closure.c"), rt(runtime, "io.c"), rt(runtime, "equal.c"), rt(runtime, "task.c"), rt(runtime, "net.c"), rt(runtime, "tls.c"), "-lm"]),
-    append-strs(openssl-libs(), ["-o", out]))
+  append-strs(append-strs(append-strs(append-strs([cc, "-std=c11", "-D_DEFAULT_SOURCE", "-Wall", "-Wextra", "-O2", String.concat("-I", Path.join("include", runtime)), String.concat("-I", Path.join("third_party", runtime))], openssl-cflags()), objs), [rt(runtime, "alloc.c"), rt(runtime, "gc.c"), rt(runtime, "panic.c"), rt(runtime, "print.c"), rt(runtime, "shadow.c"), rt(runtime, "variants.c"), rt(runtime, "str.c"), rt(runtime, "float_text.c"), rt(runtime, "char_text.c"), rt-third-party(runtime, "ryu/d2s.c"), rt(runtime, "map.c"), rt(runtime, "closure.c"), rt(runtime, "io.c"), rt(runtime, "equal.c"), rt(runtime, "task.c"), rt(runtime, "net.c"), rt(runtime, "tls.c"), "-lm"]), append-strs(openssl-libs(), ["-o", out]))
 
 let exit-code(st: SpawnStatus) -> Int =
   match (st)
@@ -1027,12 +949,10 @@ let link-objs(cc: Str, runtime: Str, objs: List Str, bin: Str) -> Result Str Str
   match (spawn-capture(link-argv(cc, runtime, objs, tmp), ""))
     | Err(_) -> Err(String.concat("cannot spawn ", cc))
     | Ok(SpawnOutput(st, _, err)) ->
-      cond
-        | exit-code(st) == 0 ->
-          match (rename(tmp, bin))
-            | Ok(_) -> Ok(bin)
-            | Err(_) -> Err(String.concat("cannot rename ", bin))
-        | else -> Err(err)
+      if (exit-code(st) == 0) ->
+        match (rename(tmp, bin))
+          | Ok(_) -> Ok(bin)
+          | Err(_) -> Err(String.concat("cannot rename ", bin)) | Err(err)
 }
 
 let any-newer(paths: List Str, bin: Str) -> Bool =
@@ -1127,7 +1047,7 @@ let is-print-defn(form: Ast) -> Bool =
         | None -> false
     | _ -> false
 
-let take-print-defns(forms: List Ast, acc: List Ast) -> (List Ast * List Ast) =
+let take-print-defns(forms: List Ast, acc: List Ast) -> List Ast * List Ast =
   match (forms)
     | [] -> (reverse(acc), [])
     | f :: rest ->
@@ -1189,20 +1109,16 @@ let compile-store(abs: Str, src: Str, with-init: List Ast, exported: Export, dir
             let main-sym =
               if (String.length(main-ret) > 0) -> main-name | ""
             let iface = Iface(bytes-hash(src), direct, init, main-sym, main-ret, fns, filter-ctors(local, names, []), reverse(stubs))
-            cond
-              | write-bytes(object-path(abs), bytes) ->
-                cond
-                  | write-iface(abs, iface) -> finish-fresh(abs, iface, ctx)
-                  | else ->
-                    {
-                      note-compiling(abs, ctx, since(started))
-                      Err("cannot write interface")
-                    }
-              | else ->
-                {
-                  note-compiling(abs, ctx, since(started))
-                  Err("cannot write object")
-                }
+            if (write-bytes(object-path(abs), bytes)) ->
+              if (write-iface(abs, iface)) -> finish-fresh(abs, iface, ctx) |
+              {
+                note-compiling(abs, ctx, since(started))
+                Err("cannot write interface")
+              } |
+            {
+              note-compiling(abs, ctx, since(started))
+              Err("cannot write object")
+            }
           }
 
 let ensure-list(paths: List Str, ctx: Ctx) -> Result Unit Str =
@@ -1227,10 +1143,7 @@ let has-nl(s: Str) -> Bool =
   has-nl-from(s, 0)
 
 let has-nl-from(s: Str, i: Int) -> Bool =
-  cond
-    | i >= String.length(s) -> false
-    | String.byte(i, s) == 10 -> true
-    | else -> has-nl-from(s, i + 1)
+  if (i >= String.length(s)) -> false | if (String.byte(i, s) == 10) -> true | has-nl-from(s, i + 1)
 
 let since(started: Int) -> Int {
   let d = now-ms() - started
@@ -1239,20 +1152,18 @@ let since(started: Int) -> Int {
 
 ; Same rule as `mn.mnd`'s `note-compiling`: a tty, and not `--quiet` / `--json`.
 let note-progress(verb: Str, abs: Str, ctx: Ctx, ms: Int) -> Unit =
-  cond
-    | ctx-quiet(ctx) || json-mode-on() || not(isatty(2)) -> ()
-    | else ->
-      {
-        write(stderr, progress-line(verb, display-path(abs), ms))
-        ()
-      }
+  if (ctx-quiet(ctx) || json-mode-on() || not(isatty(2))) -> () |
+  {
+    write(stderr, progress-line(verb, display-path(abs), ms))
+    ()
+  }
 
 ; `examples/sc.mnd` → `examples/sc.doctest.mnd`. The generated module is not
 ; the source file; errors in an annotation still use the source path.
 pub let doctest-label(shown: Str) -> Str =
   if (String.ends-with(".mnd", shown)) -> String.concat(String.slice(0, String.length(shown) - 4, shown), ".doctest.mnd") | String.concat(shown, ".doctest.mnd")
 
-let note-compiling(abs: Str, ctx: Ctx, ms: Int) -> Unit = {
+let note-compiling(abs: Str, ctx: Ctx, ms: Int) -> Unit {
   let orig = doctest-origin(abs)
   let name =
     if (String.length(orig) == 0) -> abs | doctest-label(display-path(orig))
@@ -1261,7 +1172,7 @@ let note-compiling(abs: Str, ctx: Ctx, ms: Int) -> Unit = {
 
 ; Panic frames for a generated test module name the original source
 ; at origin 1 and the generated file at origin 0.
-let emit-paths(abs: Str) -> List Str = {
+let emit-paths(abs: Str) -> List Str {
   let orig = doctest-origin(abs)
   if (String.length(orig) == 0) -> [display-path(abs)] | [display-path(abs), display-path(orig)]
 }
@@ -1270,13 +1181,11 @@ let note-linking(abs: Str, ctx: Ctx, ms: Int) -> Unit =
   note-progress("Linking", abs, ctx, ms)
 
 let note-link-label(label: Str, ctx: Ctx, ms: Int) -> Unit =
-  cond
-    | ctx-quiet(ctx) || json-mode-on() || not(isatty(2)) -> ()
-    | else ->
-      {
-        write(stderr, progress-line("Linking", label, ms))
-        ()
-      }
+  if (ctx-quiet(ctx) || json-mode-on() || not(isatty(2))) -> () |
+  {
+    write(stderr, progress-line("Linking", label, ms))
+    ()
+  }
 
 let compile-file(abs: Str, ctx: Ctx) -> Result Iface Str =
   compile-file-read(abs, ctx)
@@ -1388,47 +1297,41 @@ let boot-path(abs: Str) -> Str =
 let link-closure(abs: Str, iface: Iface, ctx: Ctx, cc: Str, runtime: Str, bin: Str) -> Result Str Str =
   match (iface)
     | Iface(_, _, _, main-sym, main-ret, _, _, _) ->
-      cond
-        | String.length(main-sym) == 0 -> Err("program has no top-level `defn main`")
-        | else ->
-          match (ctx)
-            | Ctx(_, _, _, triple, _, _, order, inits, _, _, _) ->
-              {
-                let unit = main-ret == "Unit"
-                let syms = snoc-str(deref(inits), main-sym)
-                let forms = bootstrap-forms(deref(inits), main-sym, unit)
-                match (lower-program-sep(forms, triple, ["<bootstrap>"], imps-of-syms(syms), []))
-                  | Err(msg) -> Err(msg)
-                  | Ok(bytes) ->
+      if (String.length(main-sym) == 0) -> Err("program has no top-level `defn main`") |
+      match (ctx)
+        | Ctx(_, _, _, triple, _, _, order, inits, _, _, _) ->
+          {
+            let unit = main-ret == "Unit"
+            let syms = snoc-str(deref(inits), main-sym)
+            let forms = bootstrap-forms(deref(inits), main-sym, unit)
+            match (lower-program-sep(forms, triple, ["<bootstrap>"], imps-of-syms(syms), []))
+              | Err(msg) -> Err(msg)
+              | Ok(bytes) ->
+                {
+                  let bp = boot-path(abs)
+                  write-if-changed(bp, bytes)
+                  let objs = snoc-str(deref(order), bp)
+                  if (any-newer(objs, bin)) ->
                     {
-                      let bp = boot-path(abs)
-                      write-if-changed(bp, bytes)
-                      let objs = snoc-str(deref(order), bp)
-                      cond
-                        | any-newer(objs, bin) ->
+                      let started = now-ms()
+                      match (link-objs(cc, runtime, objs, bin))
+                        | Ok(out) ->
                           {
-                            let started = now-ms()
-                            match (link-objs(cc, runtime, objs, bin))
-                              | Ok(out) ->
-                                {
-                                  note-linking(abs, ctx, since(started))
-                                  Ok(out)
-                                }
-                              | Err(msg) ->
-                                {
-                                  note-linking(abs, ctx, since(started))
-                                  cond
-                                    | has-nl(msg) ->
-                                      {
-                                        write(stderr, msg)
-                                        Err("link failed")
-                                      }
-                                    | else -> Err(msg)
-                                }
+                            note-linking(abs, ctx, since(started))
+                            Ok(out)
                           }
-                        | else -> Ok(bin)
-                    }
-              }
+                        | Err(msg) ->
+                          {
+                            note-linking(abs, ctx, since(started))
+                            if (has-nl(msg)) ->
+                              {
+                                write(stderr, msg)
+                                Err("link failed")
+                              } | Err(msg)
+                          }
+                    } | Ok(bin)
+                }
+          }
 
 pub let build-program(entry: Str, clean: Bool, for-test: Bool, cc: Str, runtime: Str, bin: Str, do-link: Bool, quiet: Bool) -> Result Str Str {
   let abs = canonical-path(entry)
@@ -1509,22 +1412,18 @@ let collect-cases(displays: List Str, paths: List Str, done: Map Str Iface) -> R
             | Some(iface) ->
               {
                 let main-sym = iface-main(iface)
-                cond
-                  | String.length(main-sym) > 0 ->
-                    match (collect-cases(ds, as, done))
-                      | Ok(rest) -> Ok(SuiteSym(d, main-sym) :: rest)
-                      | Err(e) -> Err(e)
-                  | else -> Err(String.concat("no main in ", d))
+                if (String.length(main-sym) > 0) ->
+                  match (collect-cases(ds, as, done))
+                    | Ok(rest) -> Ok(SuiteSym(d, main-sym) :: rest)
+                    | Err(e) -> Err(e) | Err(String.concat("no main in ", d))
               }
 
 let link-failed(msg: Str) -> Result Str Str =
-  cond
-    | has-nl(msg) ->
-      {
-        write(stderr, msg)
-        Err("link failed")
-      }
-    | else -> Err(msg)
+  if (has-nl(msg)) ->
+    {
+      write(stderr, msg)
+      Err("link failed")
+    } | Err(msg)
 
 let link-suite(key: Str, cases: List SuiteSym, ctx: Ctx, cc: Str, runtime: Str, bin: Str, label: Str) -> Result Str Str =
   match (ctx)
@@ -1540,23 +1439,21 @@ let link-suite(key: Str, cases: List SuiteSym, ctx: Ctx, cc: Str, runtime: Str, 
               let bp = boot-path(key)
               write-if-changed(bp, bytes)
               let objs = snoc-str(deref(order), bp)
-              cond
-                | any-newer(objs, bin) ->
-                  {
-                    let started = now-ms()
-                    match (link-objs(cc, runtime, objs, bin))
-                      | Ok(out) ->
-                        {
-                          note-link-label(label, ctx, since(started))
-                          Ok(out)
-                        }
-                      | Err(msg) ->
-                        {
-                          note-link-label(label, ctx, since(started))
-                          link-failed(msg)
-                        }
-                  }
-                | else -> Ok(bin)
+              if (any-newer(objs, bin)) ->
+                {
+                  let started = now-ms()
+                  match (link-objs(cc, runtime, objs, bin))
+                    | Ok(out) ->
+                      {
+                        note-link-label(label, ctx, since(started))
+                        Ok(out)
+                      }
+                    | Err(msg) ->
+                      {
+                        note-link-label(label, ctx, since(started))
+                        link-failed(msg)
+                      }
+                } | Ok(bin)
             }
       }
 
@@ -1581,33 +1478,21 @@ let triple-marker() -> Str =
   "target triple = \""
 
 let bytes-match-at(s: Str, i: Int, pat: Str, j: Int) -> Bool =
-  cond
-    | j >= String.length(pat) -> true
-    | i + j >= String.length(s) -> false
-    | String.byte(i + j, s) == String.byte(j, pat) -> bytes-match-at(s, i, pat, j + 1)
-    | else -> false
+  if (j >= String.length(pat)) -> true | if (i + j >= String.length(s)) -> false | if (String.byte(i + j, s) == String.byte(j, pat)) -> bytes-match-at(s, i, pat, j + 1) | false
 
 let find-bytes(s: Str, pat: Str, i: Int) -> Int =
-  cond
-    | i + String.length(pat) > String.length(s) -> -1
-    | bytes-match-at(s, i, pat, 0) -> i
-    | else -> find-bytes(s, pat, i + 1)
+  if (i + String.length(pat) > String.length(s)) -> -1 | if (bytes-match-at(s, i, pat, 0)) -> i | find-bytes(s, pat, i + 1)
 
 let copy-until(s: Str, i: Int, stop: Int, acc: Str) -> Str =
-  cond
-    | i >= String.length(s) -> acc
-    | String.byte(i, s) == stop -> acc
-    | else -> copy-until(s, i + 1, stop, String.concat(acc, String.slice(i, 1, s)))
+  if (i >= String.length(s)) -> acc | if (String.byte(i, s) == stop) -> acc | copy-until(s, i + 1, stop, String.concat(acc, String.slice(i, 1, s)))
 
 let triple-from-clang(cc: Str) -> Str =
   match (spawn-capture([cc, "-S", "-emit-llvm", "-o", "-", "-x", "c", "-"], "int x;"))
     | Err(_) -> ""
     | Ok(SpawnOutput(st, text, _)) ->
-      cond
-        | exit-code(st) == 0 ->
-          {
-            let mark = triple-marker()
-            let at = find-bytes(text, mark, 0)
-            if (at < 0) -> "" | copy-until(text, at + String.length(mark), 34, "")
-          }
-        | else -> ""
+      if (exit-code(st) == 0) ->
+        {
+          let mark = triple-marker()
+          let at = find-bytes(text, mark, 0)
+          if (at < 0) -> "" | copy-until(text, at + String.length(mark), 34, "")
+        } | ""

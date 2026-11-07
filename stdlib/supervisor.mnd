@@ -1,8 +1,9 @@
 ; OTP-lite one-for-one supervisor helpers (Build F).
 ; @module std/supervisor
-
 import std/actor as Actor
+
 pub import std/actor (Pid)
+
 import std/list as List
 import std/sched as Sched
 import std/task as Task
@@ -35,7 +36,7 @@ pub let should-restart(policy: Restart, cancelled: Bool) -> Bool =
 ; @test start-children([]) => []
 pub let start-children[a](children: List (ChildSpec a)) -> List (Pid a) =
   List.map(
-    fn (s) = {
+    fn (s) {
       match (s)
         | ChildSpec(boot, _) -> boot()
     },
@@ -61,38 +62,46 @@ pub let restart-child[a](spec: ChildSpec a) -> Pid a =
 let watch-one[a](spec: ChildSpec a) -> Unit =
   match (spec)
     | ChildSpec(boot, restart) ->
-      loop () {
-        let pid = boot()
-        match (Actor.join(pid))
-          | Ok(_) ->
-            if (should-restart(restart, false)) -> {
-              Task.yield()
-              recur()
-            } | ()
-          | Err(_) ->
-            if (should-restart(restart, true)) -> {
-              Task.yield()
-              recur()
-            } | ()
-      }
+      loop ()
+        {
+          let pid = boot()
+          match (Actor.join(pid))
+            | Ok(_) ->
+              if (should-restart(restart, false)) ->
+                {
+                  Task.yield()
+                  recur()
+                }
+            | Err(_) ->
+              if (should-restart(restart, true)) ->
+                {
+                  Task.yield()
+                  recur()
+                }
+        }
 
 ; One-for-one: spawn a watcher per child under a scope; park until cancel.
 ; Scaffolding — prefer start-children / stop-children when you need explicit
 ; lifecycle; this loop does not yet surface child exit reasons to callers.
 ; @test true
 pub let supervise[a](children: List (ChildSpec a)) -> Unit =
-  Task.scope(fn (scope) = {
-    List.for-each(
-      fn (spec) = {
-        Task.spawn-in(scope, fn () = {
-          watch-one(spec)
-          0
-        })
-        ()
-      },
-      children
-    )
-    let cell = Sched.wait-new()
-    Sched.wait(cell)
-    ()
-  })
+  Task.scope(
+    fn (scope) {
+      List.for-each(
+        fn (spec) {
+          Task.spawn-in(
+            scope,
+            fn () {
+              watch-one(spec)
+              0
+            }
+          )
+          ()
+        },
+        children
+      )
+      let cell = Sched.wait-new()
+      Sched.wait(cell)
+      ()
+    }
+  )

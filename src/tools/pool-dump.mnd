@@ -5,7 +5,6 @@
 ;
 ; Usage: bun run host/src/cli/menard.ts run src/tools/pool-dump.mnd -- <file.mnd>
 ; The same summary is src/pool/pool.test.mnd.
-
 import "../reader/ast.mnd"
 import "../reader/read.mnd"
 import "../pool/pool.mnd"
@@ -38,9 +37,7 @@ let check-source(path: Str, src: Str) -> Unit =
     | Err(e) -> fail-parse(path, e)
 
 let main() -> Unit =
-  cond
-    | arg-count() < 1 -> fail("usage: pool-dump.mnd <file.mnd>")
-    | else ->
-      match (read-file(arg(0)))
-        | Ok(src) -> check-source(arg(0), src)
-        | Err(_) -> fail(String.concat("cannot read ", arg(0)))
+  if (arg-count() < 1) -> fail("usage: pool-dump.mnd <file.mnd>") |
+  match (read-file(arg(0)))
+    | Ok(src) -> check-source(arg(0), src)
+    | Err(_) -> fail(String.concat("cannot read ", arg(0)))

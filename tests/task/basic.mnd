@@ -12,7 +12,7 @@ let yield-then-bump(counter: Ref Int) -> Int {
   deref(counter)
 }
 
-let unwrap-ok(r: Result Int Task.Cancelled) -> Int =
+let unwrap-ok(r: Result Int (Task.Cancelled)) -> Int =
   match (r)
     | Ok(n) -> n
     | Err(_) -> -1
@@ -36,34 +36,39 @@ let main() -> Int {
   let b = unwrap-ok(Task.join(t2))
   println(a + b)
   println(deref(counter))
-
   ; Yield fairness: child yields, main mutates, child continues.
   let c2 = ref(0)
   let ty = Task.spawn(fn () = yield-then-bump(c2))
   set!(c2, 1)
   let yv = unwrap-ok(Task.join(ty))
   println(yv)
-
   ; Cancel before the child finishes.
-  let slow = Task.spawn(fn () = {
-    Task.yield()
-    Task.yield()
-    99
-  })
+  let slow =
+    Task.spawn(
+      fn () {
+        Task.yield()
+        Task.yield()
+        99
+      }
+    )
   Task.cancel(slow)
   let cr = Task.join(slow)
   match (cr)
     | Ok(_) -> println(0)
     | Err(_) -> println(1)
-
   ; Scope exit cancels unfinished children.
-  Task.scope(fn (s) = {
-    spawn-in(s, fn () = {
-      Task.yield()
-      0
-    })
-    ()
-  })
+  Task.scope(
+    fn (s) {
+      spawn-in(
+        s,
+        fn () {
+          Task.yield()
+          0
+        }
+      )
+      ()
+    }
+  )
   println(2)
   0
 }

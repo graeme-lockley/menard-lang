@@ -2,7 +2,6 @@
 ; match. Fixture paths are from the repo root, and are also found when
 ; `./mn test` is run from a subdirectory. `check` / `emit` stay in
 ; tests/phase2/reader-roundtrip.test.ts.
-
 import "../test/paths.mnd"
 import "./ast.mnd"
 import "./read.mnd"
@@ -120,11 +119,7 @@ test "pipe needs whitespace on both sides" = {
 }
 
 test "an arm bar stays a bar when the condition is a pipe" = {
-  let src = "let f(n: Int) -> Int =
-  cond
-    | n |> g(1) -> 0
-    | else -> 1
-"
+  let src = "let f(n: Int) -> Int =\n  cond\n    | n |> g(1) -> 0\n    | else -> 1\n"
   match (read-all(src))
     | Err(_) -> false
     | Ok(forms) ->
@@ -137,17 +132,7 @@ test "an arm bar stays a bar when the condition is a pipe" = {
 }
 
 test "binding and test blocks put the opening brace after equals" = {
-  let src = "let value = {
-  let inner = {
-    41
-  }
-  inner + 1
-}
-
-test \"block value\" = {
-  value == 42
-}
-"
+  let src = "let value = {\n  let inner = {\n    41\n  }\n  inner + 1\n}\n\ntest \"block value\" = {\n  value == 42\n}\n"
   match (read-all(src))
     | Err(_) -> false
     | Ok(forms) -> print-form-all(forms) == src
@@ -162,28 +147,29 @@ test "an empty map round-trips" = {
         | Ok(b) -> print-form(a) == "{}" && ast-equal(a, b)
 }
 
-test "a map literal and a question chain round-trip" = {
-  match (read("{\"a\" => 1, \"b\" => 2}"))
-    | Err(_) -> false
-    | Ok(a) ->
-      match (read(print-form(a)))
-        | Err(_) -> false
-        | Ok(b) -> ast-equal(a, b)
-} && {
-  match (read("{...x, \"a\" => 1, ...y}"))
-    | Err(_) -> false
-    | Ok(a) ->
-      match (read(print-form(a)))
-        | Err(_) -> false
-        | Ok(b) -> ast-equal(a, b)
-} && {
-  match (read("a ? b ? c"))
-    | Err(_) -> false
-    | Ok(a) ->
-      match (read(print-form(a)))
-        | Err(_) -> false
-        | Ok(b) -> print-form(a) == "a ? b ? c" && ast-equal(a, b)
-}
+test "a map literal and a question chain round-trip" =
+  {
+    match (read("{\"a\" => 1, \"b\" => 2}"))
+      | Err(_) -> false
+      | Ok(a) ->
+        match (read(print-form(a)))
+          | Err(_) -> false
+          | Ok(b) -> ast-equal(a, b)
+  } && {
+    match (read("{...x, \"a\" => 1, ...y}"))
+      | Err(_) -> false
+      | Ok(a) ->
+        match (read(print-form(a)))
+          | Err(_) -> false
+          | Ok(b) -> ast-equal(a, b)
+  } && {
+    match (read("a ? b ? c"))
+      | Err(_) -> false
+      | Ok(a) ->
+        match (read(print-form(a)))
+          | Err(_) -> false
+          | Ok(b) -> print-form(a) == "a ? b ? c" && ast-equal(a, b)
+  }
 
 test "one expression in braces stays a block" = {
   match (read("{ 1 }"))
@@ -242,12 +228,13 @@ test "a shebang with no following program is an empty file" = {
         | _ -> false
 }
 
-test "a hash that is not the first two bytes is an error" = {
-  match (read(" #!/usr/bin/env mn\n42"))
-    | Err(_) -> true
-    | Ok(_) -> false
-} && {
-  match (read("42\n#"))
-    | Err(_) -> true
-    | Ok(_) -> false
-}
+test "a hash that is not the first two bytes is an error" =
+  {
+    match (read(" #!/usr/bin/env mn\n42"))
+      | Err(_) -> true
+      | Ok(_) -> false
+  } && {
+    match (read("42\n#"))
+      | Err(_) -> true
+      | Ok(_) -> false
+  }

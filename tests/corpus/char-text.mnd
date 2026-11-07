@@ -1,7 +1,6 @@
 ; LANG-10: canonical Char text. Printed spellings must agree across
 ; interpreter, stage0 and stage1. Cover printable, escaped, and non-BMP
 ; via show, println, and a show/round-trip string compare.
-
 let main() -> Int {
   ; show path
   println(show('A'))

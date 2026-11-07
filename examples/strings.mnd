@@ -1,7 +1,6 @@
 ; Slice 3D — Str concat + byte-length.
 ; Prints: "hel" + "lo" = hello (5 bytes)
 ; Run with: `./mn run examples/strings.mnd`
-
 import std/string as String
 
 let main() -> Unit {
