@@ -109,6 +109,15 @@ static void clear_wait_cell(int cell_id) {
   }
 }
 
+int mn_net_has_waiters(void) {
+  for (int i = 0; i < MAX_NET_WAITERS; i++) {
+    if (waiters[i].alive) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 int mn_net_poll(int timeout_ms) {
   struct pollfd pfds[MAX_NET_WAITERS];
   int map[MAX_NET_WAITERS];
@@ -133,7 +142,10 @@ int mn_net_poll(int timeout_ms) {
     }
     return 0;
   }
-  int pr = poll(pfds, (nfds_t)n, timeout_ms);
+  int pr;
+  do {
+    pr = poll(pfds, (nfds_t)n, timeout_ms);
+  } while (pr < 0 && errno == EINTR);
   if (pr <= 0) {
     return 0;
   }
@@ -145,7 +157,10 @@ int mn_net_poll(int timeout_ms) {
     int i = map[j];
     int cell = waiters[i].cell_id;
     waiters[i].alive = 0;
-    mn_task_notify(mn_int_to_word((int64_t)cell));
+    /* Do not mn_task_notify: that nested-pumps while the main wait loop
+     * is inside idle_block, draining woken tasks before it can see them
+     * and spuriously panicking "main stuck". */
+    mn_task_wake_io_cell(cell);
     notified++;
   }
   return notified;

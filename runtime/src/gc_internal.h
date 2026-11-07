@@ -71,6 +71,10 @@ void mn_task_visit_roots(mn_root_visit_fn fn, void *ctx);
 
 /* Drive parkable socket completions (Build F). Returns # notified. */
 int mn_net_poll(int timeout_ms);
+/* True when at least one parkable socket waiter is registered. */
+int mn_net_has_waiters(void);
+/* Wake a wait cell from the net poller without nested pump (Build F). */
+void mn_task_wake_io_cell(int cell_id);
 /* Monotonic clock (ms) and timer helpers used by the task pump. */
 int64_t mn_mono_now_ms(void);
 void mn_timers_fire_due(void);

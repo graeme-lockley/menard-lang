@@ -293,6 +293,16 @@ static void notify_cell(MnWaitCell *c) {
   }
 }
 
+/* Used by mn_net_poll: enqueue waiters without a nested pump. The caller's
+ * wait/join loop drives pump() so it can observe runnable_head. */
+void mn_task_wake_io_cell(int cell_id) {
+  MnWaitCell *c = cell_by_id(cell_id);
+  if (c == NULL) {
+    return;
+  }
+  notify_cell(c);
+}
+
 /* Close the cell and wake every waiter. Sticky/closed stay set so a late
  * wait after an alive-check/park race returns without parking. */
 static void notify_all_cell(MnWaitCell *c) {
@@ -625,7 +635,12 @@ static int wait_on_cell(MnWaitCell *c) {
       if (runnable_head != NULL) {
         continue;
       }
+      /* Infinite wait: another fd may have made progress (or EINTR); keep
+       * polling while socket waiters remain. True deadlock = no FDs. */
       if (delay < 0) {
+        if (mn_net_has_waiters()) {
+          continue;
+        }
         mn_panic("mn_task_wait: main stuck");
       }
     }
@@ -969,7 +984,7 @@ static void join_wait_until_terminal(MnTask *target) {
         if (runnable_head != NULL || is_terminal(target)) {
           continue;
         }
-        if (delay < 0) {
+        if (delay < 0 && !mn_net_has_waiters()) {
           mn_panic("mn_task_join: target waiting on cell");
         }
         continue;
