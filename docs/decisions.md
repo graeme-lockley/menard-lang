@@ -4,7 +4,8 @@ The language these decisions produced is described in [guide.md](guide.md).
 This file is the history: what was chosen, what was turned down, and when.
 
 Dated ratifications and reversals, newest first, plus the index of the standing
-decisions.
+decisions. The **Current rules** table and **Topic index** below are the
+navigation layer: update both in the same commit that changes a rule.
 
 `menard-spec.md` is the specification. It states the design and nothing else —
 no rationale-by-narration, no revision history, no argument with itself. This
@@ -28,7 +29,96 @@ specification. Where a name changed, the entry that changed it says so.
 
 ---
 
+## Current rules
+
+One row per area. Update this table in the **same commit** that changes a rule.
+
+| Area | Current rule |
+| --- | --- |
+| representation/GC | [2026-09-25 — Static objects: literals and nullary constructors](#d-2026-09-25-static-objects) |
+| syntax | [2026-10-10 — Map literals and `?`](#d-2026-10-10-map-literals) |
+| modules | [2026-11-04 — Aliased imports carry re-exported types (LANG-16)](#d-2026-11-04-lang-16) |
+| types | [2026-11-04 — Constructor-call canonical text for `show` (LANG-01)](#d-2026-11-04-show-text) |
+| tooling | [2026-09-25 — Compiler product is LLVM bitcode (ADR 40)](#d-2026-09-25-llvm-bitcode) |
+| concurrency | [2026-10-24 — Build F: defer, net, HTTP, OpenSSL, bounded mailboxes](#d-2026-10-24-build-f) |
+| FFI | [2026-10-17 — FFI modules and Runtime ABI ≠ foreign FFI (Build B)](#d-2026-10-17-ffi-modules) |
+| docs | [2026-11-04 — Security policy docs and seam list includes `sched` / `net` (OTH-05)](#d-2026-11-04-oth-05) |
+
+## Topic index
+
+Every dated entry, grouped by primary area. Prefer a single area; an entry may appear under more than one only when it clearly spans them.
+
+### representation/GC
+
+- [2026-11-04 — Variant constructor order is declaration-order tags (LANG-18)](#d-2026-11-04-lang-18)
+- [2026-10-31 — Float total order: monotonic bits, one quiet NaN (LANG-03)](#d-2026-10-31-lang-03)
+- [2026-09-25 — Static objects: literals and nullary constructors](#d-2026-09-25-static-objects)
+- [2026-09-25 — v0.5.4: no `null`; the empty word is a sentinel, not a reference](#d-2026-09-25-v0-5-4)
+- [2026-09-25 — v0.5.2: `StringBuffer` is built in, and a mispricing corrected](#d-2026-09-25-v0-5-2)
+- [2026-09-25 — v0.5.1: the surface, the seam, and the collector's shape kinds](#d-2026-09-25-v0-5-1)
+- [2026-09-25 — v0.5 ratified](#d-2026-09-25-v0-5)
+
+### syntax
+
+- [2026-10-17 — Postfix `??` Result propagation rejected](#d-2026-10-17-postfix-result)
+- [2026-10-10 — Pipe operator `|>`](#d-2026-10-10-pipe)
+- [2026-10-10 — Map literals and `?`](#d-2026-10-10-map-literals)
+- [2026-10-09 — String-literal escapes (Kestrel's set, adapted)](#d-2026-10-09-string-escapes)
+- [2026-10-04 — `cond`, projection, and `Pair` (amends ADR 1)](#d-2026-10-04-cond-pair)
+- [2026-10-03 — Infix surface (ADR 1)](#d-2026-10-03-infix)
+- [2026-09-25 — `print` / `println`: bare stdout, ADR 39](#d-2026-09-25-print-println)
+
+### modules
+
+- [2026-11-04 — Aliased imports carry re-exported types (LANG-16)](#d-2026-11-04-lang-16)
+- [2026-10-24 — Aliased imports qualify types and constructors](#d-2026-10-24-aliased-imports)
+- [2026-10-17 — Purpose, libraries, and `std/time` seam (Build A)](#d-2026-10-17-build-a)
+- [2026-10-15 — Registration, re-export, named patterns, multi-value match](#d-2026-10-15-registration)
+
+### types
+
+- [2026-11-04 — Constructor-call canonical text for `show` (LANG-01)](#d-2026-11-04-show-text)
+- [2026-10-31 — Map keys use `compare`; AVL not HAMT (LIB-06)](#d-2026-10-31-lib-06)
+- [2026-10-26 — Canonical Float text: Ryu in C, mirrored in the host (LANG-02)](#d-2026-10-26-lang-02)
+- [2026-10-16 — Caml-style n-tuples (amends the multi-value match decision)](#d-2026-10-16-n-tuples)
+
+### tooling
+
+- [2026-09-25 — Compiler product is LLVM bitcode (ADR 40)](#d-2026-09-25-llvm-bitcode)
+- [2026-09-25 — v0.5.5: `exec` is admitted, in argv form](#d-2026-09-25-v0-5-5)
+- [2026-09-25 — v0.5.3: `dump!`, and a gap the spec had been hiding](#d-2026-09-25-v0-5-3)
+
+### concurrency
+
+- [2026-10-31 — Per-Pid pending reply hooks (CONC-05)](#d-2026-10-31-conc-05)
+- [2026-10-30 — HTTP limits, lowercase headers, last-wins (CONC-04)](#d-2026-10-30-conc-04)
+- [2026-10-26 — Deadlines: timer heap, wait-until, virtual clock (CONC-02)](#d-2026-10-26-conc-02)
+- [2026-11-03 — TLS verify-by-default, SNI, typed errors (CONC-03)](#d-2026-11-03-conc-03)
+- [2026-11-04 — TLS failure classification complete (CONC-19)](#d-2026-11-04-conc-19)
+- [2026-10-26 — Wait-cell `notify-all` + closed cell (CONC-01)](#d-2026-10-26-conc-01)
+- [2026-10-24 — Build F: defer, net, HTTP, OpenSSL, bounded mailboxes](#d-2026-10-24-build-f)
+
+### FFI
+
+- [2026-10-17 — FFI proving ground: SQLite (not EventKit)](#d-2026-10-17-sqlite)
+- [2026-10-17 — FFI modules and Runtime ABI ≠ foreign FFI (Build B)](#d-2026-10-17-ffi-modules)
+- [2026-09-25 — v0.5.6: `!` marks mutation only; `extern` marks the OS](#d-2026-09-25-v0-5-6)
+
+### docs
+
+- [2026-11-04 — Security policy docs and seam list includes `sched` / `net` (OTH-05)](#d-2026-11-04-oth-05)
+- [2026-10-24 — MIT licence](#d-2026-10-24-mit)
+- [2026-09-25 — The specification is rewritten as a specification](#d-2026-09-25-spec-rewrite)
+- [2026-09-25 — name check closed; v0.4 written](#d-2026-09-25-v0-4)
+
+---
+
+<a id="d-2026-11-04-show-text" name="d-2026-11-04-show-text"></a>
+
 ## 2026-11-04 — Constructor-call canonical text for `show` (LANG-01)
+
+**Status:** current
+**Open:** TOOL-12 `show-text` and OTH-10 editions may lag the flag-day.
 
 ### The decision
 
@@ -62,7 +152,12 @@ OTH-10 editions can lag; until then, rewrite expectations by hand
 
 ---
 
+<a id="d-2026-11-04-oth-05" name="d-2026-11-04-oth-05"></a>
+
 ## 2026-11-04 — Security policy docs and seam list includes `sched` / `net` (OTH-05)
+
+**Status:** current
+**Open:** OTH-04 dependency checksums and `--offline` are not enforced yet; `github:` cache-miss fetch remains an acknowledged gap.
 
 ### The decision
 
@@ -91,7 +186,11 @@ OTH-04).
 
 ---
 
+<a id="d-2026-11-04-lang-18" name="d-2026-11-04-lang-18"></a>
+
 ## 2026-11-04 — Variant constructor order is declaration-order tags (LANG-18)
+
+**Status:** current
 
 ### The decision
 
@@ -120,7 +219,11 @@ the disagreement.
 
 ---
 
+<a id="d-2026-10-31-lib-06" name="d-2026-10-31-lib-06"></a>
+
 ## 2026-10-31 — Map keys use `compare`; AVL not HAMT (LIB-06)
+
+**Status:** current
 
 ### The decision
 
@@ -145,7 +248,11 @@ compare for composites; replacing AVL with a HAMT.
 
 ---
 
+<a id="d-2026-10-31-conc-05" name="d-2026-10-31-conc-05"></a>
+
 ## 2026-10-31 — Per-Pid pending reply hooks (CONC-05)
+
+**Status:** current
 
 ### The decision
 
@@ -173,7 +280,11 @@ and GC surface). Relying on `call-timeout` / CONC-02 deadlines as the death fix.
 
 ---
 
+<a id="d-2026-10-30-conc-04" name="d-2026-10-30-conc-04"></a>
+
 ## 2026-10-30 — HTTP limits, lowercase headers, last-wins (CONC-04)
+
+**Status:** current
 
 ### The decision
 
@@ -206,7 +317,11 @@ via `Maybe` match instead of silent `? 0`.
 
 ---
 
+<a id="d-2026-10-26-conc-02" name="d-2026-10-26-conc-02"></a>
+
 ## 2026-10-26 — Deadlines: timer heap, wait-until, virtual clock (CONC-02)
+
+**Status:** current
 
 ### The decision
 
@@ -244,7 +359,11 @@ timeout into cancel; exposing `mn_net_poll` as Platform API; sharing the
 
 ---
 
+<a id="d-2026-11-03-conc-03" name="d-2026-11-03-conc-03"></a>
+
 ## 2026-11-03 — TLS verify-by-default, SNI, typed errors (CONC-03)
+
+**Status:** current
 
 ### The decision
 
@@ -269,7 +388,11 @@ custom CA paths into the public Menard API (env hook is enough for tests/ops).
 
 ---
 
+<a id="d-2026-11-04-conc-19" name="d-2026-11-04-conc-19"></a>
+
 ## 2026-11-04 — TLS failure classification complete (CONC-19)
+
+**Status:** current
 
 ### The decision
 
@@ -295,7 +418,11 @@ into one tag (still rejected, as under CONC-03).
 
 ---
 
+<a id="d-2026-10-26-conc-01" name="d-2026-10-26-conc-01"></a>
+
 ## 2026-10-26 — Wait-cell `notify-all` + closed cell (CONC-01)
+
+**Status:** current
 
 ### The decision
 
@@ -318,7 +445,11 @@ without a closed bit (still races with late parkers).
 
 ---
 
+<a id="d-2026-10-31-lang-03" name="d-2026-10-31-lang-03"></a>
+
 ## 2026-10-31 — Float total order: monotonic bits, one quiet NaN (LANG-03)
+
+**Status:** current
 
 ### The decision
 
@@ -344,7 +475,11 @@ endian-sensitive `memcmp` ordering.
 
 ---
 
+<a id="d-2026-10-26-lang-02" name="d-2026-10-26-lang-02"></a>
+
 ## 2026-10-26 — Canonical Float text: Ryu in C, mirrored in the host (LANG-02)
+
+**Status:** current
 
 ### The decision
 
@@ -380,7 +515,11 @@ panicking on non-finite arithmetic (supersedes the old §2.11.T panic rule).
 
 ---
 
+<a id="d-2026-10-24-mit" name="d-2026-10-24-mit"></a>
+
 ## 2026-10-24 — MIT licence
+
+**Status:** current
 
 ### The decision
 
@@ -403,7 +542,11 @@ not a prerequisite for publishing the source.
 
 ---
 
+<a id="d-2026-11-04-lang-16" name="d-2026-11-04-lang-16"></a>
+
 ## 2026-11-04 — Aliased imports carry re-exported types (LANG-16)
+
+**Status:** current
 
 ### The decision
 
@@ -433,7 +576,11 @@ and alias-only use removes the need for leaf workarounds.
 
 ---
 
+<a id="d-2026-10-24-aliased-imports" name="d-2026-10-24-aliased-imports"></a>
+
 ## 2026-10-24 — Aliased imports qualify types and constructors
+
+**Status:** current
 
 ### The decision
 
@@ -459,7 +606,11 @@ flatteners must implement it.
 
 ---
 
+<a id="d-2026-10-24-build-f" name="d-2026-10-24-build-f"></a>
+
 ## 2026-10-24 — Build F: defer, net, HTTP, OpenSSL, bounded mailboxes
+
+**Status:** current
 
 ### The decision
 
@@ -484,7 +635,11 @@ boundary is honest dual-host agreement without pretending sockets work under
 
 ---
 
+<a id="d-2026-10-17-sqlite" name="d-2026-10-17-sqlite"></a>
+
 ## 2026-10-17 — FFI proving ground: SQLite (not EventKit)
+
+**Status:** current
 
 ### The decision
 
@@ -509,7 +664,11 @@ every host without a special binary identity.
 
 ---
 
+<a id="d-2026-10-17-ffi-modules" name="d-2026-10-17-ffi-modules"></a>
+
 ## 2026-10-17 — FFI modules and Runtime ABI ≠ foreign FFI (Build B)
+
+**Status:** current
 
 ### The decision
 
@@ -551,7 +710,11 @@ can grow via an external conversion bridge without expanding `mn_*` or
 
 ---
 
+<a id="d-2026-10-17-build-a" name="d-2026-10-17-build-a"></a>
+
 ## 2026-10-17 — Purpose, libraries, and `std/time` seam (Build A)
+
+**Status:** current
 
 ### The decision
 
@@ -596,7 +759,11 @@ monotonic clocks, sockets, and concurrency ratification are later builds.
 
 ---
 
+<a id="d-2026-10-17-postfix-result" name="d-2026-10-17-postfix-result"></a>
+
 ## 2026-10-17 — Postfix `??` Result propagation rejected
+
+**Status:** current
 
 ### The decision
 
@@ -631,7 +798,11 @@ postfix `??` or list it as a future option. This file is the record.
 
 ---
 
+<a id="d-2026-10-16-n-tuples" name="d-2026-10-16-n-tuples"></a>
+
 ## 2026-10-16 — Caml-style n-tuples (amends the multi-value match decision)
+
+**Status:** current
 
 ### The decision
 
@@ -710,7 +881,12 @@ bearing choices; everything in the specification follows from them.
 | 40 | **The compiler emits LLVM bitcode (`.bc`), never textual `.ll` as the product** | Textual IR is a second spelling of the same module and invites non-determinism (whitespace, type printing); bitcode is the binary artifact the gate and the driver consume; `llvm-dis` stays a debug aid only | A Menard bitcode writer (~subset of LLVM encoding) must stay deterministic and in sync with the pinned LLVM/clang |
 ---
 
+<a id="d-2026-10-15-registration" name="d-2026-10-15-registration"></a>
+
 ## 2026-10-15 — Registration, re-export, named patterns, multi-value match
+
+**Status:** current
+**Open:** the product / `Pair` rejection in this entry was reversed by [2026-10-16 — Caml-style n-tuples (amends the multi-value match decision)](#d-2026-10-16-n-tuples); registration, re-export, named patterns, and allocation-free multi-scrutinee `match` remain as decided here.
 
 ### The decision
 
@@ -764,7 +940,11 @@ needed a first-class product.
   match. Grouping keeps each nested match exhaustive exactly when the source
   match is. (A *value* of product type has its own single-constructor check.)
 
+<a id="d-2026-10-10-pipe" name="d-2026-10-10-pipe"></a>
+
 ## 2026-10-10 — Pipe operator `|>`
+
+**Status:** current
 
 ### The decision
 
@@ -797,7 +977,11 @@ string functions change argument order. A non-call on the right is
 
 ---
 
+<a id="d-2026-10-10-map-literals" name="d-2026-10-10-map-literals"></a>
+
 ## 2026-10-10 — Map literals and `?`
+
+**Status:** current
 
 ### The decision
 
@@ -840,7 +1024,11 @@ postfix `??` rethrow prototype was built and rejected — see the
 
 ---
 
+<a id="d-2026-10-09-string-escapes" name="d-2026-10-09-string-escapes"></a>
+
 ## 2026-10-09 — String-literal escapes (Kestrel's set, adapted)
+
+**Status:** current
 
 ### The decision
 
@@ -879,7 +1067,12 @@ lexical error, so no existing literal changes meaning.
 
 ---
 
+<a id="d-2026-10-04-cond-pair" name="d-2026-10-04-cond-pair"></a>
+
 ## 2026-10-04 — `cond`, projection, and `Pair` (amends ADR 1)
+
+**Status:** current
+**Open:** `Pair` / product spelling was replaced by [2026-10-16 — Caml-style n-tuples (amends the multi-value match decision)](#d-2026-10-16-n-tuples); `cond`, inline `if`, `::`, and `.` projection remain as decided here.
 
 ### The decision
 
@@ -908,7 +1101,11 @@ into the unqualified environment.
 
 ---
 
+<a id="d-2026-10-03-infix" name="d-2026-10-03-infix"></a>
+
 ## 2026-10-03 — Infix surface (ADR 1)
+
+**Status:** superseded by [2026-10-04 — `cond`, projection, and `Pair` (amends ADR 1)](#d-2026-10-04-cond-pair)
 
 ### The decision
 
@@ -924,7 +1121,11 @@ parenthesized surface with no operators.
 
 ---
 
+<a id="d-2026-09-25-llvm-bitcode" name="d-2026-09-25-llvm-bitcode"></a>
+
 ## 2026-09-25 — Compiler product is LLVM bitcode (ADR 40)
+
+**Status:** current
 
 ### The decision
 
@@ -952,7 +1153,11 @@ output as golden unless encoding variance forces it.
 
 ---
 
+<a id="d-2026-09-25-print-println" name="d-2026-09-25-print-println"></a>
+
 ## 2026-09-25 — `print` / `println`: bare stdout, ADR 39
+
+**Status:** current
 
 ### The decision
 
@@ -984,7 +1189,11 @@ showables still go through `show`, so `print(42)` and `print("x=", 1)` work.
 
 ---
 
+<a id="d-2026-09-25-static-objects" name="d-2026-09-25-static-objects"></a>
+
 ## 2026-09-25 — Static objects: literals and nullary constructors
+
+**Status:** current
 
 ### The decision
 
@@ -1235,7 +1444,11 @@ ever produces a very large pool.
 
 ---
 
+<a id="d-2026-09-25-spec-rewrite" name="d-2026-09-25-spec-rewrite"></a>
+
 ## 2026-09-25 — The specification is rewritten as a specification
+
+**Status:** current
 
 ### The instruction
 
@@ -1310,7 +1523,11 @@ of the project, and the next person to reach for a shell here will hit it too.
 
 ---
 
+<a id="d-2026-09-25-v0-5-6" name="d-2026-09-25-v0-5-6"></a>
+
 ## 2026-09-25 — v0.5.6: `!` marks mutation only; `extern` marks the OS
+
+**Status:** current
 
 ### The question
 
@@ -1445,7 +1662,11 @@ it.
 
 ---
 
+<a id="d-2026-09-25-v0-5-5" name="d-2026-09-25-v0-5-5"></a>
+
 ## 2026-09-25 — v0.5.5: `exec` is admitted, in argv form
+
+**Status:** current
 
 ### The correction
 
@@ -1624,7 +1845,11 @@ remains the next build step.
 
 ---
 
+<a id="d-2026-09-25-v0-5-4" name="d-2026-09-25-v0-5-4"></a>
+
 ## 2026-09-25 — v0.5.4: no `null`; the empty word is a sentinel, not a reference
+
+**Status:** current
 
 ### The observation
 
@@ -1730,7 +1955,11 @@ risk row for mistaking it for a language feature.
 
 ---
 
+<a id="d-2026-09-25-v0-5-3" name="d-2026-09-25-v0-5-3"></a>
+
 ## 2026-09-25 — v0.5.3: `dump!`, and a gap the spec had been hiding
+
+**Status:** current
 
 ### The question, and what it exposed
 
@@ -1886,7 +2115,11 @@ debug line before a crash and not.
 
 ---
 
+<a id="d-2026-09-25-v0-5-2" name="d-2026-09-25-v0-5-2"></a>
+
 ## 2026-09-25 — v0.5.2: `StringBuffer` is built in, and a mispricing corrected
+
+**Status:** current
 
 ### Ratified by the operator
 
@@ -1988,7 +2221,11 @@ A **third mispricing** joins the record from v0.3 and v0.4, with the same lesson
 
 ---
 
+<a id="d-2026-09-25-v0-5-1" name="d-2026-09-25-v0-5-1"></a>
+
 ## 2026-09-25 — v0.5.1: the surface, the seam, and the collector's shape kinds
+
+**Status:** current
 
 ### Ratified by instruction: the intrinsics go in the spec (§2.8)
 
@@ -2064,7 +2301,11 @@ runtime and interpreter must agree exactly.
 
 ---
 
+<a id="d-2026-09-25-v0-5" name="d-2026-09-25-v0-5"></a>
+
 ## 2026-09-25 — v0.5 ratified
+
+**Status:** current
 
 ### Ratified: type parameters on user nominal types (§2.3, ADR 23)
 
@@ -2134,7 +2375,11 @@ already exist; structural unions remain out (§1.3).
 
 ---
 
+<a id="d-2026-09-25-v0-4" name="d-2026-09-25-v0-4"></a>
+
 ## 2026-09-25 — name check closed; v0.4 written
+
+**Status:** current
 
 ### Name check: **closed, clean**
 

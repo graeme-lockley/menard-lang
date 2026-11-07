@@ -68,7 +68,7 @@ Rows are ordered by phase, then priority, then area, then ID.
 | [DOC-04](reviews/2026-10-24-build-f.md#doc-04) | Contributor guide and architecture map | Documentation | P1 | 1 | todo | DOC-03 | [#85](https://github.com/graeme-lockley/menard-lang/issues/85) | — |
 | [DOC-05](reviews/2026-10-24-build-f.md#doc-05) | Error-code catalogue, with `help:` | Documentation | P1 | 1 | todo | LANG-04, LANG-09, TOOL-03 | [#86](https://github.com/graeme-lockley/menard-lang/issues/86) | — |
 | [DOC-07](reviews/2026-10-24-build-f.md#doc-07) | README refresh for Build F | Documentation | P1 | 1 | todo | TOOL-01, TOOL-02, TOOL-05, TOOL-09, TOOL-13, OTH-01 | [#87](https://github.com/graeme-lockley/menard-lang/issues/87) | — |
-| [DOC-08](reviews/2026-10-24-build-f.md#doc-08) | Decisions journal: index, status, and supersession | Documentation | P1 | 1 | todo | — | [#88](https://github.com/graeme-lockley/menard-lang/issues/88) | — |
+| [DOC-08](reviews/2026-10-24-build-f.md#doc-08) | Decisions journal: index, status, and supersession | Documentation | P1 | 1 | done | — | [#88](https://github.com/graeme-lockley/menard-lang/issues/88) | — |
 | [OTH-08](reviews/2026-10-24-build-f.md#oth-08) | Repository hygiene | Other | P1 | 1 | todo | OTH-01 | [#89](https://github.com/graeme-lockley/menard-lang/issues/89) | — |
 | [LANG-12](reviews/2026-10-24-build-f.md#lang-12) | Pin arithmetic, `return`, `defer` and loop semantics | Language | P2 | 1 | todo | — | [#90](https://github.com/graeme-lockley/menard-lang/issues/90) | — |
 | [LIB-01](reviews/2026-10-24-build-f.md#lib-01) | Add `std/float`, including the total-order functions | Libraries | P0 | 2 | todo | LANG-02, LANG-03 | — | — |
