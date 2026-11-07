@@ -52,6 +52,10 @@ make native-test     # ./mn test
 make bootstrap       # interpreter, stage0, stage1, stage2, and the fixed point
 ```
 
+The `bun install` line is not optional: `make ci` typechecks against
+`host/node_modules`, which is gitignored, so a fresh clone has none. `make
+typecheck` says so and names the command when the types are missing.
+
 `make loop` drives the whole backlog loop — pick, branch, plan, implement, gate,
 review, commit, PR — with [Cursor](https://cursor.com) as the implementer and
 `docs/loop.md` as the contract. It needs `cursor-agent` and `gh` on `PATH`.
