@@ -18,26 +18,17 @@ import std/string as String
 ; @test add("2,1001,3") => Ok(5)
 ; @test add("1000,1") => Ok(1001)
 pub let add(input: Str) -> Result Int (List Int) {
-  let starts-with(prefix: String) -> Bool =
-    input |> String.starts-with(prefix)
-
+  let starts-with = fn (prefix) = input |> String.starts-with(prefix)
   let tokens =
-    cond
-      | input == "" -> []
-      | starts-with("//[") -> {
-          let idx = String.index-of("\n", input) ? 0
-          let separators = String.slice(3, idx - 4, input) |> String.split("][")
-
-          input |> String.drop(idx + 1) |> String.split-using(separators)
-        }
-      | starts-with("//") -> String.drop(4, input) |> String.split(String.slice(2, 1, input))
-      | else -> String.split-using([",", "\n"], input)
-
+    if (input == "") -> [] |
+    if (starts-with("//[")) ->
+      {
+        let idx = String.index-of("\n", input) ? 0
+        let separators = String.slice(3, idx - 4, input) |> String.split("][")
+        input |> String.drop(idx + 1) |> String.split-using(separators)
+      } | if (starts-with("//")) -> String.drop(4, input) |> String.split(String.slice(2, 1, input)) | String.split-using([",", "\n"], input)
   let numbers = tokens |> List.map(Int.parse) |> List.filter(fn (n) = n <= 1000)
-
-  cond
-    | List.any(is-negative, numbers) -> numbers |> List.filter(is-negative) |> Err()
-    | else -> numbers |> List.sum() |> Ok()
+  if (List.any(is-negative, numbers)) -> numbers |> List.filter(is-negative) |> Err() | numbers |> List.sum() |> Ok()
 }
 
 let is-negative(n: Int) -> Bool =

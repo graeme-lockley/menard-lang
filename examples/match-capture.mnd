@@ -1,7 +1,6 @@
 ; Match binders are in scope for nested `fn`, and the env holds every capture.
 ; Prints: head 10, rest is non-empty, total 11
 ; Run with: `./mn run examples/match-capture.mnd`
-
 let first-plus-rest-flag(xs: List Int) -> Unit =
   match (xs)
     | [] -> println("empty list, total 0")
@@ -12,9 +11,7 @@ let first-plus-rest-flag(xs: List Int) -> Unit =
             | [] -> 0
             | _ -> 1
         print("head ", h)
-        cond
-          | flag == 0 -> print(", rest is empty")
-          | else -> print(", rest is non-empty")
+        if (flag == 0) -> print(", rest is empty") | print(", rest is non-empty")
         println(", total ", h + flag)
       })()
 

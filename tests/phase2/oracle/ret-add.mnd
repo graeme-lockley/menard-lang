@@ -3,6 +3,5 @@
 ; `add` plus its required `sub 1` fixup (spec §2.2 — see that module's
 ; header comment), not a folded `ret i32 42`. See
 ; `tests/phase2/oracle.test.ts`.
-
 let main() -> Int =
   20 + 22

@@ -24,6 +24,7 @@ function join(a: Span, b: Span): Span {
 
 const PREC: Record<string, number> = {
   "?": 0,
+  "??": 0,
   "|>": 1,
   "||": 2,
   "&&": 3,
@@ -577,7 +578,7 @@ class P {
         continue;
       }
       this.i++;
-      const rightPrec = op.text === "::" || op.text === "?" ? p : p + 1;
+      const rightPrec = op.text === "::" || op.text === "?" || op.text === "??" ? p : p + 1;
       const right = this.parsePrec(rightPrec);
       if (!right.ok) return right;
       const core = op.text === "::" ? "Cons" : op.text;
@@ -1400,7 +1401,7 @@ class P {
         continue;
       }
       this.i++;
-      const rightPrec = op.text === "::" || op.text === "?" ? p : p + 1;
+      const rightPrec = op.text === "::" || op.text === "?" || op.text === "??" ? p : p + 1;
       const right = this.parsePrecStop(rightPrec, stops);
       if (!right.ok) return right;
       const core = op.text === "::" ? "Cons" : op.text;

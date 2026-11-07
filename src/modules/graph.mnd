@@ -18,7 +18,6 @@
 ; expressions become `mn_<hash>_init`. Flatten then appends one bootstrap
 ; `(defn main -> Int …)` that calls those inits in dependency order and then
 ; the entry module's mangled main. That bootstrap is the only C `main`.
-
 import "../reader/ast.mnd"
 import "../reader/read.mnd"
 import "../reader/casing.mnd"
@@ -79,10 +78,7 @@ let reverse-ints(xs: List Int, acc: List Int) -> List Int =
 ; is a jump, so the scan stays one frame.
 let collect-line-starts(src: Str, i: Int, n: Int, acc: List Int) -> List Int =
   loop (j = i, out = acc)
-    cond
-      | j >= n -> out
-      | String.byte(j, src) == 10 -> recur(j + 1, (j + 1) :: out)
-      | else -> recur(j + 1, out)
+    if (j >= n) -> out | if (String.byte(j, src) == 10) -> recur(j + 1, (j + 1) :: out) | recur(j + 1, out)
 
 let line-starts(src: Str) -> List Int =
   reverse-ints(collect-line-starts(src, 0, String.length(src), [0]), [])
@@ -115,7 +111,8 @@ let line-search-mid(m: Map Int Int, lo: Int, hi: Int, offset: Int, mid: Int) -> 
 ; Its offsets and line are in that file, so they must not be recomputed
 ; from the buffer being stamped.
 let span-at(sp: Span, origin: Int, m: Map Int Int, n: Int) -> Span =
-  if (sp.origin != 0) -> sp | {
+  if (sp.origin != 0) -> sp |
+  {
     let line = line-search(m, 0, n, sp.start)
     Span(
       sp.start,
@@ -169,10 +166,7 @@ let drop-prefix(s: Str, n: Int) -> Str =
 
 ; Index of byte b at or after i, or -1.
 let index-of-byte(s: Str, b: Int, i: Int) -> Int =
-  cond
-    | i >= String.length(s) -> -1
-    | String.byte(i, s) == b -> i
-    | else -> index-of-byte(s, b, i + 1)
+  if (i >= String.length(s)) -> -1 | if (String.byte(i, s) == b) -> i | index-of-byte(s, b, i + 1)
 
 ; name.mnd when name does not already end in .mnd.
 let ensure-mnd(name: Str) -> Str =
@@ -181,21 +175,19 @@ let ensure-mnd(name: Str) -> Str =
 ; `std/list` → `stdlib/list.mnd`, independent of the importing file.
 ; The working directory is tried first. Each parent is tried after that,
 ; so a command run inside `stdlib/` still finds `stdlib/list.mnd`.
-let std-path(spec: Str) -> Str = {
+let std-path(spec: Str) -> Str {
   let rel = Path.join(ensure-mnd(drop-prefix(spec, 4)), "stdlib")
   if (exists(rel)) -> rel | std-path-from(rel, Path.dirname(cwd()))
 }
 
-let std-path-from(rel: Str, dir: Str) -> Str = {
+let std-path-from(rel: Str, dir: Str) -> Str {
   let candidate = Path.join(rel, dir)
-  cond
-    | exists(candidate) -> candidate
-    | dir == "/" -> rel
-    | else ->
-      {
-        let up = Path.dirname(dir)
-        if (up == dir) -> rel | std-path-from(rel, up)
-      }
+  if (exists(candidate)) -> candidate |
+  if (dir == "/") -> rel |
+  {
+    let up = Path.dirname(dir)
+    if (up == dir) -> rel | std-path-from(rel, up)
+  }
 }
 
 ; Cache root for github: imports. HOME/.menard/deps, or .menard/deps.
@@ -210,32 +202,25 @@ let deps-root() -> Str =
 let github-cache-path(spec: Str) -> Str {
   let rest = drop-prefix(spec, 7)
   let at = index-of-byte(rest, 64, 0)
-  cond
-    | at < 1 -> spec
-    | else ->
-      {
-        let owner-repo = String.slice(0, at, rest)
-        let slash = index-of-byte(owner-repo, 47, 0)
-        let after = drop-prefix(rest, at + 1)
-        let vslash = index-of-byte(after, 47, 0)
-        cond
-          | slash < 1 || vslash < 1 -> spec
-          | else ->
-            {
-              let owner = String.slice(0, slash, owner-repo)
-              let repo = drop-prefix(owner-repo, slash + 1)
-              let version = String.slice(0, vslash, after)
-              let module = drop-prefix(after, vslash + 1)
-              Path.join(ensure-mnd(module), Path.join(version, Path.join(repo, Path.join(owner, deps-root()))))
-            }
-      }
+  if (at < 1) -> spec |
+  {
+    let owner-repo = String.slice(0, at, rest)
+    let slash = index-of-byte(owner-repo, 47, 0)
+    let after = drop-prefix(rest, at + 1)
+    let vslash = index-of-byte(after, 47, 0)
+    if (slash < 1 || vslash < 1) -> spec |
+    {
+      let owner = String.slice(0, slash, owner-repo)
+      let repo = drop-prefix(owner-repo, slash + 1)
+      let version = String.slice(0, vslash, after)
+      let module = drop-prefix(after, vslash + 1)
+      Path.join(ensure-mnd(module), Path.join(version, Path.join(repo, Path.join(owner, deps-root()))))
+    }
+  }
 }
 
 let resolve-import-path(from-path: Str, spec: Str) -> Str =
-  cond
-    | String.starts-with("std/", spec) -> std-path(spec)
-    | String.starts-with("github:", spec) -> github-cache-path(spec)
-    | else -> Path.normalize(Path.join(spec, Path.dirname(from-path)))
+  if (String.starts-with("std/", spec)) -> std-path(spec) | if (String.starts-with("github:", spec)) -> github-cache-path(spec) | Path.normalize(Path.join(spec, Path.dirname(from-path)))
 
 ; True when path is inside the github dependency cache.
 let in-deps(path: Str) -> Bool =
@@ -247,10 +232,7 @@ let index-of-from(s: Str, needle: Str) -> Int =
 let index-of-from-at(s: Str, needle: Str, i: Int) -> Int {
   let n = String.length(needle)
   let sn = String.length(s)
-  cond
-    | i + n > sn -> -1
-    | String.slice(i, n, s) == needle -> i
-    | else -> index-of-from-at(s, needle, i + 1)
+  if (i + n > sn) -> -1 | if (String.slice(i, n, s) == needle) -> i | index-of-from-at(s, needle, i + 1)
 }
 
 let spawn-ok(st: SpawnStatus) -> Bool =
@@ -269,27 +251,21 @@ record DepSpec {
 let dep-spec-of(path: Str) -> Maybe DepSpec {
   let mark = "/.menard/deps/"
   let rel =
-    cond
-      | String.starts-with(".menard/deps/", path) -> drop-prefix(path, 13)
-      | else ->
-        {
-          let i = index-of-from(path, mark)
-          if (i < 0) -> "" | drop-prefix(path, i + String.length(mark))
-        }
+    if (String.starts-with(".menard/deps/", path)) -> drop-prefix(path, 13) |
+    {
+      let i = index-of-from(path, mark)
+      if (i < 0) -> "" | drop-prefix(path, i + String.length(mark))
+    }
   let s1 = index-of-byte(rel, 47, 0)
-  cond
-    | s1 < 1 -> None
-    | else ->
-      {
-        let s2 = index-of-byte(rel, 47, s1 + 1)
-        cond
-          | s2 < 0 -> None
-          | else ->
-            {
-              let s3 = index-of-byte(rel, 47, s2 + 1)
-              if (s3 < 0) -> None | Some(DepSpec(String.slice(0, s1, rel), String.slice(s1 + 1, s2 - s1 - 1, rel), String.slice(s2 + 1, s3 - s2 - 1, rel)))
-            }
-      }
+  if (s1 < 1) -> None |
+  {
+    let s2 = index-of-byte(rel, 47, s1 + 1)
+    if (s2 < 0) -> None |
+    {
+      let s3 = index-of-byte(rel, 47, s2 + 1)
+      if (s3 < 0) -> None | Some(DepSpec(String.slice(0, s1, rel), String.slice(s1 + 1, s2 - s1 - 1, rel), String.slice(s2 + 1, s3 - s2 - 1, rel)))
+    }
+  }
 }
 
 ; Download the tag archive into the cache directory when the module file
@@ -299,40 +275,32 @@ let fetch-dep(spec: DepSpec) -> Result Unit Str =
     | DepSpec(owner, repo, version) ->
       {
         let dir = Path.join(version, Path.join(repo, Path.join(owner, deps-root())))
-        cond
-          | ensure-dir(dir) ->
-            {
-              let tgz = Path.join(".src.tgz", dir)
-              let url = String.concat("https://codeload.github.com/", owner, "/", repo, "/tar.gz/refs/tags/", version)
-              match (spawn(["/usr/bin/curl", "-fsSL", "-o", tgz, url]))
-                | Err(_) -> Err(String.concat("cannot fetch ", url))
-                | Ok(st) ->
-                  cond
-                    | spawn-ok(st) ->
-                      match (spawn(["/usr/bin/tar", "-xzf", tgz, "-C", dir, "--strip-components=1"]))
-                        | Err(_) -> Err(String.concat("cannot extract ", url))
-                        | Ok(st2) ->
-                          cond
-                            | spawn-ok(st2) ->
-                              {
-                                remove(tgz)
-                                Ok(())
-                              }
-                            | else -> Err(String.concat("cannot extract ", url))
-                    | else -> Err(String.concat("cannot fetch ", url))
-            }
-          | else -> Err(String.concat("cannot create ", dir))
+        if (ensure-dir(dir)) ->
+          {
+            let tgz = Path.join(".src.tgz", dir)
+            let url = String.concat("https://codeload.github.com/", owner, "/", repo, "/tar.gz/refs/tags/", version)
+            match (spawn(["/usr/bin/curl", "-fsSL", "-o", tgz, url]))
+              | Err(_) -> Err(String.concat("cannot fetch ", url))
+              | Ok(st) ->
+                if (spawn-ok(st)) ->
+                  match (spawn(["/usr/bin/tar", "-xzf", tgz, "-C", dir, "--strip-components=1"]))
+                    | Err(_) -> Err(String.concat("cannot extract ", url))
+                    | Ok(st2) ->
+                      if (spawn-ok(st2)) ->
+                        {
+                          remove(tgz)
+                          Ok(())
+                        } | Err(String.concat("cannot extract ", url)) | Err(String.concat("cannot fetch ", url))
+          } | Err(String.concat("cannot create ", dir))
       }
 
 ; Make a github cache path exist. Other paths are left for read-file.
 pub let ensure-module-file(path: Str) -> Result Unit Str =
-  cond
-    | exists(path) -> Ok(())
-    | in-deps(path) ->
-      match (dep-spec-of(path))
-        | None -> Err(String.concat("bad dependency path: ", path))
-        | Some(spec) -> fetch-dep(spec)
-    | else -> Ok(())
+  if (exists(path)) -> Ok(()) |
+  if (in-deps(path)) ->
+    match (dep-spec-of(path))
+      | None -> Err(String.concat("bad dependency path: ", path))
+      | Some(spec) -> fetch-dep(spec) | Ok(())
 
 ; `owner/repo` and the version, from a github: specifier.
 record GithubVer {
@@ -341,22 +309,18 @@ record GithubVer {
 }
 
 let github-ver(spec: Str) -> Maybe GithubVer =
-  cond
-    | String.starts-with("github:", spec) ->
+  if (String.starts-with("github:", spec)) ->
+    {
+      let rest = drop-prefix(spec, 7)
+      let at = index-of-byte(rest, 64, 0)
+      if (at < 1) -> None |
       {
-        let rest = drop-prefix(spec, 7)
-        let at = index-of-byte(rest, 64, 0)
-        cond
-          | at < 1 -> None
-          | else ->
-            {
-              let owner-repo = String.slice(0, at, rest)
-              let after = drop-prefix(rest, at + 1)
-              let vslash = index-of-byte(after, 47, 0)
-              if (vslash < 1) -> None | Some(GithubVer(owner-repo, String.slice(0, vslash, after)))
-            }
+        let owner-repo = String.slice(0, at, rest)
+        let after = drop-prefix(rest, at + 1)
+        let vslash = index-of-byte(after, 47, 0)
+        if (vslash < 1) -> None | Some(GithubVer(owner-repo, String.slice(0, vslash, after)))
       }
-    | else -> None
+    } | None
 
 ; Record owner/repo → version. A second version is an error.
 let note-version(versions: Ref (Map Str Str), spec: Str) -> Result Unit Str =
@@ -402,13 +366,11 @@ let spec-text(spec: Ast) -> Maybe Str =
 let parse-import-spec(form: Ast) -> Maybe Str =
   match (form)
     | ParenNode(head :: rest, sp) ->
-      cond
-        | is-sym(head, "pub") -> parse-import-spec(ParenNode(rest, sp))
-        | is-sym(head, "import") ->
-          match (rest)
-            | spec :: _ -> spec-text(spec)
-            | [] -> None
-        | else -> None
+      if (is-sym(head, "pub")) -> parse-import-spec(ParenNode(rest, sp)) |
+      if (is-sym(head, "import")) ->
+        match (rest)
+          | spec :: _ -> spec-text(spec)
+          | [] -> None | None
     | _ -> None
 
 let unwrap-pub-form(form: Ast) -> Ast =
@@ -435,7 +397,6 @@ let collect-import-specs(forms: List Ast, acc: List Str) -> List Str =
 
 ; ---------------------------------------------------------------------------
 ; Private-symbol uniquification (slice H)
-
 let decl-name-of(name-part: Ast) -> Maybe Str =
   match (name-part)
     | SymNode(n, _) -> Some(n)
@@ -468,51 +429,47 @@ let gather-variant-names(name-part: Ast, ctors: List Ast, acc: List Str) -> List
 }
 
 let gather-decl-name-list(head: Str, rest: List Ast, acc: List Str) -> List Str =
-  cond
-    | head == "let" ->
-      match (rest)
-        | name-part :: _ ->
-          match (sym-str(name-part))
-            | Some(n) -> push-unique(acc, n)
-            | None -> acc
-        | [] -> acc
-    | head == "defn" || head == "runtime" ->
-      match (rest)
-        | name-part :: _ ->
-          match (decl-name-of(name-part))
-            | Some(n) -> push-unique(acc, n)
-            | None -> acc
-        | [] -> acc
-    | head == "alias" ->
-      match (rest)
-        | name-part :: _ ->
-          match (sym-str(name-part))
-            | Some(n) -> push-unique(acc, n)
-            | None -> acc
-        | [] -> acc
-    | head == "defrec" ->
-      match (rest)
-        | name-part :: _ ->
-          match (decl-name-of(name-part))
-            | Some(n) -> push-unique(acc, n)
-            | None -> acc
-        | [] -> acc
-    | head == "variant" ->
-      match (rest)
-        | name-part :: ctors -> gather-variant-names(name-part, ctors, acc)
-        | [] -> acc
-    | else -> acc
+  if (head == "let") ->
+    match (rest)
+      | name-part :: _ ->
+        match (sym-str(name-part))
+          | Some(n) -> push-unique(acc, n)
+          | None -> acc
+      | [] -> acc |
+  if (head == "defn" || head == "runtime") ->
+    match (rest)
+      | name-part :: _ ->
+        match (decl-name-of(name-part))
+          | Some(n) -> push-unique(acc, n)
+          | None -> acc
+      | [] -> acc |
+  if (head == "alias") ->
+    match (rest)
+      | name-part :: _ ->
+        match (sym-str(name-part))
+          | Some(n) -> push-unique(acc, n)
+          | None -> acc
+      | [] -> acc |
+  if (head == "defrec") ->
+    match (rest)
+      | name-part :: _ ->
+        match (decl-name-of(name-part))
+          | Some(n) -> push-unique(acc, n)
+          | None -> acc
+      | [] -> acc |
+  if (head == "variant") ->
+    match (rest)
+      | name-part :: ctors -> gather-variant-names(name-part, ctors, acc)
+      | [] -> acc | acc
 
 let gather-form-names(form: Ast, acc: List Str) -> List Str =
   match (form)
     | ParenNode(head :: rest, sp) ->
-      cond
-        | is-sym(head, "pub") -> gather-form-names(ParenNode(rest, sp), acc)
-        | is-sym(head, "import") -> acc
-        | else ->
-          match (sym-str(head))
-            | None -> acc
-            | Some(hn) -> gather-decl-name-list(hn, rest, acc)
+      if (is-sym(head, "pub")) -> gather-form-names(ParenNode(rest, sp), acc) |
+      if (is-sym(head, "import")) -> acc |
+      match (sym-str(head))
+        | None -> acc
+        | Some(hn) -> gather-decl-name-list(hn, rest, acc)
     | _ -> acc
 
 let gather-forms-names(forms: List Ast, acc: List Str) -> List Str =
@@ -570,10 +527,7 @@ let build-renames-from-list(names: List Str, pub-names: Map Str Bool, prefix: St
   match (names)
     | [] -> acc
     | n :: rest ->
-      cond
-        | n == "main" -> build-renames-from-list(rest, pub-names, prefix, main-sym, Map.set(n, main-sym, acc))
-        | name-is-pub(pub-names, n) -> build-renames-from-list(rest, pub-names, prefix, main-sym, acc)
-        | else -> build-renames-from-list(rest, pub-names, prefix, main-sym, add-rename(acc, prefix, n))
+      if (n == "main") -> build-renames-from-list(rest, pub-names, prefix, main-sym, Map.set(n, main-sym, acc)) | if (name-is-pub(pub-names, n)) -> build-renames-from-list(rest, pub-names, prefix, main-sym, acc) | build-renames-from-list(rest, pub-names, prefix, main-sym, add-rename(acc, prefix, n))
 
 let qualified-prefix(path: Str) -> Str =
   String.concat("__q", show(path-hash(path)), "_")
@@ -603,10 +557,7 @@ let is-core-form-head(head: Ast) -> Bool =
 let rename-paren(xs: List Ast, sp: Span, renames: Map Str Str) -> Ast =
   match (xs)
     | head :: rest ->
-      cond
-        | is-sym(head, "quote") || is-sym(head, "char") -> ParenNode(xs, sp)
-        | is-core-form-head(head) -> ParenNode(head :: rename-ast-list(rest, renames), sp)
-        | else -> ParenNode(rename-ast-list(xs, renames), sp)
+      if (is-sym(head, "quote") || is-sym(head, "char")) -> ParenNode(xs, sp) | if (is-core-form-head(head)) -> ParenNode(head :: rename-ast-list(rest, renames), sp) | ParenNode(rename-ast-list(xs, renames), sp)
     | [] -> ParenNode(xs, sp)
 
 let rename-ast(a: Ast, renames: Map Str Str) -> Ast =
@@ -647,18 +598,16 @@ let register-one-export!(exports: Ref (Map Str Str), path: Str, name: Str, kind:
         Ok(())
       }
     | Some(prev) ->
-      cond
-        | kind == "alias" || shared-io-ctor(name) ->
-          {
-            note-module-export!(path, name)
-            Ok(())
-          }
-        | prev == path ->
-          {
-            note-module-export!(path, name)
-            Ok(())
-          }
-        | else -> Err(String.concat("duplicate pub export `", name, "` from ", path, " (already exported by ", prev, ")"))
+      if (kind == "alias" || shared-io-ctor(name)) ->
+        {
+          note-module-export!(path, name)
+          Ok(())
+        } |
+      if (prev == path) ->
+        {
+          note-module-export!(path, name)
+          Ok(())
+        } | Err(String.concat("duplicate pub export `", name, "` from ", path, " (already exported by ", prev, ")"))
 
 let register-export-names!(exports: Ref (Map Str Str), path: Str, names: List Str, kind: Str) -> Result Unit Str =
   match (names)
@@ -669,9 +618,7 @@ let register-export-names!(exports: Ref (Map Str Str), path: Str, names: List St
 let register-form-exports!(exports: Ref (Map Str Str), path: Str, form: Ast) -> Result Unit Str =
   match (form)
     | ParenNode(head :: rest, sp) ->
-      cond
-        | is-sym(head, "pub") -> register-pub-export!(exports, path, ParenNode(rest, sp))
-        | else -> Ok(())
+      if (is-sym(head, "pub")) -> register-pub-export!(exports, path, ParenNode(rest, sp)) | Ok(())
     | _ -> Ok(())
 
 let register-pub-export!(exports: Ref (Map Str Str), path: Str, inner: Ast) -> Result Unit Str =
@@ -760,10 +707,8 @@ let register-reexport-ctors!(exports: Ref (Map Str Str), path: Str, names: List 
     | [] -> Ok(())
     | n :: rest -> Result.and-then(fn (_) = register-reexport-ctors!(exports, path, rest), register-one-export!(exports, path, n, "alias"))
 
-
 ; ---------------------------------------------------------------------------
 ; Per-module init and the program bootstrap
-
 let sym-node(n: Str) -> Ast =
   SymNode(n, dummy-span())
 
@@ -792,23 +737,19 @@ let is-kept-decl(form: Ast) -> Bool {
 let is-int-let(form: Ast) -> Bool =
   match (form)
     | ParenNode([head, _, expr], _) ->
-      cond
-        | is-sym(head, "let") ->
-          match (expr)
-            | IntNode(_, _) -> true
-            | _ -> false
-        | else -> false
+      if (is-sym(head, "let")) ->
+        match (expr)
+          | IntNode(_, _) -> true
+          | _ -> false | false
     | _ -> false
 
 let is-value-let(form: Ast) -> Bool =
   match (form)
     | ParenNode([head, _, expr], _) ->
-      cond
-        | is-sym(head, "let") ->
-          match (expr)
-            | IntNode(_, _) -> false
-            | _ -> true
-        | else -> false
+      if (is-sym(head, "let")) ->
+        match (expr)
+          | IntNode(_, _) -> false
+          | _ -> true | false
     | _ -> false
 
 record SplitBody {
@@ -820,10 +761,7 @@ let partition-body(forms: List Ast, kept: List Ast, init: List Ast) -> SplitBody
   match (forms)
     | [] -> SplitBody(reverse(kept), reverse(init))
     | f :: rest ->
-      cond
-        | is-kept-decl(f) || is-int-let(f) -> partition-body(rest, f :: kept, init)
-        | is-value-let(f) -> partition-body(rest, f :: kept, f :: init)
-        | else -> partition-body(rest, kept, f :: init)
+      if (is-kept-decl(f) || is-int-let(f)) -> partition-body(rest, f :: kept, init) | if (is-value-let(f)) -> partition-body(rest, f :: kept, f :: init) | partition-body(rest, kept, f :: init)
 
 let init-defn(name: Str, body: List Ast) -> Ast =
   defn-form(name, "Unit", append-asts(body, [unit-form()]))
@@ -844,15 +782,13 @@ let return-after-arrow(xs: List Ast) -> Maybe Str =
   match (xs)
     | [] -> None
     | x :: rest ->
-      cond
-        | is-sym(x, "->") ->
-          match (rest)
-            | ret :: _ ->
-              match (sym-str(ret))
-                | Some(n) -> Some(n)
-                | None -> Some("")
-            | [] -> None
-        | else -> return-after-arrow(rest)
+      if (is-sym(x, "->")) ->
+        match (rest)
+          | ret :: _ ->
+            match (sym-str(ret))
+              | Some(n) -> Some(n)
+              | None -> Some("")
+          | [] -> None | return-after-arrow(rest)
 
 let defn-return-rest(rest: List Ast, want: Str) -> Maybe Str =
   match (rest)
@@ -878,11 +814,10 @@ let find-main-return(forms: List Ast, want: Str) -> Maybe Str =
         | None -> find-main-return(rest, want)
 
 let note-entry!(path: Str, entry-path: Str, forms: List Ast, entry: Ref EntryMain) -> Unit =
-  cond
-    | path == entry-path ->
-      match (find-main-return(forms, main-symbol(path)))
-        | Some(ret) -> set!(entry, EntryMain(main-symbol(path), ret == "Unit", true))
-        | None -> ()
+  if (path == entry-path) ->
+    match (find-main-return(forms, main-symbol(path)))
+      | Some(ret) -> set!(entry, EntryMain(main-symbol(path), ret == "Unit", true))
+      | None -> ()
 
 let calls-of(names: List Str) -> List Ast =
   match (names)
@@ -928,7 +863,6 @@ let uniquify-module-body(path: Str, entry-path: Str, mid: Int, forms: List Ast, 
 
 ; ---------------------------------------------------------------------------
 ; Module graph load
-
 let load-module-into(path: Str, entry-path: Str, visited: Ref (Map Str Bool), acc: Ref (List Ast), mid: Ref Int, exports: Ref (Map Str Str), paths: Ref (List Str), sources: Ref (Map Str Str), inits: Ref (List Str), entry: Ref EntryMain, versions: Ref (Map Str Str)) -> Result Unit Str =
   match (Map.lookup(path, deref(visited)))
     | Some(_) -> Ok(())
@@ -1158,40 +1092,22 @@ pub let defn-return-type(forms: List Ast, name: Str) -> Maybe Str =
 ; unit is prepared, then read by the fold (before typecheck) and the
 ; rewrite (after typecheck). `runtime-ops` itself is declared above
 ; `flatten-module-graph`, which clears it.
-
 let path-ends(path: Str, suffix: Str) -> Bool {
-  let p = if (Path.is-absolute(path)) -> path | Path.join(path, "/")
+  let p =
+    if (Path.is-absolute(path)) -> path | Path.join(path, "/")
   let n = String.length(p)
   let m = String.length(suffix)
   n >= m && String.slice(n - m, m, p) == suffix
 }
 
 let string-op(name: Str) -> Maybe Str =
-  cond
-    | name == "length" -> Some("str-byte-length")
-    | name == "byte" -> Some("str-byte")
-    | name == "slice" -> Some("str-slice")
-    | name == "concat" -> Some("str-concat")
-    | name == "from-char" -> Some("char->str")
-    | else -> None
+  if (name == "length") -> Some("str-byte-length") | if (name == "byte") -> Some("str-byte") | if (name == "slice") -> Some("str-slice") | if (name == "concat") -> Some("str-concat") | if (name == "from-char") -> Some("char->str") | None
 
 let map-op(name: Str) -> Maybe Str =
-  cond
-    | name == "empty" -> Some("map-new")
-    | name == "size" -> Some("map-size")
-    | name == "keys" -> Some("map-keys")
-    | else -> None
+  if (name == "empty") -> Some("map-new") | if (name == "size") -> Some("map-size") | if (name == "keys") -> Some("map-keys") | None
 
 let buffer-op(name: Str) -> Maybe Str =
-  cond
-    | name == "new" -> Some("sb-new")
-    | name == "append!" -> Some("sb-append!")
-    | name == "append-byte!" -> Some("sb-append-byte!")
-    | name == "length" -> Some("sb-length")
-    | name == "clear!" -> Some("sb-clear!")
-    | name == "to-str" -> Some("sb-to-str")
-    | name == "take-str!" -> Some("sb-take-str!")
-    | else -> None
+  if (name == "new") -> Some("sb-new") | if (name == "append!") -> Some("sb-append!") | if (name == "append-byte!") -> Some("sb-append-byte!") | if (name == "length") -> Some("sb-length") | if (name == "clear!") -> Some("sb-clear!") | if (name == "to-str") -> Some("sb-to-str") | if (name == "take-str!") -> Some("sb-take-str!") | None
 
 let runtime-module(path: Str) -> Bool =
   path-ends(path, "/stdlib/string.mnd") || path-ends(path, "/stdlib/map.mnd") || path-ends(path, "/stdlib/string-buffer.mnd")
@@ -1206,11 +1122,7 @@ pub let runtime-misplaced(path: Str, forms: List Ast) -> Maybe Str =
   if (runtime-module(path)) -> None | runtime-misplaced-list(forms)
 
 let runtime-binding(path: Str, name: Str) -> Maybe Str =
-  cond
-    | path-ends(path, "/stdlib/string.mnd") -> string-op(name)
-    | path-ends(path, "/stdlib/map.mnd") -> map-op(name)
-    | path-ends(path, "/stdlib/string-buffer.mnd") -> buffer-op(name)
-    | else -> None
+  if (path-ends(path, "/stdlib/string.mnd")) -> string-op(name) | if (path-ends(path, "/stdlib/map.mnd")) -> map-op(name) | if (path-ends(path, "/stdlib/string-buffer.mnd")) -> buffer-op(name) | None
 
 let note-runtime!(symbol: Str, op: Str) -> Unit =
   set!(runtime-ops, Map.set(symbol, op, deref(runtime-ops)))
@@ -1253,11 +1165,7 @@ let note-local-runtime-list!(path: Str, forms: List Ast) -> Unit =
       }
 
 let runtime-names(path: Str) -> List Str =
-  cond
-    | path-ends(path, "/stdlib/string.mnd") -> ["length", "byte", "slice", "concat", "from-char"]
-    | path-ends(path, "/stdlib/map.mnd") -> ["empty", "size", "keys"]
-    | path-ends(path, "/stdlib/string-buffer.mnd") -> ["new", "append!", "append-byte!", "length", "clear!", "to-str", "take-str!"]
-    | else -> []
+  if (path-ends(path, "/stdlib/string.mnd")) -> ["length", "byte", "slice", "concat", "from-char"] | if (path-ends(path, "/stdlib/map.mnd")) -> ["empty", "size", "keys"] | if (path-ends(path, "/stdlib/string-buffer.mnd")) -> ["new", "append!", "append-byte!", "length", "clear!", "to-str", "take-str!"] | []
 
 let note-names!(path: Str, prefix: Str, names: List Str) -> Unit =
   match (names)
@@ -1357,10 +1265,7 @@ let rot-three(args: List Ast) -> List Ast =
     | _ -> args
 
 let permute-args(op: Str, args: List Ast) -> List Ast =
-  cond
-    | op == "str-byte" -> swap-two(args)
-    | op == "str-slice" -> rot-three(args)
-    | else -> args
+  if (op == "str-byte") -> swap-two(args) | if (op == "str-slice") -> rot-three(args) | args
 
 let rewrite-runtime-list(xs: List Ast) -> List Ast =
   match (xs)

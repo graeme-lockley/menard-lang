@@ -1,6 +1,5 @@
 ; SQLite API — foreign lib via sql_* (not mn_*).
 ; Native-only; the interpreter leaves sql_* unbound.
-
 import std/json
 import std/list
 import std/map as Map
@@ -12,15 +11,17 @@ pub type SqlError =
   | SqlBadJson
 
 extern sql_open(path: Str) -> Result Unit Int
+
 extern sql_close() -> Result Unit Int
+
 extern sql_exec(sql: Str) -> Result Unit Int
+
 extern sql_query(sql: Str) -> Result Str Int
+
 extern sql_errmsg() -> Str
 
 let decode-err(code: Int) -> SqlError =
-  cond
-    | code == 2 -> SqlBadState
-    | else -> SqlErr(sql_errmsg())
+  if (code == 2) -> SqlBadState | SqlErr(sql_errmsg())
 
 let map-unit(r: Result Unit Int) -> Result Unit SqlError =
   match (r)
@@ -33,7 +34,6 @@ let map-json-str(r: Result Str Int) -> Result Str SqlError =
     | Err(c) -> Err(decode-err(c))
 
 ; One query row: column name → JSON value (Map Str Json).
-
 let parse-row(v: Json) -> Result (Map Str Json) SqlError =
   match (v)
     | JsonObject(m) -> Ok(m)

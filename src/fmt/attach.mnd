@@ -1,0 +1,189 @@
+; Attach trivia items to AST nodes by source span order.
+; Twin of host/src/fmt/attach.ts.
+import "../reader/ast.mnd"
+import "./trivia.mnd"
+import std/list
+import std/map as Map
+
+pub record AttachedTrivia {
+  leading: Map Int (List TriviaItem)
+  trailing: List TriviaItem
+}
+
+let head-str(a: Ast) -> Maybe Str =
+  match (a)
+    | ParenNode(SymNode(n, _) :: _, _) -> Some(n)
+    | _ -> None
+
+let is-head(a: Ast, name: Str) -> Bool =
+  match (head-str(a))
+    | Some(n) -> n == name
+    | None -> false
+
+let span-start(a: Ast) -> Int =
+  ast-span(a).start
+
+; Sort attach points by span.start ascending.
+let insert-sorted(a: Ast, xs: List Ast) -> List Ast =
+  match (xs)
+    | [] -> [a]
+    | h :: t ->
+      if (span-start(a) < span-start(h)) -> a :: xs | if (span-start(a) == span-start(h) && ast-span(a).end < ast-span(h).end) -> a :: xs | h :: insert-sorted(a, t)
+
+let push-point(a: Ast, acc: List Ast) -> List Ast =
+  insert-sorted(a, acc)
+
+let walk-expr(a: Ast, acc: List Ast) -> List Ast =
+  match (a)
+    | ParenNode(xs, _) ->
+      match (head-str(a))
+        | Some("do") -> walk-do(xs, acc)
+        | Some("match") -> walk-match(xs, acc)
+        | Some("mmatch") -> walk-match(xs, acc)
+        | Some("cond") -> walk-cond(xs, acc)
+        | Some("if") -> walk-children(xs, acc)
+        | Some("fn") -> walk-children(xs, acc)
+        | Some("loop") -> walk-children(xs, acc)
+        | Some("while") -> walk-children(xs, acc)
+        | Some("when") -> walk-children(xs, acc)
+        | Some("let") -> walk-children(xs, acc)
+        | Some("defn") -> walk-children(xs, acc)
+        | _ -> walk-nested(xs, acc)
+    | _ -> acc
+
+let walk-children(xs: List Ast, acc: List Ast) -> List Ast =
+  match (xs)
+    | [] -> acc
+    | _ :: rest -> walk-children-rest(rest, acc)
+
+let walk-children-rest(xs: List Ast, acc: List Ast) -> List Ast =
+  match (xs)
+    | [] -> acc
+    | h :: t -> walk-children-rest(t, walk-expr(h, acc))
+
+let walk-nested(xs: List Ast, acc: List Ast) -> List Ast =
+  match (xs)
+    | [] -> acc
+    | h :: t ->
+      match (h)
+        | ParenNode(_, _) -> walk-nested(t, walk-expr(h, acc))
+        | _ -> walk-nested(t, acc)
+
+let walk-do(xs: List Ast, acc: List Ast) -> List Ast =
+  match (xs)
+    | [] -> acc
+    | _ :: stmts -> walk-stmts(stmts, acc)
+
+let walk-stmts(xs: List Ast, acc: List Ast) -> List Ast =
+  match (xs)
+    | [] -> acc
+    | h :: t ->
+      {
+        let acc1 = push-point(h, acc)
+        let acc2 =
+          if (is-head(h, "let") || is-head(h, "defn")) -> walk-expr(h, acc1) |
+          if (is-head(h, "return") || is-head(h, "defer")) ->
+            match (h)
+              | ParenNode(_ :: e :: _, _) -> walk-expr(e, acc1)
+              | _ -> acc1 | walk-expr(h, acc1)
+        walk-stmts(t, acc2)
+      }
+
+let walk-match(xs: List Ast, acc: List Ast) -> List Ast =
+  match (xs)
+    | [] -> acc
+    | _ :: scrut :: arms -> walk-match-arms(arms, walk-expr(scrut, acc))
+    | _ :: [] -> acc
+
+let walk-match-arms(xs: List Ast, acc: List Ast) -> List Ast =
+  match (xs)
+    | [] -> acc
+    | pat :: body :: rest -> walk-match-arms(rest, walk-expr(body, push-point(pat, acc)))
+    | _ :: _ -> acc
+
+let walk-cond(xs: List Ast, acc: List Ast) -> List Ast =
+  match (xs)
+    | [] -> acc
+    | _ :: clauses -> walk-cond-clauses(clauses, acc)
+
+let walk-cond-clauses(xs: List Ast, acc: List Ast) -> List Ast =
+  match (xs)
+    | [] -> acc
+    | c :: rest ->
+      {
+        let acc1 = push-point(c, acc)
+        let acc2 =
+          match (c)
+            | ParenNode(_ :: body-parts, _) -> walk-children-rest(body-parts, acc1)
+            | _ -> acc1
+        walk-cond-clauses(rest, acc2)
+      }
+
+let walk-inner(a: Ast, acc: List Ast) -> List Ast =
+  match (a)
+    | ParenNode(xs, _) ->
+      match (head-str(a))
+        | Some("defn") -> walk-children(xs, acc)
+        | Some("test") -> walk-children(xs, acc)
+        | Some("defrec") -> acc
+        | Some("alias") -> acc
+        | Some("import") -> acc
+        | Some("extern") -> acc
+        | Some("runtime") -> acc
+        | Some("variant") ->
+          match (xs)
+            | _ :: _ :: ctors -> fold-ctors(ctors, acc)
+            | _ -> acc
+        | Some("do") -> walk-do(xs, acc)
+        | _ -> walk-expr(a, acc)
+    | _ -> acc
+
+let fold-ctors(xs: List Ast, acc: List Ast) -> List Ast =
+  match (xs)
+    | [] -> acc
+    | h :: t -> fold-ctors(t, push-point(h, acc))
+
+let walk-form(a: Ast, acc: List Ast) -> List Ast {
+  let acc1 = push-point(a, acc)
+  match (a)
+    | ParenNode(SymNode("pub", _) :: inner :: _, _) -> walk-inner(inner, acc1)
+    | _ -> walk-inner(a, acc1)
+}
+
+pub let collect-attach-points(forms: List Ast) -> List Ast =
+  fold-forms(forms, [])
+
+let fold-forms(forms: List Ast, acc: List Ast) -> List Ast =
+  match (forms)
+    | [] -> acc
+    | h :: t -> fold-forms(t, walk-form(h, acc))
+
+let bucket-add(m: Map Int (List TriviaItem), key: Int, item: TriviaItem) -> Map Int (List TriviaItem) =
+  match (Map.lookup(key, m))
+    | None -> Map.set(key, [item], m)
+    | Some(xs) -> Map.set(key, append(xs, [item]), m)
+
+let append(xs: List TriviaItem, ys: List TriviaItem) -> List TriviaItem =
+  match (xs)
+    | [] -> ys
+    | h :: t -> h :: append(t, ys)
+
+let attach-from(items: List TriviaItem, points: List Ast, leading: Map Int (List TriviaItem), trailing: List TriviaItem) -> AttachedTrivia =
+  match (items)
+    | [] -> AttachedTrivia(leading, reverse(trailing))
+    | item :: rest ->
+      {
+        let pts = drop-before(points, item.end)
+        match (pts)
+          | [] -> attach-from(rest, [], leading, item :: trailing)
+          | p :: _ -> attach-from(rest, pts, bucket-add(leading, span-start(p), item), trailing)
+      }
+
+let drop-before(points: List Ast, end: Int) -> List Ast =
+  match (points)
+    | [] -> []
+    | p :: rest ->
+      if (span-start(p) < end) -> drop-before(rest, end) | points
+
+pub let attach-trivia(items: List TriviaItem, forms: List Ast) -> AttachedTrivia =
+  attach-from(items, collect-attach-points(forms), Map.empty(), [])

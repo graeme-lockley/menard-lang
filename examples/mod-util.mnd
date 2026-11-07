@@ -1,5 +1,4 @@
 ; Slice 3G — multi-module emit helper.
 ; Imported by `mod-main.mnd`.
-
 pub let double(n: Int) -> Int =
   n * 2

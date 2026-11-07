@@ -6,7 +6,6 @@
 ; a pipe stays plain text. Optional `help:` follows the caret block.
 ; `--json` accumulates diagnostics and flushes one versioned object to
 ; stdout (no color, no progress).
-
 import "../reader/ast.mnd"
 import std/console
 import std/io
@@ -17,6 +16,7 @@ import std/string as String
 
 ; JSON mode accumulates diagnostics and suppresses color/progress.
 let json-mode = ref(false)
+
 let json-diags = ref([])
 
 ; `Compiling` / `Linking` are light grey, the file name dark grey.
@@ -44,24 +44,15 @@ let digits-of(n: Int, acc: Int) -> Int =
 ; A call per byte overflows the stack on a source the size of `lower.mnd`.
 let walk-loc(src: Str, offset: Int, i: Int, line: Int, start: Int, n: Int) -> Int =
   loop (j = i, ln = line, st = start)
-    cond
-      | j >= offset || j >= n -> st
-      | String.byte(j, src) == 10 -> recur(j + 1, ln + 1, j + 1)
-      | else -> recur(j + 1, ln, st)
+    if (j >= offset || j >= n) -> st | if (String.byte(j, src) == 10) -> recur(j + 1, ln + 1, j + 1) | recur(j + 1, ln, st)
 
 let walk-line(src: Str, offset: Int, i: Int, line: Int, n: Int) -> Int =
   loop (j = i, ln = line)
-    cond
-      | j >= offset || j >= n -> ln
-      | String.byte(j, src) == 10 -> recur(j + 1, ln + 1)
-      | else -> recur(j + 1, ln)
+    if (j >= offset || j >= n) -> ln | if (String.byte(j, src) == 10) -> recur(j + 1, ln + 1) | recur(j + 1, ln)
 
 let line-end(src: Str, i: Int, n: Int) -> Int =
   loop (j = i)
-    cond
-      | j >= n -> n
-      | String.byte(j, src) == 10 -> j
-      | else -> recur(j + 1)
+    if (j >= n) -> n | if (String.byte(j, src) == 10) -> j | recur(j + 1)
 
 let drop-cr(src: Str, start: Int, end: Int) -> Int =
   if (end > start && String.byte(end - 1, src) == 13) -> end - 1 | end
@@ -122,7 +113,6 @@ let format-span(path: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str) ->
 
 ; ---------------------------------------------------------------------------
 ; JSON mode: accumulate then flush one object to stdout.
-
 record JsonDiag {
   path: Str
   src: Str
@@ -164,7 +154,7 @@ let diag-object(d: JsonDiag) -> Json.Json =
         Json.JsonObject(with-help)
       }
 
-let diags-to-json-list(xs: List JsonDiag, acc: List Json.Json) -> List Json.Json =
+let diags-to-json-list(xs: List JsonDiag, acc: List (Json.Json)) -> List (Json.Json) =
   match (xs)
     | [] -> reverse(acc)
     | d :: rest -> diags-to-json-list(rest, diag-object(d) :: acc)
@@ -179,17 +169,15 @@ pub let flush-diagnostics-json() -> Unit {
 }
 
 pub let report-span-help(path: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str, help: Maybe Str) -> Unit =
-  cond
-    | deref(json-mode) ->
-      {
-        set!(json-diags, JsonDiag(path, src, sp, sev, code, msg, help) :: deref(json-diags))
-        ()
-      }
-    | else ->
-      {
-        write(stderr, format-span-help(path, src, sp, sev, code, msg, help))
-        ()
-      }
+  if (deref(json-mode)) ->
+    {
+      set!(json-diags, JsonDiag(path, src, sp, sev, code, msg, help) :: deref(json-diags))
+      ()
+    } |
+  {
+    write(stderr, format-span-help(path, src, sp, sev, code, msg, help))
+    ()
+  }
 
 pub let report-span(path: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str) -> Unit =
   report-span-help(path, src, sp, sev, code, msg, None)

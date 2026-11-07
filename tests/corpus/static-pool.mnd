@@ -1,7 +1,6 @@
 ; A literal and a computed string compare and show the same. A literal
 ; `None` is the same value `Map.lookup` returns for a missing key. A user
 ; nullary built in two places shows the same text.
-
 import std/string as String
 import std/map as Map
 

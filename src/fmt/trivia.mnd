@@ -1,0 +1,129 @@
+; Scan Menard source for full-line trivia: shebang, semicolon comments, blank runs.
+; Rejects CR. Twin of host/src/fmt/trivia.ts.
+import std/string as String
+import std/list
+
+pub type TriviaKind =
+  | Shebang
+  | Comment
+  | Blank
+
+pub record TriviaItem {
+  kind: TriviaKind
+  start: Int
+  end: Int
+  text: Str
+  blank-lines: Int
+}
+
+pub record TriviaError {
+  message: Str
+  help: Maybe Str
+}
+
+record BlankRun {
+  next: Int
+  count: Int
+  blank-start: Int
+}
+
+let nl() -> Str =
+  String.from-char('\n')
+
+let is-space(b: Int) -> Bool =
+  b == 32 || b == 9
+
+let find-cr(s: Str, i: Int, n: Int) -> Bool =
+  if (i >= n) -> false | if (String.byte(i, s) == 13) -> true | find-cr(s, i + 1, n)
+
+let line-end(s: Str, i: Int, n: Int) -> Int =
+  if (i >= n) -> n | if (String.byte(i, s) == 10) -> i | line-end(s, i + 1, n)
+
+let skip-spaces(s: Str, i: Int, n: Int) -> Int =
+  if (i >= n) -> i | if (is-space(String.byte(i, s))) -> skip-spaces(s, i + 1, n) | i
+
+let take-blanks(s: Str, i: Int, n: Int, count: Int, blank-start: Int) -> BlankRun =
+  if (i >= n) -> BlankRun(i, count, blank-start) |
+  {
+    let bs = i
+    let j = skip-spaces(s, i, n)
+    if (j < n && String.byte(j, s) == 10) ->
+      take-blanks(
+        s,
+        j + 1,
+        n,
+        count + 1,
+        if (count == 0) -> bs | blank-start
+      ) | BlankRun(bs, count, blank-start)
+  }
+
+let scan-from(s: Str, i: Int, n: Int, acc: List TriviaItem) -> List TriviaItem =
+  if (i >= n) -> reverse(acc) |
+  {
+    let line-start = i
+    let j = skip-spaces(s, i, n)
+    if (j >= n) -> reverse(acc) |
+    if (String.byte(j, s) == 10) ->
+      {
+        let run = take-blanks(s, line-start, n, 0, line-start)
+        if (run.count > 0) -> scan-from(s, run.next, n, TriviaItem(Blank, run.blank-start, run.next, "", run.count) :: acc) | scan-from(s, run.next, n, acc)
+      } |
+    if (String.byte(j, s) == 59) ->
+      {
+        let text-end = line-end(s, j, n)
+        let end =
+          if (text-end < n && String.byte(text-end, s) == 10) -> text-end + 1 | text-end
+        let text = String.slice(j, text-end - j, s)
+        scan-from(s, end, n, TriviaItem(Comment, line-start, end, text, 0) :: acc)
+      } |
+    {
+      let text-end = line-end(s, j, n)
+      let end =
+        if (text-end < n && String.byte(text-end, s) == 10) -> text-end + 1 | text-end
+      scan-from(s, end, n, acc)
+    }
+  }
+
+let pad(n: Int) -> Str =
+  pad-from(n, "")
+
+let pad-from(n: Int, acc: Str) -> Str =
+  if (n <= 0) -> acc | pad-from(n - 1, String.concat(acc, " "))
+
+let drop-leading-blanks(xs: List TriviaItem) -> List TriviaItem =
+  match (xs)
+    | [] -> []
+    | TriviaItem(Blank, _, _, _, _) :: rest -> drop-leading-blanks(rest)
+    | _ -> xs
+
+let trim-edge-blanks(xs: List TriviaItem) -> List TriviaItem =
+  reverse(drop-leading-blanks(reverse(drop-leading-blanks(xs))))
+
+let newlines(n: Int) -> Str =
+  newlines-from(n, "")
+
+let newlines-from(n: Int, acc: Str) -> Str =
+  if (n <= 0) -> acc | newlines-from(n - 1, String.concat(acc, nl()))
+
+pub let format-trivia-items(items: List TriviaItem, ind: Int) -> Str =
+  format-trivia-go(trim-edge-blanks(items), ind, "")
+
+let format-trivia-go(items: List TriviaItem, ind: Int, acc: Str) -> Str =
+  match (items)
+    | [] -> acc
+    | TriviaItem(Shebang, _, _, text, _) :: rest -> format-trivia-go(rest, ind, String.concat(acc, String.concat(text, nl())))
+    | TriviaItem(Comment, _, _, text, _) :: rest -> format-trivia-go(rest, ind, String.concat(acc, String.concat(pad(ind), String.concat(text, nl()))))
+    | TriviaItem(Blank, _, _, _, n) :: rest -> format-trivia-go(rest, ind, String.concat(acc, newlines(n)))
+
+pub let scan-trivia(src: Str) -> Result (List TriviaItem) TriviaError {
+  let n = String.length(src)
+  if (find-cr(src, 0, n)) -> Err(TriviaError("CRLF line endings are not supported", Some("convert the file to LF (Unix) line endings"))) |
+  if (n >= 2 && String.byte(0, src) == 35 && String.byte(1, src) == 33) ->
+    {
+      let text-end = line-end(src, 2, n)
+      let end =
+        if (text-end < n && String.byte(text-end, src) == 10) -> text-end + 1 | text-end
+      let text = String.slice(0, text-end, src)
+      Ok(scan-from(src, end, n, [TriviaItem(Shebang, 0, end, text, 0)]))
+    } | Ok(scan-from(src, 0, n, []))
+}

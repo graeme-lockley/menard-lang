@@ -97,7 +97,7 @@ function peekSimpleAtom(src: Uint8Array, at: number): string | null {
   return null;
 }
 
-const OPS = ["==", "!=", "<=", ">=", "&&", "||", "->", "::", "|>", "=>", "+", "-", "*", "/", "%", "<", ">", "=", "|", "?"];
+const OPS = ["==", "!=", "<=", ">=", "&&", "||", "->", "::", "|>", "=>", "??", "+", "-", "*", "/", "%", "<", ">", "=", "|", "?"];
 
 /** Kestrel's simple escapes. `-1` means this byte is not one of them. */
 function simpleEscape(e: number): number {

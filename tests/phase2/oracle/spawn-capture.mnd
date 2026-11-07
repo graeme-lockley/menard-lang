@@ -1,6 +1,5 @@
 ; Interpreter and native `spawn-capture` both return the child's stdout.
 ; `/bin/echo` and `/bin/cat` are absolute paths, so there is no PATH search.
-
 import std/io
 import std/proc
 

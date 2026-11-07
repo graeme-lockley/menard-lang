@@ -1,6 +1,5 @@
 ; Slice 3B oracle: Bool/Unit values, Bool-returning helper, Unit mid-sequence.
 ; Expect exit 1.
-
 let is-pos(n: Int) -> Bool =
   n > 0
 
@@ -16,8 +15,6 @@ let main() -> Int {
   let t = true
   let f = false
   touch()
-  cond
-    | t ->
-      if (f) -> 0 | as-int(is-pos(5))
-    | else -> 0
+  if (t) ->
+    if (f) -> 0 | as-int(is-pos(5)) | 0
 }

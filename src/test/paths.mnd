@@ -1,24 +1,18 @@
 ; A repo-root path, found from the working directory or a parent.
 ; `./mn test` from `src/` still opens `tests/…` and `hello.mnd`.
-
 import std/fs
 import std/path as Path
 import std/string as String
 
-let find-up(rel: Str, dir: Str) -> Str = {
+let find-up(rel: Str, dir: Str) -> Str {
   let candidate = Path.join(rel, dir)
-  cond
-    | exists(candidate) -> candidate
-    | dir == "/" -> rel
-    | else ->
-      {
-        let up = Path.dirname(dir)
-        if (up == dir) -> rel | find-up(rel, up)
-      }
+  if (exists(candidate)) -> candidate |
+  if (dir == "/") -> rel |
+  {
+    let up = Path.dirname(dir)
+    if (up == dir) -> rel | find-up(rel, up)
+  }
 }
 
 pub let project-file(path: Str) -> Str =
-  cond
-    | Path.is-absolute(path) -> path
-    | exists(path) -> path
-    | else -> find-up(path, Path.dirname(cwd()))
+  if (Path.is-absolute(path)) -> path | if (exists(path)) -> path | find-up(path, Path.dirname(cwd()))

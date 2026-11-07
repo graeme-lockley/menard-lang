@@ -9,7 +9,6 @@
 ; `Type` union are not ported — `Arr` is unused by the Phase 2 critical
 ; subset (§2.8.2), and "ctor" is dead code in host/src/type/check.ts (never
 ; constructed). Revisit if a later slice needs fixed-size arrays.
-
 import std/string as String
 
 pub type Type =
@@ -32,7 +31,7 @@ pub type Type =
   | TNominal(Str, List Type, Str)
   | TProduct(List Type)
 
- ; name, type args, kind ("record" | "variant")
+; name, type args, kind ("record" | "variant")
 
 ; A declared name's own scheme: how many type parameters it binds, plus the
 ; (possibly parameter-mentioning) type itself. Instantiated with fresh
@@ -69,7 +68,6 @@ pub record CtorInfo {
 ; ---------------------------------------------------------------------------
 ; Constructors — small wrappers so callers read as "the List type of T"
 ; rather than a bare variant application.
-
 pub let t-int() -> Type =
   TInt
 
@@ -123,7 +121,6 @@ pub let t-product(elems: List Type) -> Type =
 ; ---------------------------------------------------------------------------
 ; Structural equality (ignores display names on TVar, exactly as host's
 ; typeEqual does — a variable's spelling is not part of its identity).
-
 pub let type-equal(a: Type, b: Type) -> Bool =
   match (a, b)
     | (TInt, TInt) -> true
@@ -155,7 +152,6 @@ pub let type-list-equal(xs: List Type, ys: List Type) -> Bool =
 ; ---------------------------------------------------------------------------
 ; Diagnostic spelling — not a pretty-printer, "canonical enough to read in
 ; an error message". Mirrors host's typeShow.
-
 pub let type-show(t: Type) -> Str =
   match (t)
     | TInt -> "Int"
@@ -207,7 +203,6 @@ let type-show-list(xs: List Type) -> Str =
 ; they are only ever produced as TMaybe/TList/TResult directly, never
 ; re-wrapped as TNominal, so this is complete for every type this typer can
 ; itself construct.
-
 pub let is-showable(t: Type) -> Bool =
   match (t)
     | TStringBuffer -> false

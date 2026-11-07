@@ -1,5 +1,4 @@
 ; Appending a literal copies it. A later append does not change the literal.
-
 import std/string-buffer as Buf
 
 let main() -> Int {

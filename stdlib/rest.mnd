@@ -1,9 +1,11 @@
 ; Small REST helpers over std/http (Build F).
 ; @module std/rest
-
 pub import std/http (Request, Response, Method)
+
 import std/json as Json
+
 pub import std/json (Json)
+
 import std/map as Map
 import std/string as String
 

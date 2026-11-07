@@ -12,7 +12,6 @@
 ;   ctor("name", TAG, ARITY)
 ;   then each stub as its own declaration. `fn` is a keyword, so the
 ;   function record is `fn-rec`.
-
 import "../reader/ast.mnd"
 import "../reader/read.mnd"
 import "../reader/print.mnd"
@@ -80,7 +79,8 @@ let default-cache() -> Str =
 
 pub let canonical-path(path: Str) -> Str {
   let direct = realpath(path)
-  if (String.length(direct) > 0) -> direct | normalize-path(
+  if (String.length(direct) > 0) -> direct |
+  normalize-path(
     if (Path.is-absolute(path)) -> path | Path.join(path, cwd())
   )
 }
@@ -220,23 +220,19 @@ let elem-str(elems: List Ast, i: Int) -> Str =
   match (elems)
     | [] -> ""
     | e :: rest ->
-      cond
-        | i == 0 ->
-          match (e)
-            | StrNode(s, _) -> s
-            | _ -> ""
-        | else -> elem-str(rest, i - 1)
+      if (i == 0) ->
+        match (e)
+          | StrNode(s, _) -> s
+          | _ -> "" | elem-str(rest, i - 1)
 
 let elem-int(elems: List Ast, i: Int) -> Int =
   match (elems)
     | [] -> 0
     | e :: rest ->
-      cond
-        | i == 0 ->
-          match (e)
-            | IntNode(n, _) -> n
-            | _ -> 0
-        | else -> elem-int(rest, i - 1)
+      if (i == 0) ->
+        match (e)
+          | IntNode(n, _) -> n
+          | _ -> 0 | elem-int(rest, i - 1)
 
 let elem-ast(elems: List Ast, i: Int) -> Maybe Ast =
   match (elems)
@@ -269,20 +265,15 @@ let take-form(a: Ast, src-hash: Ref Int, deps: Ref (List DepRec), init: Ref Str,
     | ParenNode(elems, _) ->
       {
         let h = head-of(a)
-        cond
-          | h == "src" -> set!(src-hash, elem-int(elems, 1))
-          | h == "dep" -> set!(deps, DepRec(elem-int(elems, 1), elem-str(elems, 2)) :: deref(deps))
-          | h == "init" -> set!(init, undash(elem-str(elems, 1)))
-          | h == "main" ->
-            {
-              set!(main-sym, undash(elem-str(elems, 1)))
-              set!(main-ret, undash(elem-str(elems, 2)))
-              ()
-            }
-          | h == "fn-rec" -> set!(fns, FnRec(elem-str(elems, 1), elem-str(elems, 2), elem-int(elems, 3)) :: deref(fns))
-          | h == "ctor" -> set!(ctors, CtorRec(elem-str(elems, 1), elem-int(elems, 2), elem-int(elems, 3)) :: deref(ctors))
-          | h == "mni" -> ()
-          | else -> set!(stubs, a :: deref(stubs))
+        if (h == "src") -> set!(src-hash, elem-int(elems, 1)) |
+        if (h == "dep") -> set!(deps, DepRec(elem-int(elems, 1), elem-str(elems, 2)) :: deref(deps)) |
+        if (h == "init") -> set!(init, undash(elem-str(elems, 1))) |
+        if (h == "main") ->
+          {
+            set!(main-sym, undash(elem-str(elems, 1)))
+            set!(main-ret, undash(elem-str(elems, 2)))
+            ()
+          } | if (h == "fn-rec") -> set!(fns, FnRec(elem-str(elems, 1), elem-str(elems, 2), elem-int(elems, 3)) :: deref(fns)) | if (h == "ctor") -> set!(ctors, CtorRec(elem-str(elems, 1), elem-int(elems, 2), elem-int(elems, 3)) :: deref(ctors)) | if (h == "mni") -> () | set!(stubs, a :: deref(stubs))
         ()
       }
     | _ -> ()
@@ -311,8 +302,7 @@ let iface-from-forms(forms: List Ast) -> Iface {
 
 let compatible-iface(forms: List Ast) -> Bool =
   match (forms)
-    | ParenNode([SymNode(name, _), IntNode(version, _)], _) :: _ ->
-      name == "mni" && version == iface-version
+    | ParenNode([SymNode(name, _), IntNode(version, _)], _) :: _ -> name == "mni" && version == iface-version
     | _ -> false
 
 pub let read-iface(abs: Str) -> Maybe Iface =
@@ -348,11 +338,9 @@ pub let remove-cache(abs: Str) -> Unit {
 }
 
 let split-acc(s: Str, i: Int, start: Int, n: Int, acc: List Str) -> List Str =
-  cond
-    | i > n -> acc
-    | i == n || String.byte(i, s) == 10 ->
-      if (i == start) -> split-acc(s, i + 1, i + 1, n, acc) | split-acc(s, i + 1, i + 1, n, String.slice(start, i - start, s) :: acc)
-    | else -> split-acc(s, i + 1, start, n, acc)
+  if (i > n) -> acc |
+  if (i == n || String.byte(i, s) == 10) ->
+    if (i == start) -> split-acc(s, i + 1, i + 1, n, acc) | split-acc(s, i + 1, i + 1, n, String.slice(start, i - start, s) :: acc) | split-acc(s, i + 1, start, n, acc)
 
 let reverse-strs(xs: List Str, acc: List Str) -> List Str =
   match (xs)

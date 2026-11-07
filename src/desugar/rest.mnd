@@ -5,7 +5,6 @@
 ; becomes `(sum (Cons 1 xs))`. A splice that is not a suffix is appended
 ; with a generated `mn-rest-append`. Runs after desugar and before typing.
 ; Mirrors host/src/desugar/rest.ts.
-
 import "../reader/ast.mnd"
 import std/string as String
 
@@ -92,9 +91,9 @@ let reverse-asts(xs: List Ast, acc: List Ast) -> List Ast =
     | x :: rest -> reverse-asts(rest, x :: acc)
 
 let nil-node(sp: Span) -> Ast =
-  ; LANG-07: Nil is a bare value, not `(Nil)`.
   mk-sym("Nil", sp)
 
+; LANG-07: Nil is a bare value, not `(Nil)`.
 let cons-node(h: Ast, t: Ast, sp: Span) -> Ast =
   ParenNode([mk-sym("Cons", sp), h, t], sp)
 
@@ -121,13 +120,11 @@ let contains-dots-list(xs: List Ast) -> Bool =
       if (contains-dots(x)) -> true | contains-dots-list(rest)
 
 let dots-span(ast: Ast) -> Span =
-  cond
-    | is-dots(ast) -> ast-span(ast)
-    | else ->
-      match (ast)
-        | ParenNode(elems, _) -> dots-span-list(elems, ast-span(ast))
-        | BracketNode(elems, _) -> dots-span-list(elems, ast-span(ast))
-        | _ -> ast-span(ast)
+  if (is-dots(ast)) -> ast-span(ast) |
+  match (ast)
+    | ParenNode(elems, _) -> dots-span-list(elems, ast-span(ast))
+    | BracketNode(elems, _) -> dots-span-list(elems, ast-span(ast))
+    | _ -> ast-span(ast)
 
 let dots-span-list(xs: List Ast, fallback: Span) -> Span =
   match (xs)
@@ -174,12 +171,10 @@ let param-asts(form: Ast) -> Maybe (List Ast) =
 let is-list-type(ast: Ast) -> Bool =
   match (ast)
     | ParenNode(h :: rest, _) ->
-      cond
-        | is-sym(h, "List") ->
-          match (rest)
-            | [] -> false
-            | _ :: _ -> true
-        | else -> false
+      if (is-sym(h, "List")) ->
+        match (rest)
+          | [] -> false
+          | _ :: _ -> true | false
     | _ -> false
 
 let not-empty(xs: List Ast) -> Bool =
@@ -199,13 +194,11 @@ let split-last(xs: List Ast, acc: List Ast) -> Maybe SplitLast =
 let validate-rest-type(init: List Ast, sp: Span, i: Int, diags: Ref (List RestError), report: Bool) -> Maybe Int =
   match (init)
     | _ :: ty :: [] ->
-      cond
-        | is-list-type(ty) -> Some(i)
-        | else ->
-          {
-            report-if(report, diags, ast-span(ty), "rest parameter type must be a List")
-            None
-          }
+      if (is-list-type(ty)) -> Some(i) |
+      {
+        report-if(report, diags, ast-span(ty), "rest parameter type must be a List")
+        None
+      }
     | _ ->
       {
         report-if(report, diags, sp, "rest parameter must be a (name: Type ...) form")
@@ -220,20 +213,16 @@ let validate-rest-elems(elems: List Ast, sp: Span, i: Int, diags: Ref (List Rest
         None
       }
     | Some(SplitLast(init, last)) ->
-      cond
-        | is-dots(last) ->
-          cond
-            | contains-dots-list(init) ->
-              {
-                report-if(report, diags, dots-span-list(init, sp), "rest marker must be the last element of the parameter")
-                None
-              }
-            | else -> validate-rest-type(init, sp, i, diags, report)
-        | else ->
+      if (is-dots(last)) ->
+        if (contains-dots-list(init)) ->
           {
-            report-if(report, diags, dots-span-list(elems, sp), "rest marker must be the last element of the parameter")
+            report-if(report, diags, dots-span-list(init, sp), "rest marker must be the last element of the parameter")
             None
-          }
+          } | validate-rest-type(init, sp, i, diags, report) |
+      {
+        report-if(report, diags, dots-span-list(elems, sp), "rest marker must be the last element of the parameter")
+        None
+      }
 
 let validate-rest-param(p: Ast, i: Int, diags: Ref (List RestError), report: Bool) -> Maybe Int =
   match (p)
@@ -248,16 +237,12 @@ let rest-fixed-params(ps: List Ast, i: Int, diags: Ref (List RestError), report:
   match (ps)
     | [] -> None
     | p :: rest ->
-      cond
-        | contains-dots(p) ->
-          cond
-            | not-empty(rest) ->
-              {
-                report-if(report, diags, dots-span(p), "rest parameter must be last")
-                None
-              }
-            | else -> validate-rest-param(p, i, diags, report)
-        | else -> rest-fixed-params(rest, i + 1, diags, report)
+      if (contains-dots(p)) ->
+        if (not-empty(rest)) ->
+          {
+            report-if(report, diags, dots-span(p), "rest parameter must be last")
+            None
+          } | validate-rest-param(p, i, diags, report) | rest-fixed-params(rest, i + 1, diags, report)
 
 let rest-fixed(form: Ast, diags: Ref (List RestError), report: Bool) -> Maybe Int =
   match (param-asts(form))
@@ -322,20 +307,18 @@ let decl-names(form: Ast) -> List Str =
     | _ -> []
 
 let decl-names-kw(h: Ast, name: Ast, more: List Ast) -> List Str =
-  cond
-    | is-sym(h, "defn") || is-sym(h, "extern") || is-sym(h, "runtime") || is-sym(h, "defrec") || is-sym(h, "alias") ->
-      match (name-text(name))
-        | Some(n) -> [n]
-        | None -> []
-    | is-sym(h, "let") ->
-      match (sym-of(name))
-        | Some(n) -> [n]
-        | None -> []
-    | is-sym(h, "variant") ->
-      match (name-text(name))
-        | Some(n) -> ctor-names(more, [n])
-        | None -> ctor-names(more, [])
-    | else -> []
+  if (is-sym(h, "defn") || is-sym(h, "extern") || is-sym(h, "runtime") || is-sym(h, "defrec") || is-sym(h, "alias")) ->
+    match (name-text(name))
+      | Some(n) -> [n]
+      | None -> [] |
+  if (is-sym(h, "let")) ->
+    match (sym-of(name))
+      | Some(n) -> [n]
+      | None -> [] |
+  if (is-sym(h, "variant")) ->
+    match (name-text(name))
+      | Some(n) -> ctor-names(more, [n])
+      | None -> ctor-names(more, []) | []
 
 let collect-names(forms: List Ast, acc: List Str) -> List Str =
   match (forms)
@@ -426,24 +409,20 @@ let call-of(head: Ast, ps: List Piece, sp: Span) -> Ast =
   ParenNode(head :: piece-exprs(ps), sp)
 
 let take-pieces(n: Int, ps: List Piece, acc: List Piece) -> PieceSplit =
-  cond
-    | n == 0 -> PieceSplit(reverse-pieces(acc, []), ps)
-    | else ->
-      match (ps)
-        | [] -> PieceSplit(reverse-pieces(acc, []), [])
-        | p :: rest -> take-pieces(n - 1, rest, p :: acc)
+  if (n == 0) -> PieceSplit(reverse-pieces(acc, []), ps) |
+  match (ps)
+    | [] -> PieceSplit(reverse-pieces(acc, []), [])
+    | p :: rest -> take-pieces(n - 1, rest, p :: acc)
 
 let place-piece(p: Piece, acc: Ast, ctx: PackCtx, sp: Span) -> Ast =
   match (p)
     | Elem(e) -> cons-node(e, acc, sp)
     | Splice(e, ssp) ->
-      cond
-        | is-nil-node(acc) -> e
-        | else ->
-          {
-            mark-need(ctx, ssp)
-            call-node(ctx-append(ctx), [e, acc], sp)
-          }
+      if (is-nil-node(acc)) -> e |
+      {
+        mark-need(ctx, ssp)
+        call-node(ctx-append(ctx), [e, acc], sp)
+      }
 
 let build-rest(ps: List Piece, ctx: PackCtx, sp: Span) -> Ast =
   match (ps)
@@ -499,23 +478,19 @@ let split-dots(dots: Ast, rest: List Ast, ctx: PackCtx, acc: List Piece, bad: Bo
         PieceParse(reverse-pieces(acc, []), true)
       }
     | n :: more ->
-      cond
-        | is-dots(n) ->
-          {
-            push-err(ctx, ast-span(dots), "E_TYPE_SPREAD", "spread takes one expression")
-            split-go(rest, ctx, acc, true)
-          }
-        | else -> split-go(more, ctx, Splice(rewrite-value(n, ctx), ast-span(dots)) :: acc, bad)
+      if (is-dots(n)) ->
+        {
+          push-err(ctx, ast-span(dots), "E_TYPE_SPREAD", "spread takes one expression")
+          split-go(rest, ctx, acc, true)
+        } | split-go(more, ctx, Splice(rewrite-value(n, ctx), ast-span(dots)) :: acc, bad)
 
 let finish-call(head: Ast, name: Str, args: List Ast, sp: Span, ctx: PackCtx) -> Ast =
   match (split-pieces(args, ctx))
     | PieceParse(ps, bad) ->
-      cond
-        | bad -> call-of(head, ps, sp)
-        | else ->
-          match (fixed-of(name, ctx-sigs(ctx)))
-            | Some(k) -> pack-named(head, k, ps, sp, ctx)
-            | None -> finish-plain(head, ps, sp, ctx)
+      if (bad) -> call-of(head, ps, sp) |
+      match (fixed-of(name, ctx-sigs(ctx)))
+        | Some(k) -> pack-named(head, k, ps, sp, ctx)
+        | None -> finish-plain(head, ps, sp, ctx)
 
 let rewrite-values(xs: List Ast, ctx: PackCtx) -> List Ast =
   match (xs)
@@ -535,13 +510,11 @@ let rewrite-expr(ast: Ast, ctx: PackCtx) -> Ast =
 
 let rewrite-value(ast: Ast, ctx: PackCtx) -> Ast {
   let out = rewrite-expr(ast, ctx)
-  cond
-    | is-dots(out) ->
-      {
-        push-err(ctx, ast-span(out), "E_TYPE_SPREAD", "spread takes one expression")
-        out
-      }
-    | else -> out
+  if (is-dots(out)) ->
+    {
+      push-err(ctx, ast-span(out), "E_TYPE_SPREAD", "spread takes one expression")
+      out
+    } | out
 }
 
 let rewrite-lambda(fn-sym: Ast, rest: List Ast, sp: Span, ctx: PackCtx) -> Ast =
@@ -603,12 +576,10 @@ let split-arrow(xs: List Ast, acc: List Ast) -> Maybe ArrowSplit =
   match (xs)
     | [] -> None
     | x :: rest ->
-      cond
-        | is-sym(x, "->") ->
-          match (rest)
-            | ret :: body -> Some(ArrowSplit(reverse-asts(ret :: x :: acc, []), body))
-            | [] -> None
-        | else -> split-arrow(rest, x :: acc)
+      if (is-sym(x, "->")) ->
+        match (rest)
+          | ret :: body -> Some(ArrowSplit(reverse-asts(ret :: x :: acc, []), body))
+          | [] -> None | split-arrow(rest, x :: acc)
 
 let rewrite-header(form: Ast, ctx: PackCtx) -> Ast =
   match (form)
@@ -627,12 +598,10 @@ let rewrite-inner(form: Ast, ctx: PackCtx) -> Ast =
 let rewrap(original: Ast, inner: Ast) -> Ast =
   match (original)
     | ParenNode(h :: _, sp) ->
-      cond
-        | is-sym(h, "pub") ->
-          match (inner)
-            | ParenNode(elems, _) -> ParenNode(h :: elems, sp)
-            | _ -> inner
-        | else -> inner
+      if (is-sym(h, "pub")) ->
+        match (inner)
+          | ParenNode(elems, _) -> ParenNode(h :: elems, sp)
+          | _ -> inner | inner
     | _ -> inner
 
 let rewrite-top(form: Ast, ctx: PackCtx) -> Ast =

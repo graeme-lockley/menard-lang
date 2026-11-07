@@ -5,7 +5,6 @@
 ;
 ; Usage: bun run host/src/cli/menard.ts run src/tools/read-roundtrip.mnd -- <file.mnd>
 ; The same property is src/reader/read.test.mnd.
-
 import "../reader/ast.mnd"
 import "../reader/read.mnd"
 import "../reader/print.mnd"
@@ -24,13 +23,11 @@ let fail-parse(path: Str, e: ParseError) -> Unit =
     | ParseError(_, msg, _) -> fail(String.concat(path, ": parse error: ", msg))
 
 let compare-roundtrip(path: Str, forms: List Ast, forms2: List Ast) -> Unit =
-  cond
-    | ast-list-equal(forms, forms2) ->
-      {
-        println("ok")
-        exit(0)
-      }
-    | else -> fail(String.concat("roundtrip mismatch: ", path))
+  if (ast-list-equal(forms, forms2)) ->
+    {
+      println("ok")
+      exit(0)
+    } | fail(String.concat("roundtrip mismatch: ", path))
 
 let reread(path: Str, forms: List Ast, printed: Str) -> Unit =
   match (read-all(printed))
@@ -46,9 +43,7 @@ let check-source(path: Str, src: Str) -> Unit =
     | Err(e) -> fail-parse(path, e)
 
 let main() -> Unit =
-  cond
-    | arg-count() < 1 -> fail("usage: read-roundtrip.mnd <file.mnd>")
-    | else ->
-      match (read-file(arg(0)))
-        | Ok(src) -> check-source(arg(0), src)
-        | Err(_) -> fail(String.concat("cannot read ", arg(0)))
+  if (arg-count() < 1) -> fail("usage: read-roundtrip.mnd <file.mnd>") |
+  match (read-file(arg(0)))
+    | Ok(src) -> check-source(arg(0), src)
+    | Err(_) -> fail(String.concat("cannot read ", arg(0)))

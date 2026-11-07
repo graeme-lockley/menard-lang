@@ -3,7 +3,6 @@
 ;
 ; Spans are byte offsets. Diagnostic text keeps the words the host uses
 ; ("unclosed", "'!'", "unterminated") so both front ends report the same code.
-
 import "./ast.mnd"
 import "../pool/float-bits.mnd"
 import std/string as String
@@ -121,7 +120,7 @@ let perr[a](t: Tok, message: Str) -> Result a ParseError =
   Err(ParseError(tok-span(t), message, None))
 
 let is-letter(b: Int) -> Bool =
-  (b >= 65 && b <= 90) || (b >= 97 && b <= 122)
+  b >= 65 && b <= 90 || b >= 97 && b <= 122
 
 let is-digit(b: Int) -> Bool =
   b >= 48 && b <= 57
@@ -133,11 +132,7 @@ let is-keyword(s: Str) -> Bool =
   s == "alias" || s == "cond" || s == "else" || s == "extern" || s == "fn" || s == "if" || s == "import" || s == "let" || s == "loop" || s == "match" || s == "panic" || s == "pub" || s == "record" || s == "recur" || s == "ref" || s == "deref" || s == "return" || s == "defer" || s == "set!" || s == "type" || s == "while" || s == "when"
 
 let kind-of(text: Str) -> Str =
-  cond
-    | text == "nan" || text == "inf" -> "float"
-    | text == "true" || text == "false" -> "ident"
-    | is-keyword(text) -> "kw"
-    | else -> "ident"
+  if (text == "nan" || text == "inf") -> "float" | if (text == "true" || text == "false") -> "ident" | if (is-keyword(text)) -> "kw" | "ident"
 
 let lex-peek(lx: Lex, k: Int) -> Int {
   let i = deref(lx.pos) + k
@@ -148,16 +143,14 @@ let lex-bump(lx: Lex) -> Int {
   let p = deref(lx.pos)
   let b = String.byte(p, lx.src)
   set!(lx.pos, p + 1)
-  cond
-    | b == 10 ->
-      {
-        set!(lx.line, deref(lx.line) + 1)
-        set!(lx.col, 0)
-        match (deref(lx.map))
-          | SrcMap(_, _, _, pending-line, pending-base, saw) ->
-            if (pending-line != 0) -> set!(lx.map, SrcMap(p + 1, pending-line, pending-base, 0, 0, true)) | set!(lx.map, SrcMap(p + 1, 0, 0, 0, 0, saw))
-      }
-    | else -> set!(lx.col, deref(lx.col) + 1)
+  if (b == 10) ->
+    {
+      set!(lx.line, deref(lx.line) + 1)
+      set!(lx.col, 0)
+      match (deref(lx.map))
+        | SrcMap(_, _, _, pending-line, pending-base, saw) ->
+          if (pending-line != 0) -> set!(lx.map, SrcMap(p + 1, pending-line, pending-base, 0, 0, true)) | set!(lx.map, SrcMap(p + 1, 0, 0, 0, 0, saw))
+    } | set!(lx.col, deref(lx.col) + 1)
   b
 }
 
@@ -168,21 +161,19 @@ let match-text-at(lx: Lex, s: Str, i: Int, n: Int) -> Bool =
   if (i >= n) -> true | if (lex-peek(lx, i) != String.byte(i, s)) -> false | match-text-at(lx, s, i + 1, n)
 
 let bump-n(lx: Lex, n: Int) -> Unit =
-  if (n <= 0) -> () | {
+  if (n <= 0) -> () |
+  {
     lex-bump(lx)
     bump-n(lx, n - 1)
   }
 
 let read-directive-int(lx: Lex, acc: Int, any: Bool) -> Int =
-  cond
-    | lex-peek(lx, 0) >= 48 && lex-peek(lx, 0) <= 57 ->
-      {
-        let d = lex-peek(lx, 0) - 48
-        lex-bump(lx)
-        read-directive-int(lx, acc * 10 + d, true)
-      }
-    | any -> acc
-    | else -> -1
+  if (lex-peek(lx, 0) >= 48 && lex-peek(lx, 0) <= 57) ->
+    {
+      let d = lex-peek(lx, 0) - 48
+      lex-bump(lx)
+      read-directive-int(lx, acc * 10 + d, true)
+    } | if (any) -> acc | -1
 
 let skip-directive-spaces(lx: Lex) -> Unit =
   while (lex-peek(lx, 0) == 32) {
@@ -192,22 +183,26 @@ let skip-directive-spaces(lx: Lex) -> Unit =
 ; `; #source "path" line base` arms the next line. A malformed comment
 ; stays an ordinary comment.
 let note-directive(lx: Lex) -> Unit =
-  if (not(match-text(lx, " #source \""))) -> () | {
+  if (not(match-text(lx, " #source \""))) -> () |
+  {
     bump-n(lx, 10)
     while (lex-peek(lx, 0) != -1 && lex-peek(lx, 0) != 10 && lex-peek(lx, 0) != 34) {
-      if (lex-peek(lx, 0) == 92) -> {
-        lex-bump(lx)
-        ()
-      }
+      if (lex-peek(lx, 0) == 92) ->
+        {
+          lex-bump(lx)
+          ()
+        }
       lex-bump(lx)
     }
-    if (lex-peek(lx, 0) != 34) -> () | {
+    if (lex-peek(lx, 0) != 34) -> () |
+    {
       lex-bump(lx)
       skip-directive-spaces(lx)
       let line = read-directive-int(lx, 0, false)
       skip-directive-spaces(lx)
       let base = read-directive-int(lx, 0, false)
-      if (line < 1 || base < 0) -> () | match (deref(lx.map))
+      if (line < 1 || base < 0) -> () |
+      match (deref(lx.map))
         | SrcMap(ls, map-line, map-base, _, _, _) -> set!(lx.map, SrcMap(ls, map-line, map-base, line, base, true))
     }
   }
@@ -224,15 +219,17 @@ let skip-comment(lx: Lex) -> Unit {
 ; bytes. The line is consumed, including its newline, so the next line
 ; keeps its own number. `#` anywhere else stays an unexpected character.
 let skip-shebang(lx: Lex) -> Unit =
-  if (lex-peek(lx, 0) == 35 && lex-peek(lx, 1) == 33) -> {
-    while (lex-peek(lx, 0) != -1 && lex-peek(lx, 0) != 10) {
-      lex-bump(lx)
+  if (lex-peek(lx, 0) == 35 && lex-peek(lx, 1) == 33) ->
+    {
+      while (lex-peek(lx, 0) != -1 && lex-peek(lx, 0) != 10) {
+        lex-bump(lx)
+      }
+      if (lex-peek(lx, 0) == 10) ->
+        {
+          lex-bump(lx)
+          ()
+        }
     }
-    if (lex-peek(lx, 0) == 10) -> {
-      lex-bump(lx)
-      ()
-    }
-  } | ()
 
 let prev-byte(lx: Lex) -> Int {
   let s = deref(lx.pos)
@@ -254,26 +251,22 @@ let push-tok(toks: Ref (List Tok), t: Tok) -> Unit =
 let line-ready-after-indent(lx: Lex) -> Bool {
   set!(lx.at-start, false)
   set!(lx.bol, true)
-  cond
-    | lex-peek(lx, 0) == 13 ->
-      {
-        lex-bump(lx)
-        ()
-      }
-  cond
-    | lex-peek(lx, 0) == 10 ->
-      {
-        lex-bump(lx)
-        set!(lx.at-start, true)
-        false
-      }
-    | lex-peek(lx, 0) == 59 ->
-      {
-        skip-comment(lx)
-        false
-      }
-    | lex-peek(lx, 0) == -1 -> false
-    | else -> true
+  if (lex-peek(lx, 0) == 13) ->
+    {
+      lex-bump(lx)
+      ()
+    }
+  if (lex-peek(lx, 0) == 10) ->
+    {
+      lex-bump(lx)
+      set!(lx.at-start, true)
+      false
+    } |
+  if (lex-peek(lx, 0) == 59) ->
+    {
+      skip-comment(lx)
+      false
+    } | if (lex-peek(lx, 0) == -1) -> false | true
 }
 
 let line-ready-start(lx: Lex, failed: Ref (Maybe ParseError)) -> Bool {
@@ -282,104 +275,80 @@ let line-ready-start(lx: Lex, failed: Ref (Maybe ParseError)) -> Bool {
     lex-bump(lx)
     set!(lx.indent, deref(lx.indent) + 1)
   }
-  cond
-    | lex-peek(lx, 0) == 9 ->
-      {
-        let p = deref(lx.pos)
-        set!(failed, Some(perr-at(p, p + 1, deref(lx.line), "tab in leading whitespace")))
-        false
-      }
-    | else -> line-ready-after-indent(lx)
+  if (lex-peek(lx, 0) == 9) ->
+    {
+      let p = deref(lx.pos)
+      set!(failed, Some(perr-at(p, p + 1, deref(lx.line), "tab in leading whitespace")))
+      false
+    } | line-ready-after-indent(lx)
 }
 
 let line-ready(lx: Lex, failed: Ref (Maybe ParseError)) -> Bool =
   if (not(deref(lx.at-start))) -> true | line-ready-start(lx, failed)
 
 let hex-val(b: Int) -> Int =
-  cond
-    | b >= 48 && b <= 57 -> b - 48
-    | b >= 97 && b <= 102 -> b - 87
-    | b >= 65 && b <= 70 -> b - 55
-    | else -> -1
+  if (b >= 48 && b <= 57) -> b - 48 | if (b >= 97 && b <= 102) -> b - 87 | if (b >= 65 && b <= 70) -> b - 55 | -1
 
 ; UTF-8 of one Unicode scalar. The caller has rejected surrogates and values above U+10FFFF.
 let append-utf8!(sb: StringBuffer, cp: Int) -> Unit =
-  cond
-    | cp <= 127 -> Buf.append-byte!(sb, cp)
-    | cp <= 2047 ->
-      {
-        Buf.append-byte!(sb, 192 + cp / 64)
-        Buf.append-byte!(sb, 128 + cp % 64)
-      }
-    | cp <= 65535 ->
-      {
-        Buf.append-byte!(sb, 224 + cp / 4096)
-        Buf.append-byte!(sb, 128 + (cp / 64) % 64)
-        Buf.append-byte!(sb, 128 + cp % 64)
-      }
-    | else ->
-      {
-        Buf.append-byte!(sb, 240 + cp / 262144)
-        Buf.append-byte!(sb, 128 + (cp / 4096) % 64)
-        Buf.append-byte!(sb, 128 + (cp / 64) % 64)
-        Buf.append-byte!(sb, 128 + cp % 64)
-      }
+  if (cp <= 127) -> Buf.append-byte!(sb, cp) |
+  if (cp <= 2047) ->
+    {
+      Buf.append-byte!(sb, 192 + cp / 64)
+      Buf.append-byte!(sb, 128 + cp % 64)
+    } |
+  if (cp <= 65535) ->
+    {
+      Buf.append-byte!(sb, 224 + cp / 4096)
+      Buf.append-byte!(sb, 128 + cp / 64 % 64)
+      Buf.append-byte!(sb, 128 + cp % 64)
+    } |
+  {
+    Buf.append-byte!(sb, 240 + cp / 262144)
+    Buf.append-byte!(sb, 128 + cp / 4096 % 64)
+    Buf.append-byte!(sb, 128 + cp / 64 % 64)
+    Buf.append-byte!(sb, 128 + cp % 64)
+  }
 
 let escape-invalid!(lx: Lex, failed: Ref (Maybe ParseError), esc: Int, line: Int) -> Unit =
   set!(failed, Some(perr-at(esc, deref(lx.pos), line, "invalid string escape")))
 
 ; `\u{` hex `}` — 1 to 6 digits. `u` is already consumed. `esc` is the backslash.
 let append-unicode-escape!(lx: Lex, sb: StringBuffer, failed: Ref (Maybe ParseError), esc: Int, start: Int, line: Int) -> Unit {
-  cond
-    | lex-peek(lx, 0) == -1 -> set!(failed, Some(perr-at(start, deref(lx.pos), line, "unterminated string")))
-    | lex-peek(lx, 0) != 123 -> escape-invalid!(lx, failed, esc, line)
-    | else ->
-      {
-        lex-bump(lx)
-        let cp = ref(0)
-        let digits = ref(0)
-        while (deref(digits) < 6 && hex-val(lex-peek(lx, 0)) >= 0) {
-          let v = hex-val(lex-peek(lx, 0))
-          lex-bump(lx)
-          set!(cp, deref(cp) * 16 + v)
-          set!(digits, deref(digits) + 1)
-        }
-        let nxt = lex-peek(lx, 0)
-        let n = deref(digits)
-        let cpv = deref(cp)
-        cond
-          | nxt == -1 -> set!(failed, Some(perr-at(start, deref(lx.pos), line, "unterminated string")))
-          | n == 0 -> escape-invalid!(lx, failed, esc, line)
-          | hex-val(nxt) >= 0 -> escape-invalid!(lx, failed, esc, line)
-          | nxt != 125 -> escape-invalid!(lx, failed, esc, line)
-          | else ->
-            {
-              lex-bump(lx)
-              cond
-                | cpv > 1114111 -> escape-invalid!(lx, failed, esc, line)
-                | cpv >= 55296 && cpv <= 57343 -> escape-invalid!(lx, failed, esc, line)
-                | else -> append-utf8!(sb, cpv)
-            }
-      }
+  if (lex-peek(lx, 0) == -1) -> set!(failed, Some(perr-at(start, deref(lx.pos), line, "unterminated string"))) |
+  if (lex-peek(lx, 0) != 123) -> escape-invalid!(lx, failed, esc, line) |
+  {
+    lex-bump(lx)
+    let cp = ref(0)
+    let digits = ref(0)
+    while (deref(digits) < 6 && hex-val(lex-peek(lx, 0)) >= 0) {
+      let v = hex-val(lex-peek(lx, 0))
+      lex-bump(lx)
+      set!(cp, deref(cp) * 16 + v)
+      set!(digits, deref(digits) + 1)
+    }
+    let nxt = lex-peek(lx, 0)
+    let n = deref(digits)
+    let cpv = deref(cp)
+    if (nxt == -1) -> set!(failed, Some(perr-at(start, deref(lx.pos), line, "unterminated string"))) |
+    if (n == 0) -> escape-invalid!(lx, failed, esc, line) |
+    if (hex-val(nxt) >= 0) -> escape-invalid!(lx, failed, esc, line) |
+    if (nxt != 125) -> escape-invalid!(lx, failed, esc, line) |
+    {
+      lex-bump(lx)
+      if (cpv > 1114111) -> escape-invalid!(lx, failed, esc, line) | if (cpv >= 55296 && cpv <= 57343) -> escape-invalid!(lx, failed, esc, line) | append-utf8!(sb, cpv)
+    }
+  }
 }
 
 ; The backslash is already consumed.
 let append-string-escape!(lx: Lex, sb: StringBuffer, failed: Ref (Maybe ParseError), start: Int, line: Int) -> Unit {
   let esc = deref(lx.pos) - 1
-  cond
-    | lex-peek(lx, 0) == -1 -> set!(failed, Some(perr-at(start, deref(lx.pos), line, "unterminated string")))
-    | else ->
-      {
-        let e = lex-bump(lx)
-        cond
-          | e == 92 -> Buf.append-byte!(sb, 92)
-          | e == 34 -> Buf.append-byte!(sb, 34)
-          | e == 110 -> Buf.append-byte!(sb, 10)
-          | e == 114 -> Buf.append-byte!(sb, 13)
-          | e == 116 -> Buf.append-byte!(sb, 9)
-          | e == 117 -> append-unicode-escape!(lx, sb, failed, esc, start, line)
-          | else -> escape-invalid!(lx, failed, esc, line)
-      }
+  if (lex-peek(lx, 0) == -1) -> set!(failed, Some(perr-at(start, deref(lx.pos), line, "unterminated string"))) |
+  {
+    let e = lex-bump(lx)
+    if (e == 92) -> Buf.append-byte!(sb, 92) | if (e == 34) -> Buf.append-byte!(sb, 34) | if (e == 110) -> Buf.append-byte!(sb, 10) | if (e == 114) -> Buf.append-byte!(sb, 13) | if (e == 116) -> Buf.append-byte!(sb, 9) | if (e == 117) -> append-unicode-escape!(lx, sb, failed, esc, start, line) | escape-invalid!(lx, failed, esc, line)
+  }
 }
 
 let scan-string(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), start: Int, col: Int, ind: Int, bol: Bool, line: Int) -> Unit {
@@ -388,23 +357,13 @@ let scan-string(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), s
   let closed = ref(false)
   while (deref(lx.pos) < lx.n && not(deref(closed)) && is-none(deref(failed))) {
     let c = lex-bump(lx)
-    cond
-      | c == 34 -> set!(closed, true)
-      | c == 92 -> append-string-escape!(lx, sb, failed, start, line)
-      | else -> Buf.append-byte!(sb, c)
+    if (c == 34) -> set!(closed, true) | if (c == 92) -> append-string-escape!(lx, sb, failed, start, line) | Buf.append-byte!(sb, c)
   }
-  cond
-    | is-none(deref(failed)) && not(deref(closed)) -> set!(failed, Some(perr-at(start, deref(lx.pos), line, "unterminated string")))
-    | deref(closed) -> push-tok(toks, make-tok("str", Buf.take-str!(sb), start, deref(lx.pos), col, ind, bol, line))
+  if (is-none(deref(failed)) && not(deref(closed))) -> set!(failed, Some(perr-at(start, deref(lx.pos), line, "unterminated string"))) | if (deref(closed)) -> push-tok(toks, make-tok("str", Buf.take-str!(sb), start, deref(lx.pos), col, ind, bol, line))
 }
 
 let utf8-width(b: Int) -> Int =
-  cond
-    | b >= 0 && b < 128 -> 1
-    | b >= 192 && b <= 223 -> 2
-    | b >= 224 && b <= 239 -> 3
-    | b >= 240 && b <= 247 -> 4
-    | else -> 0
+  if (b >= 0 && b < 128) -> 1 | if (b >= 192 && b <= 223) -> 2 | if (b >= 224 && b <= 239) -> 3 | if (b >= 240 && b <= 247) -> 4 | 0
 
 let is-cont-byte(b: Int) -> Bool =
   b >= 128 && b < 192
@@ -414,27 +373,17 @@ let peek-cp-at(lx: Lex, off: Int) -> Int {
   let b1 = lex-peek(lx, off + 1)
   let b2 = lex-peek(lx, off + 2)
   let b3 = lex-peek(lx, off + 3)
-  cond
-    | b0 < 128 -> b0
-    | b0 >= 192 && b0 <= 223 && is-cont-byte(b1) -> (b0 - 192) * 64 + (b1 - 128)
-    | b0 >= 224 && b0 <= 239 && is-cont-byte(b1) && is-cont-byte(b2) -> (b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128)
-    | b0 >= 240 && b0 <= 247 && is-cont-byte(b1) && is-cont-byte(b2) && is-cont-byte(b3) -> (b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128)
-    | else -> -1
+  if (b0 < 128) -> b0 | if (b0 >= 192 && b0 <= 223 && is-cont-byte(b1)) -> (b0 - 192) * 64 + (b1 - 128) | if (b0 >= 224 && b0 <= 239 && is-cont-byte(b1) && is-cont-byte(b2)) -> (b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128) | if (b0 >= 240 && b0 <= 247 && is-cont-byte(b1) && is-cont-byte(b2) && is-cont-byte(b3)) -> (b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128) | -1
 }
 
 let scalar-fits(cp: Int, w: Int) -> Bool =
-  cp >= 0 && cp <= 1114111 && not (cp >= 55296 && cp <= 57343) &&
-    cond
-      | w == 1 -> true
-      | w == 2 -> cp >= 128
-      | w == 3 -> cp >= 2048
-      | w == 4 -> cp >= 65536
-      | else -> false
+  cp >= 0 && cp <= 1114111 && not(cp >= 55296 && cp <= 57343) && if (w == 1) -> true | if (w == 2) -> cp >= 128 | if (w == 3) -> cp >= 2048 | if (w == 4) -> cp >= 65536 | false
 
 ; Width of one scalar at `off` that is closed by `'`, otherwise 0.
 let closed-char-width(lx: Lex, off: Int) -> Int {
   let w = utf8-width(lex-peek(lx, off))
-  if (w <= 0) -> 0 | {
+  if (w <= 0) -> 0 |
+  {
     let cp = peek-cp-at(lx, off)
     if (scalar-fits(cp, w) && lex-peek(lx, off + w) == 39) -> w | 0
   }
@@ -456,150 +405,123 @@ let scan-char-hex(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError),
   }
   let cpv = deref(cp)
   let n = deref(digits)
-  cond
-    | lex-peek(lx, 0) == -1 -> set!(failed, Some(perr-at(start, deref(lx.pos), line, "unterminated character literal")))
-    | n == 0 || lex-peek(lx, 0) != 125 || cpv > 1114111 || (cpv >= 55296 && cpv <= 57343) ->
-      set!(failed, Some(perr-at(start, deref(lx.pos), line, "invalid character escape")))
-    | else ->
-      {
-        lex-bump(lx)
-        cond
-          | lex-peek(lx, 0) != 39 -> set!(failed, Some(perr-at(start, deref(lx.pos), line, "unterminated character literal")))
-          | else ->
-            {
-              lex-bump(lx)
-              push-char!(lx, toks, cpv, start, col, ind, bol, line)
-            }
-      }
+  if (lex-peek(lx, 0) == -1) -> set!(failed, Some(perr-at(start, deref(lx.pos), line, "unterminated character literal"))) |
+  if (n == 0 || lex-peek(lx, 0) != 125 || cpv > 1114111 || cpv >= 55296 && cpv <= 57343) -> set!(failed, Some(perr-at(start, deref(lx.pos), line, "invalid character escape"))) |
+  {
+    lex-bump(lx)
+    if (lex-peek(lx, 0) != 39) -> set!(failed, Some(perr-at(start, deref(lx.pos), line, "unterminated character literal"))) |
+    {
+      lex-bump(lx)
+      push-char!(lx, toks, cpv, start, col, ind, bol, line)
+    }
+  }
 }
 
 ; The opening `'` is already consumed. The next byte is `\`.
 let scan-char-escape(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), start: Int, col: Int, ind: Int, bol: Bool, line: Int) -> Unit {
   lex-bump(lx)
   let e = lex-peek(lx, 0)
-  cond
-    | e < 0 -> set!(failed, Some(perr-at(start, deref(lx.pos), line, "unterminated character literal")))
-    | e == 117 && lex-peek(lx, 1) == 123 ->
-      {
-        lex-bump(lx)
-        scan-char-hex(lx, toks, failed, start, col, ind, bol, line)
-      }
-    | else ->
-      {
-        lex-bump(lx)
-        let cp =
-          cond
-            | e == 110 -> 10
-            | e == 114 -> 13
-            | e == 116 -> 9
-            | e == 39 || e == 92 -> e
-            | else -> -1
-        cond
-          | cp < 0 -> set!(failed, Some(perr-at(start, deref(lx.pos), line, "invalid character escape")))
-          | lex-peek(lx, 0) != 39 -> set!(failed, Some(perr-at(start, deref(lx.pos), line, "unterminated character literal")))
-          | else ->
-            {
-              lex-bump(lx)
-              push-char!(lx, toks, cp, start, col, ind, bol, line)
-            }
-      }
+  if (e < 0) -> set!(failed, Some(perr-at(start, deref(lx.pos), line, "unterminated character literal"))) |
+  if (e == 117 && lex-peek(lx, 1) == 123) ->
+    {
+      lex-bump(lx)
+      scan-char-hex(lx, toks, failed, start, col, ind, bol, line)
+    } |
+  {
+    lex-bump(lx)
+    let cp =
+      if (e == 110) -> 10 | if (e == 114) -> 13 | if (e == 116) -> 9 | if (e == 39 || e == 92) -> e | -1
+    if (cp < 0) -> set!(failed, Some(perr-at(start, deref(lx.pos), line, "invalid character escape"))) |
+    if (lex-peek(lx, 0) != 39) -> set!(failed, Some(perr-at(start, deref(lx.pos), line, "unterminated character literal"))) |
+    {
+      lex-bump(lx)
+      push-char!(lx, toks, cp, start, col, ind, bol, line)
+    }
+  }
 }
 
 let scan-symbol(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), start: Int, col: Int, ind: Int, bol: Bool, line: Int) -> Unit {
   lex-bump(lx)
-  cond
-    | not(is-letter(lex-peek(lx, 0))) -> set!(failed, Some(perr-at(start, deref(lx.pos), line, "symbol literal requires an identifier")))
-    | else ->
-      {
-        let ns = deref(lx.pos)
-        lex-bump(lx)
-        while (is-ident-cont(lex-peek(lx, 0)) || lex-peek(lx, 0) == 33) {
-          lex-bump(lx)
-        }
-        let name = String.slice(ns, deref(lx.pos) - ns, lx.src)
-        if (String.byte(String.length(name) - 1, name) != 33 && has-bang(name)) -> set!(failed, Some(perr-at(ns, deref(lx.pos), line, "'!' may appear only as the final character of an identifier"))) | push-tok(toks, make-tok("sym", name, start, deref(lx.pos), col, ind, bol, line))
-      }
+  if (not(is-letter(lex-peek(lx, 0)))) -> set!(failed, Some(perr-at(start, deref(lx.pos), line, "symbol literal requires an identifier"))) |
+  {
+    let ns = deref(lx.pos)
+    lex-bump(lx)
+    while (is-ident-cont(lex-peek(lx, 0)) || lex-peek(lx, 0) == 33) {
+      lex-bump(lx)
+    }
+    let name = String.slice(ns, deref(lx.pos) - ns, lx.src)
+    if (String.byte(String.length(name) - 1, name) != 33 && has-bang(name)) -> set!(failed, Some(perr-at(ns, deref(lx.pos), line, "'!' may appear only as the final character of an identifier"))) | push-tok(toks, make-tok("sym", name, start, deref(lx.pos), col, ind, bol, line))
+  }
 }
 
 ; `'` plus one scalar or one escape, closed by `'`, is a Char (`'A'`, `'\n'`,
 ; `'\u{1F600}'`). Anything else stays a symbol (`'red`).
 let scan-quote(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), start: Int, col: Int, ind: Int, bol: Bool, line: Int) -> Unit {
-  cond
-    | lex-peek(lx, 1) == 92 ->
-      {
-        lex-bump(lx)
-        scan-char-escape(lx, toks, failed, start, col, ind, bol, line)
-      }
-    | closed-char-width(lx, 1) > 0 ->
-      {
-        lex-bump(lx)
-        let cp = peek-cp-at(lx, 0)
-        bump-n(lx, closed-char-width(lx, 0))
-        lex-bump(lx)
-        push-char!(lx, toks, cp, start, col, ind, bol, line)
-      }
-    | lex-peek(lx, 1) == 39 -> set!(failed, Some(perr-at(start, start + 2, line, "empty character literal")))
-    | else -> scan-symbol(lx, toks, failed, start, col, ind, bol, line)
+  if (lex-peek(lx, 1) == 92) ->
+    {
+      lex-bump(lx)
+      scan-char-escape(lx, toks, failed, start, col, ind, bol, line)
+    } |
+  if (closed-char-width(lx, 1) > 0) ->
+    {
+      lex-bump(lx)
+      let cp = peek-cp-at(lx, 0)
+      bump-n(lx, closed-char-width(lx, 0))
+      lex-bump(lx)
+      push-char!(lx, toks, cp, start, col, ind, bol, line)
+    } | if (lex-peek(lx, 1) == 39) -> set!(failed, Some(perr-at(start, start + 2, line, "empty character literal"))) | scan-symbol(lx, toks, failed, start, col, ind, bol, line)
 }
 
 let has-bang(s: Str) -> Bool =
   has-bang-from(s, 0, String.length(s))
 
 let has-bang-from(s: Str, i: Int, n: Int) -> Bool =
-  cond
-    | i >= n -> false
-    | String.byte(i, s) == 33 -> true
-    | else -> has-bang-from(s, i + 1, n)
+  if (i >= n) -> false | if (String.byte(i, s) == 33) -> true | has-bang-from(s, i + 1, n)
 
 let scan-number(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), start: Int, col: Int, ind: Int, bol: Bool, line: Int) -> Unit {
   let b0 = lex-peek(lx, 0)
-  cond
-    | b0 == 45 || b0 == 43 ->
-      {
-        lex-bump(lx)
-        ()
-      }
+  if (b0 == 45 || b0 == 43) ->
+    {
+      lex-bump(lx)
+      ()
+    }
   let saw-dot = ref(false)
   let saw-exp = ref(false)
   let saw-digit = ref(false)
   let go = ref(true)
   while (deref(go) && deref(lx.pos) < lx.n && is-none(deref(failed))) {
     let c = lex-peek(lx, 0)
-    cond
-      | is-digit(c) ->
-        {
-          set!(saw-digit, true)
-          lex-bump(lx)
-          ()
-        }
-      | c == 46 && not(deref(saw-dot)) && not(deref(saw-exp)) && lex-peek(lx, 1) != 46 ->
-        {
-          set!(saw-dot, true)
-          lex-bump(lx)
-          ()
-        }
-      | (c == 101 || c == 69) && not(deref(saw-exp)) && deref(saw-digit) ->
-        {
-          set!(saw-exp, true)
-          lex-bump(lx)
-          cond
-            | lex-peek(lx, 0) == 45 || lex-peek(lx, 0) == 43 ->
-              {
-                lex-bump(lx)
-                ()
-              }
-          if (not(is-digit(lex-peek(lx, 0)))) -> set!(failed, Some(perr-at(start, deref(lx.pos), line, "malformed float exponent")))
-        }
-      | else -> set!(go, false)
-  }
-  cond
-    | is-none(deref(failed)) ->
+    if (is-digit(c)) ->
       {
-        let text = String.slice(start, deref(lx.pos) - start, lx.src)
-        let kind =
-          if (deref(saw-dot) || deref(saw-exp)) -> "float" | "int"
-        push-tok(toks, make-tok(kind, text, start, deref(lx.pos), col, ind, bol, line))
-      }
+        set!(saw-digit, true)
+        lex-bump(lx)
+        ()
+      } |
+    if (c == 46 && not(deref(saw-dot)) && not(deref(saw-exp)) && lex-peek(lx, 1) != 46) ->
+      {
+        set!(saw-dot, true)
+        lex-bump(lx)
+        ()
+      } |
+    if ((c == 101 || c == 69) && not(deref(saw-exp)) && deref(saw-digit)) ->
+      {
+        set!(saw-exp, true)
+        lex-bump(lx)
+        if (lex-peek(lx, 0) == 45 || lex-peek(lx, 0) == 43) ->
+          {
+            lex-bump(lx)
+            ()
+          }
+        if (not(is-digit(lex-peek(lx, 0)))) -> set!(failed, Some(perr-at(start, deref(lx.pos), line, "malformed float exponent")))
+      } | set!(go, false)
+  }
+  if (is-none(deref(failed))) ->
+    {
+      let text = String.slice(start, deref(lx.pos) - start, lx.src)
+      let kind =
+        if (deref(saw-dot) || deref(saw-exp)) -> "float" | "int"
+      push-tok(toks, make-tok(kind, text, start, deref(lx.pos), col, ind, bol, line))
+    }
 }
 
 let match-op(lx: Lex) -> Str {
@@ -608,77 +530,47 @@ let match-op(lx: Lex) -> Str {
   let n = lx.n
   let b0 = lex-peek(lx, 0)
   let b1 = lex-peek(lx, 1)
-  cond
-    | b0 == 61 && b1 == 61 && after-ws(byte-or-end(s, i + 2, n)) -> "=="
-    | b0 == 33 && b1 == 61 && after-ws(byte-or-end(s, i + 2, n)) -> "!="
-    | b0 == 60 && b1 == 61 && after-ws(byte-or-end(s, i + 2, n)) -> "<="
-    | b0 == 62 && b1 == 61 && after-ws(byte-or-end(s, i + 2, n)) -> ">="
-    | b0 == 38 && b1 == 38 && after-ws(byte-or-end(s, i + 2, n)) -> "&&"
-    | b0 == 124 && b1 == 124 && after-ws(byte-or-end(s, i + 2, n)) -> "||"
-    | b0 == 124 && b1 == 62 && after-ws(byte-or-end(s, i + 2, n)) -> "|>"
-    | b0 == 45 && b1 == 62 && after-ws(byte-or-end(s, i + 2, n)) -> "->"
-    | b0 == 61 && b1 == 62 && after-ws(byte-or-end(s, i + 2, n)) -> "=>"
-    | b0 == 58 && b1 == 58 && after-ws(byte-or-end(s, i + 2, n)) -> "::"
-    | b0 == 63 && after-ws(b1) -> "?"
-    | b0 == 43 && after-ws(b1) -> "+"
-    | b0 == 45 && after-ws(b1) -> "-"
-    | b0 == 42 && after-ws(b1) -> "*"
-    | b0 == 47 && after-ws(b1) -> "/"
-    | b0 == 37 && after-ws(b1) -> "%"
-    | b0 == 60 && after-ws(b1) -> "<"
-    | b0 == 62 && after-ws(b1) -> ">"
-    | b0 == 61 && after-ws(b1) -> "="
-    | b0 == 124 && after-ws(b1) -> "|"
-    | else -> ""
+  if (b0 == 61 && b1 == 61 && after-ws(byte-or-end(s, i + 2, n))) -> "==" | if (b0 == 33 && b1 == 61 && after-ws(byte-or-end(s, i + 2, n))) -> "!=" | if (b0 == 60 && b1 == 61 && after-ws(byte-or-end(s, i + 2, n))) -> "<=" | if (b0 == 62 && b1 == 61 && after-ws(byte-or-end(s, i + 2, n))) -> ">=" | if (b0 == 38 && b1 == 38 && after-ws(byte-or-end(s, i + 2, n))) -> "&&" | if (b0 == 124 && b1 == 124 && after-ws(byte-or-end(s, i + 2, n))) -> "||" | if (b0 == 124 && b1 == 62 && after-ws(byte-or-end(s, i + 2, n))) -> "|>" | if (b0 == 45 && b1 == 62 && after-ws(byte-or-end(s, i + 2, n))) -> "->" | if (b0 == 61 && b1 == 62 && after-ws(byte-or-end(s, i + 2, n))) -> "=>" | if (b0 == 58 && b1 == 58 && after-ws(byte-or-end(s, i + 2, n))) -> "::" | if (b0 == 63 && b1 == 63 && after-ws(byte-or-end(s, i + 2, n))) -> "??" | if (b0 == 63 && after-ws(b1)) -> "?" | if (b0 == 43 && after-ws(b1)) -> "+" | if (b0 == 45 && after-ws(b1)) -> "-" | if (b0 == 42 && after-ws(b1)) -> "*" | if (b0 == 47 && after-ws(b1)) -> "/" | if (b0 == 37 && after-ws(b1)) -> "%" | if (b0 == 60 && after-ws(b1)) -> "<" | if (b0 == 62 && after-ws(b1)) -> ">" | if (b0 == 61 && after-ws(b1)) -> "=" | if (b0 == 124 && after-ws(b1)) -> "|" | ""
 }
 
 let byte-or-end(s: Str, i: Int, n: Int) -> Int =
   if (i < n) -> String.byte(i, s) | -1
 
 let op-len(op: Str) -> Int =
-  if (op == "==" || op == "!=" || op == "<=" || op == ">=" || op == "&&" || op == "||" || op == "->" || op == "=>" || op == "::" || op == "|>") -> 2 | 1
+  if (op == "==" || op == "!=" || op == "<=" || op == ">=" || op == "&&" || op == "||" || op == "->" || op == "=>" || op == "::" || op == "|>" || op == "??") -> 2 | 1
 
 let scan-ident(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError), start: Int, col: Int, ind: Int, bol: Bool, line: Int) -> Unit {
   lex-bump(lx)
   let go = ref(true)
   while (deref(go) && is-none(deref(failed))) {
-    cond
-      | is-ident-cont(lex-peek(lx, 0)) ->
-        cond
-          | lex-peek(lx, 0) == 45 && lex-peek(lx, 1) == 62 -> set!(failed, Some(perr-at(deref(lx.pos), deref(lx.pos) + 2, line, "operator -> requires whitespace on both sides")))
-          | else ->
-            {
-              lex-bump(lx)
-              ()
-            }
-      | else -> set!(go, false)
-  }
-  ; `f<=` / `f>=`: `=` is not ident-cont, but completes a float-order name.
-  cond
-    | is-none(deref(failed)) && deref(lx.pos) > start ->
-      {
-        let last = String.byte(deref(lx.pos) - 1, lx.src)
-        cond
-          | (last == 60 || last == 62) && lex-peek(lx, 0) == 61 ->
-            {
-              lex-bump(lx)
-              ()
-            }
-          | else -> ()
-      }
-  ; `a!=b`: leave `!=` for the glued-eq help path.
-  cond
-    | is-none(deref(failed)) && lex-peek(lx, 0) == 33 && lex-peek(lx, 1) != 61 ->
+    if (is-ident-cont(lex-peek(lx, 0))) ->
+      if (lex-peek(lx, 0) == 45 && lex-peek(lx, 1) == 62) -> set!(failed, Some(perr-at(deref(lx.pos), deref(lx.pos) + 2, line, "operator -> requires whitespace on both sides"))) |
       {
         lex-bump(lx)
-        if (is-ident-cont(lex-peek(lx, 0)) || lex-peek(lx, 0) == 33) -> set!(failed, Some(perr-at(start, deref(lx.pos) + 1, line, "'!' may appear only as the final character of an identifier")))
-      }
-  cond
-    | is-none(deref(failed)) ->
-      {
-        let text = String.slice(start, deref(lx.pos) - start, lx.src)
-        push-tok(toks, make-tok(kind-of(text), text, start, deref(lx.pos), col, ind, bol, line))
-      }
+        ()
+      } | set!(go, false)
+  }
+  ; `f<=` / `f>=`: `=` is not ident-cont, but completes a float-order name.
+  if (is-none(deref(failed)) && deref(lx.pos) > start) ->
+    {
+      let last = String.byte(deref(lx.pos) - 1, lx.src)
+      if ((last == 60 || last == 62) && lex-peek(lx, 0) == 61) ->
+        {
+          lex-bump(lx)
+          ()
+        }
+    }
+  ; `a!=b`: leave `!=` for the glued-eq help path.
+  if (is-none(deref(failed)) && lex-peek(lx, 0) == 33 && lex-peek(lx, 1) != 61) ->
+    {
+      lex-bump(lx)
+      if (is-ident-cont(lex-peek(lx, 0)) || lex-peek(lx, 0) == 33) -> set!(failed, Some(perr-at(start, deref(lx.pos) + 1, line, "'!' may appear only as the final character of an identifier")))
+    }
+  if (is-none(deref(failed))) ->
+    {
+      let text = String.slice(start, deref(lx.pos) - start, lx.src)
+      push-tok(toks, make-tok(kind-of(text), text, start, deref(lx.pos), col, ind, bol, line))
+    }
 }
 
 let scan-real(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError)) -> Unit {
@@ -690,68 +582,59 @@ let scan-real(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError)) -> 
   let b = lex-peek(lx, 0)
   set!(lx.bol, false)
   let prev = prev-byte(lx)
-  cond
-    | b == 34 -> scan-string(lx, toks, failed, start, col, ind, bol, line)
-    | b == 39 -> scan-quote(lx, toks, failed, start, col, ind, bol, line)
-    | b == 46 && lex-peek(lx, 1) == 46 && lex-peek(lx, 2) == 46 ->
-      {
+  if (b == 34) -> scan-string(lx, toks, failed, start, col, ind, bol, line) |
+  if (b == 39) -> scan-quote(lx, toks, failed, start, col, ind, bol, line) |
+  if (b == 46 && lex-peek(lx, 1) == 46 && lex-peek(lx, 2) == 46) ->
+    {
+      lex-bump(lx)
+      lex-bump(lx)
+      lex-bump(lx)
+      push-tok(toks, make-tok("ident", "...", start, deref(lx.pos), col, ind, bol, line))
+    } |
+  if (b == 46) ->
+    {
+      lex-bump(lx)
+      push-tok(toks, make-tok("punct", ".", start, deref(lx.pos), col, ind, bol, line))
+    } |
+  if (is-punct(b)) ->
+    {
+      lex-bump(lx)
+      push-tok(toks, make-tok("punct", chr(b), start, deref(lx.pos), col, ind, bol, line))
+    } |
+  if (b == 58 && lex-peek(lx, 1) != 58) ->
+    {
+      lex-bump(lx)
+      push-tok(toks, make-tok("punct", ":", start, deref(lx.pos), col, ind, bol, line))
+    } |
+  if (not(prev-ident(prev)) && b == 45 && lex-peek(lx, 1) == 105 && lex-peek(lx, 2) == 110 && lex-peek(lx, 3) == 102 && not(is-ident-cont(lex-peek(lx, 4)))) ->
+    {
+      ; LANG-02: `-inf` is one float literal.
+      lex-bump(lx)
+      lex-bump(lx)
+      lex-bump(lx)
+      lex-bump(lx)
+      push-tok(toks, make-tok("float", "-inf", start, deref(lx.pos), col, ind, bol, line))
+    } |
+  if (not(prev-ident(prev)) && b == 45 && (is-letter(lex-peek(lx, 1)) || lex-peek(lx, 1) == 40) && not(is-digit(lex-peek(lx, 1)))) ->
+    {
+      lex-bump(lx)
+      push-tok(toks, make-tok("op", "u-", start, deref(lx.pos), col, ind, bol, line))
+    } |
+  if (is-digit(b) || (b == 45 || b == 43) && is-digit(lex-peek(lx, 1)) && not(prev-ident(prev))) -> scan-number(lx, toks, failed, start, col, ind, bol, line) |
+  if (prev-ws(prev) && match-op(lx) != "") ->
+    {
+      let op = match-op(lx)
+      let k = ref(0)
+      while (deref(k) < op-len(op)) {
         lex-bump(lx)
-        lex-bump(lx)
-        lex-bump(lx)
-        push-tok(toks, make-tok("ident", "...", start, deref(lx.pos), col, ind, bol, line))
+        set!(k, deref(k) + 1)
       }
-    | b == 46 ->
-      {
-        lex-bump(lx)
-        push-tok(toks, make-tok("punct", ".", start, deref(lx.pos), col, ind, bol, line))
-      }
-    | is-punct(b) ->
-      {
-        lex-bump(lx)
-        push-tok(toks, make-tok("punct", chr(b), start, deref(lx.pos), col, ind, bol, line))
-      }
-    | b == 58 && lex-peek(lx, 1) != 58 ->
-      {
-        lex-bump(lx)
-        push-tok(toks, make-tok("punct", ":", start, deref(lx.pos), col, ind, bol, line))
-      }
-    | not(prev-ident(prev)) && b == 45 && lex-peek(lx, 1) == 105 && lex-peek(lx, 2) == 110 && lex-peek(lx, 3) == 102 && not(is-ident-cont(lex-peek(lx, 4))) ->
-      {
-        ; LANG-02: `-inf` is one float literal.
-        lex-bump(lx)
-        lex-bump(lx)
-        lex-bump(lx)
-        lex-bump(lx)
-        push-tok(toks, make-tok("float", "-inf", start, deref(lx.pos), col, ind, bol, line))
-      }
-    | not(prev-ident(prev)) && b == 45 && (is-letter(lex-peek(lx, 1)) || lex-peek(lx, 1) == 40) && not(is-digit(lex-peek(lx, 1))) ->
-      {
-        lex-bump(lx)
-        push-tok(toks, make-tok("op", "u-", start, deref(lx.pos), col, ind, bol, line))
-      }
-    | is-digit(b) || (b == 45 || b == 43) && is-digit(lex-peek(lx, 1)) && not(prev-ident(prev)) -> scan-number(lx, toks, failed, start, col, ind, bol, line)
-    | prev-ws(prev) && match-op(lx) != "" ->
-      {
-        let op = match-op(lx)
-        let k = ref(0)
-        while (deref(k) < op-len(op)) {
-          lex-bump(lx)
-          set!(k, deref(k) + 1)
-        }
-        push-tok(toks, make-tok("op", op, start, deref(lx.pos), col, ind, bol, line))
-      }
-    | is-letter(b) || b == 95 -> scan-ident(lx, toks, failed, start, col, ind, bol, line)
-    | b == 63 -> set!(failed, Some(perr-at(start, start + 1, line, "operator ? requires whitespace on both sides")))
-    | b == 61 && lex-peek(lx, 1) == 62 -> set!(failed, Some(perr-at(start, start + 2, line, "operator => requires whitespace on both sides")))
-    | (b == 61 || b == 33) && lex-peek(lx, 1) == 61 ->
-      set!(failed, Some(glued-eq-err(lx, toks, start, line, b)))
-    | else -> set!(failed, Some(perr-at(start, start + 1, line, "unexpected character")))
+      push-tok(toks, make-tok("op", op, start, deref(lx.pos), col, ind, bol, line))
+    } | if (is-letter(b) || b == 95) -> scan-ident(lx, toks, failed, start, col, ind, bol, line) | if (b == 63) -> set!(failed, Some(perr-at(start, start + 1, line, "operator ? requires whitespace on both sides"))) | if (b == 61 && lex-peek(lx, 1) == 62) -> set!(failed, Some(perr-at(start, start + 2, line, "operator => requires whitespace on both sides"))) | if ((b == 61 || b == 33) && lex-peek(lx, 1) == 61) -> set!(failed, Some(glued-eq-err(lx, toks, start, line, b))) | set!(failed, Some(perr-at(start, start + 1, line, "unexpected character")))
 }
 
 let tok-atom-text(t: Tok) -> Maybe Str =
-  cond
-    | t.kind == "ident" || t.kind == "kw" || t.kind == "int" || t.kind == "float" || t.kind == "sym" -> Some(t.text)
-    | else -> None
+  if (t.kind == "ident" || t.kind == "kw" || t.kind == "int" || t.kind == "float" || t.kind == "sym") -> Some(t.text) | None
 
 let last-atom-text(toks: List Tok) -> Maybe Str =
   match (toks)
@@ -759,26 +642,13 @@ let last-atom-text(toks: List Tok) -> Maybe Str =
     | t :: _ -> tok-atom-text(t)
 
 let peek-simple-atom-from(src: Str, at: Int, n: Int) -> Maybe Str =
-  cond
-    | at >= n -> None
-    | is-letter(String.byte(at, src)) || String.byte(at, src) == 95 ->
-      Some(String.slice(at, peek-ident-end(src, at + 1, n) - at, src))
-    | is-digit(String.byte(at, src)) ->
-      Some(String.slice(at, peek-digits-end(src, at + 1, n) - at, src))
-    | else -> None
+  if (at >= n) -> None | if (is-letter(String.byte(at, src)) || String.byte(at, src) == 95) -> Some(String.slice(at, peek-ident-end(src, at + 1, n) - at, src)) | if (is-digit(String.byte(at, src))) -> Some(String.slice(at, peek-digits-end(src, at + 1, n) - at, src)) | None
 
 let peek-ident-end(src: Str, i: Int, n: Int) -> Int =
-  cond
-    | i >= n -> i
-    | is-letter(String.byte(i, src)) || is-digit(String.byte(i, src)) || String.byte(i, src) == 95 ->
-      peek-ident-end(src, i + 1, n)
-    | else -> i
+  if (i >= n) -> i | if (is-letter(String.byte(i, src)) || is-digit(String.byte(i, src)) || String.byte(i, src) == 95) -> peek-ident-end(src, i + 1, n) | i
 
 let peek-digits-end(src: Str, i: Int, n: Int) -> Int =
-  cond
-    | i >= n -> i
-    | is-digit(String.byte(i, src)) -> peek-digits-end(src, i + 1, n)
-    | else -> i
+  if (i >= n) -> i | if (is-digit(String.byte(i, src))) -> peek-digits-end(src, i + 1, n) | i
 
 let glued-eq-err(lx: Lex, toks: Ref (List Tok), start: Int, line: Int, b: Int) -> ParseError {
   let op =
@@ -804,19 +674,16 @@ let chr(b: Int) -> Str {
 
 let scan-one(lx: Lex, toks: Ref (List Tok), failed: Ref (Maybe ParseError)) -> Unit {
   let b = lex-peek(lx, 0)
-  cond
-    | b == 32 || b == 9 || b == 13 ->
-      {
-        lex-bump(lx)
-        set!(lx.bol, false)
-      }
-    | b == 10 ->
-      {
-        lex-bump(lx)
-        set!(lx.at-start, true)
-      }
-    | b == 59 -> skip-comment(lx)
-    | else -> scan-real(lx, toks, failed)
+  if (b == 32 || b == 9 || b == 13) ->
+    {
+      lex-bump(lx)
+      set!(lx.bol, false)
+    } |
+  if (b == 10) ->
+    {
+      lex-bump(lx)
+      set!(lx.at-start, true)
+    } | if (b == 59) -> skip-comment(lx) | scan-real(lx, toks, failed)
 }
 
 let lex-all(src: Str) -> Result (List Tok) ParseError {
@@ -826,9 +693,8 @@ let lex-all(src: Str) -> Result (List Tok) ParseError {
   set!(lex-current, Some(lx))
   skip-shebang(lx)
   while (deref(lx.pos) < lx.n && is-none(deref(failed))) {
-    cond
-      | line-ready(lx, failed) ->
-        if (is-none(deref(failed))) -> scan-one(lx, toks, failed)
+    if (line-ready(lx, failed)) ->
+      if (is-none(deref(failed))) -> scan-one(lx, toks, failed)
   }
   set!(lex-current, None)
   match (deref(failed))
@@ -843,7 +709,6 @@ let lex-all(src: Str) -> Result (List Tok) ParseError {
 
 ; ---------------------------------------------------------------------------
 ; Parser
-
 let empty-asts() -> List Ast =
   []
 
@@ -866,15 +731,13 @@ let is-op-text(text: Str) -> Bool =
 
 let eat(ps: Ps, text: Str) -> Maybe Tok {
   let t = peek(ps)
-  cond
-    | t.text != text -> None
-    | is-delim-text(text) && t.kind != "punct" -> None
-    | is-op-text(text) && t.kind != "op" -> None
-    | else ->
-      {
-        advance(ps)
-        Some(t)
-      }
+  if (t.text != text) -> None |
+  if (is-delim-text(text) && t.kind != "punct") -> None |
+  if (is-op-text(text) && t.kind != "op") -> None |
+  {
+    advance(ps)
+    Some(t)
+  }
 }
 
 let delim(ps: Ps, text: Str) -> Bool {
@@ -883,25 +746,13 @@ let delim(ps: Ps, text: Str) -> Bool {
 }
 
 let prec-of(op: Str) -> Int =
-  cond
-    | op == "?" -> 0
-    | op == "|>" -> 1
-    | op == "||" -> 2
-    | op == "&&" -> 3
-    | op == "==" || op == "!=" || op == "<" || op == ">" || op == "<=" || op == ">=" -> 4
-    | op == "+" || op == "-" || op == "::" -> 5
-    | op == "*" || op == "/" || op == "%" -> 6
-    | else -> -1
+  if (op == "?" || op == "??") -> 0 | if (op == "|>") -> 1 | if (op == "||") -> 2 | if (op == "&&") -> 3 | if (op == "==" || op == "!=" || op == "<" || op == ">" || op == "<=" || op == ">=") -> 4 | if (op == "+" || op == "-" || op == "::") -> 5 | if (op == "*" || op == "/" || op == "%") -> 6 | -1
 
 let is-cmp(op: Str) -> Bool =
   op == "==" || op == "!=" || op == "<" || op == ">" || op == "<=" || op == ">="
 
 let core-op(op: Str) -> Str =
-  cond
-    | op == "&&" -> "and"
-    | op == "||" -> "or"
-    | op == "::" -> "Cons"
-    | else -> op
+  if (op == "&&") -> "and" | if (op == "||") -> "or" | if (op == "::") -> "Cons" | op
 
 let sym-at(name: Str, sp: Span) -> Ast =
   SymNode(name, sp)
@@ -913,10 +764,7 @@ let bracket-at(elems: List Ast, sp: Span) -> Ast =
   BracketNode(elems, sp)
 
 let cmp-pair(op: Str, a: Ast, b: Ast, sp: Span) -> Ast =
-  cond
-    | op == "==" -> paren-at([sym-at("=", sp), a, b], sp)
-    | op == "!=" -> paren-at([sym-at("not", sp), paren-at([sym-at("=", sp), a, b], sp)], sp)
-    | else -> paren-at([sym-at(op, sp), a, b], sp)
+  if (op == "==") -> paren-at([sym-at("=", sp), a, b], sp) | if (op == "!=") -> paren-at([sym-at("not", sp), paren-at([sym-at("=", sp), a, b], sp)], sp) | paren-at([sym-at(op, sp), a, b], sp)
 
 let cmp-pairs(op: Str, prev: Ast, rest: List Ast, sp: Span) -> List Ast =
   match (rest)
@@ -933,12 +781,10 @@ let int-value(text: Str) -> Int =
   int-value-from(text, 0, String.length(text), false, 0)
 
 let int-value-from(text: Str, i: Int, n: Int, neg: Bool, acc: Int) -> Int =
-  cond
-    | i == 0 && n > 0 && String.byte(0, text) == 43 -> int-value-from(text, 1, n, false, 0)
-    | i == 0 && n > 0 && String.byte(0, text) == 45 -> int-value-from(text, 1, n, true, 0)
-    | i >= n ->
-      if (neg) -> -acc | acc
-    | else -> int-value-from(text, i + 1, n, neg, acc * 10 + (String.byte(i, text) - 48))
+  if (i == 0 && n > 0 && String.byte(0, text) == 43) -> int-value-from(text, 1, n, false, 0) |
+  if (i == 0 && n > 0 && String.byte(0, text) == 45) -> int-value-from(text, 1, n, true, 0) |
+  if (i >= n) ->
+    if (neg) -> -acc | acc | int-value-from(text, i + 1, n, neg, acc * 10 + (String.byte(i, text) - 48))
 
 let str-node(t: Tok) -> Ast =
   StrNode(t.text, tok-span(t))
@@ -959,35 +805,32 @@ let parse-expr-stop(ps: Ps) -> Result Ast ParseError =
   parse-prec(ps, 0, "->", true)
 
 let parse-prec(ps: Ps, min: Int, stop: Str, stopping: Bool) -> Result Ast ParseError =
-  cond
-    | stopping && (peek(ps)).text == stop -> perr(peek(ps), "expected an expression")
-    | else ->
-      match (parse-unary(ps, stop, stopping))
-        | Err(e) -> Err(e)
-        | Ok(first) -> parse-prec-rest(ps, min, stop, stopping, first)
+  if (stopping && peek(ps).text == stop) -> perr(peek(ps), "expected an expression") |
+  match (parse-unary(ps, stop, stopping))
+    | Err(e) -> Err(e)
+    | Ok(first) -> parse-prec-rest(ps, min, stop, stopping, first)
 
 let parse-prec-rest(ps: Ps, min: Int, stop: Str, stopping: Bool, left: Ast) -> Result Ast ParseError {
   let op = peek(ps)
-  cond
-    | stopping && op.text == stop -> Ok(left)
-    | op.kind != "op" || op.text == "->" || op.text == "u-" || op.text == "|" -> Ok(left)
-    | prec-of(op.text) < 0 || prec-of(op.text) < min -> Ok(left)
-    | is-cmp(op.text) ->
-      match (parse-cmp-chain(ps, left, op.text))
-        | Err(e) -> Err(e)
-        | Ok(chained) -> parse-prec-rest(ps, min, stop, stopping, chained)
-    | op.text == "&&" || op.text == "||" ->
-      match (parse-logic-chain(ps, left, op.text))
-        | Err(e) -> Err(e)
-        | Ok(chained) -> parse-prec-rest(ps, min, stop, stopping, chained)
-    | else ->
-      {
-        advance(ps)
-        let right-min = if (op.text == "::" || op.text == "?") -> prec-of(op.text) | prec-of(op.text) + 1
-        match (parse-prec(ps, right-min, stop, stopping))
-          | Err(e) -> Err(e)
-          | Ok(right) -> parse-prec-rest(ps, min, stop, stopping, paren-at([sym-at(core-op(op.text), tok-span(op)), left, right], span-join(ast-span(left), ast-span(right))))
-      }
+  if (stopping && op.text == stop) -> Ok(left) |
+  if (op.kind != "op" || op.text == "->" || op.text == "u-" || op.text == "|") -> Ok(left) |
+  if (prec-of(op.text) < 0 || prec-of(op.text) < min) -> Ok(left) |
+  if (is-cmp(op.text)) ->
+    match (parse-cmp-chain(ps, left, op.text))
+      | Err(e) -> Err(e)
+      | Ok(chained) -> parse-prec-rest(ps, min, stop, stopping, chained) |
+  if (op.text == "&&" || op.text == "||") ->
+    match (parse-logic-chain(ps, left, op.text))
+      | Err(e) -> Err(e)
+      | Ok(chained) -> parse-prec-rest(ps, min, stop, stopping, chained) |
+  {
+    advance(ps)
+    let right-min =
+      if (op.text == "::" || op.text == "?" || op.text == "??") -> prec-of(op.text) | prec-of(op.text) + 1
+    match (parse-prec(ps, right-min, stop, stopping))
+      | Err(e) -> Err(e)
+      | Ok(right) -> parse-prec-rest(ps, min, stop, stopping, paren-at([sym-at(core-op(op.text), tok-span(op)), left, right], span-join(ast-span(left), ast-span(right))))
+  }
 }
 
 let parse-logic-chain(ps: Ps, first: Ast, op: Str) -> Result Ast ParseError {
@@ -999,15 +842,13 @@ let parse-logic-chain(ps: Ps, first: Ast, op: Str) -> Result Ast ParseError {
 
 let parse-logic-more(ps: Ps, op: Str, args: List Ast, sp: Span) -> Result Ast ParseError {
   let t = peek(ps)
-  cond
-    | t.kind == "op" && t.text == op ->
-      {
-        advance(ps)
-        match (parse-prec(ps, prec-of(op) + 1, "", false))
-          | Err(e) -> Err(e)
-          | Ok(right) -> parse-logic-more(ps, op, append-ast(args, right), span-join(sp, ast-span(right)))
-      }
-    | else -> Ok(paren-at(sym-at(core-op(op), sp) :: args, sp))
+  if (t.kind == "op" && t.text == op) ->
+    {
+      advance(ps)
+      match (parse-prec(ps, prec-of(op) + 1, "", false))
+        | Err(e) -> Err(e)
+        | Ok(right) -> parse-logic-more(ps, op, append-ast(args, right), span-join(sp, ast-span(right)))
+    } | Ok(paren-at(sym-at(core-op(op), sp) :: args, sp))
 }
 
 let parse-cmp-chain(ps: Ps, first: Ast, op: Str) -> Result Ast ParseError {
@@ -1019,15 +860,13 @@ let parse-cmp-chain(ps: Ps, first: Ast, op: Str) -> Result Ast ParseError {
 
 let parse-cmp-more(ps: Ps, op: Str, args: List Ast, sp: Span) -> Result Ast ParseError {
   let t = peek(ps)
-  cond
-    | t.kind == "op" && t.text == op && is-cmp(op) ->
-      {
-        advance(ps)
-        match (parse-prec(ps, prec-of(op) + 1, "", false))
-          | Err(e) -> Err(e)
-          | Ok(right) -> parse-cmp-more(ps, op, append-ast(args, right), span-join(sp, ast-span(right)))
-      }
-    | else -> Ok(finish-cmp(op, args, sp))
+  if (t.kind == "op" && t.text == op && is-cmp(op)) ->
+    {
+      advance(ps)
+      match (parse-prec(ps, prec-of(op) + 1, "", false))
+        | Err(e) -> Err(e)
+        | Ok(right) -> parse-cmp-more(ps, op, append-ast(args, right), span-join(sp, ast-span(right)))
+    } | Ok(finish-cmp(op, args, sp))
 }
 
 let cat[a](xs: List a, ys: List a) -> List a =
@@ -1041,17 +880,15 @@ let append-ast(xs: List Ast, x: Ast) -> List Ast =
     | h :: t -> h :: append-ast(t, x)
 
 let parse-unary(ps: Ps, stop: Str, stopping: Bool) -> Result Ast ParseError =
-  cond
-    | stopping && (peek(ps)).text == stop -> perr(peek(ps), "expected an expression")
-    | (peek(ps)).kind == "op" && (peek(ps)).text == "u-" ->
-      {
-        let op = peek(ps)
-        advance(ps)
-        match (parse-unary(ps, stop, stopping))
-          | Err(e) -> Err(e)
-          | Ok(e) -> Ok(paren-at([sym-at("-", tok-span(op)), e], span-join(tok-span(op), ast-span(e))))
-      }
-    | else -> parse-post(ps)
+  if (stopping && peek(ps).text == stop) -> perr(peek(ps), "expected an expression") |
+  if (peek(ps).kind == "op" && peek(ps).text == "u-") ->
+    {
+      let op = peek(ps)
+      advance(ps)
+      match (parse-unary(ps, stop, stopping))
+        | Err(e) -> Err(e)
+        | Ok(e) -> Ok(paren-at([sym-at("-", tok-span(op)), e], span-join(tok-span(op), ast-span(e))))
+    } | parse-post(ps)
 
 let parse-post(ps: Ps) -> Result Ast ParseError =
   match (parse-atom(ps))
@@ -1059,16 +896,14 @@ let parse-post(ps: Ps) -> Result Ast ParseError =
     | Ok(left) -> parse-calls(ps, left)
 
 let parse-calls(ps: Ps, left: Ast) -> Result Ast ParseError =
-  cond
-    | delim(ps, "(") && not((peek(ps)).bol) ->
-      match (parse-call-args(ps, left))
-        | Err(e) -> Err(e)
-        | Ok(call) -> parse-calls(ps, call)
-    | (peek(ps)).kind == "punct" && (peek(ps)).text == "." && not((peek(ps)).bol) ->
-      match (parse-project(ps, left))
-        | Err(e) -> Err(e)
-        | Ok(projected) -> parse-calls(ps, projected)
-    | else -> Ok(left)
+  if (delim(ps, "(") && not(peek(ps).bol)) ->
+    match (parse-call-args(ps, left))
+      | Err(e) -> Err(e)
+      | Ok(call) -> parse-calls(ps, call) |
+  if (peek(ps).kind == "punct" && peek(ps).text == "." && not(peek(ps).bol)) ->
+    match (parse-project(ps, left))
+      | Err(e) -> Err(e)
+      | Ok(projected) -> parse-calls(ps, projected) | Ok(left)
 
 ; `expr.field` is a projection, not a method call; `expr.N` (1-based) is a
 ; tuple projection.
@@ -1076,10 +911,7 @@ let parse-project(ps: Ps, target: Ast) -> Result Ast ParseError {
   let dot = peek(ps)
   advance(ps)
   let field = peek(ps)
-  cond
-    | field.kind == "ident" -> parse-project-field(ps, target, dot, field)
-    | field.kind == "int" -> parse-project-index(ps, target, dot, field)
-    | else -> perr(field, "expected a field name or tuple index")
+  if (field.kind == "ident") -> parse-project-field(ps, target, dot, field) | if (field.kind == "int") -> parse-project-index(ps, target, dot, field) | perr(field, "expected a field name or tuple index")
 }
 
 ; The name after the dot is the field or the export.
@@ -1103,23 +935,19 @@ let parse-call-args(ps: Ps, callee: Ast) -> Result Ast ParseError =
     | Some(_) -> parse-call-rest(ps, callee, [callee])
 
 let parse-call-rest(ps: Ps, callee: Ast, acc: List Ast) -> Result Ast ParseError =
-  cond
-    | delim(ps, ")") || (peek(ps)).kind == "eof" -> parse-call-close(ps, callee, acc)
-    | else ->
-      {
-        eat(ps, ",")
-        if (delim(ps, ")")) -> parse-call-close(ps, callee, acc) | parse-call-one(ps, callee, acc)
-      }
+  if (delim(ps, ")") || peek(ps).kind == "eof") -> parse-call-close(ps, callee, acc) |
+  {
+    eat(ps, ",")
+    if (delim(ps, ")")) -> parse-call-close(ps, callee, acc) | parse-call-one(ps, callee, acc)
+  }
 
 let parse-call-one(ps: Ps, callee: Ast, acc: List Ast) -> Result Ast ParseError {
   let acc2 =
-    cond
-      | (peek(ps)).kind == "ident" && (peek(ps)).text == "..." ->
-        {
-          advance(ps)
-          append-ast(acc, sym-at("...", tok-span(peek(ps))))
-        }
-      | else -> acc
+    if (peek(ps).kind == "ident" && peek(ps).text == "...") ->
+      {
+        advance(ps)
+        append-ast(acc, sym-at("...", tok-span(peek(ps))))
+      } | acc
   match (parse-expr(ps))
     | Err(e) -> Err(e)
     | Ok(e) ->
@@ -1145,68 +973,61 @@ let parse-float-tok(ps: Ps, t: Tok) -> Result Ast ParseError {
 
 let parse-atom(ps: Ps) -> Result Ast ParseError {
   let t = peek(ps)
-  cond
-    | t.kind == "kw" && t.text == "if" -> parse-if(ps)
-    | t.kind == "kw" && t.text == "cond" -> parse-cond(ps)
-    | t.kind == "kw" && t.text == "match" -> parse-match(ps)
-    | t.kind == "kw" && t.text == "loop" -> parse-loop(ps)
-    | t.kind == "kw" && t.text == "while" -> parse-while(ps)
-    | t.kind == "kw" && t.text == "fn" -> parse-fn(ps)
-    | t.kind == "punct" && t.text == "{" -> parse-block(ps)
-    | t.kind == "punct" && t.text == "[" -> parse-list(ps)
-    | t.kind == "punct" && t.text == "(" -> parse-group(ps)
-    | t.kind == "int" ->
-      {
-        advance(ps)
-        Ok(IntNode(int-value(t.text), tok-span(t)))
-      }
-    | t.kind == "float" -> parse-float-tok(ps, t)
-    | t.kind == "str" ->
-      {
-        advance(ps)
-        Ok(str-node(t))
-      }
-    | t.kind == "sym" ->
-      {
-        advance(ps)
-        Ok(paren-at([sym-at("quote", tok-span(t)), sym-at(t.text, tok-span(t))], tok-span(t)))
-      }
-    | t.kind == "char" ->
-      {
-        advance(ps)
-        Ok(paren-at([sym-at("char", tok-span(t)), IntNode(int-value(t.text), tok-span(t))], tok-span(t)))
-      }
-    | t.kind == "ident" ->
-      {
-        advance(ps)
-        cond
-          | t.text == "true" -> Ok(BoolNode(true, tok-span(t)))
-          | t.text == "false" -> Ok(BoolNode(false, tok-span(t)))
-          | else -> Ok(sym-at(t.text, tok-span(t)))
-      }
-    | t.kind == "op" && t.text == "=>" -> perr(t, "=> is only valid in a map")
-    | t.text == "panic" || t.text == "ref" || t.text == "deref" || t.text == "set!" || t.text == "recur" ->
-      {
-        advance(ps)
-        parse-call-args(ps, sym-at(t.text, tok-span(t)))
-      }
-    | else -> perr(t, "expected an expression")
+  if (t.kind == "kw" && t.text == "if") -> parse-if(ps) |
+  if (t.kind == "kw" && t.text == "cond") -> parse-cond(ps) |
+  if (t.kind == "kw" && t.text == "match") -> parse-match(ps) |
+  if (t.kind == "kw" && t.text == "loop") -> parse-loop(ps) |
+  if (t.kind == "kw" && t.text == "while") -> parse-while(ps) |
+  if (t.kind == "kw" && t.text == "fn") -> parse-fn(ps) |
+  if (t.kind == "punct" && t.text == "{") -> parse-block(ps) |
+  if (t.kind == "punct" && t.text == "[") -> parse-list(ps) |
+  if (t.kind == "punct" && t.text == "(") -> parse-group(ps) |
+  if (t.kind == "int") ->
+    {
+      advance(ps)
+      Ok(IntNode(int-value(t.text), tok-span(t)))
+    } |
+  if (t.kind == "float") -> parse-float-tok(ps, t) |
+  if (t.kind == "str") ->
+    {
+      advance(ps)
+      Ok(str-node(t))
+    } |
+  if (t.kind == "sym") ->
+    {
+      advance(ps)
+      Ok(paren-at([sym-at("quote", tok-span(t)), sym-at(t.text, tok-span(t))], tok-span(t)))
+    } |
+  if (t.kind == "char") ->
+    {
+      advance(ps)
+      Ok(paren-at([sym-at("char", tok-span(t)), IntNode(int-value(t.text), tok-span(t))], tok-span(t)))
+    } |
+  if (t.kind == "ident") ->
+    {
+      advance(ps)
+      if (t.text == "true") -> Ok(BoolNode(true, tok-span(t))) | if (t.text == "false") -> Ok(BoolNode(false, tok-span(t))) | Ok(sym-at(t.text, tok-span(t)))
+    } |
+  if (t.kind == "op" && t.text == "=>") -> perr(t, "=> is only valid in a map") |
+  if (t.text == "panic" || t.text == "ref" || t.text == "deref" || t.text == "set!" || t.text == "recur") ->
+    {
+      advance(ps)
+      parse-call-args(ps, sym-at(t.text, tok-span(t)))
+    } | perr(t, "expected an expression")
 }
 
 let parse-group(ps: Ps) -> Result Ast ParseError {
   let open = peek(ps)
   advance(ps)
-  cond
-    | delim(ps, ")") ->
-      {
-        let close = peek(ps)
-        advance(ps)
-        Ok(paren-at([], span-join(tok-span(open), tok-span(close))))
-      }
-    | else ->
-      match (parse-expr(ps))
-        | Err(e) -> Err(e)
-        | Ok(e) -> parse-group-after(ps, open, e)
+  if (delim(ps, ")")) ->
+    {
+      let close = peek(ps)
+      advance(ps)
+      Ok(paren-at([], span-join(tok-span(open), tok-span(close))))
+    } |
+  match (parse-expr(ps))
+    | Err(e) -> Err(e)
+    | Ok(e) -> parse-group-after(ps, open, e)
 }
 
 let parse-group-after(ps: Ps, open: Tok, e: Ast) -> Result Ast ParseError =
@@ -1273,22 +1094,18 @@ let collect-until(ps: Ps, close: Str, step: (Ps) -> Result Ast ParseError) -> Re
   collect-until-acc(ps, close, step, [])
 
 let collect-until-acc(ps: Ps, close: Str, step: (Ps) -> Result Ast ParseError, acc: List Ast) -> Result (List Ast) ParseError =
-  cond
-    | delim(ps, close) || (peek(ps)).kind == "eof" -> Ok(rev(acc, []))
-    | else ->
-      {
-        eat(ps, ",")
-        cond
-          | delim(ps, close) -> Ok(rev(acc, []))
-          | else ->
-            match (step(ps))
-              | Err(e) -> Err(e)
-              | Ok(a) ->
-                {
-                  eat(ps, ",")
-                  collect-until-acc(ps, close, step, a :: acc)
-                }
-      }
+  if (delim(ps, close) || peek(ps).kind == "eof") -> Ok(rev(acc, [])) |
+  {
+    eat(ps, ",")
+    if (delim(ps, close)) -> Ok(rev(acc, [])) |
+    match (step(ps))
+      | Err(e) -> Err(e)
+      | Ok(a) ->
+        {
+          eat(ps, ",")
+          collect-until-acc(ps, close, step, a :: acc)
+        }
+  }
 
 let parse-block(ps: Ps) -> Result Ast ParseError =
   match (eat(ps, "{"))
@@ -1296,10 +1113,10 @@ let parse-block(ps: Ps) -> Result Ast ParseError =
     | Some(open) -> parse-brace(ps, open)
 
 let is-spread-tok(ps: Ps) -> Bool =
-  (peek(ps)).kind == "ident" && (peek(ps)).text == "..."
+  peek(ps).kind == "ident" && peek(ps).text == "..."
 
 let is-fat-arrow(ps: Ps) -> Bool =
-  (peek(ps)).kind == "op" && (peek(ps)).text == "=>"
+  peek(ps).kind == "op" && peek(ps).text == "=>"
 
 let is-block-stmt(a: Ast) -> Bool =
   match (a)
@@ -1315,29 +1132,25 @@ let finish-map(ps: Ps, open: Tok, entries: List Ast) -> Result Ast ParseError =
     | Some(close) -> Ok(paren-at(sym-at("map-lit", tok-span(open)) :: rev(entries, []), span-join(tok-span(open), tok-span(close))))
 
 let parse-map-after(ps: Ps, open: Tok, entries: List Ast) -> Result Ast ParseError =
-  cond
-    | delim(ps, "}") -> finish-map(ps, open, entries)
-    | (peek(ps)).text == "," ->
-      {
-        advance(ps)
-        if (delim(ps, "}")) -> finish-map(ps, open, entries) | parse-map-entry(ps, open, entries)
-      }
-    | else -> perr(peek(ps), "expected , or }")
+  if (delim(ps, "}")) -> finish-map(ps, open, entries) |
+  if (peek(ps).text == ",") ->
+    {
+      advance(ps)
+      if (delim(ps, "}")) -> finish-map(ps, open, entries) | parse-map-entry(ps, open, entries)
+    } | perr(peek(ps), "expected , or }")
 
 let parse-map-entry(ps: Ps, open: Tok, entries: List Ast) -> Result Ast ParseError =
-  cond
-    | is-spread-tok(ps) ->
-      {
-        let dots = peek(ps)
-        advance(ps)
-        match (parse-expr(ps))
-          | Err(e) -> Err(e)
-          | Ok(expr) -> parse-map-after(ps, open, paren-at([sym-at("...", tok-span(dots)), expr], span-join(tok-span(dots), ast-span(expr))) :: entries)
-      }
-    | else ->
+  if (is-spread-tok(ps)) ->
+    {
+      let dots = peek(ps)
+      advance(ps)
       match (parse-expr(ps))
         | Err(e) -> Err(e)
-        | Ok(key) -> parse-map-pair(ps, open, key, entries)
+        | Ok(expr) -> parse-map-after(ps, open, paren-at([sym-at("...", tok-span(dots)), expr], span-join(tok-span(dots), ast-span(expr))) :: entries)
+    } |
+  match (parse-expr(ps))
+    | Err(e) -> Err(e)
+    | Ok(key) -> parse-map-pair(ps, open, key, entries)
 
 let parse-map-pair(ps: Ps, open: Tok, key: Ast, entries: List Ast) -> Result Ast ParseError =
   match (eat(ps, "=>"))
@@ -1348,15 +1161,13 @@ let parse-map-pair(ps: Ps, open: Tok, key: Ast, entries: List Ast) -> Result Ast
         | Ok(val) -> parse-map-after(ps, open, paren-at([sym-at("=>", tok-span(arrow)), key, val], span-join(ast-span(key), ast-span(val))) :: entries)
 
 let parse-brace(ps: Ps, open: Tok) -> Result Ast ParseError =
-  cond
-    | delim(ps, "}") -> finish-map(ps, open, [])
-    | (peek(ps)).kind == "eof" -> perr(open, "unclosed {")
-    | is-spread-tok(ps) -> parse-map-entry(ps, open, [])
-    | else ->
-      match (parse-stmt(ps))
-        | Err(e) -> Err(e)
-        | Ok(first) ->
-          if (is-fat-arrow(ps) && not(is-block-stmt(first))) -> parse-map-pair(ps, open, first, []) | parse-block-rest(ps, open, [first])
+  if (delim(ps, "}")) -> finish-map(ps, open, []) |
+  if (peek(ps).kind == "eof") -> perr(open, "unclosed {") |
+  if (is-spread-tok(ps)) -> parse-map-entry(ps, open, []) |
+  match (parse-stmt(ps))
+    | Err(e) -> Err(e)
+    | Ok(first) ->
+      if (is-fat-arrow(ps) && not(is-block-stmt(first))) -> parse-map-pair(ps, open, first, []) | parse-block-rest(ps, open, [first])
 
 let parse-block-rest(ps: Ps, open: Tok, acc: List Ast) -> Result Ast ParseError =
   match (collect-stmts(ps, acc))
@@ -1368,38 +1179,34 @@ let parse-block-rest(ps: Ps, open: Tok, acc: List Ast) -> Result Ast ParseError 
           if (body == []) -> perr(open, "block requires an expression") | Ok(paren-at(sym-at("do", tok-span(open)) :: body, span-join(tok-span(open), tok-span(close))))
 
 let collect-stmts(ps: Ps, acc: List Ast) -> Result (List Ast) ParseError =
-  cond
-    | delim(ps, "}") || (peek(ps)).kind == "eof" -> Ok(rev(acc, []))
-    | else ->
-      match (parse-stmt(ps))
-        | Err(e) -> Err(e)
-        | Ok(a) -> collect-stmts(ps, a :: acc)
+  if (delim(ps, "}") || peek(ps).kind == "eof") -> Ok(rev(acc, [])) |
+  match (parse-stmt(ps))
+    | Err(e) -> Err(e)
+    | Ok(a) -> collect-stmts(ps, a :: acc)
 
 let parse-stmt(ps: Ps) -> Result Ast ParseError {
   let t = peek(ps)
-  cond
-    | t.text == "let" && t.bol -> parse-let(ps, t.indent)
-    | t.text == "return" ->
-      {
-        advance(ps)
-        match (parse-expr(ps))
-          | Err(e) -> Err(e)
-          | Ok(e) -> Ok(paren-at([sym-at("return", tok-span(t)), e], span-join(tok-span(t), ast-span(e))))
-      }
-    | t.text == "defer" ->
-      {
-        advance(ps)
-        match (parse-expr(ps))
-          | Err(e) -> Err(e)
-          | Ok(e) -> Ok(paren-at([sym-at("defer", tok-span(t)), e], span-join(tok-span(t), ast-span(e))))
-      }
-    | else -> parse-expr(ps)
+  if (t.text == "let" && t.bol) -> parse-let(ps, t.indent) |
+  if (t.text == "return") ->
+    {
+      advance(ps)
+      match (parse-expr(ps))
+        | Err(e) -> Err(e)
+        | Ok(e) -> Ok(paren-at([sym-at("return", tok-span(t)), e], span-join(tok-span(t), ast-span(e))))
+    } |
+  if (t.text == "defer") ->
+    {
+      advance(ps)
+      match (parse-expr(ps))
+        | Err(e) -> Err(e)
+        | Ok(e) -> Ok(paren-at([sym-at("defer", tok-span(t)), e], span-join(tok-span(t), ast-span(e))))
+    } | parse-expr(ps)
 }
 
 let parse-if(ps: Ps) -> Result Ast ParseError {
   let kw = peek(ps)
   advance(ps)
-  if ((peek(ps)).kind == "punct" && (peek(ps)).text == "(") -> parse-inline-if(ps, kw) | perr(peek(ps), "expected (")
+  if (peek(ps).kind == "punct" && peek(ps).text == "(") -> parse-inline-if(ps, kw) | perr(peek(ps), "expected (")
 }
 
 let parse-inline-if(ps: Ps, kw: Tok) -> Result Ast ParseError =
@@ -1418,7 +1225,7 @@ let parse-inline-if(ps: Ps, kw: Tok) -> Result Ast ParseError =
                   match (parse-expr(ps))
                     | Err(e) -> Err(e)
                     | Ok(body) ->
-                      if ((peek(ps)).kind == "op" && (peek(ps)).text == "|" && not((peek(ps)).bol)) -> parse-inline-else(ps, kw, test, body) | Ok(paren-at([sym-at("if", tok-span(kw)), test, body, paren-at([], tok-span(kw))], span-join(tok-span(kw), ast-span(body))))
+                      if (peek(ps).kind == "op" && peek(ps).text == "|" && not(peek(ps).bol)) -> parse-inline-else(ps, kw, test, body) | Ok(paren-at([sym-at("if", tok-span(kw)), test, body, paren-at([], tok-span(kw))], span-join(tok-span(kw), ast-span(body))))
 
 let parse-inline-else(ps: Ps, kw: Tok, test: Ast, body: Ast) -> Result Ast ParseError {
   advance(ps)
@@ -1443,25 +1250,23 @@ let parse-cond-arms(ps: Ps, kw: Tok, acc: List Arm) -> Result (List Arm) ParseEr
 
 let parse-cond-arm(ps: Ps, kw: Tok, acc: List Arm) -> Result (List Arm) ParseError {
   advance(ps)
-  cond
-    | (peek(ps)).text == "else" ->
-      {
-        advance(ps)
-        eat(ps, "->")
-        match (parse-expr(ps))
-          | Err(e) -> Err(e)
-          | Ok(b) -> Ok(append-arm(acc, ElseArm(b)))
-      }
-    | else ->
-      match (parse-expr-stop(ps))
+  if (peek(ps).text == "else") ->
+    {
+      advance(ps)
+      eat(ps, "->")
+      match (parse-expr(ps))
         | Err(e) -> Err(e)
-        | Ok(test) ->
-          match (eat(ps, "->"))
-            | None -> perr(peek(ps), "expected ->")
-            | Some(_) ->
-              match (parse-expr(ps))
-                | Err(e) -> Err(e)
-                | Ok(b) -> parse-cond-arms(ps, kw, append-arm(acc, ThenArm(test, b)))
+        | Ok(b) -> Ok(append-arm(acc, ElseArm(b)))
+    } |
+  match (parse-expr-stop(ps))
+    | Err(e) -> Err(e)
+    | Ok(test) ->
+      match (eat(ps, "->"))
+        | None -> perr(peek(ps), "expected ->")
+        | Some(_) ->
+          match (parse-expr(ps))
+            | Err(e) -> Err(e)
+            | Ok(b) -> parse-cond-arms(ps, kw, append-arm(acc, ThenArm(test, b)))
 }
 
 let append-arm(xs: List Arm, x: Arm) -> List Arm =
@@ -1512,10 +1317,7 @@ let first-ast(xs: List Ast) -> Ast =
 
 let parse-match-arms(ps: Ps, kw: Tok, acc: List Ast, saw: Bool) -> Result Ast ParseError {
   let t = peek(ps)
-  cond
-    | t.kind == "op" && t.text == "|" && t.bol && t.indent > kw.indent -> parse-match-arm(ps, kw, acc, saw)
-    | saw -> Ok(paren-at(acc, span-join(tok-span(kw), ast-span(last-ast(acc)))))
-    | else -> perr(t, "match requires arms")
+  if (t.kind == "op" && t.text == "|" && t.bol && t.indent > kw.indent) -> parse-match-arm(ps, kw, acc, saw) | if (saw) -> Ok(paren-at(acc, span-join(tok-span(kw), ast-span(last-ast(acc))))) | perr(t, "match requires arms")
 }
 
 let last-ast(xs: List Ast) -> Ast =
@@ -1529,15 +1331,13 @@ let parse-match-arm(ps: Ps, kw: Tok, acc: List Ast, saw: Bool) -> Result Ast Par
   match (parse-or-pattern(ps))
     | Err(e) -> Err(e)
     | Ok(pats) ->
-      cond
-        | (peek(ps)).text == "when" -> parse-match-guard(ps, kw, acc, pats)
-        | else ->
-          match (eat(ps, "->"))
-            | None -> perr(peek(ps), "expected ->")
-            | Some(_) ->
-              match (parse-expr(ps))
-                | Err(e) -> Err(e)
-                | Ok(body) -> parse-match-arms(ps, kw, push-pats(pats, body, acc), true)
+      if (peek(ps).text == "when") -> parse-match-guard(ps, kw, acc, pats) |
+      match (eat(ps, "->"))
+        | None -> perr(peek(ps), "expected ->")
+        | Some(_) ->
+          match (parse-expr(ps))
+            | Err(e) -> Err(e)
+            | Ok(body) -> parse-match-arms(ps, kw, push-pats(pats, body, acc), true)
 }
 
 let parse-match-guard(ps: Ps, kw: Tok, acc: List Ast, pats: List Ast) -> Result Ast ParseError {
@@ -1562,10 +1362,7 @@ let parse-match-guard(ps: Ps, kw: Tok, acc: List Ast, pats: List Ast) -> Result 
 
 let parse-multi-arms(ps: Ps, kw: Tok, n: Int, acc: List Ast, saw: Bool) -> Result Ast ParseError {
   let t = peek(ps)
-  cond
-    | t.kind == "op" && t.text == "|" && t.bol && t.indent > kw.indent -> parse-multi-arm(ps, kw, n, acc, saw)
-    | saw -> Ok(paren-at(acc, span-join(tok-span(kw), ast-span(last-ast(acc)))))
-    | else -> perr(t, "match requires arms")
+  if (t.kind == "op" && t.text == "|" && t.bol && t.indent > kw.indent) -> parse-multi-arm(ps, kw, n, acc, saw) | if (saw) -> Ok(paren-at(acc, span-join(tok-span(kw), ast-span(last-ast(acc))))) | perr(t, "match requires arms")
 }
 
 let parse-multi-arm(ps: Ps, kw: Tok, n: Int, acc: List Ast, saw: Bool) -> Result Ast ParseError {
@@ -1576,15 +1373,13 @@ let parse-multi-arm(ps: Ps, kw: Tok, n: Int, acc: List Ast, saw: Bool) -> Result
 }
 
 let parse-multi-arm-body(ps: Ps, kw: Tok, n: Int, acc: List Ast, alts: List (List Ast)) -> Result Ast ParseError =
-  cond
-    | (peek(ps)).text == "when" ->
-      {
-        advance(ps)
-        match (parse-expr-stop(ps))
-          | Err(e) -> Err(e)
-          | Ok(g) -> parse-multi-arm-arrow(ps, kw, n, acc, alts, Some(g))
-      }
-    | else -> parse-multi-arm-arrow(ps, kw, n, acc, alts, None)
+  if (peek(ps).text == "when") ->
+    {
+      advance(ps)
+      match (parse-expr-stop(ps))
+        | Err(e) -> Err(e)
+        | Ok(g) -> parse-multi-arm-arrow(ps, kw, n, acc, alts, Some(g))
+    } | parse-multi-arm-arrow(ps, kw, n, acc, alts, None)
 
 let parse-multi-arm-arrow(ps: Ps, kw: Tok, n: Int, acc: List Ast, alts: List (List Ast), guard: Maybe Ast) -> Result Ast ParseError =
   match (eat(ps, "->"))
@@ -1618,15 +1413,13 @@ let append-pat-group(xs: List (List Ast), x: List Ast) -> List (List Ast) =
 
 let parse-multi-or-rest(ps: Ps, n: Int, acc: List (List Ast)) -> Result (List (List Ast)) ParseError {
   let t = peek(ps)
-  cond
-    | t.kind == "op" && t.text == "|" && not(t.bol) ->
-      {
-        advance(ps)
-        match (parse-multi-pat(ps, n))
-          | Err(e) -> Err(e)
-          | Ok(pats) -> parse-multi-or-rest(ps, n, append-pat-group(acc, pats))
-      }
-    | else -> Ok(acc)
+  if (t.kind == "op" && t.text == "|" && not(t.bol)) ->
+    {
+      advance(ps)
+      match (parse-multi-pat(ps, n))
+        | Err(e) -> Err(e)
+        | Ok(pats) -> parse-multi-or-rest(ps, n, append-pat-group(acc, pats))
+    } | Ok(acc)
 }
 
 let parse-multi-pat(ps: Ps, n: Int) -> Result (List Ast) ParseError =
@@ -1635,17 +1428,15 @@ let parse-multi-pat(ps: Ps, n: Int) -> Result (List Ast) ParseError =
     | Some(_) -> parse-multi-pat-acc(ps, n, [])
 
 let parse-multi-pat-acc(ps: Ps, n: Int, acc: List Ast) -> Result (List Ast) ParseError =
-  cond
-    | delim(ps, ")") || (peek(ps)).kind == "eof" ->
-      match (eat(ps, ")"))
-        | None -> perr(peek(ps), "unclosed (")
-        | Some(_) ->
-          if (ast-len(acc) != n) -> perr(peek(ps), String.concat("pattern has ", show(ast-len(acc)), " parts, match has ", show(n))) | Ok(acc)
-    | else ->
-      {
-        eat(ps, ",")
-        if (delim(ps, ")")) -> parse-multi-pat-acc(ps, n, acc) | parse-multi-pat-one(ps, n, acc)
-      }
+  if (delim(ps, ")") || peek(ps).kind == "eof") ->
+    match (eat(ps, ")"))
+      | None -> perr(peek(ps), "unclosed (")
+      | Some(_) ->
+        if (ast-len(acc) != n) -> perr(peek(ps), String.concat("pattern has ", show(ast-len(acc)), " parts, match has ", show(n))) | Ok(acc) |
+  {
+    eat(ps, ",")
+    if (delim(ps, ")")) -> parse-multi-pat-acc(ps, n, acc) | parse-multi-pat-one(ps, n, acc)
+  }
 
 let parse-multi-pat-one(ps: Ps, n: Int, acc: List Ast) -> Result (List Ast) ParseError =
   match (parse-pattern(ps))
@@ -1668,22 +1459,20 @@ let parse-or-pattern(ps: Ps) -> Result (List Ast) ParseError =
 
 let parse-or-rest(ps: Ps, acc: List Ast) -> Result (List Ast) ParseError {
   let t = peek(ps)
-  cond
-    | t.kind == "op" && t.text == "|" && not(t.bol) ->
-      {
-        advance(ps)
-        match (parse-pattern(ps))
-          | Err(e) -> Err(e)
-          | Ok(p) -> parse-or-rest(ps, append-ast(acc, p))
-      }
-    | else -> Ok(acc)
+  if (t.kind == "op" && t.text == "|" && not(t.bol)) ->
+    {
+      advance(ps)
+      match (parse-pattern(ps))
+        | Err(e) -> Err(e)
+        | Ok(p) -> parse-or-rest(ps, append-ast(acc, p))
+    } | Ok(acc)
 }
 
 let parse-pattern(ps: Ps) -> Result Ast ParseError =
   match (parse-pattern-atom(ps))
     | Err(e) -> Err(e)
     | Ok(left) ->
-      if ((peek(ps)).kind == "op" && (peek(ps)).text == "::") -> parse-pattern-cons(ps, left) | Ok(left)
+      if (peek(ps).kind == "op" && peek(ps).text == "::") -> parse-pattern-cons(ps, left) | Ok(left)
 
 let parse-pattern-cons(ps: Ps, left: Ast) -> Result Ast ParseError {
   let op = peek(ps)
@@ -1695,42 +1484,34 @@ let parse-pattern-cons(ps: Ps, left: Ast) -> Result Ast ParseError {
 
 let parse-pattern-atom(ps: Ps) -> Result Ast ParseError {
   let t = peek(ps)
-  cond
-    | t.text == "_" ->
-      {
-        advance(ps)
-        Ok(sym-at("_", tok-span(t)))
-      }
-    | t.kind == "punct" && t.text == "[" -> parse-list(ps)
-    | t.kind == "punct" && t.text == "(" -> parse-pattern-group(ps)
-    | t.kind == "int" || t.kind == "str" || t.kind == "sym" || t.kind == "char" || t.text == "true" || t.text == "false" -> parse-atom(ps)
-    | t.kind == "ident" ->
-      {
-        advance(ps)
-        match (parse-pattern-qual(ps, sym-at(t.text, tok-span(t))))
-          | Err(e) -> Err(e)
-          | Ok(head) -> parse-pattern-atom-after(ps, t, head)
-      }
-    | else -> perr(t, "expected a pattern")
+  if (t.text == "_") ->
+    {
+      advance(ps)
+      Ok(sym-at("_", tok-span(t)))
+    } |
+  if (t.kind == "punct" && t.text == "[") -> parse-list(ps) |
+  if (t.kind == "punct" && t.text == "(") -> parse-pattern-group(ps) |
+  if (t.kind == "int" || t.kind == "str" || t.kind == "sym" || t.kind == "char" || t.text == "true" || t.text == "false") -> parse-atom(ps) |
+  if (t.kind == "ident") ->
+    {
+      advance(ps)
+      match (parse-pattern-qual(ps, sym-at(t.text, tok-span(t))))
+        | Err(e) -> Err(e)
+        | Ok(head) -> parse-pattern-atom-after(ps, t, head)
+    } | perr(t, "expected a pattern")
 }
 
 ; `Alias.Ctor` in a pattern; rewrite-import-aliases turns the project into
 ; `__import_Alias_Ctor` before typechecking.
 let parse-pattern-qual(ps: Ps, left: Ast) -> Result Ast ParseError =
-  cond
-    | (peek(ps)).kind == "punct" && (peek(ps)).text == "." && not((peek(ps)).bol) ->
-      match (parse-project(ps, left))
-        | Err(e) -> Err(e)
-        | Ok(next) -> parse-pattern-qual(ps, next)
-    | else -> Ok(left)
+  if (peek(ps).kind == "punct" && peek(ps).text == "." && not(peek(ps).bol)) ->
+    match (parse-project(ps, left))
+      | Err(e) -> Err(e)
+      | Ok(next) -> parse-pattern-qual(ps, next) | Ok(left)
 
 let parse-pattern-atom-after(ps: Ps, first: Tok, head: Ast) -> Result Ast ParseError {
   let qualified = pattern-is-project(head)
-  cond
-    | delim(ps, "{") && not((peek(ps)).bol) && is-upper(first.text) && not(qualified) -> parse-named-record-pat(ps, head)
-    | delim(ps, "(") && not((peek(ps)).bol) -> parse-pattern-args(ps, head)
-    | not(qualified) && is-upper(first.text) -> Ok(paren-at([head], tok-span(first)))
-    | else -> Ok(head)
+  if (delim(ps, "{") && not(peek(ps).bol) && is-upper(first.text) && not(qualified)) -> parse-named-record-pat(ps, head) | if (delim(ps, "(") && not(peek(ps).bol)) -> parse-pattern-args(ps, head) | if (not(qualified) && is-upper(first.text)) -> Ok(paren-at([head], tok-span(first))) | Ok(head)
 }
 
 let pattern-is-project(head: Ast) -> Bool =
@@ -1742,17 +1523,15 @@ let pattern-is-project(head: Ast) -> Bool =
 let parse-pattern-group(ps: Ps) -> Result Ast ParseError {
   let open = peek(ps)
   advance(ps)
-  cond
-    | delim(ps, ")") ->
-      {
-        let close = peek(ps)
-        advance(ps)
-        Ok(paren-at([], span-join(tok-span(open), tok-span(close))))
-      }
-    | else ->
-      match (parse-pattern(ps))
-        | Err(e) -> Err(e)
-        | Ok(p) -> parse-pattern-group-after(ps, open, p)
+  if (delim(ps, ")")) ->
+    {
+      let close = peek(ps)
+      advance(ps)
+      Ok(paren-at([], span-join(tok-span(open), tok-span(close))))
+    } |
+  match (parse-pattern(ps))
+    | Err(e) -> Err(e)
+    | Ok(p) -> parse-pattern-group-after(ps, open, p)
 }
 
 let parse-pattern-group-after(ps: Ps, open: Tok, p: Ast) -> Result Ast ParseError =
@@ -1804,29 +1583,25 @@ let parse-named-record-pat(ps: Ps, name: Ast) -> Result Ast ParseError =
     | Some(_) -> parse-named-fields(ps, name, [])
 
 let parse-named-fields(ps: Ps, name: Ast, acc: List Ast) -> Result Ast ParseError =
-  cond
-    | delim(ps, "}") || (peek(ps)).kind == "eof" ->
-      match (eat(ps, "}"))
-        | None -> perr(peek(ps), "unclosed {")
-        | Some(close) -> Ok(paren-at(sym-at("recpat", ast-span(name)) :: name :: acc, span-join(ast-span(name), tok-span(close))))
-    | else ->
-      {
-        let dropped = eat(ps, ",")
-        if (delim(ps, "}")) -> parse-named-fields(ps, name, acc) | parse-named-field(ps, name, acc, dropped)
-      }
+  if (delim(ps, "}") || peek(ps).kind == "eof") ->
+    match (eat(ps, "}"))
+      | None -> perr(peek(ps), "unclosed {")
+      | Some(close) -> Ok(paren-at(sym-at("recpat", ast-span(name)) :: name :: acc, span-join(ast-span(name), tok-span(close)))) |
+  {
+    let dropped = eat(ps, ",")
+    if (delim(ps, "}")) -> parse-named-fields(ps, name, acc) | parse-named-field(ps, name, acc, dropped)
+  }
 
 let parse-named-field(ps: Ps, name: Ast, acc: List Ast, dropped: Maybe Tok) -> Result Ast ParseError {
   let f = peek(ps)
-  cond
-    | f.kind != "ident" -> perr(f, "expected a field name")
-    | is-upper(f.text) -> perr(f, "expected a field name")
-    | field-listed(acc, f.text) -> perr(f, String.concat("duplicate field ", f.text))
-    | else ->
-      {
-        advance(ps)
-        let dropped2 = eat(ps, ",")
-        parse-named-fields(ps, name, append-ast(acc, sym-at(f.text, tok-span(f))))
-      }
+  if (f.kind != "ident") -> perr(f, "expected a field name") |
+  if (is-upper(f.text)) -> perr(f, "expected a field name") |
+  if (field-listed(acc, f.text)) -> perr(f, String.concat("duplicate field ", f.text)) |
+  {
+    advance(ps)
+    let dropped2 = eat(ps, ",")
+    parse-named-fields(ps, name, append-ast(acc, sym-at(f.text, tok-span(f))))
+  }
 }
 
 let parse-pattern-args(ps: Ps, callee: Ast) -> Result Ast ParseError {
@@ -1858,18 +1633,16 @@ let parse-loop(ps: Ps) -> Result Ast ParseError {
 
 let parse-loop-bind(ps: Ps) -> Result Ast ParseError {
   let n = peek(ps)
-  cond
-    | n.kind != "ident" -> perr(n, "expected a loop binding")
-    | else ->
-      {
-        advance(ps)
-        match (eat(ps, "="))
-          | None -> perr(peek(ps), "expected =")
-          | Some(_) ->
-            match (parse-expr(ps))
-              | Err(e) -> Err(e)
-              | Ok(e) -> Ok(paren-at([sym-at(n.text, tok-span(n)), e], span-join(tok-span(n), ast-span(e))))
-      }
+  if (n.kind != "ident") -> perr(n, "expected a loop binding") |
+  {
+    advance(ps)
+    match (eat(ps, "="))
+      | None -> perr(peek(ps), "expected =")
+      | Some(_) ->
+        match (parse-expr(ps))
+          | Err(e) -> Err(e)
+          | Ok(e) -> Ok(paren-at([sym-at(n.text, tok-span(n)), e], span-join(tok-span(n), ast-span(e))))
+  }
 }
 
 let parse-while(ps: Ps) -> Result Ast ParseError {
@@ -1920,17 +1693,14 @@ let parse-fn(ps: Ps) -> Result Ast ParseError {
 }
 
 let parse-fn-after-params(ps: Ps, kw: Tok, params: Ast, annotated: Bool) -> Result Ast ParseError =
-  cond
-    | (peek(ps)).kind == "op" && (peek(ps)).text == "->" ->
-      {
-        advance(ps)
-        match (parse-type(ps))
-          | Err(e) -> Err(e)
-          | Ok(ret) ->
-            if (annotated) -> parse-fn-body-ann(ps, kw, params, ret) | perr(kw, "fn return type requires typed parameters")
-      }
-    | annotated -> perr(kw, "fn with typed parameters requires -> return type")
-    | else -> parse-fn-body(ps, kw, params)
+  if (peek(ps).kind == "op" && peek(ps).text == "->") ->
+    {
+      advance(ps)
+      match (parse-type(ps))
+        | Err(e) -> Err(e)
+        | Ok(ret) ->
+          if (annotated) -> parse-fn-body-ann(ps, kw, params, ret) | perr(kw, "fn return type requires typed parameters")
+    } | if (annotated) -> perr(kw, "fn with typed parameters requires -> return type") | parse-fn-body(ps, kw, params)
 
 let parse-fn-body(ps: Ps, kw: Tok, params: Ast) -> Result Ast ParseError =
   match (parse-body(ps))
@@ -1940,13 +1710,7 @@ let parse-fn-body(ps: Ps, kw: Tok, params: Ast) -> Result Ast ParseError =
 let parse-fn-body-ann(ps: Ps, kw: Tok, params: Ast, ret: Ast) -> Result Ast ParseError =
   match (parse-body(ps))
     | Err(e) -> Err(e)
-    | Ok(body) ->
-      Ok(
-        paren-at(
-          [sym-at("fn", tok-span(kw)), params, sym-at("->", ast-span(ret)), ret, body],
-          span-join(tok-span(kw), ast-span(body))
-        )
-      )
+    | Ok(body) -> Ok(paren-at([sym-at("fn", tok-span(kw)), params, sym-at("->", ast-span(ret)), ret, body], span-join(tok-span(kw), ast-span(body))))
 
 record FnParamList {
   elems: List Ast
@@ -1966,8 +1730,7 @@ let parse-fn-params-open(ps: Ps, open: Tok) -> Result FnParams ParseError =
         | FnParamList(xs, annotated) ->
           match (eat(ps, ")"))
             | None -> perr(peek(ps), "unclosed (")
-            | Some(close) ->
-              Ok(FnParams(paren-at(xs, span-join(tok-span(open), tok-span(close))), annotated))
+            | Some(close) -> Ok(FnParams(paren-at(xs, span-join(tok-span(open), tok-span(close))), annotated))
 
 let ann-or-false(ann: Maybe Bool) -> Bool =
   match (ann)
@@ -1976,15 +1739,12 @@ let ann-or-false(ann: Maybe Bool) -> Bool =
 
 ; Collect fn params until `)`, tracking all-typed vs all-untyped.
 let collect-fn-params(ps: Ps, acc: List Ast, ann: Maybe Bool) -> Result FnParamList ParseError =
-  cond
-    | delim(ps, ")") ->
-      Ok(FnParamList(rev(acc, []), ann-or-false(ann)))
-    | (peek(ps)).kind == "eof" -> perr(peek(ps), "unclosed (")
-    | else ->
-      {
-        if ((peek(ps)).text == ",") -> advance(ps)
-        if (delim(ps, ")")) -> collect-fn-params(ps, acc, ann) | collect-fn-params-one(ps, acc, ann)
-      }
+  if (delim(ps, ")")) -> Ok(FnParamList(rev(acc, []), ann-or-false(ann))) |
+  if (peek(ps).kind == "eof") -> perr(peek(ps), "unclosed (") |
+  {
+    if (peek(ps).text == ",") -> advance(ps)
+    if (delim(ps, ")")) -> collect-fn-params(ps, acc, ann) | collect-fn-params-one(ps, acc, ann)
+  }
 
 let collect-fn-params-one(ps: Ps, acc: List Ast, ann: Maybe Bool) -> Result FnParamList ParseError =
   match (parse-fn-param(ps))
@@ -1998,9 +1758,7 @@ let collect-fn-params-one(ps: Ps, acc: List Ast, ann: Maybe Bool) -> Result FnPa
               if (prev == annotated) -> collect-fn-params(ps, ast :: acc, ann) | perr(peek(ps), "fn parameters must be all typed or all untyped")
 
 let parse-fn-param(ps: Ps) -> Result FnParam ParseError =
-  cond
-    | delim(ps, "(") -> parse-fn-tuple-param(ps)
-    | else -> parse-fn-ident-param(ps)
+  if (delim(ps, "(")) -> parse-fn-tuple-param(ps) | parse-fn-ident-param(ps)
 
 let parse-fn-tuple-param(ps: Ps) -> Result FnParam ParseError =
   match (parse-tuple-pattern(ps))
@@ -2010,29 +1768,23 @@ let parse-fn-tuple-param(ps: Ps) -> Result FnParam ParseError =
         | Some(_) ->
           match (parse-type(ps))
             | Err(e) -> Err(e)
-            | Ok(ty) ->
-              Ok(FnParam(paren-at([sym-at("param", ast-span(pat)), pat, ty], span-join(ast-span(pat), ast-span(ty))), true))
+            | Ok(ty) -> Ok(FnParam(paren-at([sym-at("param", ast-span(pat)), pat, ty], span-join(ast-span(pat), ast-span(ty))), true))
         | None -> Ok(FnParam(pat, false))
 
 let parse-fn-ident-param(ps: Ps) -> Result FnParam ParseError {
   let n = peek(ps)
-  cond
-    | n.kind != "ident" -> perr(n, "expected a parameter")
-    | else ->
+  if (n.kind != "ident") -> perr(n, "expected a parameter") |
+  {
+    advance(ps)
+    let bare = bare-name(n.text)
+    if (ends-colon(n.text) || peek(ps).text == ":") ->
       {
-        advance(ps)
-        let bare = bare-name(n.text)
-        cond
-          | ends-colon(n.text) || (peek(ps)).text == ":" ->
-            {
-              if ((peek(ps)).text == ":") -> advance(ps)
-              match (parse-type(ps))
-                | Err(e) -> Err(e)
-                | Ok(ty) ->
-                  Ok(FnParam(paren-at([sym-at(String.concat(bare, ":"), tok-span(n)), ty], span-join(tok-span(n), ast-span(ty))), true))
-            }
-          | else -> Ok(FnParam(sym-at(bare, tok-span(n)), false))
-      }
+        if (peek(ps).text == ":") -> advance(ps)
+        match (parse-type(ps))
+          | Err(e) -> Err(e)
+          | Ok(ty) -> Ok(FnParam(paren-at([sym-at(String.concat(bare, ":"), tok-span(n)), ty], span-join(tok-span(n), ast-span(ty))), true))
+      } | Ok(FnParam(sym-at(bare, tok-span(n)), false))
+  }
 }
 
 let bare-name(text: Str) -> Str {
@@ -2046,32 +1798,26 @@ let ends-colon(text: Str) -> Bool {
 }
 
 let parse-body(ps: Ps) -> Result Ast ParseError =
-  cond
-    | delim(ps, "{") -> parse-block(ps)
-    | else ->
-      match (eat(ps, "="))
-        | None -> perr(peek(ps), "expected = or {")
-        | Some(_) -> parse-expr(ps)
+  if (delim(ps, "{")) -> parse-block(ps) |
+  match (eat(ps, "="))
+    | None -> perr(peek(ps), "expected = or {")
+    | Some(_) -> parse-expr(ps)
 
 let parse-type(ps: Ps) -> Result Ast ParseError =
   parse-type-arrow(ps)
 
 let parse-type-arrow(ps: Ps) -> Result Ast ParseError =
-  cond
-    | delim(ps, "(") -> parse-type-paren(ps)
-    | else ->
-      match (parse-type-product(ps))
-        | Err(e) -> Err(e)
-        | Ok(spine) ->
-          cond
-            | (peek(ps)).kind == "op" && (peek(ps)).text == "->" ->
-              {
-                advance(ps)
-                match (parse-type(ps))
-                  | Err(e) -> Err(e)
-                  | Ok(ret) -> Ok(paren-at([sym-at("Fn", ast-span(spine)), spine, sym-at("->", ast-span(ret)), ret], span-join(ast-span(spine), ast-span(ret))))
-              }
-            | else -> Ok(spine)
+  if (delim(ps, "(")) -> parse-type-paren(ps) |
+  match (parse-type-product(ps))
+    | Err(e) -> Err(e)
+    | Ok(spine) ->
+      if (peek(ps).kind == "op" && peek(ps).text == "->") ->
+        {
+          advance(ps)
+          match (parse-type(ps))
+            | Err(e) -> Err(e)
+            | Ok(ret) -> Ok(paren-at([sym-at("Fn", ast-span(spine)), spine, sym-at("->", ast-span(ret)), ret], span-join(ast-span(spine), ast-span(ret))))
+        } | Ok(spine)
 
 ; `T1 * T2 * …` with ≥2 factors → `(product T1 T2 …)`. `*` binds tighter
 ; than `->` (so a product sits directly on the arrow's spine) but is
@@ -2080,74 +1826,59 @@ let parse-type-product(ps: Ps) -> Result Ast ParseError =
   match (parse-type-spine(ps))
     | Err(e) -> Err(e)
     | Ok(head) ->
-      if ((peek(ps)).kind == "op" && (peek(ps)).text == "*") -> parse-type-product-rest(ps, [head]) | Ok(head)
+      if (peek(ps).kind == "op" && peek(ps).text == "*") -> parse-type-product-rest(ps, [head]) | Ok(head)
 
 let parse-type-product-rest(ps: Ps, acc: List Ast) -> Result Ast ParseError =
-  cond
-    | (peek(ps)).kind == "op" && (peek(ps)).text == "*" ->
-      {
-        advance(ps)
-        match (parse-type-spine(ps))
-          | Err(e) -> Err(e)
-          | Ok(next) -> parse-type-product-rest(ps, append-ast(acc, next))
-      }
-    | else -> Ok(paren-at(sym-at("product", ast-span(first-ast(acc))) :: acc, span-join(ast-span(first-ast(acc)), ast-span(last-ast(acc)))))
+  if (peek(ps).kind == "op" && peek(ps).text == "*") ->
+    {
+      advance(ps)
+      match (parse-type-spine(ps))
+        | Err(e) -> Err(e)
+        | Ok(next) -> parse-type-product-rest(ps, append-ast(acc, next))
+    } | Ok(paren-at(sym-at("product", ast-span(first-ast(acc))) :: acc, span-join(ast-span(first-ast(acc)), ast-span(last-ast(acc)))))
 
 let parse-type-paren(ps: Ps) -> Result Ast ParseError {
   let open = peek(ps)
   advance(ps)
-  cond
-    | delim(ps, ")") ->
+  if (delim(ps, ")")) ->
+    {
+      advance(ps)
+      if (peek(ps).kind != "op" || peek(ps).text != "->") -> perr(peek(ps), "expected ->") |
       {
         advance(ps)
-        cond
-          | (peek(ps)).kind != "op" || (peek(ps)).text != "->" -> perr(peek(ps), "expected ->")
-          | else ->
-            {
-              advance(ps)
-              match (parse-type(ps))
-                | Err(e) -> Err(e)
-                | Ok(ret) -> Ok(paren-at([sym-at("Fn", tok-span(open)), sym-at("->", tok-span(open)), ret], span-join(tok-span(open), ast-span(ret))))
-            }
+        match (parse-type(ps))
+          | Err(e) -> Err(e)
+          | Ok(ret) -> Ok(paren-at([sym-at("Fn", tok-span(open)), sym-at("->", tok-span(open)), ret], span-join(tok-span(open), ast-span(ret))))
       }
-    | else ->
-      match (parse-type(ps))
-        | Err(e) -> Err(e)
-        | Ok(first) -> parse-type-paren-rest(ps, open, first)
+    } |
+  match (parse-type(ps))
+    | Err(e) -> Err(e)
+    | Ok(first) -> parse-type-paren-rest(ps, open, first)
 }
 
 let parse-type-paren-rest(ps: Ps, open: Tok, first: Ast) -> Result Ast ParseError =
-  cond
-    | delim(ps, ",") -> parse-type-args(ps, open, [first])
-    | else ->
-      match (eat(ps, ")"))
-        | None -> perr(peek(ps), "unclosed (")
-        | Some(_) ->
-          cond
-            | (peek(ps)).kind == "op" && (peek(ps)).text == "->" ->
-              {
-                advance(ps)
-                match (parse-type(ps))
-                  | Err(e) -> Err(e)
-                  | Ok(ret) -> Ok(paren-at([sym-at("Fn", tok-span(open)), first, sym-at("->", ast-span(ret)), ret], span-join(tok-span(open), ast-span(ret))))
-              }
-            | else ->
-              ; Grouping: `(List a) * (List a)` continues as a product after `)`.
-              if ((peek(ps)).kind == "op" && (peek(ps)).text == "*") -> parse-type-product-rest(ps, [first]) | Ok(first)
+  if (delim(ps, ",")) -> parse-type-args(ps, open, [first]) |
+  match (eat(ps, ")"))
+    | None -> perr(peek(ps), "unclosed (")
+    | Some(_) ->
+      if (peek(ps).kind == "op" && peek(ps).text == "->") ->
+        {
+          advance(ps)
+          match (parse-type(ps))
+            | Err(e) -> Err(e)
+            | Ok(ret) -> Ok(paren-at([sym-at("Fn", tok-span(open)), first, sym-at("->", ast-span(ret)), ret], span-join(tok-span(open), ast-span(ret))))
+        } | if (peek(ps).kind == "op" && peek(ps).text == "*") -> parse-type-product-rest(ps, [first]) | Ok(first)
 
+; Grouping: `(List a) * (List a)` continues as a product after `)`.
 let parse-type-args(ps: Ps, open: Tok, acc: List Ast) -> Result Ast ParseError =
-  cond
-    | not(delim(ps, ",")) -> parse-type-args-close(ps, open, acc)
-    | else ->
-      {
-        advance(ps)
-        cond
-          | delim(ps, ")") -> parse-type-args-close(ps, open, acc)
-          | else ->
-            match (parse-type(ps))
-              | Err(e) -> Err(e)
-              | Ok(n) -> parse-type-args(ps, open, append-ast(acc, n))
-      }
+  if (not(delim(ps, ","))) -> parse-type-args-close(ps, open, acc) |
+  {
+    advance(ps)
+    if (delim(ps, ")")) -> parse-type-args-close(ps, open, acc) |
+    match (parse-type(ps))
+      | Err(e) -> Err(e)
+      | Ok(n) -> parse-type-args(ps, open, append-ast(acc, n))
+  }
 
 let parse-type-args-close(ps: Ps, open: Tok, acc: List Ast) -> Result Ast ParseError =
   match (eat(ps, ")"))
@@ -2166,82 +1897,65 @@ let parse-type-spine(ps: Ps) -> Result Ast ParseError =
     | Ok(head) -> parse-type-args-spine(ps, head, [])
 
 let parse-type-args-spine(ps: Ps, head: Ast, args: List Ast) -> Result Ast ParseError =
-  cond
-    | is-type-atom(ps) && not((peek(ps)).bol) ->
-      match (parse-type-atom(ps))
-        | Err(e) -> Err(e)
-        | Ok(a) -> parse-type-args-spine(ps, head, append-ast(args, a))
-    | args == [] -> Ok(head)
-    | else -> Ok(paren-at(head :: args, span-join(ast-span(head), ast-span(last-ast(args)))))
+  if (is-type-atom(ps) && not(peek(ps).bol)) ->
+    match (parse-type-atom(ps))
+      | Err(e) -> Err(e)
+      | Ok(a) -> parse-type-args-spine(ps, head, append-ast(args, a)) | if (args == []) -> Ok(head) | Ok(paren-at(head :: args, span-join(ast-span(head), ast-span(last-ast(args)))))
 
 let is-type-atom(ps: Ps) -> Bool {
   let t = peek(ps)
-  cond
-    | t.kind == "ident" -> true
-    | t.kind == "punct" && (t.text == "(" || t.text == "[") -> true
-    | else -> false
+  if (t.kind == "ident") -> true | if (t.kind == "punct" && (t.text == "(" || t.text == "[")) -> true | false
 }
 
 let parse-type-atom(ps: Ps) -> Result Ast ParseError {
   let t = peek(ps)
-  cond
-    | t.kind == "ident" ->
-      {
-        advance(ps)
-        parse-type-atom-project(ps, sym-at(t.text, tok-span(t)))
-      }
-    | t.kind == "punct" && t.text == "(" -> parse-type-arrow(ps)
-    | else -> perr(t, "expected a type")
+  if (t.kind == "ident") ->
+    {
+      advance(ps)
+      parse-type-atom-project(ps, sym-at(t.text, tok-span(t)))
+    } | if (t.kind == "punct" && t.text == "(") -> parse-type-arrow(ps) | perr(t, "expected a type")
 }
 
 ; `Alias.Name` in a type annotation is the same project shape expressions use,
 ; so rewrite-import-aliases can mangle it for separate compilation.
 let parse-type-atom-project(ps: Ps, left: Ast) -> Result Ast ParseError =
-  cond
-    | (peek(ps)).kind == "punct" && (peek(ps)).text == "." && not((peek(ps)).bol) ->
-      match (parse-project(ps, left))
-        | Err(e) -> Err(e)
-        | Ok(next) -> parse-type-atom-project(ps, next)
-    | else -> Ok(left)
+  if (peek(ps).kind == "punct" && peek(ps).text == "." && not(peek(ps).bol)) ->
+    match (parse-project(ps, left))
+      | Err(e) -> Err(e)
+      | Ok(next) -> parse-type-atom-project(ps, next) | Ok(left)
 
 let parse-tparams-opt(ps: Ps) -> Result (Maybe Ast) ParseError =
-  cond
-    | not(delim(ps, "[")) -> Ok(None)
-    | else ->
-      {
-        let open = peek(ps)
-        advance(ps)
-        match (collect-until(ps, "]", parse-tparam))
-          | Err(e) -> Err(e)
-          | Ok(ps2) ->
-            match (eat(ps, "]"))
-              | None -> perr(peek(ps), "unclosed [")
-              | Some(close) -> Ok(Some(bracket-at(ps2, span-join(tok-span(open), tok-span(close)))))
-      }
+  if (not(delim(ps, "["))) -> Ok(None) |
+  {
+    let open = peek(ps)
+    advance(ps)
+    match (collect-until(ps, "]", parse-tparam))
+      | Err(e) -> Err(e)
+      | Ok(ps2) ->
+        match (eat(ps, "]"))
+          | None -> perr(peek(ps), "unclosed [")
+          | Some(close) -> Ok(Some(bracket-at(ps2, span-join(tok-span(open), tok-span(close)))))
+  }
 
 let parse-tparam(ps: Ps) -> Result Ast ParseError {
   let n = peek(ps)
-  cond
-    | n.kind != "ident" -> perr(n, "expected a type parameter")
-    | else ->
-      {
-        advance(ps)
-        Ok(sym-at(n.text, tok-span(n)))
-      }
+  if (n.kind != "ident") -> perr(n, "expected a type parameter") |
+  {
+    advance(ps)
+    Ok(sym-at(n.text, tok-span(n)))
+  }
 }
 
 let parse-name(ps: Ps) -> Result Ast ParseError {
   let name = peek(ps)
-  cond
-    | name.kind != "ident" -> perr(name, "expected a name")
-    | else ->
-      {
-        advance(ps)
-        match (parse-tparams-opt(ps))
-          | Err(e) -> Err(e)
-          | Ok(None) -> Ok(sym-at(name.text, tok-span(name)))
-          | Ok(Some(tp)) -> Ok(paren-at([sym-at(name.text, tok-span(name)), tp], span-join(tok-span(name), ast-span(tp))))
-      }
+  if (name.kind != "ident") -> perr(name, "expected a name") |
+  {
+    advance(ps)
+    match (parse-tparams-opt(ps))
+      | Err(e) -> Err(e)
+      | Ok(None) -> Ok(sym-at(name.text, tok-span(name)))
+      | Ok(Some(tp)) -> Ok(paren-at([sym-at(name.text, tok-span(name)), tp], span-join(tok-span(name), ast-span(tp))))
+  }
 }
 
 let parse-param-list(ps: Ps) -> Result (List Ast) ParseError =
@@ -2273,40 +1987,33 @@ let parse-tuple-param-type(ps: Ps, pat: Ast) -> Result Ast ParseError =
         | Ok(ty) -> Ok(paren-at([sym-at("param", ast-span(pat)), pat, ty], span-join(ast-span(pat), ast-span(ty))))
 
 let parse-simple-param(ps: Ps) -> Result Ast ParseError {
-  let rest = (peek(ps)).kind == "ident" && (peek(ps)).text == "..."
+  let rest = peek(ps).kind == "ident" && peek(ps).text == "..."
   if (rest) -> advance(ps)
   let name = peek(ps)
-  cond
-    | name.kind != "ident" -> perr(name, "expected a parameter name")
-    | else ->
-      {
-        advance(ps)
-        let bare = bare-name(name.text)
-        if ((peek(ps)).text == ":") -> advance(ps)
-        match (parse-type(ps))
-          | Err(e) -> Err(e)
-          | Ok(ty) ->
-            if (rest) -> Ok(paren-at([sym-at(String.concat(bare, ":"), tok-span(name)), ty, sym-at("...", tok-span(name))], span-join(tok-span(name), ast-span(ty)))) | Ok(paren-at([sym-at(String.concat(bare, ":"), tok-span(name)), ty], span-join(tok-span(name), ast-span(ty))))
-      }
+  if (name.kind != "ident") -> perr(name, "expected a parameter name") |
+  {
+    advance(ps)
+    let bare = bare-name(name.text)
+    if (peek(ps).text == ":") -> advance(ps)
+    match (parse-type(ps))
+      | Err(e) -> Err(e)
+      | Ok(ty) ->
+        if (rest) -> Ok(paren-at([sym-at(String.concat(bare, ":"), tok-span(name)), ty, sym-at("...", tok-span(name))], span-join(tok-span(name), ast-span(ty)))) | Ok(paren-at([sym-at(String.concat(bare, ":"), tok-span(name)), ty], span-join(tok-span(name), ast-span(ty))))
+  }
 }
 
 let parse-field(ps: Ps) -> Result Ast ParseError {
   let name = peek(ps)
-  cond
-    | name.kind != "ident" -> perr(name, "expected a field name")
-    | else ->
+  if (name.kind != "ident") -> perr(name, "expected a field name") |
+  {
+    advance(ps)
+    let bare = bare-name(name.text)
+    if (peek(ps).text == ":") ->
       {
         advance(ps)
-        let bare = bare-name(name.text)
-        cond
-          | (peek(ps)).text == ":" ->
-            {
-              advance(ps)
-              parse-field-type(ps, name, bare)
-            }
-          | ends-colon(name.text) -> parse-field-type(ps, name, bare)
-          | else -> perr(peek(ps), "expected :")
-      }
+        parse-field-type(ps, name, bare)
+      } | if (ends-colon(name.text)) -> parse-field-type(ps, name, bare) | perr(peek(ps), "expected :")
+  }
 }
 
 let parse-field-type(ps: Ps, name: Tok, bare: Str) -> Result Ast ParseError =
@@ -2336,24 +2043,20 @@ let parse-let-tuple-expr(ps: Ps, kw: Tok, pat: Ast) -> Result Ast ParseError =
 
 let parse-let-named(ps: Ps, kw: Tok, indent: Int) -> Result Ast ParseError {
   let name = peek(ps)
-  cond
-    | name.kind != "ident" -> perr(name, "expected a name")
-    | else ->
-      {
-        advance(ps)
-        match (parse-tparams-opt(ps))
-          | Err(e) -> Err(e)
-          | Ok(tp) ->
-            cond
-              | delim(ps, "(") -> parse-defn(ps, kw, name, tp, indent)
-              | else ->
-                match (eat(ps, "="))
-                  | None -> perr(peek(ps), "expected =")
-                  | Some(_) ->
-                    match (parse-expr(ps))
-                      | Err(e) -> Err(e)
-                      | Ok(expr) -> Ok(paren-at([sym-at("let", tok-span(kw)), sym-at(name.text, tok-span(name)), expr], span-join(tok-span(kw), ast-span(expr))))
-      }
+  if (name.kind != "ident") -> perr(name, "expected a name") |
+  {
+    advance(ps)
+    match (parse-tparams-opt(ps))
+      | Err(e) -> Err(e)
+      | Ok(tp) ->
+        if (delim(ps, "(")) -> parse-defn(ps, kw, name, tp, indent) |
+        match (eat(ps, "="))
+          | None -> perr(peek(ps), "expected =")
+          | Some(_) ->
+            match (parse-expr(ps))
+              | Err(e) -> Err(e)
+              | Ok(expr) -> Ok(paren-at([sym-at("let", tok-span(kw)), sym-at(name.text, tok-span(name)), expr], span-join(tok-span(kw), ast-span(expr))))
+  }
 }
 
 let name-ast(name: Tok, tp: Maybe Ast) -> Ast =
@@ -2381,7 +2084,7 @@ let parse-defn(ps: Ps, kw: Tok, name: Tok, tp: Maybe Ast, indent: Int) -> Result
 ; `__p{i}` name and the body is wrapped in a `match __p{i} pat …` for
 ; it (mirrors host's `wrapPatternParams`; top-level `defn` does the same
 ; at desugar time instead — see `desugar.mnd`'s `desugar-defn`).
-let local-fn-let(kw: Tok, name: Tok, params: List Ast, body: Ast) -> Ast = {
+let local-fn-let(kw: Tok, name: Tok, params: List Ast, body: Ast) -> Ast {
   let names = param-names(params, 0)
   let wrapped = wrap-body-with-params(params, 0, body)
   let fn-ast = paren-at([sym-at("fn", tok-span(kw)), paren-at(names, tok-span(name)), wrapped], span-join(tok-span(kw), ast-span(body)))
@@ -2420,52 +2123,43 @@ let parse-test(ps: Ps) -> Result Ast ParseError {
   let kw = peek(ps)
   advance(ps)
   let s = peek(ps)
-  cond
-    | s.kind != "str" -> perr(s, "expected a test description")
-    | else ->
-      {
-        advance(ps)
-        match (eat(ps, "="))
-          | None -> perr(peek(ps), "expected =")
-          | Some(_) ->
-            match (parse-expr(ps))
-              | Err(e) -> Err(e)
-              | Ok(e) -> Ok(paren-at([sym-at("test", tok-span(kw)), str-node(s), e], span-join(tok-span(kw), ast-span(e))))
-      }
+  if (s.kind != "str") -> perr(s, "expected a test description") |
+  {
+    advance(ps)
+    match (eat(ps, "="))
+      | None -> perr(peek(ps), "expected =")
+      | Some(_) ->
+        match (parse-expr(ps))
+          | Err(e) -> Err(e)
+          | Ok(e) -> Ok(paren-at([sym-at("test", tok-span(kw)), str-node(s), e], span-join(tok-span(kw), ast-span(e))))
+  }
 }
 
 let parse-import(ps: Ps, reexport: Bool) -> Result Ast ParseError {
   let kw = peek(ps)
   advance(ps)
   let t = peek(ps)
-  cond
-    | t.kind == "str" || t.kind == "ident" ->
-      {
-        advance(ps)
-        let path =
-          if (t.kind == "str") -> str-node(t) | sym-at(t.text, tok-span(t))
-        parse-import-tail(ps, kw, path, t, reexport)
-      }
-    | else -> perr(t, "expected a module path")
+  if (t.kind == "str" || t.kind == "ident") ->
+    {
+      advance(ps)
+      let path =
+        if (t.kind == "str") -> str-node(t) | sym-at(t.text, tok-span(t))
+      parse-import-tail(ps, kw, path, t, reexport)
+    } | perr(t, "expected a module path")
 }
 
 ; `as` is special only here, so the same spelling can still be a name.
 let parse-import-tail(ps: Ps, kw: Tok, path: Ast, path-tok: Tok, reexport: Bool) -> Result Ast ParseError =
-  cond
-    | (peek(ps)).kind == "ident" && (peek(ps)).text == "as" ->
-      if (reexport) -> perr(peek(ps), "pub import cannot be qualified") | parse-import-alias(ps, kw, path, path-tok)
-    | delim(ps, "(") -> parse-import-list(ps, kw, path, reexport)
-    | else -> Ok(paren-at([sym-at("import", tok-span(kw)), path], span-join(tok-span(kw), tok-span(path-tok))))
+  if (peek(ps).kind == "ident" && peek(ps).text == "as") ->
+    if (reexport) -> perr(peek(ps), "pub import cannot be qualified") | parse-import-alias(ps, kw, path, path-tok) | if (delim(ps, "(")) -> parse-import-list(ps, kw, path, reexport) | Ok(paren-at([sym-at("import", tok-span(kw)), path], span-join(tok-span(kw), tok-span(path-tok))))
 
 let parse-import-alias(ps: Ps, kw: Tok, path: Ast, path-tok: Tok) -> Result Ast ParseError =
-  cond
-    | (peek(ps)).kind == "ident" && (peek(ps)).text == "as" ->
-      {
-        advance(ps)
-        let mod = peek(ps)
-        if (mod.kind != "ident") -> perr(mod, "expected a module name") | parse-import-named(ps, kw, path, mod)
-      }
-    | else -> Ok(paren-at([sym-at("import", tok-span(kw)), path], span-join(tok-span(kw), tok-span(path-tok))))
+  if (peek(ps).kind == "ident" && peek(ps).text == "as") ->
+    {
+      advance(ps)
+      let mod = peek(ps)
+      if (mod.kind != "ident") -> perr(mod, "expected a module name") | parse-import-named(ps, kw, path, mod)
+    } | Ok(paren-at([sym-at("import", tok-span(kw)), path], span-join(tok-span(kw), tok-span(path-tok))))
 
 let parse-import-list(ps: Ps, kw: Tok, path: Ast, reexport: Bool) -> Result Ast ParseError =
   match (parse-import-names(ps))
@@ -2479,28 +2173,24 @@ let parse-import-names(ps: Ps) -> Result Ast ParseError =
     | Some(open) -> parse-import-name-acc(ps, open, [])
 
 let parse-import-name-acc(ps: Ps, open: Tok, acc: List Ast) -> Result Ast ParseError =
-  cond
-    | delim(ps, ")") || (peek(ps)).kind == "eof" ->
-      match (eat(ps, ")"))
-        | None -> perr(peek(ps), "unclosed (")
-        | Some(close) ->
-          if (acc == []) -> perr(open, "import name list is empty") | Ok(paren-at(acc, span-join(tok-span(open), tok-span(close))))
-    | else ->
-      {
-        let dropped = eat(ps, ",")
-        if (delim(ps, ")")) -> parse-import-name-acc(ps, open, acc) | parse-import-name-one(ps, open, acc, dropped)
-      }
+  if (delim(ps, ")") || peek(ps).kind == "eof") ->
+    match (eat(ps, ")"))
+      | None -> perr(peek(ps), "unclosed (")
+      | Some(close) ->
+        if (acc == []) -> perr(open, "import name list is empty") | Ok(paren-at(acc, span-join(tok-span(open), tok-span(close)))) |
+  {
+    let dropped = eat(ps, ",")
+    if (delim(ps, ")")) -> parse-import-name-acc(ps, open, acc) | parse-import-name-one(ps, open, acc, dropped)
+  }
 
 let parse-import-name-one(ps: Ps, open: Tok, acc: List Ast, dropped: Maybe Tok) -> Result Ast ParseError {
   let n = peek(ps)
-  cond
-    | n.kind != "ident" -> perr(n, "expected an export name")
-    | else ->
-      {
-        advance(ps)
-        let dropped2 = eat(ps, ",")
-        parse-import-name-acc(ps, open, append-ast(acc, sym-at(n.text, tok-span(n))))
-      }
+  if (n.kind != "ident") -> perr(n, "expected an export name") |
+  {
+    advance(ps)
+    let dropped2 = eat(ps, ",")
+    parse-import-name-acc(ps, open, append-ast(acc, sym-at(n.text, tok-span(n))))
+  }
 }
 
 ; `(import path alias)` is the qualified form.
@@ -2513,48 +2203,44 @@ let parse-extern(ps: Ps) -> Result Ast ParseError {
   let kw = peek(ps)
   advance(ps)
   let name = peek(ps)
-  cond
-    | name.kind != "ident" -> perr(name, "expected an extern name")
-    | else ->
-      {
-        advance(ps)
-        match (parse-tparams-opt(ps))
+  if (name.kind != "ident") -> perr(name, "expected an extern name") |
+  {
+    advance(ps)
+    match (parse-tparams-opt(ps))
+      | Err(e) -> Err(e)
+      | Ok(tp) ->
+        match (parse-param-list(ps))
           | Err(e) -> Err(e)
-          | Ok(tp) ->
-            match (parse-param-list(ps))
-              | Err(e) -> Err(e)
-              | Ok(params) ->
-                match (eat(ps, "->"))
-                  | None -> perr(peek(ps), "expected ->")
-                  | Some(_) ->
-                    match (parse-type(ps))
-                      | Err(e) -> Err(e)
-                      | Ok(ret) -> Ok(paren-at(defn-like("extern", kw, name-ast(name, tp), params, ret), span-join(tok-span(kw), ast-span(ret))))
-      }
+          | Ok(params) ->
+            match (eat(ps, "->"))
+              | None -> perr(peek(ps), "expected ->")
+              | Some(_) ->
+                match (parse-type(ps))
+                  | Err(e) -> Err(e)
+                  | Ok(ret) -> Ok(paren-at(defn-like("extern", kw, name-ast(name, tp), params, ret), span-join(tok-span(kw), ast-span(ret))))
+  }
 }
 
 let parse-runtime(ps: Ps) -> Result Ast ParseError {
   let kw = peek(ps)
   advance(ps)
   let name = peek(ps)
-  cond
-    | name.kind != "ident" -> perr(name, "expected a runtime name")
-    | else ->
-      {
-        advance(ps)
-        match (parse-tparams-opt(ps))
+  if (name.kind != "ident") -> perr(name, "expected a runtime name") |
+  {
+    advance(ps)
+    match (parse-tparams-opt(ps))
+      | Err(e) -> Err(e)
+      | Ok(tp) ->
+        match (parse-param-list(ps))
           | Err(e) -> Err(e)
-          | Ok(tp) ->
-            match (parse-param-list(ps))
-              | Err(e) -> Err(e)
-              | Ok(params) ->
-                match (eat(ps, "->"))
-                  | None -> perr(peek(ps), "expected ->")
-                  | Some(_) ->
-                    match (parse-type(ps))
-                      | Err(e) -> Err(e)
-                      | Ok(ret) -> Ok(paren-at(defn-like("runtime", kw, name-ast(name, tp), params, ret), span-join(tok-span(kw), ast-span(ret))))
-      }
+          | Ok(params) ->
+            match (eat(ps, "->"))
+              | None -> perr(peek(ps), "expected ->")
+              | Some(_) ->
+                match (parse-type(ps))
+                  | Err(e) -> Err(e)
+                  | Ok(ret) -> Ok(paren-at(defn-like("runtime", kw, name-ast(name, tp), params, ret), span-join(tok-span(kw), ast-span(ret))))
+  }
 }
 
 let defn-like(head: Str, kw: Tok, name: Ast, params: List Ast, ret: Ast) -> List Ast =
@@ -2564,18 +2250,16 @@ let parse-alias(ps: Ps) -> Result Ast ParseError {
   let kw = peek(ps)
   advance(ps)
   let name = peek(ps)
-  cond
-    | name.kind != "ident" -> perr(name, "expected an alias name")
-    | else ->
-      {
-        advance(ps)
-        match (eat(ps, "="))
-          | None -> perr(peek(ps), "expected =")
-          | Some(_) ->
-            match (parse-type(ps))
-              | Err(e) -> Err(e)
-              | Ok(ty) -> Ok(paren-at([sym-at("alias", tok-span(kw)), sym-at(name.text, tok-span(name)), ty], span-join(tok-span(kw), ast-span(ty))))
-      }
+  if (name.kind != "ident") -> perr(name, "expected an alias name") |
+  {
+    advance(ps)
+    match (eat(ps, "="))
+      | None -> perr(peek(ps), "expected =")
+      | Some(_) ->
+        match (parse-type(ps))
+          | Err(e) -> Err(e)
+          | Ok(ty) -> Ok(paren-at([sym-at("alias", tok-span(kw)), sym-at(name.text, tok-span(name)), ty], span-join(tok-span(kw), ast-span(ty))))
+  }
 }
 
 let parse-record(ps: Ps) -> Result Ast ParseError {
@@ -2608,52 +2292,36 @@ let parse-type-decl(ps: Ps) -> Result Ast ParseError {
 
 let parse-ctors(ps: Ps, kw: Tok, name: Ast, acc: List Ast) -> Result Ast ParseError {
   let t = peek(ps)
-  cond
-    | t.kind == "op" && t.text == "|" && t.bol && t.indent > kw.indent ->
-      {
-        advance(ps)
-        match (parse-ctor(ps))
-          | Err(e) -> Err(e)
-          | Ok(c) -> parse-ctors(ps, kw, name, append-ast(acc, c))
-      }
-    | acc == [] -> Ok(paren-at([sym-at("variant", tok-span(kw)), name], span-join(tok-span(kw), ast-span(name))))
-    | else -> Ok(paren-at(sym-at("variant", tok-span(kw)) :: name :: acc, span-join(tok-span(kw), ast-span(last-ast(acc)))))
+  if (t.kind == "op" && t.text == "|" && t.bol && t.indent > kw.indent) ->
+    {
+      advance(ps)
+      match (parse-ctor(ps))
+        | Err(e) -> Err(e)
+        | Ok(c) -> parse-ctors(ps, kw, name, append-ast(acc, c))
+    } | if (acc == []) -> Ok(paren-at([sym-at("variant", tok-span(kw)), name], span-join(tok-span(kw), ast-span(name)))) | Ok(paren-at(sym-at("variant", tok-span(kw)) :: name :: acc, span-join(tok-span(kw), ast-span(last-ast(acc)))))
 }
 
 let parse-ctor(ps: Ps) -> Result Ast ParseError {
   let name = peek(ps)
-  cond
-    | name.kind != "ident" -> perr(name, "expected a constructor")
-    | else ->
-      {
-        advance(ps)
-        cond
-          | not(delim(ps, "(")) -> Ok(paren-at([sym-at(name.text, tok-span(name))], tok-span(name)))
-          | else ->
-            {
-              advance(ps)
-              match (collect-until(ps, ")", parse-type))
-                | Err(e) -> Err(e)
-                | Ok(args) ->
-                  match (eat(ps, ")"))
-                    | None -> perr(peek(ps), "unclosed (")
-                    | Some(close) -> Ok(paren-at(sym-at(name.text, tok-span(name)) :: args, span-join(tok-span(name), tok-span(close))))
-            }
-      }
+  if (name.kind != "ident") -> perr(name, "expected a constructor") |
+  {
+    advance(ps)
+    if (not(delim(ps, "("))) -> Ok(paren-at([sym-at(name.text, tok-span(name))], tok-span(name))) |
+    {
+      advance(ps)
+      match (collect-until(ps, ")", parse-type))
+        | Err(e) -> Err(e)
+        | Ok(args) ->
+          match (eat(ps, ")"))
+            | None -> perr(peek(ps), "unclosed (")
+            | Some(close) -> Ok(paren-at(sym-at(name.text, tok-span(name)) :: args, span-join(tok-span(name), tok-span(close))))
+    }
+  }
 }
 
 let parse-decl-inner(ps: Ps) -> Result Ast ParseError {
   let t = peek(ps)
-  cond
-    | t.text == "import" -> parse-import(ps, false)
-    | t.text == "extern" -> parse-extern(ps)
-    | t.text == "runtime" -> parse-runtime(ps)
-    | t.text == "alias" -> parse-alias(ps)
-    | t.text == "record" -> parse-record(ps)
-    | t.text == "type" -> parse-type-decl(ps)
-    | t.text == "let" -> parse-let(ps, t.indent)
-    | t.text == "test" -> parse-test(ps)
-    | else -> perr(t, "expected a declaration")
+  if (t.text == "import") -> parse-import(ps, false) | if (t.text == "extern") -> parse-extern(ps) | if (t.text == "runtime") -> parse-runtime(ps) | if (t.text == "alias") -> parse-alias(ps) | if (t.text == "record") -> parse-record(ps) | if (t.text == "type") -> parse-type-decl(ps) | if (t.text == "let") -> parse-let(ps, t.indent) | if (t.text == "test") -> parse-test(ps) | perr(t, "expected a declaration")
 }
 
 let parse-decl(ps: Ps) -> Result Ast ParseError =
@@ -2663,16 +2331,14 @@ let parse-decl(ps: Ps) -> Result Ast ParseError =
 
 let parse-pub(ps: Ps, pub-tok: Tok) -> Result Ast ParseError {
   let t = peek(ps)
-  cond
-    | t.text == "extern" || t.text == "test" -> perr(t, "pub cannot prefix this declaration")
-    | t.text == "import" ->
-      match (parse-import(ps, true))
-        | Err(e) -> Err(e)
-        | Ok(inner) -> Ok(wrap-pub(pub-tok, inner))
-    | else ->
-      match (parse-decl-inner(ps))
-        | Err(e) -> Err(e)
-        | Ok(inner) -> Ok(wrap-pub(pub-tok, inner))
+  if (t.text == "extern" || t.text == "test") -> perr(t, "pub cannot prefix this declaration") |
+  if (t.text == "import") ->
+    match (parse-import(ps, true))
+      | Err(e) -> Err(e)
+      | Ok(inner) -> Ok(wrap-pub(pub-tok, inner)) |
+  match (parse-decl-inner(ps))
+    | Err(e) -> Err(e)
+    | Ok(inner) -> Ok(wrap-pub(pub-tok, inner))
 }
 
 let wrap-pub(pub-tok: Tok, inner: Ast) -> Ast =
@@ -2681,37 +2347,27 @@ let wrap-pub(pub-tok: Tok, inner: Ast) -> Ast =
     | _ -> paren-at([sym-at("pub", tok-span(pub-tok))], tok-span(pub-tok))
 
 let is-decl(t: Tok) -> Bool =
-  cond
-    | t.text == "runtime" -> true
-    | t.kind == "kw" && (t.text == "pub" || t.text == "import" || t.text == "extern" || t.text == "alias" || t.text == "record" || t.text == "type" || t.text == "let") -> true
-    | t.text == "test" -> true
-    | else -> false
+  if (t.text == "runtime") -> true | if (t.kind == "kw" && (t.text == "pub" || t.text == "import" || t.text == "extern" || t.text == "alias" || t.text == "record" || t.text == "type" || t.text == "let")) -> true | if (t.text == "test") -> true | false
 
 let parse-file-acc(ps: Ps, acc: List Ast) -> Result (List Ast) ParseError =
-  cond
-    | (peek(ps)).kind == "eof" -> Ok(rev(acc, []))
-    | else ->
-      {
-        let t = peek(ps)
-        cond
-          | t.indent != 0 || not(t.bol) -> perr(t, "top-level declaration must start at column 0")
-          | else ->
-            match (parse-top(ps, t))
-              | Err(e) -> Err(e)
-              | Ok(f) -> parse-file-acc(ps, f :: acc)
-      }
+  if (peek(ps).kind == "eof") -> Ok(rev(acc, [])) |
+  {
+    let t = peek(ps)
+    if (t.indent != 0 || not(t.bol)) -> perr(t, "top-level declaration must start at column 0") |
+    match (parse-top(ps, t))
+      | Err(e) -> Err(e)
+      | Ok(f) -> parse-file-acc(ps, f :: acc)
+  }
 
 let parse-top(ps: Ps, t: Tok) -> Result Ast ParseError =
   if (is-decl(t)) -> parse-decl(ps) | parse-expr(ps)
 
 let parse-one(ps: Ps) -> Result Ast ParseError =
-  cond
-    | (peek(ps)).kind == "eof" -> perr(peek(ps), "expected an expression")
-    | else ->
-      match (parse-expr(ps))
-        | Err(e) -> Err(e)
-        | Ok(e) ->
-          if ((peek(ps)).kind != "eof") -> perr(peek(ps), "unexpected trailing input") | Ok(e)
+  if (peek(ps).kind == "eof") -> perr(peek(ps), "expected an expression") |
+  match (parse-expr(ps))
+    | Err(e) -> Err(e)
+    | Ok(e) ->
+      if (peek(ps).kind != "eof") -> perr(peek(ps), "unexpected trailing input") | Ok(e)
 
 pub let read(src: Str) -> Result Ast ParseError =
   match (lex-all(src))

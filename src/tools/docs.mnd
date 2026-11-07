@@ -7,7 +7,6 @@
 ;
 ; Usage: bun run host/src/cli/menard.ts run src/tools/docs.mnd -- stdlib
 ; Prints one record per published function. Exits 1 when a check fails.
-
 import std/fs
 import std/io
 import std/list
@@ -29,21 +28,15 @@ let comment-body(line: Str) -> Str {
 
 ; The symbol at the start of s, stopping at space, `[`, `(`, or `)`.
 let take-sym(s: Str, i: Int, n: Int) -> Str =
-  cond
-    | i >= n -> String.slice(0, n, s)
-    | else ->
-      {
-        let b = String.byte(i, s)
-        if (b == 32 || b == 91 || b == 40 || b == 41) -> String.slice(0, i, s) | take-sym(s, i + 1, n)
-      }
+  if (i >= n) -> String.slice(0, n, s) |
+  {
+    let b = String.byte(i, s)
+    if (b == 32 || b == 91 || b == 40 || b == 41) -> String.slice(0, i, s) | take-sym(s, i + 1, n)
+  }
 
 ; Bytes to skip before the name of a defn or runtime header.
 let header-skip(line: Str) -> Int =
-  cond
-    | String.starts-with("pub runtime ", line) -> 12
-    | String.starts-with("pub let ", line) -> 8
-    | String.starts-with("runtime ", line) -> 8
-    | else -> 4
+  if (String.starts-with("pub runtime ", line)) -> 12 | if (String.starts-with("pub let ", line)) -> 8 | if (String.starts-with("runtime ", line)) -> 8 | 4
 
 ; The function name from a defn or runtime header line.
 let defn-name(line: Str) -> Str {
@@ -83,10 +76,7 @@ let scan-record(module: Str, name: Str, sig: Str, docs: List Str, exported: Bool
   let missing-summary = summary == ""
   let missing-test = exported && length(tests) == 0
   let note =
-    cond
-      | missing-summary -> String.concat("error: ", module, " ", name, " has no summary\n")
-      | missing-test -> String.concat("error: ", module, " ", name, " has no @test\n")
-      | else -> ""
+    if (missing-summary) -> String.concat("error: ", module, " ", name, " has no summary\n") | if (missing-test) -> String.concat("error: ", module, " ", name, " has no @test\n") | ""
   let body =
     if (exported) -> String.concat("module: ", module, "\nname: ", name, "\nsignature: ", sig, "\nsummary: ", summary, "\n", String.join("\n", tests), "\n\n") | ""
   Scan(String.concat(note, body), not(missing-summary || missing-test))
@@ -99,26 +89,21 @@ let scan-lines(ls: List Str, docs: List Str, module: Str, acc: Scan) -> Scan =
     | raw :: rest ->
       {
         let line = raw
-        cond
-          | line == "" -> scan-lines(rest, [], module, acc)
-          | String.byte(0, line) == 59 -> scan-lines(rest, append([comment-body(line)], docs), module-of(comment-body(line), module), acc)
-          | is-defn(line) ->
-            {
-              let rec = scan-record(module, defn-name(line), line, docs, is-pub(line))
-              match (rec)
-                | Scan(text, ok) ->
-                  match (acc)
-                    | Scan(prev, pok) -> scan-lines(rest, [], module, Scan(String.concat(prev, text), pok && ok))
-            }
-          | else -> scan-lines(rest, [], module, acc)
+        if (line == "") -> scan-lines(rest, [], module, acc) |
+        if (String.byte(0, line) == 59) -> scan-lines(rest, append([comment-body(line)], docs), module-of(comment-body(line), module), acc) |
+        if (is-defn(line)) ->
+          {
+            let rec = scan-record(module, defn-name(line), line, docs, is-pub(line))
+            match (rec)
+              | Scan(text, ok) ->
+                match (acc)
+                  | Scan(prev, pok) -> scan-lines(rest, [], module, Scan(String.concat(prev, text), pok && ok))
+          } | scan-lines(rest, [], module, acc)
       }
 
 ; Lines of s, keeping blanks so a blank line can end a doc comment.
 let split-keep(s: Str, i: Int, start: Int, n: Int, acc: List Str) -> List Str =
-  cond
-    | i > n -> reverse(acc)
-    | i == n || String.byte(i, s) == 10 -> split-keep(s, i + 1, i + 1, n, String.slice(start, i - start, s) :: acc)
-    | else -> split-keep(s, i + 1, start, n, acc)
+  if (i > n) -> reverse(acc) | if (i == n || String.byte(i, s) == 10) -> split-keep(s, i + 1, i + 1, n, String.slice(start, i - start, s) :: acc) | split-keep(s, i + 1, start, n, acc)
 
 ; Scan one library file. A missing file is a failure.
 let scan-file(path: Str) -> Scan =
@@ -135,16 +120,14 @@ let scan-names(dir: Str, names: List Str, acc: Scan) -> Scan =
   match (names)
     | [] -> acc
     | name :: rest ->
-      cond
-        | lib-name(name) ->
-          {
-            let one = scan-file(Path.join(name, dir))
-            match (one)
-              | Scan(text, ok) ->
-                match (acc)
-                  | Scan(prev, pok) -> scan-names(dir, rest, Scan(String.concat(prev, text), pok && ok))
-          }
-        | else -> scan-names(dir, rest, acc)
+      if (lib-name(name)) ->
+        {
+          let one = scan-file(Path.join(name, dir))
+          match (one)
+            | Scan(text, ok) ->
+              match (acc)
+                | Scan(prev, pok) -> scan-names(dir, rest, Scan(String.concat(prev, text), pok && ok))
+        } | scan-names(dir, rest, acc)
 
 ; The published records for dir, and whether every defn is documented.
 let library-docs(dir: Str) -> Scan =

@@ -1,6 +1,5 @@
 ; Decimal text to little-endian IEEE-754 binary64. The hex is the payload
 ; the static pool sorts, low byte first.
-
 import "./float-bits.mnd"
 import std/result as Result
 
@@ -26,5 +25,4 @@ test "subnormals and signed underflow" = hex-is("5e-324", "0100000000000000") &&
 
 test "overflow is an error" = is-err("1e400") && is-err("-1e309")
 
-test "unhex is the inverse of a known payload" =
-  unhex-float("000000000000f03f") == unhex-float("000000000000f03f")
+test "unhex is the inverse of a known payload" = unhex-float("000000000000f03f") == unhex-float("000000000000f03f")

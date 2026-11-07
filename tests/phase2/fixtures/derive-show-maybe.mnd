@@ -1,6 +1,5 @@
 ; Fixture for src/derive/plan.test.mnd: show of Some(1) plans
 ; `(Maybe Int)`.
-
 let use-show() -> Str =
   show(Some(1))
 

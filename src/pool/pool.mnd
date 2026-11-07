@@ -41,7 +41,6 @@
 ; object per entry, `align 8`, in `pool-summary`'s byte order.
 ; `pool-summary` itself stays the goldenable text form. Interned `Sym`
 ; names are not collected: nothing interns one at runtime.
-
 import "../reader/ast.mnd"
 import "./float-bits.mnd"
 import std/list
@@ -51,7 +50,6 @@ import std/map as Map
 ; ---------------------------------------------------------------------------
 ; Small Ast helpers, restated locally per `src/`'s "no prelude import"
 ; rule (see `type/check.mnd`'s equivalent header note).
-
 let sym-str(ast: Ast) -> Maybe Str =
   match (ast)
     | SymNode(n, _) -> Some(n)
@@ -85,7 +83,6 @@ let unwrap-pub-head(head: Ast, rest: List Ast, sp: Span, ast: Ast) -> Ast =
 ; then every top-level `variant` ctor and zero-or-more-field `defrec` in
 ; `forms` (a `defrec`'s own name is its one constructor, per
 ; `type/check.mnd`'s `collect-defrec-fields`).
-
 let builtin-ctor-arities() -> Map Str Int {
   let m0 = Map.empty()
   let m1 = Map.set("None", 0, m0)
@@ -142,10 +139,7 @@ let collect-defrec-decl-arities-named(name-part: Ast, fields: List Ast, acc: Map
     | Some(type-name) -> Map.set(type-name, length(fields), acc)
 
 let collect-arities-named(hn: Str, rest: List Ast, acc: Map Str Int) -> Map Str Int =
-  cond
-    | hn == "variant" -> collect-variant-decl-arities(rest, acc)
-    | hn == "defrec" -> collect-defrec-decl-arities(rest, acc)
-    | else -> acc
+  if (hn == "variant") -> collect-variant-decl-arities(rest, acc) | if (hn == "defrec") -> collect-defrec-decl-arities(rest, acc) | acc
 
 let collect-arities-form-checked(ast: Ast, acc: Map Str Int) -> Map Str Int =
   match (ast)
@@ -192,7 +186,6 @@ let is-nullary-ctor(name: Str, arities: Map Str Int) -> Bool =
 ; `"str \"…\""` or `"ctor Name"` — as it is found; dedup and sort (below)
 ; then operate on those lines' own bytes, which is exactly "dedup by byte
 ; content, sort by byte content" for this text form.
-
 let quote-str(s: Str) -> Str =
   String.concat("\"", s, "\"")
 
@@ -234,7 +227,7 @@ let walk-expr(ast: Ast, arities: Map Str Int, entries: Ref (List Str)) -> Unit =
     | StrNode(s, _) -> record-str!(entries, s)
     | FloatNode(s, _) -> record-float!(entries, s)
     | SymNode(name, _) ->
-      if (is-nullary-ctor(name, arities)) -> record-ctor!(entries, name) | ()
+      if (is-nullary-ctor(name, arities)) -> record-ctor!(entries, name)
     | ParenNode(elems, _) -> walk-paren(elems, arities, entries)
     | BracketNode(elems, _) -> walk-list(elems, arities, entries)
     | _ -> ()
@@ -264,7 +257,6 @@ let walk-paren-nonquote(head: Ast, rest: List Ast, arities: Map Str Int, entries
 ; walk everything else — `defn` bodies, top-level `let`s, bare top-level
 ; expressions — as ordinary code, exactly as `derive/plan.mnd`'s
 ; `walk-top-form` does for use-site collection.
-
 let is-decl-head(name: Str) -> Bool =
   name == "alias" || name == "defrec" || name == "variant" || name == "extern" || name == "import"
 
@@ -294,7 +286,6 @@ let walk-top-forms(forms: List Ast, arities: Map Str Int, entries: Ref (List Str
 ; ---------------------------------------------------------------------------
 ; Dedup by byte content, sort by byte content (ADR 38/§2.2.1's own two
 ; rules), then join one entry per line.
-
 let str-insert-sorted(x: Str, xs: List Str) -> List Str =
   match (xs)
     | [] -> [x]

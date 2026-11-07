@@ -17,12 +17,15 @@ let defer-order() -> Int {
 let defer-cancel-cleanup() -> Int {
   let flag = ref(0)
   let ready = Sched.wait-new()
-  let t = Task.spawn(fn () = {
-    defer set!(flag, 1)
-    Sched.notify(ready)
-    Sched.wait(Sched.wait-new())
-    0
-  })
+  let t =
+    Task.spawn(
+      fn () {
+        defer set!(flag, 1)
+        Sched.notify(ready)
+        Sched.wait(Sched.wait-new())
+        0
+      }
+    )
   Sched.wait(ready)
   Task.cancel(t)
   Task.join(t)

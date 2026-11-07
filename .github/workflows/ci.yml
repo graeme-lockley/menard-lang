@@ -38,6 +38,10 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: make backlog-check
 
+      - name: Format check
+        working-directory: ${{ github.workspace }}
+        run: make fmt-check
+
       - name: Install clang and llvm-dis
         run: sudo apt-get update && sudo apt-get install -y clang llvm
 

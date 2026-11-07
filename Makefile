@@ -97,7 +97,15 @@ next:
 loop:
 	bun run tools/loop/run.ts $(ARGS)
 
-ci: typecheck test backlog-check
+# Format check over the four trees the review names. Uses the host CLI so the
+# host CI job can run it without a bootstrap `./mn`.
+fmt-check:
+	@set -e; \
+	files=$$(find src stdlib examples tests -name '*.mnd' ! -path 'tests/negative/*' -print | sort); \
+	if [ -z "$$files" ]; then echo "fmt-check: no .mnd files found"; exit 1; fi; \
+	bun run host/src/cli/menard.ts fmt --check $$files
+
+ci: typecheck test backlog-check fmt-check
 
 # Non-functional collector checks: StringBuffer reclaim, and a bounded
 # live set on the stress program. Separate from `test` on purpose.

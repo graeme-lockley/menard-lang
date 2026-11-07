@@ -1,29 +1,38 @@
 ; Build F: one-for-one start / stop / restart-child smoke.
 import std/actor as Actor
+
 pub import std/actor (Pid)
+
 import std/supervisor as Sup
 import std/list as List
 import std/task as Tsk
 
 let main() -> Int {
   let hits = ref(0)
-  let start = fn () = Actor.spawn(fn (mb) = {
-    set!(hits, deref(hits) + 1)
-    match (Actor.receive(mb))
-      | Ok(_) -> ()
-      | Err(_) -> ()
-  })
+  let start =
+    fn () =
+      Actor.spawn(
+        fn (mb) {
+          set!(hits, deref(hits) + 1)
+          match (Actor.receive(mb))
+            | Ok(_) -> ()
+            | Err(_) -> ()
+        }
+      )
   let specs = [Sup.ChildSpec(start, Sup.Permanent), Sup.ChildSpec(start, Sup.Temporary)]
   let pids = Sup.start-children(specs)
   println(List.length(pids))
   loop ()
-    if (deref(hits) < 2) -> {
-      Tsk.yield()
-      recur()
-    } | ()
+    if (deref(hits) < 2) ->
+      {
+        Tsk.yield()
+        recur()
+      }
   println(deref(hits))
   let again = Sup.restart-child(Sup.ChildSpec(start, Sup.Permanent))
-  println(if (Actor.id(again) > 0) -> 1 | 0)
+  println(
+    if (Actor.id(again) > 0) -> 1 | 0
+  )
   Sup.stop-children(again :: pids)
   Actor.join(again)
   println(1)

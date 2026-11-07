@@ -179,7 +179,6 @@
 ;   `"division by zero"` and ends in `unreachable`. The success block
 ;   does the native op and retags. LLVM's `sdiv`/`srem` by zero is
 ;   undefined, so the check has to be explicit.
-
 import "../reader/ast.mnd"
 import "../pool/pool.mnd"
 import "../pool/float-bits.mnd"
@@ -194,7 +193,6 @@ import std/string-buffer as Buf
 ; ---------------------------------------------------------------------------
 ; Small Ast helpers, restated locally per `src/`'s "no prelude import"
 ; rule (see `type/check.mnd`'s equivalent header note).
-
 let sym-str(ast: Ast) -> Maybe Str =
   match (ast)
     | SymNode(n, _) -> Some(n)
@@ -215,7 +213,6 @@ let strip-trailing-colon(raw: Str) -> Str {
 ; unlike the old fold-based lowerer, this module needs a param's declared
 ; type to decide whether the whole `defn` is lowerable at all), the
 ; return type, and the body.
-
 record LParam {
   name: Str
   ty: Ast
@@ -368,7 +365,6 @@ let collect-ldefns-all-cons(f: Ast, rest: List Ast) -> List LDefn =
 ; ---------------------------------------------------------------------------
 ; Which top-level `defn`s this module actually lowers — see header
 ; comment's "Calls, and the two kinds of top-level `defn`".
-
 let is-type-named(ast: Ast, name: Str) -> Bool =
   match (ast)
     | SymNode(n, _) -> n == name
@@ -402,23 +398,15 @@ let is-raw-upper-name(n: Str) -> Bool =
 ; `__m12_Foo` / `__q1635669332_Foo` → `Foo`; otherwise identity.
 let strip-uniq-prefix(n: Str) -> Str {
   let len = String.length(n)
-  cond
-    | len >= 4 && String.byte(0, n) == 95 && String.byte(1, n) == 95 && (String.byte(2, n) == 109 || String.byte(2, n) == 113) ->
-      strip-uniq-prefix-digits(n, 3, len)
-    | else -> n
+  if (len >= 4 && String.byte(0, n) == 95 && String.byte(1, n) == 95 && (String.byte(2, n) == 109 || String.byte(2, n) == 113)) -> strip-uniq-prefix-digits(n, 3, len) | n
 }
 
 let strip-uniq-prefix-digits(n: Str, i: Int, len: Int) -> Str =
-  cond
-    | i >= len -> n
-    | else ->
-      {
-        let b = String.byte(i, n)
-        cond
-          | b >= 48 && b <= 57 -> strip-uniq-prefix-digits(n, i + 1, len)
-          | b == 95 -> String.slice(i + 1, len - (i + 1), n)
-          | else -> n
-      }
+  if (i >= len) -> n |
+  {
+    let b = String.byte(i, n)
+    if (b >= 48 && b <= 57) -> strip-uniq-prefix-digits(n, i + 1, len) | if (b == 95) -> String.slice(i + 1, len - (i + 1), n) | n
+  }
 
 ; `__import_Alias_Name` → `Name` so aliased import types stay heap types
 ; for the word-ABI filter (LANG-04).
@@ -428,10 +416,7 @@ let strip-import-prefix(n: Str) -> Str {
 }
 
 let strip-import-prefix-alias(n: Str, i: Int, len: Int) -> Str =
-  cond
-    | i >= len -> n
-    | String.byte(i, n) == 95 -> String.slice(i + 1, len - (i + 1), n)
-    | else -> strip-import-prefix-alias(n, i + 1, len)
+  if (i >= len) -> n | if (String.byte(i, n) == 95) -> String.slice(i + 1, len - (i + 1), n) | strip-import-prefix-alias(n, i + 1, len)
 
 let is-upper-type-name(n: Str) -> Bool =
   is-raw-upper-name(strip-import-prefix(strip-uniq-prefix(n)))
@@ -500,12 +485,10 @@ let is-unit-literal-body(body: List Ast) -> Bool =
     | _ -> false
 
 let is-unit-noop-ldefn(ld: LDefn) -> Bool =
-  cond
-    | not(is-unit-type(ldefn-ret(ld))) -> false
-    | else ->
-      match (ldefn-params(ld))
-        | [] -> is-unit-literal-body(ldefn-body(ld))
-        | _ -> false
+  if (not(is-unit-type(ldefn-ret(ld)))) -> false |
+  match (ldefn-params(ld))
+    | [] -> is-unit-literal-body(ldefn-body(ld))
+    | _ -> false
 
 let collect-noop-names(lds: List LDefn) -> Map Str Bool =
   match (lds)
@@ -978,12 +961,11 @@ let emit-root-save!(b: Builder) -> Int =
   emit-call!(b, extern-root-save-abs(deref(b-root-ns(b))), [])
 
 let emit-root-restore!(b: Builder, depth-abs: Int) -> Unit =
-  cond
-    | is-rooting(b) ->
-      {
-        emit-call!(b, extern-root-restore-abs(deref(b-root-ns(b))), [depth-abs])
-        ()
-      }
+  if (is-rooting(b)) ->
+    {
+      emit-call!(b, extern-root-restore-abs(deref(b-root-ns(b))), [depth-abs])
+      ()
+    }
 
 ; Alloca whose address is on the shadow stack. The push is a real
 ; `ptr` call so LLVM cannot drop the following store or fold the slot
@@ -991,13 +973,11 @@ let emit-root-restore!(b: Builder, depth-abs: Int) -> Unit =
 ; Allocation-free functions get a plain alloca.
 let root-alloca!(b: Builder) -> Int {
   let slot = emit-alloca!(b)
-  cond
-    | is-rooting(b) ->
-      {
-        emit-call-void!(b, extern-kind-write, extern-root-push-abs(deref(b-root-ns(b))), [slot, const-i64!(b, 0)])
-        slot
-      }
-    | else -> slot
+  if (is-rooting(b)) ->
+    {
+      emit-call-void!(b, extern-kind-write, extern-root-push-abs(deref(b-root-ns(b))), [slot, const-i64!(b, 0)])
+      slot
+    } | slot
 }
 
 let emit-ret!(b: Builder, val-abs: Int) -> Unit {
@@ -1018,18 +998,16 @@ let emit-unreachable!(b: Builder) -> Unit {
 ; block — always wrong, never merely redundant — so this is skipped
 ; entirely; the caller's `switch-to!` to whatever comes next still runs
 ; unconditionally, exactly as if this branch had produced a value.
-    ; The slot holds a root index (an immediate). The join reloads it
-    ; with `get!`. Storing the index, not the word, means this alloca
-    ; does not have to be a shadow root — including when the `if` sits
-    ; in a loop header.
+; The slot holds a root index (an immediate). The join reloads it
+; with `get!`. Storing the index, not the word, means this alloca
+; does not have to be a shadow root — including when the `if` sits
+; in a loop header.
 let maybe-store-and-br!(b: Builder, result-slot: Int, val-abs: Int, target: BB) -> Unit =
-  cond
-    | block-terminated(b) -> ()
-    | else ->
-      {
-        emit-store!(b, result-slot, val-abs)
-        emit-br!(b, target)
-      }
+  if (block-terminated(b)) -> () |
+  {
+    emit-store!(b, result-slot, val-abs)
+    emit-br!(b, target)
+  }
 
 ; `+`/`-`: free plus a one-instruction fixup (header comment's "The
 ; tagged-`Int` ABI, literally").
@@ -1303,23 +1281,7 @@ record PoolLine {
 }
 
 let singleton-index-bare(name: Str) -> Int =
-  cond
-    | name == "Nil" -> 0
-    | name == "None" -> 1
-    | name == "NotFound" -> 2
-    | name == "Permission" -> 3
-    | name == "Exists" -> 4
-    | name == "IsADirectory" -> 5
-    | name == "NotADirectory" -> 6
-    | name == "InvalidPath" -> 7
-    | name == "TooLarge" -> 8
-    | name == "NotExecutable" -> 9
-    | name == "InvalidArgument" -> 10
-    | name == "TooManyArguments" -> 11
-    | name == "Timeout" -> 12
-    | name == "TlsVerifyFailed" -> 13
-    | name == "TlsHandshakeFailed" -> 14
-    | else -> -1
+  if (name == "Nil") -> 0 | if (name == "None") -> 1 | if (name == "NotFound") -> 2 | if (name == "Permission") -> 3 | if (name == "Exists") -> 4 | if (name == "IsADirectory") -> 5 | if (name == "NotADirectory") -> 6 | if (name == "InvalidPath") -> 7 | if (name == "TooLarge") -> 8 | if (name == "NotExecutable") -> 9 | if (name == "InvalidArgument") -> 10 | if (name == "TooManyArguments") -> 11 | if (name == "Timeout") -> 12 | if (name == "TlsVerifyFailed") -> 13 | if (name == "TlsHandshakeFailed") -> 14 | -1
 
 let singleton-index(name: Str) -> Int {
   let bare = singleton-index-bare(name)
@@ -1335,10 +1297,7 @@ let emitted-ctor-tag(name: Str, ctors: Map Str CtorSpec) -> Int =
         | None -> 0
 
 let classify-line(line: Str, ctors: Map Str CtorSpec) -> PoolLine =
-  cond
-    | String.starts-with("ctor ", line) -> classify-ctor(String.slice(5, String.length(line) - 5, line), ctors)
-    | String.starts-with("float ", line) -> classify-float(line)
-    | else -> classify-str(line)
+  if (String.starts-with("ctor ", line)) -> classify-ctor(String.slice(5, String.length(line) - 5, line), ctors) | if (String.starts-with("float ", line)) -> classify-float(line) | classify-str(line)
 
 let classify-float(line: Str) -> PoolLine =
   PoolLine(pool-kind-float, unhex-float(String.slice(6, 16, line)), -1, 13, 16)
@@ -1419,7 +1378,6 @@ let attach-static-pool(p: StrPool, forms: List Ast, ctors: Map Str CtorSpec, ext
 ; see `llvm-ir.mnd`'s `ICallVoid` doc comment for why this needs its own
 ; `Item`/emission path rather than reusing `emit-call!`, which always
 ; assumes (and bumps a value id for) an `Int`-returning callee. --
-
 let emit-call-void!(b: Builder, kind: Int, callee-abs: Int, arg-abs: List Int) -> Unit {
   let callee-rel = rel-ref(b, callee-abs)
   let arg-rels = rel-refs(b, arg-abs)
@@ -1450,7 +1408,6 @@ let emit-print-i64!(b: Builder, pool: StrPool, v: Int) -> Unit {
 ; to alloca absolute ids; `funcs` is every lowerable (`Int`-only) `defn`,
 ; for calls; `noop` is every `Unit`, zero-arg, empty-body `defn`'s name,
 ; for the shadow-push/pop skip (see header comment).
-
 let is-arith-binop(s: Str) -> Bool =
   s == "+" || s == "-" || s == "*" || s == "/" || s == "%"
 
@@ -1462,11 +1419,7 @@ let is-float-cmp-op(s: Str) -> Bool =
   s == "f<" || s == "f>" || s == "f<=" || s == "f>="
 
 let float-cmp-int-op(s: Str) -> Str =
-  cond
-    | s == "f<" -> "<"
-    | s == "f>" -> ">"
-    | s == "f<=" -> "<="
-    | else -> ">="
+  if (s == "f<") -> "<" | if (s == "f>") -> ">" | if (s == "f<=") -> "<=" | ">="
 
 let str-in-list(s: Str, xs: List Str) -> Bool =
   match (xs)
@@ -1542,14 +1495,14 @@ let lower-sym(name: Str, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, p
         | None ->
           if (str-in-list(name, deref(b-slots(b)))) -> Ok(emit-slot-get!(b, pool, name)) | lower-sym-ctor-or-err(name, b, pool)
 
-    ; `func-ref-abs` is already the module-scope absolute id
-    ; (`num-strings + extern-count + idx`).
+; `func-ref-abs` is already the module-scope absolute id
+; (`num-strings + extern-count + idx`).
 let lower-func-as-value(fr: FuncRef, b: Builder, pool: StrPool) -> Result Int Str {
   let code = emit-cast!(b, cast-ptrtoint, func-ref-abs(fr), ty-i64)
   Ok(emit-call!(b, extern-closure-bare-abs(str-pool-extern-base(pool)), [code]))
 }
 
-          ; Nullary ctor as an expression *is* the value (Nil, None, …).
+; Nullary ctor as an expression *is* the value (Nil, None, …).
 let lower-sym-ctor-or-err(name: Str, b: Builder, pool: StrPool) -> Result Int Str =
   match (ctor-tag-of(name, pool))
     | None -> Err(String.concat("cannot lower unbound name ", name))
@@ -1557,14 +1510,12 @@ let lower-sym-ctor-or-err(name: Str, b: Builder, pool: StrPool) -> Result Int St
       {
         let ns = str-pool-extern-base(pool)
         let arity = ctor-arity-of(name, pool)
-        cond
-          | arity == 0 -> emit-nullary!(b, pool, name)
-          | else ->
-            {
-              let tag-c = const-i64!(b, tag)
-              let ar-c = const-i64!(b, arity)
-              Ok(emit-call!(b, extern-ctor-closure-abs(ns), [tag-c, ar-c]))
-            }
+        if (arity == 0) -> emit-nullary!(b, pool, name) |
+        {
+          let tag-c = const-i64!(b, tag)
+          let ar-c = const-i64!(b, arity)
+          Ok(emit-call!(b, extern-ctor-closure-abs(ns), [tag-c, ar-c]))
+        }
       }
 
 ; A reader span covers a source extent (`end` > `start`). Compiler-built
@@ -1613,53 +1564,30 @@ let lower-apply-value(head: Ast, args: List Ast, sp: Span, env: Map Str Int, b: 
   Result.and-then(fn (clo) = lower-apply-clo(clo, args, sp, env, b, funcs, noop, pool), lower-expr(head, env, b, funcs, noop, pool))
 
 let apply-extern-abs(n: Int, base: Int) -> Result Int Str =
-  cond
-    | n == 0 -> Ok(extern-apply-0-abs(base))
-    | n == 1 -> Ok(extern-apply-1-abs(base))
-    | n == 2 -> Ok(extern-apply-2-abs(base))
-    | n == 3 -> Ok(extern-apply-3-abs(base))
-    | n == 4 -> Ok(extern-apply-4-abs(base))
-    | n == 5 -> Ok(extern-apply-5-abs(base))
-    | n == 6 -> Ok(extern-apply-6-abs(base))
-    | n == 7 -> Ok(extern-apply-7-abs(base))
-    | n == 8 -> Ok(extern-apply-8-abs(base))
-    | else -> Err("closure application supports at most 8 arguments")
+  if (n == 0) -> Ok(extern-apply-0-abs(base)) | if (n == 1) -> Ok(extern-apply-1-abs(base)) | if (n == 2) -> Ok(extern-apply-2-abs(base)) | if (n == 3) -> Ok(extern-apply-3-abs(base)) | if (n == 4) -> Ok(extern-apply-4-abs(base)) | if (n == 5) -> Ok(extern-apply-5-abs(base)) | if (n == 6) -> Ok(extern-apply-6-abs(base)) | if (n == 7) -> Ok(extern-apply-7-abs(base)) | if (n == 8) -> Ok(extern-apply-8-abs(base)) | Err("closure application supports at most 8 arguments")
 
 let lower-apply-clo(clo: Int, args: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  Result.and-then(
-    fn (vs) =
-      Result.and-then(
-        fn (abs) = Ok(emit-traced-call!(b, pool, sp, abs, get-words!(b, clo :: vs))),
-        apply-extern-abs(length(args), str-pool-extern-base(pool))
-      ),
-    lower-args(args, env, b, funcs, noop, pool)
-  )
+  Result.and-then(fn (vs) = Result.and-then(fn (abs) = Ok(emit-traced-call!(b, pool, sp, abs, get-words!(b, clo :: vs))), apply-extern-abs(length(args), str-pool-extern-base(pool))), lower-args(args, env, b, funcs, noop, pool))
 
 let lower-named(hn: Str, rest: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  cond
-    | hn == "quote" -> lower-quote(rest, b, pool)
-    | hn == "char" -> lower-char-lit(rest, b)
-    | hn == "if" -> lower-if(rest, env, b, funcs, noop, pool)
-    | hn == "let" -> lower-let-inline(rest, env, b, funcs, noop, pool)
-    | hn == "do" -> lower-sequence(rest, env, b, funcs, noop, pool)
-    | hn == "loop" -> lower-loop(rest, env, b, funcs, noop, pool)
-    | hn == "recur" -> lower-recur(rest, env, b, funcs, noop, pool)
-    | hn == "match" -> lower-match(rest, env, b, funcs, noop, pool)
-    | hn == "slot" -> lower-slot(rest, env, b, funcs, noop, pool)
-    | hn == "tuple" -> lower-tuple(rest, env, b, funcs, noop, pool)
-    | is-arith-binop(hn) -> lower-arith(rest, hn, sp, env, b, funcs, noop, pool)
-    | is-float-cmp-op(hn) -> lower-float-cmp(rest, hn, env, b, funcs, noop, pool)
-    | is-cmp-op(hn) -> lower-cmp-value(rest, hn, env, b, funcs, noop, pool)
-    | is-ctor-name(hn, pool) -> lower-ctor(hn, rest, env, b, funcs, noop, pool)
-    | else ->
-      match (Map.lookup(hn, funcs))
-        | Some(_) -> lower-call(hn, rest, sp, env, b, funcs, noop, pool)
-        | None ->
-          cond
-            | is-runtime-op(hn) -> lower-runtime-op(hn, rest, env, b, funcs, noop, pool)
-            | is-effect-head(hn) -> Result.and-then(fn (_) = Ok(const-unit!(b)), lower-effect-op(hn, rest, env, b, funcs, noop, pool))
-            | is-unsupported-form(hn) -> Err(String.concat("cannot lower `", hn, "` with the real instruction lowerer yet"))
-            | else -> lower-call(hn, rest, sp, env, b, funcs, noop, pool)
+  if (hn == "quote") -> lower-quote(rest, b, pool) |
+  if (hn == "char") -> lower-char-lit(rest, b) |
+  if (hn == "if") -> lower-if(rest, env, b, funcs, noop, pool) |
+  if (hn == "let") -> lower-let-inline(rest, env, b, funcs, noop, pool) |
+  if (hn == "do") -> lower-sequence(rest, env, b, funcs, noop, pool) |
+  if (hn == "loop") -> lower-loop(rest, env, b, funcs, noop, pool) |
+  if (hn == "recur") -> lower-recur(rest, env, b, funcs, noop, pool) |
+  if (hn == "match") -> lower-match(rest, env, b, funcs, noop, pool) |
+  if (hn == "slot") -> lower-slot(rest, env, b, funcs, noop, pool) |
+  if (hn == "tuple") -> lower-tuple(rest, env, b, funcs, noop, pool) |
+  if (is-arith-binop(hn)) -> lower-arith(rest, hn, sp, env, b, funcs, noop, pool) |
+  if (is-float-cmp-op(hn)) -> lower-float-cmp(rest, hn, env, b, funcs, noop, pool) |
+  if (is-cmp-op(hn)) -> lower-cmp-value(rest, hn, env, b, funcs, noop, pool) |
+  if (is-ctor-name(hn, pool)) -> lower-ctor(hn, rest, env, b, funcs, noop, pool) |
+  match (Map.lookup(hn, funcs))
+    | Some(_) -> lower-call(hn, rest, sp, env, b, funcs, noop, pool)
+    | None ->
+      if (is-runtime-op(hn)) -> lower-runtime-op(hn, rest, env, b, funcs, noop, pool) | if (is-effect-head(hn)) -> Result.and-then(fn (_) = Ok(const-unit!(b)), lower-effect-op(hn, rest, env, b, funcs, noop, pool)) | if (is-unsupported-form(hn)) -> Err(String.concat("cannot lower `", hn, "` with the real instruction lowerer yet")) | lower-call(hn, rest, sp, env, b, funcs, noop, pool)
 
 let lower-char-lit(rest: List Ast, b: Builder) -> Result Int Str =
   match (rest)
@@ -1683,11 +1611,7 @@ let lower-slot(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str Func
 ; Load payload slot `n` from the lowered receiver.
 let lower-slot-index(obj: Ast, idx: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (idx)
-    | IntNode(n, _) ->
-      Result.and-then(
-        fn (val) = Ok(emit-call!(b, extern-slot-abs(str-pool-extern-base(pool)), [get!(b, val), const-i64!(b, n)])),
-        lower-expr(obj, env, b, funcs, noop, pool)
-      )
+    | IntNode(n, _) -> Result.and-then(fn (val) = Ok(emit-call!(b, extern-slot-abs(str-pool-extern-base(pool)), [get!(b, val), const-i64!(b, n)])), lower-expr(obj, env, b, funcs, noop, pool))
     | _ -> Err("slot index must be an integer")
 
 let lower-if(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
@@ -1695,11 +1619,11 @@ let lower-if(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRe
     | [test, then, els] -> Result.and-then(fn (cond-abs) = lower-if-branches(cond-abs, then, els, env, b, funcs, noop, pool), lower-cond(test, env, b, funcs, noop, pool))
     | _ -> Err("if requires a test, a then-branch and an else-branch")
 
-    ; `result-slot` is allocated into the block still open when the
-    ; `if` is encountered — the one block guaranteed to dominate
-    ; `then`, `else` and `join` alike, however many blocks each of
-    ; those turns out to need internally (see `Builder`'s header
-    ; comment).
+; `result-slot` is allocated into the block still open when the
+; `if` is encountered — the one block guaranteed to dominate
+; `then`, `else` and `join` alike, however many blocks each of
+; those turns out to need internally (see `Builder`'s header
+; comment).
 let lower-if-branches(cond-abs: Int, then: Ast, els: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str {
   let result-slot = emit-alloca!(b)
   let then-bb = fresh-bb!(b)
@@ -1710,9 +1634,9 @@ let lower-if-branches(cond-abs: Int, then: Ast, els: Ast, env: Map Str Int, b: B
   Result.and-then(fn (then-val) = lower-if-then-done(then-val, els, result-slot, else-bb, join-bb, env, b, funcs, noop, pool), lower-expr(then, env, b, funcs, noop, pool))
 }
 
-    ; `maybe-store-and-br!`: if `then` ended in `recur` (block already
-    ; terminated), skip the store+br — a second terminator would be
-    ; illegal. Still switch into `else` either way.
+; `maybe-store-and-br!`: if `then` ended in `recur` (block already
+; terminated), skip the store+br — a second terminator would be
+; illegal. Still switch into `else` either way.
 let lower-if-then-done(then-val: Int, els: Ast, result-slot: Int, else-bb: BB, join-bb: BB, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str {
   maybe-store-and-br!(b, result-slot, then-val, join-bb)
   switch-to!(b, else-bb)
@@ -1732,7 +1656,6 @@ let lower-if-else-done(else-val: Int, result-slot: Int, join-bb: BB, b: Builder)
 ; lower body with names bound to those slots; a normal body value
 ; stores into the result slot and br's exit; `recur` stores new values
 ; and br's header. Nested loops push/pop `LoopFrame` on the Builder.
-
 let binding-pair-of(ast: Ast) -> Maybe (List Ast) =
   match (ast)
     | ParenNode([name-ast, init-ast], _) -> Some([name-ast, init-ast])
@@ -1794,8 +1717,8 @@ let lower-loop-bind-all(pairs: List Ast, body: Ast, result-slot: Int, env: Map S
               )
         | _ -> Err("each loop binding must be (name init)")
 
-    ; Save once, in the block that dominates the header, so `recur` can
-    ; pop body roots without popping the loop slots rooted above.
+; Save once, in the block that dominates the header, so `recur` can
+; pop body roots without popping the loop slots rooted above.
 let lower-loop-run(body: Ast, result-slot: Int, names: List Str, slots: List Int, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str {
   let header = fresh-bb!(b)
   let exit-bb = fresh-bb!(b)
@@ -1907,10 +1830,7 @@ let collect-defrec-decl(rest: List Ast, acc: Map Str CtorSpec, tag-ref: Ref Int)
     | [] -> acc
 
 let collect-ctors-named(hn: Str, rest: List Ast, acc: Map Str CtorSpec, tag-ref: Ref Int) -> Map Str CtorSpec =
-  cond
-    | hn == "variant" -> collect-variant-decl(rest, acc, tag-ref)
-    | hn == "defrec" -> collect-defrec-decl(rest, acc, tag-ref)
-    | else -> acc
+  if (hn == "variant") -> collect-variant-decl(rest, acc, tag-ref) | if (hn == "defrec") -> collect-defrec-decl(rest, acc, tag-ref) | acc
 
 let collect-ctors-form(ast: Ast, acc: Map Str CtorSpec, tag-ref: Ref Int) -> Map Str CtorSpec =
   match (unwrap-pub(ast))
@@ -1946,34 +1866,9 @@ let has-builtin-tag(hn: Str) -> Bool =
 let is-ctor-name(hn: Str, pool: StrPool) -> Bool =
   has-builtin-tag(hn) || is-user-ctor(hn, pool)
 
-    ; IoError ctors — constructed by the runtime, matched in user code.
+; IoError ctors — constructed by the runtime, matched in user code.
 let builtin-ctor-tag-of(hn: Str) -> Maybe Int =
-  cond
-    | hn == "Nil" -> Some(tag-nil)
-    | hn == "Cons" -> Some(tag-cons)
-    | hn == "None" -> Some(tag-none)
-    | hn == "Some" -> Some(tag-some)
-    | hn == "Ok" -> Some(tag-ok)
-    | hn == "Err" -> Some(tag-err)
-    | hn == "NotFound" -> Some(20)
-    | hn == "Permission" -> Some(21)
-    | hn == "Exists" -> Some(22)
-    | hn == "IsADirectory" -> Some(23)
-    | hn == "NotADirectory" -> Some(24)
-    | hn == "InvalidPath" -> Some(25)
-    | hn == "TooLarge" -> Some(26)
-    | hn == "Other" -> Some(27)
-    | hn == "Timeout" -> Some(28)
-    | hn == "TlsVerifyFailed" -> Some(29)
-    | hn == "Exited" -> Some(30)
-    | hn == "Signalled" -> Some(31)
-    | hn == "SpawnOutput" -> Some(32)
-    | hn == "NotExecutable" -> Some(33)
-    | hn == "InvalidArgument" -> Some(34)
-    | hn == "TooManyArguments" -> Some(35)
-    | hn == "Unsupported" -> Some(36)
-    | hn == "TlsHandshakeFailed" -> Some(37)
-    | else -> None
+  if (hn == "Nil") -> Some(tag-nil) | if (hn == "Cons") -> Some(tag-cons) | if (hn == "None") -> Some(tag-none) | if (hn == "Some") -> Some(tag-some) | if (hn == "Ok") -> Some(tag-ok) | if (hn == "Err") -> Some(tag-err) | if (hn == "NotFound") -> Some(20) | if (hn == "Permission") -> Some(21) | if (hn == "Exists") -> Some(22) | if (hn == "IsADirectory") -> Some(23) | if (hn == "NotADirectory") -> Some(24) | if (hn == "InvalidPath") -> Some(25) | if (hn == "TooLarge") -> Some(26) | if (hn == "Other") -> Some(27) | if (hn == "Timeout") -> Some(28) | if (hn == "TlsVerifyFailed") -> Some(29) | if (hn == "Exited") -> Some(30) | if (hn == "Signalled") -> Some(31) | if (hn == "SpawnOutput") -> Some(32) | if (hn == "NotExecutable") -> Some(33) | if (hn == "InvalidArgument") -> Some(34) | if (hn == "TooManyArguments") -> Some(35) | if (hn == "Unsupported") -> Some(36) | if (hn == "TlsHandshakeFailed") -> Some(37) | None
 
 ; Prefixed import spellings (`__import_Net_NotFound`) share tags/arities
 ; with the bare constructor (LANG-16 re-exports under aliases).
@@ -1997,36 +1892,24 @@ let seam-fixed-arity(hn: Str) -> Maybe Int =
     | None -> seam-fixed-arity-bare(strip-import-prefix(hn))
 
 let seam-fixed-arity-bare(hn: Str) -> Maybe Int =
-  cond
-    | hn == "SpawnOutput" -> Some(3)
-    | hn == "Other" || hn == "Exited" || hn == "Signalled" -> Some(1)
-    | hn == "NotFound" || hn == "Permission" || hn == "Exists" || hn == "IsADirectory" || hn == "NotADirectory" || hn == "InvalidPath" || hn == "TooLarge" || hn == "Timeout" || hn == "TlsVerifyFailed" || hn == "TlsHandshakeFailed" || hn == "NotExecutable" || hn == "InvalidArgument" || hn == "TooManyArguments" || hn == "Unsupported" -> Some(0)
-    | else -> None
+  if (hn == "SpawnOutput") -> Some(3) | if (hn == "Other" || hn == "Exited" || hn == "Signalled") -> Some(1) | if (hn == "NotFound" || hn == "Permission" || hn == "Exists" || hn == "IsADirectory" || hn == "NotADirectory" || hn == "InvalidPath" || hn == "TooLarge" || hn == "Timeout" || hn == "TlsVerifyFailed" || hn == "TlsHandshakeFailed" || hn == "NotExecutable" || hn == "InvalidArgument" || hn == "TooManyArguments" || hn == "Unsupported") -> Some(0) | None
 
 let ctor-arity-of(hn: Str, pool: StrPool) -> Int =
   match (seam-fixed-arity(hn))
     | Some(n) -> n
     | None ->
-      cond
-        | hn == "Nil" || hn == "None" -> 0
-        | hn == "Cons" -> 2
-        | hn == "Some" || hn == "Ok" || hn == "Err" -> 1
-        | else ->
-          match (Map.lookup(hn, str-pool-ctors(pool)))
+      if (hn == "Nil" || hn == "None") -> 0 |
+      if (hn == "Cons") -> 2 |
+      if (hn == "Some" || hn == "Ok" || hn == "Err") -> 1 |
+      match (Map.lookup(hn, str-pool-ctors(pool)))
+        | Some(spec) -> ctor-spec-arity(spec)
+        | None ->
+          match (Map.lookup(strip-import-prefix(hn), str-pool-ctors(pool)))
             | Some(spec) -> ctor-spec-arity(spec)
-            | None ->
-              match (Map.lookup(strip-import-prefix(hn), str-pool-ctors(pool)))
-                | Some(spec) -> ctor-spec-arity(spec)
-                | None -> -1
+            | None -> -1
 
 let ctor-extern-abs(hn: Str, ns: Int) -> Int =
-  cond
-    | hn == "Nil" -> extern-nil-abs(ns)
-    | hn == "Cons" -> extern-cons-abs(ns)
-    | hn == "None" -> extern-none-abs(ns)
-    | hn == "Some" -> extern-some-abs(ns)
-    | hn == "Ok" -> extern-ok-abs(ns)
-    | else -> extern-err-abs(ns)
+  if (hn == "Nil") -> extern-nil-abs(ns) | if (hn == "Cons") -> extern-cons-abs(ns) | if (hn == "None") -> extern-none-abs(ns) | if (hn == "Some") -> extern-some-abs(ns) | if (hn == "Ok") -> extern-ok-abs(ns) | extern-err-abs(ns)
 
 let lower-user-ctor-fill(obj: Int, avs: List Int, i: Int, b: Builder, pool: StrPool) -> Int =
   match (avs)
@@ -2042,7 +1925,8 @@ let lower-user-ctor(hn: Str, args: List Ast, env: Map Str Int, b: Builder, funcs
   match (Map.lookup(hn, str-pool-ctors(pool)))
     | None -> Err(String.concat("unknown constructor ", hn))
     | Some(spec) ->
-      if (ctor-spec-arity(spec) == 0) -> emit-nullary!(b, pool, hn) | if (length(args) == ctor-spec-arity(spec)) ->
+      if (ctor-spec-arity(spec) == 0) -> emit-nullary!(b, pool, hn) |
+      if (length(args) == ctor-spec-arity(spec)) ->
         Result.and-then(
           fn (avs) {
             let tag-c = const-i64!(b, ctor-spec-tag(spec))
@@ -2057,7 +1941,8 @@ let lower-fixed-tag-ctor(hn: Str, args: List Ast, env: Map Str Int, b: Builder, 
   match (builtin-ctor-tag-of(hn))
     | None -> Err(String.concat("unknown constructor ", hn))
     | Some(tag) ->
-      if (ctor-arity-of(hn, pool) == 0) -> emit-nullary!(b, pool, hn) | if (length(args) == ctor-arity-of(hn, pool)) ->
+      if (ctor-arity-of(hn, pool) == 0) -> emit-nullary!(b, pool, hn) |
+      if (length(args) == ctor-arity-of(hn, pool)) ->
         Result.and-then(
           fn (avs) {
             let tag-c = const-i64!(b, tag)
@@ -2083,11 +1968,8 @@ let lower-tuple(args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str Fun
   )
 
 let lower-ctor(hn: Str, args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  cond
-    | is-builtin-ctor(hn) ->
-      if (ctor-arity-of(hn, pool) == 0) -> emit-nullary!(b, pool, hn) | if (length(args) == ctor-arity-of(hn, pool)) -> Result.and-then(fn (avs) = Ok(emit-call-words!(b, ctor-extern-abs(hn, str-pool-extern-base(pool)), avs)), lower-args(args, env, b, funcs, noop, pool)) | Err(String.concat("arity mismatch constructing ", hn))
-    | has-builtin-tag(hn) -> lower-fixed-tag-ctor(hn, args, env, b, funcs, noop, pool)
-    | else -> lower-user-ctor(hn, args, env, b, funcs, noop, pool)
+  if (is-builtin-ctor(hn)) ->
+    if (ctor-arity-of(hn, pool) == 0) -> emit-nullary!(b, pool, hn) | if (length(args) == ctor-arity-of(hn, pool)) -> Result.and-then(fn (avs) = Ok(emit-call-words!(b, ctor-extern-abs(hn, str-pool-extern-base(pool)), avs)), lower-args(args, env, b, funcs, noop, pool)) | Err(String.concat("arity mismatch constructing ", hn)) | if (has-builtin-tag(hn)) -> lower-fixed-tag-ctor(hn, args, env, b, funcs, noop, pool) | lower-user-ctor(hn, args, env, b, funcs, noop, pool)
 
 let is-runtime-op(hn: Str) -> Bool =
   hn == "write" || hn == "mn_write" || str-in-list(hn, runtime-op-names())
@@ -2098,229 +1980,31 @@ let runtime-op-names() -> List Str =
 ; `extern` declares the C symbol (`mn_exists`). Ambient compiler calls
 ; still use the Menard name (`exists`). Both lower to the same abs id.
 let seam-menard-name(hn: Str) -> Str =
-  cond
-    | hn == "mn_write" -> "write"
-    | hn == "mn_arg_count" -> "arg-count"
-    | hn == "mn_arg" -> "arg"
-    | hn == "mn_read_file" -> "read-file"
-    | hn == "mn_write_file" -> "write-file"
-    | hn == "mn_spawn" -> "spawn"
-    | hn == "mn_spawn_capture" -> "spawn-capture"
-    | hn == "mn_getenv" -> "getenv"
-    | hn == "mn_exists" -> "exists"
-    | hn == "mn_rename" -> "rename"
-    | hn == "mn_task_spawn" -> "mn_task_spawn"
-    | hn == "mn_task_self" -> "mn_task_self"
-    | hn == "mn_task_suspend_for_test" -> "mn_task_suspend_for_test"
-    | hn == "mn_task_resume" -> "mn_task_resume"
-    | hn == "mn_task_join" -> "mn_task_join"
-    | hn == "mn_task_cancel" -> "mn_task_cancel"
-    | hn == "mn_task_yield" -> "mn_task_yield"
-    | hn == "mn_task_wait_new" -> "mn_task_wait_new"
-    | hn == "mn_task_wait" -> "mn_task_wait"
-    | hn == "mn_task_notify" -> "mn_task_notify"
-    | hn == "mn_task_notify_all" -> "mn_task_notify_all"
-    | hn == "mn_mono_ms" -> "mn_mono_ms"
-    | hn == "mn_task_wait_until" -> "mn_task_wait_until"
-    | hn == "mn_task_sleep_ms" -> "mn_task_sleep_ms"
-    | hn == "mn_task_join_timeout" -> "mn_task_join_timeout"
-    | hn == "mn_tcp_accept_timeout" -> "mn_tcp_accept_timeout"
-    | hn == "mn_tcp_connect_timeout" -> "mn_tcp_connect_timeout"
-    | hn == "mn_tcp_read_timeout" -> "mn_tcp_read_timeout"
-    | hn == "mn_tcp_write_timeout" -> "mn_tcp_write_timeout"
-    | hn == "mn_tls_client_timeout" -> "mn_tls_client_timeout"
-    | hn == "mn_tls_server_timeout" -> "mn_tls_server_timeout"
-    | hn == "mn_tls_read_timeout" -> "mn_tls_read_timeout"
-    | hn == "mn_tls_write_timeout" -> "mn_tls_write_timeout"
-    | hn == "mn_tls_client_insecure" -> "mn_tls_client_insecure"
-    | hn == "mn_tls_client_insecure_timeout" -> "mn_tls_client_insecure_timeout"
-    | hn == "mn_task_dict_set" -> "mn_task_dict_set"
-    | hn == "mn_task_dict_get" -> "mn_task_dict_get"
-    | hn == "mn_task_defer_enter" -> "mn_task_defer_enter"
-    | hn == "mn_task_defer_push" -> "mn_task_defer_push"
-    | hn == "mn_task_defer_leave" -> "mn_task_defer_leave"
-    | hn == "mn_tcp_listen" -> "mn_tcp_listen"
-    | hn == "mn_tcp_accept" -> "mn_tcp_accept"
-    | hn == "mn_tcp_connect" -> "mn_tcp_connect"
-    | hn == "mn_tcp_read" -> "mn_tcp_read"
-    | hn == "mn_tcp_write" -> "mn_tcp_write"
-    | hn == "mn_tcp_close" -> "mn_tcp_close"
-    | hn == "mn_tcp_local_port" -> "mn_tcp_local_port"
-    | hn == "mn_udp_bind" -> "mn_udp_bind"
-    | hn == "mn_udp_send" -> "mn_udp_send"
-    | hn == "mn_udp_recv" -> "mn_udp_recv"
-    | hn == "mn_udp_close" -> "mn_udp_close"
-    | hn == "mn_tls_client" -> "mn_tls_client"
-    | hn == "mn_tls_server" -> "mn_tls_server"
-    | hn == "mn_tls_read" -> "mn_tls_read"
-    | hn == "mn_tls_write" -> "mn_tls_write"
-    | hn == "mn_tls_close" -> "mn_tls_close"
-    | else -> os-menard-name(hn)
+  if (hn == "mn_write") -> "write" | if (hn == "mn_arg_count") -> "arg-count" | if (hn == "mn_arg") -> "arg" | if (hn == "mn_read_file") -> "read-file" | if (hn == "mn_write_file") -> "write-file" | if (hn == "mn_spawn") -> "spawn" | if (hn == "mn_spawn_capture") -> "spawn-capture" | if (hn == "mn_getenv") -> "getenv" | if (hn == "mn_exists") -> "exists" | if (hn == "mn_rename") -> "rename" | if (hn == "mn_task_spawn") -> "mn_task_spawn" | if (hn == "mn_task_self") -> "mn_task_self" | if (hn == "mn_task_suspend_for_test") -> "mn_task_suspend_for_test" | if (hn == "mn_task_resume") -> "mn_task_resume" | if (hn == "mn_task_join") -> "mn_task_join" | if (hn == "mn_task_cancel") -> "mn_task_cancel" | if (hn == "mn_task_yield") -> "mn_task_yield" | if (hn == "mn_task_wait_new") -> "mn_task_wait_new" | if (hn == "mn_task_wait") -> "mn_task_wait" | if (hn == "mn_task_notify") -> "mn_task_notify" | if (hn == "mn_task_notify_all") -> "mn_task_notify_all" | if (hn == "mn_mono_ms") -> "mn_mono_ms" | if (hn == "mn_task_wait_until") -> "mn_task_wait_until" | if (hn == "mn_task_sleep_ms") -> "mn_task_sleep_ms" | if (hn == "mn_task_join_timeout") -> "mn_task_join_timeout" | if (hn == "mn_tcp_accept_timeout") -> "mn_tcp_accept_timeout" | if (hn == "mn_tcp_connect_timeout") -> "mn_tcp_connect_timeout" | if (hn == "mn_tcp_read_timeout") -> "mn_tcp_read_timeout" | if (hn == "mn_tcp_write_timeout") -> "mn_tcp_write_timeout" | if (hn == "mn_tls_client_timeout") -> "mn_tls_client_timeout" | if (hn == "mn_tls_server_timeout") -> "mn_tls_server_timeout" | if (hn == "mn_tls_read_timeout") -> "mn_tls_read_timeout" | if (hn == "mn_tls_write_timeout") -> "mn_tls_write_timeout" | if (hn == "mn_tls_client_insecure") -> "mn_tls_client_insecure" | if (hn == "mn_tls_client_insecure_timeout") -> "mn_tls_client_insecure_timeout" | if (hn == "mn_task_dict_set") -> "mn_task_dict_set" | if (hn == "mn_task_dict_get") -> "mn_task_dict_get" | if (hn == "mn_task_defer_enter") -> "mn_task_defer_enter" | if (hn == "mn_task_defer_push") -> "mn_task_defer_push" | if (hn == "mn_task_defer_leave") -> "mn_task_defer_leave" | if (hn == "mn_tcp_listen") -> "mn_tcp_listen" | if (hn == "mn_tcp_accept") -> "mn_tcp_accept" | if (hn == "mn_tcp_connect") -> "mn_tcp_connect" | if (hn == "mn_tcp_read") -> "mn_tcp_read" | if (hn == "mn_tcp_write") -> "mn_tcp_write" | if (hn == "mn_tcp_close") -> "mn_tcp_close" | if (hn == "mn_tcp_local_port") -> "mn_tcp_local_port" | if (hn == "mn_udp_bind") -> "mn_udp_bind" | if (hn == "mn_udp_send") -> "mn_udp_send" | if (hn == "mn_udp_recv") -> "mn_udp_recv" | if (hn == "mn_udp_close") -> "mn_udp_close" | if (hn == "mn_tls_client") -> "mn_tls_client" | if (hn == "mn_tls_server") -> "mn_tls_server" | if (hn == "mn_tls_read") -> "mn_tls_read" | if (hn == "mn_tls_write") -> "mn_tls_write" | if (hn == "mn_tls_close") -> "mn_tls_close" | os-menard-name(hn)
 
 let os-menard-name(hn: Str) -> Str =
-  cond
-    | hn == "mn_isatty" -> "isatty"
-    | hn == "mn_mtime" -> "mtime"
-    | hn == "mn_cwd" -> "cwd"
-    | hn == "mn_ensure_dir" -> "ensure-dir"
-    | hn == "mn_list_dir" -> "list-dir"
-    | hn == "mn_realpath" -> "realpath"
-    | hn == "mn_now_ms" -> "now-ms"
-    | hn == "mn_remove" -> "remove"
-    | hn == "mn_is_dir" -> "is-dir"
-    | else -> hn
+  if (hn == "mn_isatty") -> "isatty" | if (hn == "mn_mtime") -> "mtime" | if (hn == "mn_cwd") -> "cwd" | if (hn == "mn_ensure_dir") -> "ensure-dir" | if (hn == "mn_list_dir") -> "list-dir" | if (hn == "mn_realpath") -> "realpath" | if (hn == "mn_now_ms") -> "now-ms" | if (hn == "mn_remove") -> "remove" | if (hn == "mn_is_dir") -> "is-dir" | hn
 
 let effect-alias(hn: Str) -> Str =
-  cond
-    | hn == "mn_exit" -> "exit"
-    | else -> hn
+  if (hn == "mn_exit") -> "exit" | hn
 
 let runtime-op-abs(hn: Str, ns: Int) -> Int =
   runtime-op-abs-named(seam-menard-name(hn), ns)
 
 let os-op-abs(hn: Str, ns: Int) -> Int =
-  cond
-    | hn == "isatty" -> extern-isatty-abs(ns)
-    | hn == "mtime" -> extern-mtime-abs(ns)
-    | hn == "cwd" -> extern-cwd-abs(ns)
-    | hn == "ensure-dir" -> extern-ensure-dir-abs(ns)
-    | hn == "list-dir" -> extern-list-dir-abs(ns)
-    | hn == "realpath" -> extern-realpath-abs(ns)
-    | hn == "now-ms" -> extern-now-ms-abs(ns)
-    | hn == "remove" -> extern-remove-abs(ns)
-    | else -> extern-is-dir-abs(ns)
+  if (hn == "isatty") -> extern-isatty-abs(ns) | if (hn == "mtime") -> extern-mtime-abs(ns) | if (hn == "cwd") -> extern-cwd-abs(ns) | if (hn == "ensure-dir") -> extern-ensure-dir-abs(ns) | if (hn == "list-dir") -> extern-list-dir-abs(ns) | if (hn == "realpath") -> extern-realpath-abs(ns) | if (hn == "now-ms") -> extern-now-ms-abs(ns) | if (hn == "remove") -> extern-remove-abs(ns) | extern-is-dir-abs(ns)
 
 let runtime-op-abs-named(hn: Str, ns: Int) -> Int =
-  cond
-    | hn == "write" -> extern-write-abs(ns)
-    | str-in-list(hn, ["isatty", "mtime", "cwd", "ensure-dir", "list-dir", "realpath", "now-ms", "remove", "is-dir"]) -> os-op-abs(hn, ns)
-    | hn == "f+" -> extern-fadd-abs(ns)
-    | hn == "f-" -> extern-fsub-abs(ns)
-    | hn == "f*" -> extern-fmul-abs(ns)
-    | hn == "f/" -> extern-fdiv-abs(ns)
-    | hn == "str-concat" -> extern-str-concat-abs(ns)
-    | hn == "str-byte-length" -> extern-str-byte-length-abs(ns)
-    | hn == "str-byte" -> extern-str-byte-abs(ns)
-    | hn == "str-slice" -> extern-str-slice-abs(ns)
-    | hn == "char->str" -> extern-char-to-str-abs(ns)
-    | hn == "ref" -> extern-ref-new-abs(ns)
-    | hn == "deref" -> extern-ref-deref-abs(ns)
-    | hn == "set!" -> extern-ref-set-abs(ns)
-    | hn == "sb-new" -> extern-sb-new-abs(ns)
-    | hn == "sb-append!" -> extern-sb-append-abs(ns)
-    | hn == "sb-append-byte!" -> extern-sb-append-byte-abs(ns)
-    | hn == "sb-take-str!" -> extern-sb-take-str-abs(ns)
-    | hn == "map-new" -> extern-map-new-abs(ns)
-    | hn == "map-set" -> extern-map-set-abs(ns)
-    | hn == "map-get" -> extern-map-get-abs(ns)
-    | hn == "map-has" -> extern-map-has-abs(ns)
-    | hn == "map-size" -> extern-map-size-abs(ns)
-    | hn == "map-keys" -> extern-map-keys-abs(ns)
-    | hn == "mn-env-0" -> extern-env-0-abs(ns)
-    | hn == "mn-env-1" -> extern-env-1-abs(ns)
-    | hn == "mn-env-get" -> extern-env-get-abs(ns)
-    | hn == "mn-closure-new" -> extern-closure-new-abs(ns)
-    | hn == "mn-apply-0" -> extern-apply-0-abs(ns)
-    | hn == "mn-apply-1" -> extern-apply-1-abs(ns)
-    | hn == "mn-apply-2" -> extern-apply-2-abs(ns)
-    | hn == "mn-apply-3" -> extern-apply-3-abs(ns)
-    | hn == "mn-apply-4" -> extern-apply-4-abs(ns)
-    | hn == "mn-apply-5" -> extern-apply-5-abs(ns)
-    | hn == "mn-apply-6" -> extern-apply-6-abs(ns)
-    | hn == "mn-apply-7" -> extern-apply-7-abs(ns)
-    | hn == "mn-apply-8" -> extern-apply-8-abs(ns)
-    | hn == "arg-count" -> extern-arg-count-abs(ns)
-    | hn == "arg" -> extern-arg-abs(ns)
-    | hn == "read-file" -> extern-read-file-abs(ns)
-    | hn == "write-file" -> extern-write-file-abs(ns)
-    | hn == "show" -> extern-show-abs(ns)
-    | hn == "show-char" -> extern-show-char-abs(ns)
-    | hn == "mn-env-new" -> extern-env-new-abs(ns)
-    | hn == "mn-env-set" -> extern-env-set-abs(ns)
-    | hn == "compare" -> extern-compare-abs(ns)
-    | hn == "sb-length" -> extern-sb-length-abs(ns)
-    | hn == "sb-to-str" -> extern-sb-to-str-abs(ns)
-    | hn == "sb-clear!" -> extern-sb-clear-abs(ns)
-    | hn == "dump" -> extern-dump-abs(ns)
-    | hn == "spawn" -> extern-spawn-abs(ns)
-    | hn == "spawn-capture" -> extern-spawn-capture-abs(ns)
-    | hn == "getenv" -> extern-getenv-abs(ns)
-    | hn == "exists" -> extern-exists-abs(ns)
-    | hn == "mn_task_spawn" -> extern-task-spawn-abs(ns)
-    | hn == "mn_task_self" -> extern-task-self-abs(ns)
-    | hn == "mn_task_suspend_for_test" -> extern-task-suspend-for-test-abs(ns)
-    | hn == "mn_task_resume" -> extern-task-resume-abs(ns)
-    | hn == "mn_task_join" -> extern-task-join-abs(ns)
-    | hn == "mn_task_cancel" -> extern-task-cancel-abs(ns)
-    | hn == "mn_task_yield" -> extern-task-yield-abs(ns)
-    | hn == "mn_task_wait_new" -> extern-task-wait-new-abs(ns)
-    | hn == "mn_task_wait" -> extern-task-wait-abs(ns)
-    | hn == "mn_task_notify" -> extern-task-notify-abs(ns)
-    | hn == "mn_task_notify_all" -> extern-task-notify-all-abs(ns)
-    | hn == "mn_mono_ms" -> extern-mono-ms-abs(ns)
-    | hn == "mn_task_wait_until" -> extern-task-wait-until-abs(ns)
-    | hn == "mn_task_sleep_ms" -> extern-task-sleep-ms-abs(ns)
-    | hn == "mn_task_join_timeout" -> extern-task-join-timeout-abs(ns)
-    | hn == "mn_tcp_accept_timeout" -> extern-tcp-accept-timeout-abs(ns)
-    | hn == "mn_tcp_connect_timeout" -> extern-tcp-connect-timeout-abs(ns)
-    | hn == "mn_tcp_read_timeout" -> extern-tcp-read-timeout-abs(ns)
-    | hn == "mn_tcp_write_timeout" -> extern-tcp-write-timeout-abs(ns)
-    | hn == "mn_tls_client_timeout" -> extern-tls-client-timeout-abs(ns)
-    | hn == "mn_tls_server_timeout" -> extern-tls-server-timeout-abs(ns)
-    | hn == "mn_tls_read_timeout" -> extern-tls-read-timeout-abs(ns)
-    | hn == "mn_tls_write_timeout" -> extern-tls-write-timeout-abs(ns)
-    | hn == "mn_tls_client_insecure" -> extern-tls-client-insecure-abs(ns)
-    | hn == "mn_tls_client_insecure_timeout" -> extern-tls-client-insecure-timeout-abs(ns)
-    | hn == "mn_task_dict_set" -> extern-task-dict-set-abs(ns)
-    | hn == "mn_task_dict_get" -> extern-task-dict-get-abs(ns)
-    | hn == "mn_task_defer_enter" -> extern-task-defer-enter-abs(ns)
-    | hn == "mn_task_defer_push" -> extern-task-defer-push-abs(ns)
-    | hn == "mn_task_defer_leave" -> extern-task-defer-leave-abs(ns)
-    | hn == "mn_tcp_listen" -> extern-tcp-listen-abs(ns)
-    | hn == "mn_tcp_accept" -> extern-tcp-accept-abs(ns)
-    | hn == "mn_tcp_connect" -> extern-tcp-connect-abs(ns)
-    | hn == "mn_tcp_read" -> extern-tcp-read-abs(ns)
-    | hn == "mn_tcp_write" -> extern-tcp-write-abs(ns)
-    | hn == "mn_tcp_close" -> extern-tcp-close-abs(ns)
-    | hn == "mn_tcp_local_port" -> extern-tcp-local-port-abs(ns)
-    | hn == "mn_udp_bind" -> extern-udp-bind-abs(ns)
-    | hn == "mn_udp_send" -> extern-udp-send-abs(ns)
-    | hn == "mn_udp_recv" -> extern-udp-recv-abs(ns)
-    | hn == "mn_udp_close" -> extern-udp-close-abs(ns)
-    | hn == "mn_tls_client" -> extern-tls-client-abs(ns)
-    | hn == "mn_tls_server" -> extern-tls-server-abs(ns)
-    | hn == "mn_tls_read" -> extern-tls-read-abs(ns)
-    | hn == "mn_tls_write" -> extern-tls-write-abs(ns)
-    | hn == "mn_tls_close" -> extern-tls-close-abs(ns)
-    | else -> extern-rename-abs(ns)
+  if (hn == "write") -> extern-write-abs(ns) | if (str-in-list(hn, ["isatty", "mtime", "cwd", "ensure-dir", "list-dir", "realpath", "now-ms", "remove", "is-dir"])) -> os-op-abs(hn, ns) | if (hn == "f+") -> extern-fadd-abs(ns) | if (hn == "f-") -> extern-fsub-abs(ns) | if (hn == "f*") -> extern-fmul-abs(ns) | if (hn == "f/") -> extern-fdiv-abs(ns) | if (hn == "str-concat") -> extern-str-concat-abs(ns) | if (hn == "str-byte-length") -> extern-str-byte-length-abs(ns) | if (hn == "str-byte") -> extern-str-byte-abs(ns) | if (hn == "str-slice") -> extern-str-slice-abs(ns) | if (hn == "char->str") -> extern-char-to-str-abs(ns) | if (hn == "ref") -> extern-ref-new-abs(ns) | if (hn == "deref") -> extern-ref-deref-abs(ns) | if (hn == "set!") -> extern-ref-set-abs(ns) | if (hn == "sb-new") -> extern-sb-new-abs(ns) | if (hn == "sb-append!") -> extern-sb-append-abs(ns) | if (hn == "sb-append-byte!") -> extern-sb-append-byte-abs(ns) | if (hn == "sb-take-str!") -> extern-sb-take-str-abs(ns) | if (hn == "map-new") -> extern-map-new-abs(ns) | if (hn == "map-set") -> extern-map-set-abs(ns) | if (hn == "map-get") -> extern-map-get-abs(ns) | if (hn == "map-has") -> extern-map-has-abs(ns) | if (hn == "map-size") -> extern-map-size-abs(ns) | if (hn == "map-keys") -> extern-map-keys-abs(ns) | if (hn == "mn-env-0") -> extern-env-0-abs(ns) | if (hn == "mn-env-1") -> extern-env-1-abs(ns) | if (hn == "mn-env-get") -> extern-env-get-abs(ns) | if (hn == "mn-closure-new") -> extern-closure-new-abs(ns) | if (hn == "mn-apply-0") -> extern-apply-0-abs(ns) | if (hn == "mn-apply-1") -> extern-apply-1-abs(ns) | if (hn == "mn-apply-2") -> extern-apply-2-abs(ns) | if (hn == "mn-apply-3") -> extern-apply-3-abs(ns) | if (hn == "mn-apply-4") -> extern-apply-4-abs(ns) | if (hn == "mn-apply-5") -> extern-apply-5-abs(ns) | if (hn == "mn-apply-6") -> extern-apply-6-abs(ns) | if (hn == "mn-apply-7") -> extern-apply-7-abs(ns) | if (hn == "mn-apply-8") -> extern-apply-8-abs(ns) | if (hn == "arg-count") -> extern-arg-count-abs(ns) | if (hn == "arg") -> extern-arg-abs(ns) | if (hn == "read-file") -> extern-read-file-abs(ns) | if (hn == "write-file") -> extern-write-file-abs(ns) | if (hn == "show") -> extern-show-abs(ns) | if (hn == "show-char") -> extern-show-char-abs(ns) | if (hn == "mn-env-new") -> extern-env-new-abs(ns) | if (hn == "mn-env-set") -> extern-env-set-abs(ns) | if (hn == "compare") -> extern-compare-abs(ns) | if (hn == "sb-length") -> extern-sb-length-abs(ns) | if (hn == "sb-to-str") -> extern-sb-to-str-abs(ns) | if (hn == "sb-clear!") -> extern-sb-clear-abs(ns) | if (hn == "dump") -> extern-dump-abs(ns) | if (hn == "spawn") -> extern-spawn-abs(ns) | if (hn == "spawn-capture") -> extern-spawn-capture-abs(ns) | if (hn == "getenv") -> extern-getenv-abs(ns) | if (hn == "exists") -> extern-exists-abs(ns) | if (hn == "mn_task_spawn") -> extern-task-spawn-abs(ns) | if (hn == "mn_task_self") -> extern-task-self-abs(ns) | if (hn == "mn_task_suspend_for_test") -> extern-task-suspend-for-test-abs(ns) | if (hn == "mn_task_resume") -> extern-task-resume-abs(ns) | if (hn == "mn_task_join") -> extern-task-join-abs(ns) | if (hn == "mn_task_cancel") -> extern-task-cancel-abs(ns) | if (hn == "mn_task_yield") -> extern-task-yield-abs(ns) | if (hn == "mn_task_wait_new") -> extern-task-wait-new-abs(ns) | if (hn == "mn_task_wait") -> extern-task-wait-abs(ns) | if (hn == "mn_task_notify") -> extern-task-notify-abs(ns) | if (hn == "mn_task_notify_all") -> extern-task-notify-all-abs(ns) | if (hn == "mn_mono_ms") -> extern-mono-ms-abs(ns) | if (hn == "mn_task_wait_until") -> extern-task-wait-until-abs(ns) | if (hn == "mn_task_sleep_ms") -> extern-task-sleep-ms-abs(ns) | if (hn == "mn_task_join_timeout") -> extern-task-join-timeout-abs(ns) | if (hn == "mn_tcp_accept_timeout") -> extern-tcp-accept-timeout-abs(ns) | if (hn == "mn_tcp_connect_timeout") -> extern-tcp-connect-timeout-abs(ns) | if (hn == "mn_tcp_read_timeout") -> extern-tcp-read-timeout-abs(ns) | if (hn == "mn_tcp_write_timeout") -> extern-tcp-write-timeout-abs(ns) | if (hn == "mn_tls_client_timeout") -> extern-tls-client-timeout-abs(ns) | if (hn == "mn_tls_server_timeout") -> extern-tls-server-timeout-abs(ns) | if (hn == "mn_tls_read_timeout") -> extern-tls-read-timeout-abs(ns) | if (hn == "mn_tls_write_timeout") -> extern-tls-write-timeout-abs(ns) | if (hn == "mn_tls_client_insecure") -> extern-tls-client-insecure-abs(ns) | if (hn == "mn_tls_client_insecure_timeout") -> extern-tls-client-insecure-timeout-abs(ns) | if (hn == "mn_task_dict_set") -> extern-task-dict-set-abs(ns) | if (hn == "mn_task_dict_get") -> extern-task-dict-get-abs(ns) | if (hn == "mn_task_defer_enter") -> extern-task-defer-enter-abs(ns) | if (hn == "mn_task_defer_push") -> extern-task-defer-push-abs(ns) | if (hn == "mn_task_defer_leave") -> extern-task-defer-leave-abs(ns) | if (hn == "mn_tcp_listen") -> extern-tcp-listen-abs(ns) | if (hn == "mn_tcp_accept") -> extern-tcp-accept-abs(ns) | if (hn == "mn_tcp_connect") -> extern-tcp-connect-abs(ns) | if (hn == "mn_tcp_read") -> extern-tcp-read-abs(ns) | if (hn == "mn_tcp_write") -> extern-tcp-write-abs(ns) | if (hn == "mn_tcp_close") -> extern-tcp-close-abs(ns) | if (hn == "mn_tcp_local_port") -> extern-tcp-local-port-abs(ns) | if (hn == "mn_udp_bind") -> extern-udp-bind-abs(ns) | if (hn == "mn_udp_send") -> extern-udp-send-abs(ns) | if (hn == "mn_udp_recv") -> extern-udp-recv-abs(ns) | if (hn == "mn_udp_close") -> extern-udp-close-abs(ns) | if (hn == "mn_tls_client") -> extern-tls-client-abs(ns) | if (hn == "mn_tls_server") -> extern-tls-server-abs(ns) | if (hn == "mn_tls_read") -> extern-tls-read-abs(ns) | if (hn == "mn_tls_write") -> extern-tls-write-abs(ns) | if (hn == "mn_tls_close") -> extern-tls-close-abs(ns) | extern-rename-abs(ns)
 
 let runtime-op-arity(hn: Str) -> Int =
   runtime-op-arity-named(seam-menard-name(hn))
 
 let runtime-op-arity-named(hn: Str) -> Int =
-  cond
-    | hn == "cwd" || hn == "now-ms" || hn == "mn_mono_ms" || hn == "mn_task_self" || hn == "mn_task_suspend_for_test" || hn == "mn_task_yield" || hn == "mn_task_wait_new" || hn == "mn_task_defer_enter" || hn == "mn_task_defer_leave" -> 0
-    | hn == "mn_udp_send" || hn == "mn_tls_server_timeout" -> 4
-    | hn == "mn_tls_server" || hn == "mn_tcp_connect_timeout" || hn == "mn_tcp_read_timeout" || hn == "mn_tcp_write_timeout" || hn == "mn_tls_read_timeout" || hn == "mn_tls_write_timeout" || hn == "mn_tls_client_timeout" || hn == "mn_tls_client_insecure_timeout" -> 3
-    | hn == "mn_tcp_connect" || hn == "mn_tcp_read" || hn == "mn_tcp_write" || hn == "mn_udp_recv" || hn == "mn_tls_read" || hn == "mn_tls_write" || hn == "mn_task_wait_until" || hn == "mn_task_join_timeout" || hn == "mn_tcp_accept_timeout" || hn == "mn_tls_client" || hn == "mn_tls_client_insecure" -> 2
-    | hn == "mn_tcp_listen" || hn == "mn_tcp_accept" || hn == "mn_tcp_close" || hn == "mn_tcp_local_port" || hn == "mn_udp_bind" || hn == "mn_udp_close" || hn == "mn_tls_close" -> 1
-    | str-in-list(hn, ["isatty", "mtime", "ensure-dir", "list-dir", "realpath", "remove", "is-dir"]) -> 1
-    | hn == "sb-new" || hn == "map-new" || hn == "mn-env-0" || hn == "arg-count" -> 0
-    | str-in-list(hn, ["str-byte-length", "char->str", "ref", "deref", "sb-take-str!", "sb-clear!", "map-size", "map-keys", "mn-env-1", "mn-env-new", "arg", "read-file", "mn-apply-0", "show", "show-char", "sb-length", "sb-to-str", "dump", "spawn", "getenv", "exists", "mn_task_spawn", "mn_task_resume", "mn_task_join", "mn_task_cancel", "mn_task_wait", "mn_task_notify", "mn_task_notify_all", "mn_task_dict_get", "mn_task_defer_push", "mn_task_sleep_ms"]) -> 1
-    | hn == "str-slice" || hn == "map-set" || hn == "mn-apply-2" || hn == "mn-env-set" -> 3
-    | hn == "mn-apply-3" -> 4
-    | hn == "mn-apply-4" -> 5
-    | hn == "mn-apply-5" -> 6
-    | hn == "mn-apply-6" -> 7
-    | hn == "mn-apply-7" -> 8
-    | hn == "mn-apply-8" -> 9
-    | else -> 2
+  if (hn == "cwd" || hn == "now-ms" || hn == "mn_mono_ms" || hn == "mn_task_self" || hn == "mn_task_suspend_for_test" || hn == "mn_task_yield" || hn == "mn_task_wait_new" || hn == "mn_task_defer_enter" || hn == "mn_task_defer_leave") -> 0 | if (hn == "mn_udp_send" || hn == "mn_tls_server_timeout") -> 4 | if (hn == "mn_tls_server" || hn == "mn_tcp_connect_timeout" || hn == "mn_tcp_read_timeout" || hn == "mn_tcp_write_timeout" || hn == "mn_tls_read_timeout" || hn == "mn_tls_write_timeout" || hn == "mn_tls_client_timeout" || hn == "mn_tls_client_insecure_timeout") -> 3 | if (hn == "mn_tcp_connect" || hn == "mn_tcp_read" || hn == "mn_tcp_write" || hn == "mn_udp_recv" || hn == "mn_tls_read" || hn == "mn_tls_write" || hn == "mn_task_wait_until" || hn == "mn_task_join_timeout" || hn == "mn_tcp_accept_timeout" || hn == "mn_tls_client" || hn == "mn_tls_client_insecure") -> 2 | if (hn == "mn_tcp_listen" || hn == "mn_tcp_accept" || hn == "mn_tcp_close" || hn == "mn_tcp_local_port" || hn == "mn_udp_bind" || hn == "mn_udp_close" || hn == "mn_tls_close") -> 1 | if (str-in-list(hn, ["isatty", "mtime", "ensure-dir", "list-dir", "realpath", "remove", "is-dir"])) -> 1 | if (hn == "sb-new" || hn == "map-new" || hn == "mn-env-0" || hn == "arg-count") -> 0 | if (str-in-list(hn, ["str-byte-length", "char->str", "ref", "deref", "sb-take-str!", "sb-clear!", "map-size", "map-keys", "mn-env-1", "mn-env-new", "arg", "read-file", "mn-apply-0", "show", "show-char", "sb-length", "sb-to-str", "dump", "spawn", "getenv", "exists", "mn_task_spawn", "mn_task_resume", "mn_task_join", "mn_task_cancel", "mn_task_wait", "mn_task_notify", "mn_task_notify_all", "mn_task_dict_get", "mn_task_defer_push", "mn_task_sleep_ms"])) -> 1 | if (hn == "str-slice" || hn == "map-set" || hn == "mn-apply-2" || hn == "mn-env-set") -> 3 | if (hn == "mn-apply-3") -> 4 | if (hn == "mn-apply-4") -> 5 | if (hn == "mn-apply-5") -> 6 | if (hn == "mn-apply-6") -> 7 | if (hn == "mn-apply-7") -> 8 | if (hn == "mn-apply-8") -> 9 | 2
 
 let lower-runtime-op(hn: Str, args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  cond
-    | hn == "mn-closure-new" -> lower-closure-new(args, env, b, funcs, noop, pool)
-    | length(args) == runtime-op-arity(hn) -> Result.and-then(fn (avs) = Ok(emit-call-words!(b, runtime-op-abs(hn, str-pool-extern-base(pool)), avs)), lower-args(args, env, b, funcs, noop, pool))
-    | else -> Err(String.concat("arity mismatch calling ", hn))
+  if (hn == "mn-closure-new") -> lower-closure-new(args, env, b, funcs, noop, pool) | if (length(args) == runtime-op-arity(hn)) -> Result.and-then(fn (avs) = Ok(emit-call-words!(b, runtime-op-abs(hn, str-pool-extern-base(pool)), avs)), lower-args(args, env, b, funcs, noop, pool)) | Err(String.concat("arity mismatch calling ", hn))
 
 ; `(mn-closure-new __lamN env)` — first arg is a FuncRef symbol; emit
 ; ptrtoint of that function's module-scope abs id, then call mn_closure_new.
@@ -2372,17 +2056,11 @@ let bind-name!(name: Str, val: Int, env: Map Str Int, b: Builder) -> Map Str Int
 let bind-pat!(pat: Ast, val: Int, else-bb: BB, env: Map Str Int, b: Builder, pool: StrPool) -> Result (Map Str Int) Str =
   match (pat)
     | SymNode(n, _) ->
-      cond
-        | n == "_" -> Ok(env)
-        | is-upper-name(n) -> bind-nullary-pat!(n, val, else-bb, env, b, pool)
-        | else -> Ok(bind-name!(n, val, env, b))
+      if (n == "_") -> Ok(env) | if (is-upper-name(n)) -> bind-nullary-pat!(n, val, else-bb, env, b, pool) | Ok(bind-name!(n, val, env, b))
     | ParenNode(head :: args, _) ->
       match (sym-str(head))
         | Some(cname) ->
-          cond
-            | cname == "char" -> bind-char-pat!(args, val, else-bb, env, b)
-            | cname == "tuple" -> bind-tuple-pat!(args, val, else-bb, env, b, pool)
-            | else -> bind-ctor-pat!(cname, args, val, else-bb, env, b, pool)
+          if (cname == "char") -> bind-char-pat!(args, val, else-bb, env, b) | if (cname == "tuple") -> bind-tuple-pat!(args, val, else-bb, env, b, pool) | bind-ctor-pat!(cname, args, val, else-bb, env, b, pool)
         | None -> Err("unsupported match pattern")
     | IntNode(n, _) -> bind-int-pat!(n, val, else-bb, env, b)
     | BoolNode(flag, _) -> bind-bool-pat!(flag, val, else-bb, env, b)
@@ -2528,14 +2206,12 @@ let lower-cond-op(hn: Str, a-ast: Ast, c-ast: Ast, env: Map Str Int, b: Builder,
 
 ; `=` is value-directed (`mn_equal`). Ordering ops stay immediate icmp.
 let lower-cond-cmp!(hn: Str, av: Int, cv: Int, b: Builder, pool: StrPool) -> Int =
-  cond
-    | hn == "=" ->
-      {
-        let eqw = emit-call!(b, extern-equal-abs(str-pool-extern-base(pool)), [get!(b, av), get!(b, cv)])
-        let f = const-false!(b)
-        emit-cmp2!(b, icmp-ne, eqw, f)
-      }
-    | else -> emit-cmp2!(b, cmp-pred-for(hn), get!(b, av), get!(b, cv))
+  if (hn == "=") ->
+    {
+      let eqw = emit-call!(b, extern-equal-abs(str-pool-extern-base(pool)), [get!(b, av), get!(b, cv)])
+      let f = const-false!(b)
+      emit-cmp2!(b, icmp-ne, eqw, f)
+    } | emit-cmp2!(b, cmp-pred-for(hn), get!(b, av), get!(b, cv))
 
 let lower-cond-bool-value(ast: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   Result.and-then(
@@ -2574,15 +2250,9 @@ let lower-float-cmp(args: List Ast, op: Str, env: Map Str Int, b: Builder, funcs
     | _ -> Err(String.concat("comparison `", op, "` expects exactly 2 arguments"))
 
 let cmp-pred-for(op: Str) -> Int =
-  cond
-    | op == "<" -> icmp-slt
-    | op == ">" -> icmp-sgt
-    | op == "<=" -> icmp-sle
-    | op == ">=" -> icmp-sge
-    | else -> icmp-eq
+  if (op == "<") -> icmp-slt | if (op == ">") -> icmp-sgt | if (op == "<=") -> icmp-sle | if (op == ">=") -> icmp-sge | icmp-eq
 
 ; -- arithmetic --
-
 let lower-arith(args: List Ast, op: Str, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (args)
     | [a-ast, c-ast] -> Result.and-then(fn (av) = Result.and-then(fn (cv) = Ok(apply-arith!(b, pool, sp, op, av, cv)), lower-expr(c-ast, env, b, funcs, noop, pool)), lower-expr(a-ast, env, b, funcs, noop, pool))
@@ -2595,18 +2265,12 @@ let apply-arith!(b: Builder, pool: StrPool, sp: Span, op: Str, av: Int, cv: Int)
   let file-gid = file-gid-of(pool, sp.origin)
   let line = span-line-clamped(sp)
   let msg-gid = str-pool-get(pool, div-zero-msg())
-  cond
-    | op == "+" -> arith-add!(b, aw, cw)
-    | op == "-" -> arith-sub!(b, aw, cw)
-    | op == "*" -> arith-mul!(b, aw, cw)
-    | op == "/" -> arith-div!(b, panic-at, file-gid, line, msg-gid, aw, cw)
-    | else -> arith-rem!(b, panic-at, file-gid, line, msg-gid, aw, cw)
+  if (op == "+") -> arith-add!(b, aw, cw) | if (op == "-") -> arith-sub!(b, aw, cw) | if (op == "*") -> arith-mul!(b, aw, cw) | if (op == "/") -> arith-div!(b, panic-at, file-gid, line, msg-gid, aw, cw) | arith-rem!(b, panic-at, file-gid, line, msg-gid, aw, cw)
 }
 
 ; -- let (both the inline-body form `(let n e body…)` and the bare,
 ; sequence-threading form `(let n e)` — see `lower-sequence` for the
 ; latter). --
-
 let lower-let-inline(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (rest)
     | name-ast :: expr-ast :: body -> lower-let-inline-named(name-ast, expr-ast, body, env, b, funcs, noop, pool)
@@ -2633,7 +2297,6 @@ let lower-let-inline-continue(body: List Ast, env: Map Str Int, b: Builder, func
 ; sequential forms; a bare `(let n e)` among them extends the env for
 ; every sibling that follows; a call to a known no-op (`shadow-push`/
 ; `shadow-pop`) is skipped entirely (see header comment). --
-
 record SimpleLet {
   name: Str
   expr: Ast
@@ -2645,12 +2308,10 @@ let as-simple-let(f: Ast) -> Maybe SimpleLet =
     | _ -> None
 
 let as-simple-let-named(head: Ast, name-ast: Ast, expr-ast: Ast) -> Maybe SimpleLet =
-  cond
-    | is-sym(head, "let") ->
-      match (sym-str(name-ast))
-        | Some(n) -> Some(SimpleLet(n, expr-ast))
-        | None -> None
-    | else -> None
+  if (is-sym(head, "let")) ->
+    match (sym-str(name-ast))
+      | Some(n) -> Some(SimpleLet(n, expr-ast))
+      | None -> None | None
 
 let is-unit-noop-call(f: Ast, noop: Map Str Bool) -> Bool =
   match (f)
@@ -2669,7 +2330,6 @@ let is-unit-noop-call-named(head: Ast, noop: Map Str Bool) -> Bool =
 ; only mid-sequence (never a body's last form — see header comment's
 ; "Unit results") — see `StrPool`'s doc comment (below `lower-program`)
 ; for the two-pass string-global scheme these lower against.
-
 let is-effect-head(s: Str) -> Bool =
   s == "println" || s == "print" || s == "print-text" || s == "exit" || s == "mn_exit"
 
@@ -2706,15 +2366,12 @@ let lower-effect-op(hn: Str, rest: List Ast, env: Map Str Int, b: Builder, funcs
   lower-effect-known(effect-alias(hn), rest, env, b, funcs, noop, pool)
 
 let lower-effect-known(hn: Str, rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
-  cond
-    | hn == "println" -> lower-println(rest, env, b, funcs, noop, pool)
-    | hn == "print" -> lower-print(rest, env, b, funcs, noop, pool)
-    | hn == "print-text" ->
-      match (rest)
-        | [value] -> lower-print-text(value, env, b, funcs, noop, pool)
-        | _ -> Err("print-text requires exactly one Str argument")
-    | hn == "exit" -> lower-exit(rest, env, b, funcs, noop, pool)
-    | else -> Err(String.concat("unknown effect ", hn))
+  if (hn == "println") -> lower-println(rest, env, b, funcs, noop, pool) |
+  if (hn == "print") -> lower-print(rest, env, b, funcs, noop, pool) |
+  if (hn == "print-text") ->
+    match (rest)
+      | [value] -> lower-print-text(value, env, b, funcs, noop, pool)
+      | _ -> Err("print-text requires exactly one Str argument") | if (hn == "exit") -> lower-exit(rest, env, b, funcs, noop, pool) | Err(String.concat("unknown effect ", hn))
 
 ; `(exit code)` — noreturn via `mn_exit` (tagged Int in, untagged inside).
 let lower-exit(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
@@ -2728,8 +2385,7 @@ let lower-exit(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str Func
 let lower-print-text(a: Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
   match (a)
     | StrNode(s, _) -> Ok(emit-write-str-to!(b, pool, s, str-pool-write-stdout-abs(pool)))
-    | _ ->
-      Result.and-then(fn (v) = Ok(emit-call-void!(b, extern-kind-print, extern-print-str-abs(str-pool-extern-base(pool)), [get!(b, v)])), lower-expr(a, env, b, funcs, noop, pool))
+    | _ -> Result.and-then(fn (v) = Ok(emit-call-void!(b, extern-kind-print, extern-print-str-abs(str-pool-extern-base(pool)), [get!(b, v)])), lower-expr(a, env, b, funcs, noop, pool))
 
 let lower-print-args(args: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Unit Str =
   match (args)
@@ -2756,10 +2412,7 @@ let lower-sequence(forms: List Ast, env: Map Str Int, b: Builder, funcs: Map Str
     | f :: rest -> lower-sequence-step(f, rest, env, b, funcs, noop, pool)
 
 let lower-sequence-step(f: Ast, rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  cond
-    | is-unit-noop-call(f, noop) -> lower-sequence-after-skip(rest, env, b, funcs, noop, pool)
-    | is-effect-call(f) -> lower-sequence-effect(f, rest, env, b, funcs, noop, pool)
-    | else -> lower-sequence-step-real(f, rest, env, b, funcs, noop, pool)
+  if (is-unit-noop-call(f, noop)) -> lower-sequence-after-skip(rest, env, b, funcs, noop, pool) | if (is-effect-call(f)) -> lower-sequence-effect(f, rest, env, b, funcs, noop, pool) | lower-sequence-step-real(f, rest, env, b, funcs, noop, pool)
 
 let lower-sequence-after-skip(rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (rest)
@@ -2784,8 +2437,8 @@ let lower-sequence-step-real(f: Ast, rest: List Ast, env: Map Str Int, b: Builde
     | Some(sl) -> lower-sequence-let(sl, rest, env, b, funcs, noop, pool)
     | None -> lower-sequence-plain(f, rest, env, b, funcs, noop, pool)
 
-        ; A nested let of the same name inside the initializer is a local,
-        ; not a second store of the module slot.
+; A nested let of the same name inside the initializer is a local,
+; not a second store of the module slot.
 let lower-sequence-let(sl: SimpleLet, rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   match (sl)
     | SimpleLet(name, expr) ->
@@ -2802,15 +2455,11 @@ let lower-sequence-let(sl: SimpleLet, rest: List Ast, env: Map Str Int, b: Build
       }
 
 let slot-store(b: Builder, name: Str, env: Map Str Int) -> Bool =
-  cond
-    | deref(b-slot-arm(b)) ->
-      cond
-        | str-in-list(name, deref(b-slots(b))) ->
-          match (Map.lookup(name, env))
-            | None -> true
-            | Some(_) -> false
-        | else -> false
-    | else -> false
+  if (deref(b-slot-arm(b))) ->
+    if (str-in-list(name, deref(b-slots(b)))) ->
+      match (Map.lookup(name, env))
+        | None -> true
+        | Some(_) -> false | false | false
 
 let lower-sequence-let-bind(name: Str, v: Int, rest: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str {
   let w = get!(b, v)
@@ -2829,7 +2478,6 @@ let lower-sequence-plain(f: Ast, rest: List Ast, env: Map Str Int, b: Builder, f
   Result.and-then(fn (v) = lower-sequence-rest(rest, env, b, funcs, noop, pool, get!(b, v)), lower-expr(f, env, b, funcs, noop, pool))
 
 ; -- calls to other top-level `Int`-only `defn`s --
-
 let lower-args(arg-asts: List Ast, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result (List Int) Str =
   match (arg-asts)
     | [] -> Ok([])
@@ -2850,22 +2498,16 @@ let lower-call-local-or-err(name: Str, arg-asts: List Ast, sp: Span, env: Map St
     | Some(slot) -> lower-apply-local(slot, name, arg-asts, sp, env, b, funcs, noop, pool)
 
 let lower-apply-local(slot: Int, name: Str, arg-asts: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
-  cond
-    | length(arg-asts) > 8 ->
-      Err(String.concat("closure application supports at most 8 arguments (calling local `", name, "`)"))
-    | else ->
-      Result.and-then(
-        fn (vs) {
-          ; `emit-load!` already yields a live word; only args go through `get!`
-          ; (same as the prior 0–2 apply paths).
-          let clo = emit-load!(b, slot)
-          Result.and-then(
-            fn (abs) = Ok(emit-traced-call!(b, pool, sp, abs, clo :: get-words!(b, vs))),
-            apply-extern-abs(length(arg-asts), str-pool-extern-base(pool))
-          )
-        },
-        lower-args(arg-asts, env, b, funcs, noop, pool)
-      )
+  if (length(arg-asts) > 8) -> Err(String.concat("closure application supports at most 8 arguments (calling local `", name, "`)")) |
+  Result.and-then(
+    fn (vs) {
+      ; `emit-load!` already yields a live word; only args go through `get!`
+      ; (same as the prior 0–2 apply paths).
+      let clo = emit-load!(b, slot)
+      Result.and-then(fn (abs) = Ok(emit-traced-call!(b, pool, sp, abs, clo :: get-words!(b, vs))), apply-extern-abs(length(arg-asts), str-pool-extern-base(pool)))
+    },
+    lower-args(arg-asts, env, b, funcs, noop, pool)
+  )
 
 let lower-call-with-ref(fr: FuncRef, name: Str, arg-asts: List Ast, sp: Span, env: Map Str Int, b: Builder, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool) -> Result Int Str =
   if (length(arg-asts) == func-ref-arity(fr)) -> Result.and-then(fn (args) = Ok(emit-traced-call!(b, pool, sp, func-ref-abs(fr), get-words!(b, args))), lower-args(arg-asts, env, b, funcs, noop, pool)) | Err(String.concat("arity mismatch calling ", name))
@@ -2874,7 +2516,6 @@ let lower-call-with-ref(fr: FuncRef, name: Str, arg-asts: List Ast, sp: Span, en
 ; One function: bind params (each its own alloca, uniformly with `let`s
 ; — see header comment), lower the body, then either `ret` the tagged
 ; `i64` result directly, or — `main` only — untag+trunc to `i32` first.
-
 let bind-params!(b: Builder, names: List Str, start: Int, i: Int) -> Map Str Int =
   match (names)
     | [] -> Map.empty()
@@ -2901,8 +2542,8 @@ let finish-main-return!(b: Builder, result-abs: Int) -> Unit {
   emit-ret!(b, i32v)
 }
 
-    ; Native `@main` is `(i32 argc, ptr argv) -> i32` — two LLVM params that
-    ; are not Menard words; Menard `main` itself still takes zero args.
+; Native `@main` is `(i32 argc, ptr argv) -> i32` — two LLVM params that
+; are not Menard words; Menard `main` itself still takes zero args.
 let lower-one-func(ld: LDefn, num-globals: Int, funcs: Map Str FuncRef, noop: Map Str Bool, pool: StrPool, mc: Map Str Bool, slots: List Str) -> Result LFunc Str {
   let is-main = ldefn-name(ld) == "main"
   let llvm-nparams =
@@ -3051,12 +2692,10 @@ let subst-list(xs: List Ast, consts: Map Str Int, bound: List Str) -> List Ast =
     | x :: rest -> subst-const(x, consts, bound) :: subst-list(rest, consts, bound)
 
 let subst-sym(name: Str, sp: Span, consts: Map Str Int, bound: List Str) -> Ast =
-  cond
-    | name-is-bound(name, bound) -> SymNode(name, sp)
-    | else ->
-      match (Map.lookup(name, consts))
-        | Some(k) -> IntNode(k, sp)
-        | None -> SymNode(name, sp)
+  if (name-is-bound(name, bound)) -> SymNode(name, sp) |
+  match (Map.lookup(name, consts))
+    | Some(k) -> IntNode(k, sp)
+    | None -> SymNode(name, sp)
 
 let let-bound-name(name-ast: Ast) -> Str =
   match (sym-str(name-ast))
@@ -3103,11 +2742,7 @@ let subst-defn(elems: List Ast, sp: Span, consts: Map Str Int, bound: List Str) 
 let subst-paren(elems: List Ast, sp: Span, consts: Map Str Int, bound: List Str) -> Ast =
   match (elems)
     | head :: _ ->
-      cond
-        | is-sym(head, "quote") -> ParenNode(elems, sp)
-        | is-sym(head, "let") -> subst-let(elems, sp, consts, bound)
-        | is-sym(head, "defn") || is-sym(head, "fn") -> subst-defn(elems, sp, consts, bound)
-        | else -> ParenNode(subst-list(elems, consts, bound), sp)
+      if (is-sym(head, "quote")) -> ParenNode(elems, sp) | if (is-sym(head, "let")) -> subst-let(elems, sp, consts, bound) | if (is-sym(head, "defn") || is-sym(head, "fn")) -> subst-defn(elems, sp, consts, bound) | ParenNode(subst-list(elems, consts, bound), sp)
     | _ -> ParenNode(elems, sp)
 
 let subst-const(ast: Ast, consts: Map Str Int, bound: List Str) -> Ast =
@@ -3130,12 +2765,10 @@ let subst-int-constants(forms: List Ast) -> List Ast =
 let is-folded-int-let(ast: Ast) -> Bool =
   match (unwrap-pub(ast))
     | ParenNode([head, _, expr], _) ->
-      cond
-        | is-sym(head, "let") ->
-          match (expr)
-            | IntNode(_, _) -> true
-            | _ -> false
-        | else -> false
+      if (is-sym(head, "let")) ->
+        match (expr)
+          | IntNode(_, _) -> true
+          | _ -> false | false
     | _ -> false
 
 let drop-folded-int-lets(forms: List Ast) -> List Ast =
@@ -3156,10 +2789,7 @@ let lower-program-collected(forms: List Ast, triple: Str, paths: List Str) -> Re
 }
 
 let lower-program-checked-main(main-ld: LDefn, word-lds: List LDefn, all-lds: List LDefn, forms: List Ast, triple: Str, paths: List Str) -> Result Str Str =
-  cond
-    | param-arity-of(ldefn-params(main-ld)) > 0 -> Err("`main` must take no arguments")
-    | is-int-type(ldefn-ret(main-ld)) || is-unit-type(ldefn-ret(main-ld)) -> lower-program-build(word-lds, all-lds, forms, triple, paths, [], [])
-    | else -> Err("`main` must return Int or Unit")
+  if (param-arity-of(ldefn-params(main-ld)) > 0) -> Err("`main` must take no arguments") | if (is-int-type(ldefn-ret(main-ld)) || is-unit-type(ldefn-ret(main-ld))) -> lower-program-build(word-lds, all-lds, forms, triple, paths, [], []) | Err("`main` must return Int or Unit")
 
 ; Global value numbering: cstring globals, then one shape and one object
 ; per static pool entry, then the runtime singleton declarations,
@@ -3208,13 +2838,11 @@ let mc-walk-or(a: McWalk, b: McWalk) -> McWalk =
         | McWalk(db, cb) -> McWalk(da || db, mc-append(ca, cb))
 
 let mc-note-head(hn: Str, names: Map Str Bool) -> McWalk =
-  cond
-    | mc-pure(hn) -> mc-walk-empty()
-    | mc-alloc-name(hn) || mc-ctor-alloc(hn) -> McWalk(true, [])
-    | else ->
-      match (Map.lookup(hn, names))
-        | Some(_) -> McWalk(false, [hn])
-        | None -> McWalk(true, [])
+  if (mc-pure(hn)) -> mc-walk-empty() |
+  if (mc-alloc-name(hn) || mc-ctor-alloc(hn)) -> McWalk(true, []) |
+  match (Map.lookup(hn, names))
+    | Some(_) -> McWalk(false, [hn])
+    | None -> McWalk(true, [])
 
 let mc-walk-forms(xs: List Ast, names: Map Str Bool) -> McWalk =
   match (xs)
@@ -3292,10 +2920,7 @@ let mc-walk-paren(elems: List Ast, names: Map Str Bool) -> McWalk =
       match (sym-str(head))
         | None -> mc-walk-or(mc-walk-forms(rest, names), McWalk(true, []))
         | Some(hn) ->
-          cond
-            | hn == "loop" -> mc-walk-loop(rest, names)
-            | hn == "match" -> mc-walk-match(rest, names)
-            | else -> mc-walk-call(hn, rest, names)
+          if (hn == "loop") -> mc-walk-loop(rest, names) | if (hn == "match") -> mc-walk-match(rest, names) | mc-walk-call(hn, rest, names)
 
 let mc-seed(lds: List LDefn) -> Map Str Bool =
   match (lds)
@@ -3333,12 +2958,10 @@ let mc-apply-one(ld: LDefn, rest: List LDefn, info: Map Str McWalk, flags: Map S
       | Some(f) -> f
       | None -> false
   let next-flag =
-    cond
-      | now -> true
-      | else ->
-        match (Map.lookup(name, info))
-          | Some(w) -> mc-body-true(w, flags)
-          | None -> true
+    if (now) -> true |
+    match (Map.lookup(name, info))
+      | Some(w) -> mc-body-true(w, flags)
+      | None -> true
   mc-apply(rest, info, Map.set(name, next-flag, flags))
 }
 
@@ -3446,13 +3069,10 @@ let note-defrec(rest: List Ast, acc: Map Str CtorSpec, tag-ref: Ref Int, local: 
     | [] -> acc
 
 let note-ctor-named(hn: Str, rest: List Ast, acc: Map Str CtorSpec, tag-ref: Ref Int, local: Ref (List CtorSeed)) -> Map Str CtorSpec =
-  cond
-    | hn == "variant" ->
-      match (rest)
-        | _ :: ctors -> note-variant-ctors(ctors, acc, tag-ref, local)
-        | [] -> acc
-    | hn == "defrec" -> note-defrec(rest, acc, tag-ref, local)
-    | else -> acc
+  if (hn == "variant") ->
+    match (rest)
+      | _ :: ctors -> note-variant-ctors(ctors, acc, tag-ref, local)
+      | [] -> acc | if (hn == "defrec") -> note-defrec(rest, acc, tag-ref, local) | acc
 
 let note-ctor-form(ast: Ast, acc: Map Str CtorSpec, tag-ref: Ref Int, local: Ref (List CtorSeed)) -> Map Str CtorSpec =
   match (unwrap-pub(ast))
@@ -3532,12 +3152,10 @@ let add-imp-refs(imps: List Imp, idx: Int, acc: Map Str FuncRef) -> Map Str Func
 let value-let-name(form: Ast) -> Maybe Str =
   match (unwrap-pub(form))
     | ParenNode([head, name, expr], _) ->
-      cond
-        | is-sym(head, "let") ->
-          match (expr)
-            | IntNode(_, _) -> None
-            | _ -> sym-str(name)
-        | else -> None
+      if (is-sym(head, "let")) ->
+        match (expr)
+          | IntNode(_, _) -> None
+          | _ -> sym-str(name) | None
     | _ -> None
 
 let top-value-let-names(forms: List Ast) -> List Str =
@@ -3567,9 +3185,9 @@ let add-slot-strs(names: List Str, p: StrPool) -> StrPool =
     | [] -> p
     | n :: rest -> add-slot-strs(rest, str-pool-add(p, n))
 
-    ; When a module init exists, the value let runs there. Drop the
-    ; top-level copy so bootstrap `main` does not evaluate it again.
-    ; A program with no init splices the let onto `main`, which stores it.
+; When a module init exists, the value let runs there. Drop the
+; top-level copy so bootstrap `main` does not evaluate it again.
+; A program with no init splices the let onto `main`, which stores it.
 let lower-program-build(word-lds: List LDefn, all-lds: List LDefn, forms: List Ast, triple: Str, paths: List Str, imports: List Imp, seeds: List CtorSeed) -> Result Str Str {
   let slots = top-value-let-names(forms)
   let forms2 =

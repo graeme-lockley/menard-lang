@@ -4,71 +4,87 @@ import std/task as Task
 import std/sched as Sched
 
 let cert = "tests/net/certs/localhost.crt"
+
 let key = "tests/net/certs/localhost.key"
 
 let main() -> Int {
   let ready = Sched.wait-new()
   let port-cell = ref(0)
-  let server = Task.spawn(fn () = {
-    match (Net.listen(0))
-      | Err(Net.Unsupported) -> {
-          println("Unsupported")
-          Sched.notify(ready)
-          1
-        }
-      | Err(_) -> {
-          Sched.notify(ready)
-          1
-        }
-      | Ok(listener) -> {
-          defer Net.close(listener)
-          match (Net.local-port(listener))
-            | Err(_) -> {
-                Sched.notify(ready)
-                1
-              }
-            | Ok(port) -> {
-                set!(port-cell, port)
-                Sched.notify(ready)
-                match (Net.accept(listener))
-                  | Err(_) -> 1
-                  | Ok(conn) -> {
-                      defer Net.close(conn)
-                      match (Net.tls-server(conn, cert, key))
-                        | Err(_) -> 0
-                        | Ok(tls) -> {
-                            Net.tls-close(tls)
-                            0
-                          }
-                    }
-              }
-        }
-  })
+  let server =
+    Task.spawn(
+      fn () {
+        match (Net.listen(0))
+          | Err(Net.Unsupported) ->
+            {
+              println("Unsupported")
+              Sched.notify(ready)
+              1
+            }
+          | Err(_) ->
+            {
+              Sched.notify(ready)
+              1
+            }
+          | Ok(listener) ->
+            {
+              defer Net.close(listener)
+              match (Net.local-port(listener))
+                | Err(_) ->
+                  {
+                    Sched.notify(ready)
+                    1
+                  }
+                | Ok(port) ->
+                  {
+                    set!(port-cell, port)
+                    Sched.notify(ready)
+                    match (Net.accept(listener))
+                      | Err(_) -> 1
+                      | Ok(conn) ->
+                        {
+                          defer Net.close(conn)
+                          match (Net.tls-server(conn, cert, key))
+                            | Err(_) -> 0
+                            | Ok(tls) ->
+                              {
+                                Net.tls-close(tls)
+                                0
+                              }
+                        }
+                  }
+            }
+      }
+    )
   Sched.wait(ready)
   match (Net.connect("127.0.0.1", deref(port-cell)))
-    | Err(_) -> {
+    | Err(_) ->
+      {
         println("connect-fail")
         Task.cancel(server)
         Task.join(server)
         1
       }
-    | Ok(c) -> {
+    | Ok(c) ->
+      {
         defer Net.close(c)
         match (Net.tls-client(c, "localhost"))
-          | Err(Net.TlsVerifyFailed) -> {
+          | Err(Net.TlsVerifyFailed) ->
+            {
               Task.cancel(server)
               Task.join(server)
               println("rejected")
               0
             }
-          | Err(e) -> {
+          | Err(e) ->
+            {
               println("other-err")
               println(show(e))
               Task.cancel(server)
               Task.join(server)
               1
             }
-          | Ok(tls) -> {
+          | Ok(tls) ->
+            {
               Net.tls-close(tls)
               println("accepted")
               Task.cancel(server)

@@ -61,13 +61,11 @@
 ;   never looks inside the body beyond splitting off its last form, so
 ;   it cannot mis-handle whatever the body contains — but it also cannot
 ;   be "smarter" about where pushes/pops would ideally go.
-
 import "../reader/ast.mnd"
 
 ; ---------------------------------------------------------------------------
 ; Small Ast helpers, restated locally per src/'s "no prelude import" rule
 ; (see e.g. `close/close.mnd`'s equivalent header note).
-
 let sym-str(ast: Ast) -> Maybe Str =
   match (ast)
     | SymNode(n, _) -> Some(n)
@@ -90,7 +88,6 @@ let append-list(xs: List Ast, ys: List Ast) -> List Ast =
 ; `(defn name params… -> Ret body…)` header/body split — see
 ; `close/close.mnd`'s `ArrowSplit` for the identical shape (restated
 ; locally here too, same "no prelude import" rule).
-
 record ArrowSplit {
   header: List Ast
   arrow: Ast
@@ -135,7 +132,6 @@ let find-arrow-prepend(e: Ast, rest: List Ast) -> Maybe ArrowSplit =
 ; ---------------------------------------------------------------------------
 ; Splitting a body into "everything but the last form" and "the last
 ; form" — see header comment's "The wrapping shape" for why.
-
 record SplitLast {
   init: List Ast
   last: Ast
@@ -162,7 +158,6 @@ let split-last-last(sl: SplitLast) -> Ast =
 
 ; ---------------------------------------------------------------------------
 ; `(shadow-push)` / `(shadow-pop)` call sites, and the wrapping itself.
-
 let shadow-call(name: Str) -> Ast =
   ParenNode([SymNode(name, dummy-span())], dummy-span())
 
@@ -178,17 +173,13 @@ let wrap-defn-body-split(sl: SplitLast) -> List Ast =
 ; Top-level driver: every `defn` (through an optional `pub` wrapper) has
 ; its body wrapped; every other top-level form (another declaration, or
 ; a bare top-level expression) passes through unchanged.
-
 let root-top-level(ast: Ast) -> Ast =
   match (ast)
     | ParenNode(head :: rest, sp) -> root-top-level-head(head, rest, sp, ast)
     | _ -> ast
 
 let root-top-level-head(head: Ast, rest: List Ast, sp: Span, orig: Ast) -> Ast =
-  cond
-    | is-sym(head, "pub") -> prepend-pub(root-top-level(ParenNode(rest, sp)), sp)
-    | is-sym(head, "defn") -> root-defn-form(head :: rest, sp)
-    | else -> orig
+  if (is-sym(head, "pub")) -> prepend-pub(root-top-level(ParenNode(rest, sp)), sp) | if (is-sym(head, "defn")) -> root-defn-form(head :: rest, sp) | orig
 
 let prepend-pub(inner: Ast, sp: Span) -> Ast =
   match (inner)

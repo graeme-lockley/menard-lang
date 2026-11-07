@@ -111,7 +111,8 @@ let indexed-from[a, b](f: (Int, a) -> b, i: Int, xs: List a) -> List b =
 pub let for-each[a](f: (a) -> Unit, xs: List a) -> Unit =
   match (xs)
     | [] -> ()
-    | h :: t -> {
+    | h :: t ->
+      {
         f(h)
         for-each(f, t)
       }
@@ -130,7 +131,8 @@ pub let for-each-indexed[a](f: (Int, a) -> Unit, xs: List a) -> Unit =
 let for-each-from[a](f: (Int, a) -> Unit, i: Int, xs: List a) -> Unit =
   match (xs)
     | [] -> ()
-    | h :: t -> {
+    | h :: t ->
+      {
         f(i, h)
         for-each-from(f, i + 1, t)
       }
@@ -140,7 +142,8 @@ let for-each-from[a](f: (Int, a) -> Unit, i: Int, xs: List a) -> Unit =
 pub let filter[a](f: (a) -> Bool, xs: List a) -> List a =
   match (xs)
     | [] -> []
-    | h :: t -> if (f(h)) -> h :: filter(f, t) | filter(f, t)
+    | h :: t ->
+      if (f(h)) -> h :: filter(f, t) | filter(f, t)
 
 ; The Some values of f, in order.
 ; @test filter-map(fn (n) = if (n > 1) -> Some(n) | None, [1, 2, 3]) => [2, 3]
@@ -154,7 +157,7 @@ pub let filter-map[a, b](f: (a) -> Maybe b, xs: List a) -> List b =
 
 ; Elements that pass f, then elements that do not. Order within each is kept.
 ; @test partition(fn (n) = n > 1, [1, 2, 3]) => ([2, 3], [1])
-pub let partition[a](f: (a) -> Bool, xs: List a) -> (List a) * (List a) =
+pub let partition[a](f: (a) -> Bool, xs: List a) -> List a * List a =
   match (xs)
     | [] -> ([], [])
     | h :: t ->
@@ -203,7 +206,11 @@ pub let minimum(xs: List Int) -> Maybe Int =
 let minimum-onto(xs: List Int, best: Int) -> Int =
   match (xs)
     | [] -> best
-    | h :: t -> minimum-onto(t, if (h < best) -> h | best)
+    | h :: t ->
+      minimum-onto(
+        t,
+        if (h < best) -> h | best
+      )
 
 ; The largest element, or None when xs is empty.
 ; @test maximum([3, 1, 2]) => Some(3)
@@ -217,7 +224,11 @@ pub let maximum(xs: List Int) -> Maybe Int =
 let maximum-onto(xs: List Int, best: Int) -> Int =
   match (xs)
     | [] -> best
-    | h :: t -> maximum-onto(t, if (h > best) -> h | best)
+    | h :: t ->
+      maximum-onto(
+        t,
+        if (h > best) -> h | best
+      )
 
 ; Pairs of elements taken until either list ends.
 ; @test zip([1, 2], ["a", "b"]) => [(1, "a"), (2, "b")]
@@ -232,7 +243,7 @@ pub let zip[a, b](xs: List a, ys: List b) -> List (a * b) =
 ; The firsts and seconds of pairs, in order.
 ; @test unzip([(1, "a"), (2, "b")]) => ([1, 2], ["a", "b"])
 ; @test unzip([]) => ([], [])
-pub let unzip[a, b](pairs: List (a * b)) -> (List a) * (List b) =
+pub let unzip[a, b](pairs: List (a * b)) -> List a * List b =
   match (pairs)
     | [] -> ([], [])
     | (a, b) :: rest ->

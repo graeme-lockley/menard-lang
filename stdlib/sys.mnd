@@ -1,6 +1,5 @@
 ; Process arguments, the environment, and exit.
 ; @module std/sys
-
 extern mn_exit(code: Int) -> Unit
 
 extern mn_arg_count() -> Int

@@ -16,9 +16,10 @@ function head(a: Ast): string | null {
   return txt(a.elems[0]!);
 }
 
-const OPS = new Set(["+", "-", "*", "/", "%", "<", ">", "<=", ">=", "="]);
+const OPS = new Set(["+", "-", "*", "/", "%", "<", ">", "<=", ">=", "=", "??"]);
 
 const OP_PREC: Record<string, number> = {
+  "??": 0,
   "=": 4,
   "<": 4,
   ">": 4,
@@ -31,12 +32,21 @@ const OP_PREC: Record<string, number> = {
   "%": 6,
 };
 
+/** Optional leading-trivia hook used by `mn fmt` (TOOL-01). */
+export type LeadingLookup = (ast: Ast, ind: number) => string;
+
+let leadingLookup: LeadingLookup | null = null;
+
+function lead(ast: Ast, ind: number): string {
+  return leadingLookup ? leadingLookup(ast, ind) : "";
+}
+
 /** Precedence of a printed operator, so a looser child keeps its parentheses. */
 function rootPrec(a: Ast): number | null {
   const h = head(a);
   if (!h || !isList(a)) return null;
   if (h === "Cons" && a.elems.length === 3) return 5;
-  if (h === "?") return 0;
+  if (h === "?" || h === "??") return 0;
   if (h === "|>") return 1;
   if (h === "or") return 2;
   if (h === "and") return 3;
@@ -55,6 +65,9 @@ function wrapOperand(parent: number, child: Ast, right: boolean, ind: number): s
 }
 
 function encode(text: string): Uint8Array {
+  // Latin-1: string-literal raw-show bytes (0–255) and trivia scanned the same
+  // way round-trip as source bytes. Do not UTF-8-encode — that would turn a
+  // lone 0xFF in a Str atom into a multi-byte sequence.
   return Buffer.from(text, "latin1");
 }
 
@@ -63,16 +76,40 @@ export function print(ast: Ast): Uint8Array {
 }
 
 export function printAll(forms: Ast[]): Uint8Array {
-  const parts: string[] = [];
-  for (let i = 0; i < forms.length; i++) {
-    if (i > 0) {
-      const tight = head(forms[i - 1]!) === "import" && head(forms[i]!) === "import";
-      parts.push(tight ? "\n" : "\n\n");
+  return printAllWithLeading(forms, null, "");
+}
+
+/**
+ * Print forms with an optional leading-trivia lookup (and file-trailing text).
+ * Used by the formatter; plain `printAll` passes a null lookup.
+ */
+export function printAllWithLeading(
+  forms: Ast[],
+  lookup: LeadingLookup | null,
+  trailing: string,
+): Uint8Array {
+  const prev = leadingLookup;
+  leadingLookup = lookup;
+  try {
+    const parts: string[] = [];
+    for (let i = 0; i < forms.length; i++) {
+      if (i > 0) {
+        const tight = head(forms[i - 1]!) === "import" && head(forms[i]!) === "import";
+        parts.push(tight ? "\n" : "\n\n");
+      }
+      parts.push(lead(forms[i]!, 0) + printForm(forms[i]!, 0));
     }
-    parts.push(printForm(forms[i]!, 0));
+    let body = parts.join("");
+    if (trailing) {
+      if (body.length > 0 && !body.endsWith("\n")) body += "\n";
+      body += trailing;
+    }
+    if (body.length === 0) return encode("");
+    if (!body.endsWith("\n")) body += "\n";
+    return encode(body);
+  } finally {
+    leadingLookup = prev;
   }
-  const body = parts.join("");
-  return encode(body.length ? body + "\n" : "");
 }
 
 function printForm(ast: Ast, ind: number): string {
@@ -172,7 +209,10 @@ function printField(a: Ast): string {
 
 function printVariant(ast: Ast & { tag: "list" }, ind: number): string {
   const name = printDefnName(ast.elems[1]!);
-  const ctors = ast.elems.slice(2).map((c) => `${pad(ind + 2)}| ${printCtor(c)}`);
+  const ctors = ast.elems.slice(2).map((c) => {
+    const pre = lead(c, ind + 2);
+    return `${pre}${pad(ind + 2)}| ${printCtor(c)}`;
+  });
   return `type ${name} =\n${ctors.join("\n")}`;
 }
 
@@ -201,11 +241,14 @@ function printRuntime(ast: Ast & { tag: "list" }): string {
 }
 
 function printBlock(ast: Ast & { tag: "list" }, ind: number): string {
-  const lines = ast.elems.slice(1).map((e) => `${pad(ind + 2)}${printStmt(e, ind + 2)}`);
+  const lines = ast.elems.slice(1).map((e) => {
+    const pre = lead(e, ind + 2);
+    return `${pre}${pad(ind + 2)}${printStmtBody(e, ind + 2)}`;
+  });
   return `{\n${lines.join("\n")}\n${pad(ind)}}`;
 }
 
-function printStmt(a: Ast, ind: number): string {
+function printStmtBody(a: Ast, ind: number): string {
   if (head(a) === "let") return printForm(a, ind);
   if (head(a) === "return" && a.tag === "list" && a.elems[1]) {
     return `return ${printExpr(a.elems[1], ind)}`;
@@ -366,8 +409,17 @@ function printLogic(a: Ast & { tag: "list" }, op: string, ind: number): string {
 
 function printCall(a: Ast & { tag: "list" }, ind: number): string {
   const callee = a.elems[0]!;
-  const f = callee.tag === "sym" ? printAtom(callee) : `(${printExpr(callee, ind)})`;
+  // `String.length(s)` must not become `(String.length)(s)`.
+  const f =
+    callee.tag === "sym"
+      ? printAtom(callee)
+      : head(callee) === "project"
+        ? printExpr(callee, ind)
+        : `(${printExpr(callee, ind)})`;
   const raw = a.elems.slice(1);
+  // Sym `None` stays bare (printAtom). A zero-arg upper call keeps `None()`
+  // so negative fixtures that still spell the call form round-trip; the
+  // formatter never rewrites a bare nullary *into* `None()` (AC7).
   const inline = formatCallArgs(raw, ind, false);
   if (!callNeedsHang(raw)) return `${f}(${inline})`;
   return `${f}(\n${formatCallArgs(raw, ind + 2, true)}\n${pad(ind)})`;
@@ -415,52 +467,24 @@ function arrowBody(body: Ast, ind: number): string {
   return ` ${text}`;
 }
 
-function isHeavy(body: Ast): boolean {
-  const h = head(body);
-  return h === "do" || h === "match" || h === "if" || h === "loop" || h === "while";
-}
-
-function useCond(arms: { test: Ast | null; body: Ast }[]): boolean {
-  if (arms.length >= 3) return true;
-  if (arms.some((a) => a.test !== null && arms.indexOf(a) > 0)) return true;
-  return arms.some((a) => isHeavy(a.body));
-}
-
-function printIf(a: Ast & { tag: "list" }, ind: number): string {
-  const arms = flattenIf(a);
-  if (useCond(arms)) return printCondArms(arms, ind);
-  const first = arms[0]!;
-  const then = arrowBody(first.body, ind + 2);
-  const test = printExpr(first.test!, ind);
-  if (arms.length === 1 || arms[1]!.test !== null) return `if (${test}) ->${then}`;
-  const els = printExpr(arms[1]!.body, ind);
-  return `if (${test}) ->${then} | ${els}`;
-}
-
-function printCondArms(arms: { test: Ast | null; body: Ast }[], ind: number): string {
-  const lines = ["cond"];
-  for (const arm of arms) {
-    const body = arrowBody(arm.body, ind + 4);
-    if (arm.test === null) lines.push(`${pad(ind + 2)}| else ->${body}`);
-    else lines.push(`${pad(ind + 2)}| ${printExpr(arm.test, ind + 2)} ->${body}`);
-  }
-  return lines.join("\n");
-}
-
-function flattenIf(a: Ast): { test: Ast | null; body: Ast }[] {
-  if (head(a) !== "if" || !isList(a) || a.elems.length < 4) {
-    return [{ test: null, body: a }];
-  }
-  const test = a.elems[1]!;
-  const then = a.elems[2]!;
-  const els = a.elems[3]!;
-  if (isUnit(els)) return [{ test, body: then }];
-  if (head(els) === "if") return [{ test, body: then }, ...flattenIf(els)];
-  return [{ test, body: then }, { test: null, body: els }];
-}
-
 function isUnit(a: Ast): boolean {
   return a.tag === "list" && a.kind === "paren" && a.elems.length === 0;
+}
+
+/** Print `if` as `if` — never rewrite nested/heavy chains to `cond` (AC4).
+ * Hang a multi-line or arm-bearing else (`match`/`cond`/…) so its arms keep
+ * a legal indent; keep a simple nested `if` else on the same line. */
+function printIf(a: Ast & { tag: "list" }, ind: number): string {
+  const test = printExpr(a.elems[1]!, ind);
+  const then = arrowBody(a.elems[2]!, ind + 2);
+  const els = a.elems[3];
+  if (!els || isUnit(els)) return `if (${test}) ->${then}`;
+  const elseText = printExpr(els, ind);
+  const elseHead = head(els);
+  const hangElse =
+    elseText.includes("\n") || (laidOut(els) && elseHead !== "if");
+  if (hangElse) return `if (${test}) ->${then} |\n${pad(ind)}${elseText}`;
+  return `if (${test}) ->${then} | ${elseText}`;
 }
 
 function printCond(a: Ast & { tag: "list" }, ind: number): string {
@@ -474,8 +498,9 @@ function printCond(a: Ast & { tag: "list" }, ind: number): string {
         ? c.elems[1]!
         : { tag: "list", kind: "paren", elems: [symDo(), ...c.elems.slice(1)], span: c.span };
     const b = arrowBody(body, ind + 4);
-    if (txt(test) === "else") lines.push(`${pad(ind + 2)}| else ->${b}`);
-    else lines.push(`${pad(ind + 2)}| ${printExpr(test, ind + 2)} ->${b}`);
+    const pre = lead(c, ind + 2);
+    if (txt(test) === "else") lines.push(`${pre}${pad(ind + 2)}| else ->${b}`);
+    else lines.push(`${pre}${pad(ind + 2)}| ${printExpr(test, ind + 2)} ->${b}`);
   }
   return lines.join("\n");
 }
@@ -484,6 +509,8 @@ function symDo(): Ast {
   return { tag: "sym", name: new TextEncoder().encode("do"), span: { start: 0, end: 0 } };
 }
 
+/** Keep a `when` head as `when` (no rewrite to `if`). Pattern-guard `when` is
+ * printed via printPat; this covers a rare expression-shaped `(when …)` node. */
 function printWhen(a: Ast & { tag: "list" }, ind: number): string {
   if (!a.elems[1]) return "when()";
   const test = a.elems[1];
@@ -492,14 +519,18 @@ function printWhen(a: Ast & { tag: "list" }, ind: number): string {
     rest.length === 1
       ? rest[0]!
       : { tag: "list", kind: "paren", elems: [symDo(), ...rest], span: a.span };
-  return `if (${printExpr(test, ind)}) ->${arrowBody(body, ind + 2)}`;
+  return `when (${printExpr(test, ind)}) ->${arrowBody(body, ind + 2)}`;
 }
 
 function printMatch(a: Ast & { tag: "list" }, ind: number): string {
   const scrut = printExpr(a.elems[1]!, ind);
   const lines: string[] = [`match (${scrut})`];
   for (let i = 2; i + 1 < a.elems.length; i += 2) {
-    lines.push(`${pad(ind + 2)}| ${printPat(a.elems[i]!)} ->${arrowBody(a.elems[i + 1]!, ind + 4)}`);
+    const pat = a.elems[i]!;
+    const pre = lead(pat, ind + 2);
+    lines.push(
+      `${pre}${pad(ind + 2)}| ${printPat(pat)} ->${arrowBody(a.elems[i + 1]!, ind + 4)}`,
+    );
   }
   return lines.join("\n");
 }
@@ -510,7 +541,11 @@ function printMultiMatch(a: Ast & { tag: "list" }, ind: number): string {
     scruts.tag === "list" ? scruts.elems.map((e) => printExpr(e, ind)).join(", ") : printExpr(scruts, ind);
   const lines: string[] = [`match (${list})`];
   for (let i = 2; i + 1 < a.elems.length; i += 2) {
-    lines.push(`${pad(ind + 2)}| ${printMultiArm(a.elems[i]!)} ->${arrowBody(a.elems[i + 1]!, ind + 4)}`);
+    const pat = a.elems[i]!;
+    const pre = lead(pat, ind + 2);
+    lines.push(
+      `${pre}${pad(ind + 2)}| ${printMultiArm(pat)} ->${arrowBody(a.elems[i + 1]!, ind + 4)}`,
+    );
   }
   return lines.join("\n");
 }
@@ -623,12 +658,22 @@ function printType(a: Ast): string {
   if (h === "project" && a.elems.length >= 3) {
     return printProject(a as Ast & { tag: "list" }, 0);
   }
+  // Type application. The constructor may itself be a project (`Task.Task Int`);
+  // `txt` is null for a non-sym head — never stringify that as the word "null".
+  const ctor = a.elems[0]!;
+  const ctorText =
+    ctor.tag === "sym"
+      ? dec.decode(ctor.name)
+      : ctor.tag === "list" && head(ctor) === "project"
+        ? printProject(ctor as Ast & { tag: "list" }, 0)
+        : printType(ctor);
   const args = a.elems.slice(1).map((e) => {
     const p = printType(e);
     if (e.tag === "list") return `(${p})`;
     return p;
   });
-  return `${h} ${args.join(" ")}`.trim();
+  if (args.length === 0) return ctorText;
+  return `${ctorText} ${args.join(" ")}`;
 }
 
 const RENAME: Record<string, string> = {
@@ -662,9 +707,28 @@ export function printChar(n: bigint | number): string {
   return `'\\u{${c.toString(16).toUpperCase()}}'`;
 }
 
+/**
+ * Source-safe string spelling for the AST printer / `mn fmt`.
+ * Escape `\n` `\r` `\t` so formatted files stay LF line-oriented and never
+ * grow a raw CR (trivia rejects CR). Escape `\` and `"`; every other byte
+ * (including invalid UTF-8) stays a literal latin1 code unit — same totality
+ * story as value `show`, minus the three controls that break source layout.
+ */
 function quoteStr(bytes: Uint8Array): string {
   let s = '"';
   for (const b of bytes) {
+    if (b === 0x0a) {
+      s += "\\n";
+      continue;
+    }
+    if (b === 0x0d) {
+      s += "\\r";
+      continue;
+    }
+    if (b === 0x09) {
+      s += "\\t";
+      continue;
+    }
     if (b === 0x5c || b === 0x22) s += "\\";
     s += String.fromCharCode(b);
   }

@@ -1,6 +1,5 @@
 ; Fixture for src/derive/plan.test.mnd: show of a product plans
 ; `Int * Str` (type-show product spelling).
-
 let use-show() -> Str =
   show((1, "a"))
 

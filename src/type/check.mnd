@@ -23,7 +23,6 @@
 ;     "expanded during desugaring, before typing"), so this typer never
 ;     sees them on a real pipeline run. A caller that typechecks
 ;     un-desugared forms directly will see `E_TYPE_UNBOUND` on those heads.
-
 import "../reader/ast.mnd"
 import "../desugar/rest.mnd"
 import "../diag/operator-spacing.mnd"
@@ -53,7 +52,6 @@ pub record TypeError {
 ; looked up again once that `defn`'s check is done — behaviourally
 ; identical to discarding a fresh `Subst` per body, at the cost of the map
 ; growing monotonically instead of being reclaimed.
-
 record TypeEnv {
   values: Ref (Map Str Scheme)
   types: Ref (Map Str TypeDef)
@@ -103,7 +101,9 @@ record PrintNote {
 }
 
 let print-notes = ref([])
+
 let print-functions = ref([])
+
 let print-names = ref(Map.empty())
 
 ; Types of `show` arguments, so the rewrite can route composites through the
@@ -133,8 +133,7 @@ let note-project!(sp: Span, index: Int) -> Unit =
 ; True when the note was recorded for this span.
 let proj-note-matches(sp: Span, note: ProjNote) -> Bool =
   match (note)
-    | ProjNote(start, end, origin, _) ->
-      sp.start == start && sp.end == end && sp.origin == origin
+    | ProjNote(start, end, origin, _) -> sp.start == start && sp.end == end && sp.origin == origin
 
 ; The note for this span, if inference selected a field.
 let find-proj-note(sp: Span, notes: List ProjNote) -> Maybe ProjNote =
@@ -148,16 +147,11 @@ let find-proj-note(sp: Span, notes: List ProjNote) -> Maybe ProjNote =
 ; to `__import_A_Ctor`; fall back to the bare ctor/value so identity is shared.
 let import-fallback-name(name: Str) -> Maybe Str {
   let len = String.length(name)
-  if (len >= 9 && String.slice(0, 9, name) == "__import_") ->
-    Some(import-fallback-strip(name, 9, len)) |
-    None
+  if (len >= 9 && String.slice(0, 9, name) == "__import_") -> Some(import-fallback-strip(name, 9, len)) | None
 }
 
 let import-fallback-strip(n: Str, i: Int, len: Int) -> Str =
-  cond
-    | i >= len -> n
-    | String.byte(i, n) == 95 -> String.slice(i + 1, len - (i + 1), n)
-    | else -> import-fallback-strip(n, i + 1, len)
+  if (i >= len) -> n | if (String.byte(i, n) == 95) -> String.slice(i + 1, len - (i + 1), n) | import-fallback-strip(n, i + 1, len)
 
 let value-get(env: TypeEnv, name: Str) -> Maybe Scheme =
   match (Map.lookup(name, deref(env.values)))
@@ -218,7 +212,6 @@ let fresh-var-anon(env: TypeEnv) -> Type =
 
 ; ---------------------------------------------------------------------------
 ; Small Ast helpers, restated locally per src/'s "no prelude import" rule.
-
 let sym-str(ast: Ast) -> Maybe Str =
   match (ast)
     | SymNode(n, _) -> Some(n)
@@ -243,7 +236,6 @@ let field-name(ast: Ast) -> Maybe Str =
 ; Builtins (§2.8.1/§2.8.2): the Int/Bool/Str ops, intrinsics, Map,
 ; StringBuffer, Maybe/Result/List and the Tier-0 host seam that the
 ; compiler's own source (and any Phase 2 program) needs.
-
 let install-arith(env: TypeEnv) -> Unit {
   value-set(env, "+", Scheme([], t-fn([t-int(), t-int()], t-int())))
   value-set(env, "-", Scheme([], t-fn([t-int(), t-int()], t-int())))
@@ -332,7 +324,6 @@ let empty-env() -> TypeEnv {
 ; ---------------------------------------------------------------------------
 ; Substitution: apply, occurs-check, unify. `subst` lives on `env` (a Ref),
 ; so every function below that needs it just takes `env`.
-
 let apply-subst(env: TypeEnv, t: Type) -> Type =
   match (t)
     | TVar(id, _) -> apply-subst-var(env, t, id)
@@ -389,17 +380,15 @@ let unify-dispatch(env: TypeEnv, ta: Type, tb: Type, span: Span) -> Bool =
     | _ -> unify-nonvar(env, ta, tb, span)
 
 let unify-var(env: TypeEnv, id: Int, tb: Type, span: Span) -> Bool =
-  cond
-    | occurs(env, id, tb) ->
-      {
-        err!(env, "E_TYPE_OCCURS", "infinite type", span)
-        false
-      }
-    | else ->
-      {
-        set!(env.subst, Map.set(id, tb, deref(env.subst)))
-        true
-      }
+  if (occurs(env, id, tb)) ->
+    {
+      err!(env, "E_TYPE_OCCURS", "infinite type", span)
+      false
+    } |
+  {
+    set!(env.subst, Map.set(id, tb, deref(env.subst)))
+    true
+  }
 
 let unify-nonvar(env: TypeEnv, ta: Type, tb: Type, span: Span) -> Bool =
   match (tb)
@@ -458,14 +447,12 @@ let unify-fn(env: TypeEnv, pa: List Type, ra: Type, tb: Type, span: Span) -> Boo
     | _ -> unify-mismatch(env, t-fn(pa, ra), tb, span)
 
 let unify-fn-params(env: TypeEnv, pa: List Type, pb: List Type, ra: Type, rb: Type, span: Span) -> Bool =
-  cond
-    | length(pa) == length(pb) ->
-      if (unify-list-pairwise(env, pa, pb, span)) -> unify(env, ra, rb, span) | false
-    | else ->
-      {
-        err-help!(env, "E_TYPE_ARITY", String.concat("function arity mismatch: expected ", show(length(pa)), ", found ", show(length(pb))), span, Some("check the call: expected and found argument counts must match"))
-        false
-      }
+  if (length(pa) == length(pb)) ->
+    if (unify-list-pairwise(env, pa, pb, span)) -> unify(env, ra, rb, span) | false |
+  {
+    err-help!(env, "E_TYPE_ARITY", String.concat("function arity mismatch: expected ", show(length(pa)), ", found ", show(length(pb))), span, Some("check the call: expected and found argument counts must match"))
+    false
+  }
 
 let unify-list-pairwise(env: TypeEnv, xs: List Type, ys: List Type, span: Span) -> Bool =
   match (xs)
@@ -482,16 +469,12 @@ let unify-nominal(env: TypeEnv, na: Str, aa: List Type, ka: Str, tb: Type, span:
     | _ -> unify-mismatch(env, TNominal(na, aa, ka), tb, span)
 
 let unify-nominal-same(env: TypeEnv, na: Str, aa: List Type, ka: Str, nb: Str, ab: List Type, kb: Str, span: Span) -> Bool =
-  cond
-    | na == nb ->
-      cond
-        | length(aa) == length(ab) -> unify-list-pairwise(env, aa, ab, span)
-        | else ->
-          {
-            err!(env, "E_TYPE_MISMATCH", String.concat("type argument count mismatch for ", na), span)
-            false
-          }
-    | else -> unify-mismatch(env, TNominal(na, aa, ka), TNominal(nb, ab, kb), span)
+  if (na == nb) ->
+    if (length(aa) == length(ab)) -> unify-list-pairwise(env, aa, ab, span) |
+    {
+      err!(env, "E_TYPE_MISMATCH", String.concat("type argument count mismatch for ", na), span)
+      false
+    } | unify-mismatch(env, TNominal(na, aa, ka), TNominal(nb, ab, kb), span)
 
 ; Structural, elementwise — tuples have no declared name to compare, unlike
 ; `unify-nominal-same`.
@@ -501,13 +484,11 @@ let unify-product(env: TypeEnv, ea: List Type, tb: Type, span: Span) -> Bool =
     | _ -> unify-mismatch(env, t-product(ea), tb, span)
 
 let unify-product-same(env: TypeEnv, ea: List Type, eb: List Type, span: Span) -> Bool =
-  cond
-    | length(ea) == length(eb) -> unify-list-pairwise(env, ea, eb, span)
-    | else ->
-      {
-        err!(env, "E_TYPE_ARITY", String.concat("tuple arity mismatch: expected ", show(length(ea)), ", found ", show(length(eb))), span)
-        false
-      }
+  if (length(ea) == length(eb)) -> unify-list-pairwise(env, ea, eb, span) |
+  {
+    err!(env, "E_TYPE_ARITY", String.concat("tuple arity mismatch: expected ", show(length(ea)), ", found ", show(length(eb))), span)
+    false
+  }
 
 let unify-mismatch(env: TypeEnv, ta: Type, tb: Type, span: Span) -> Bool {
   err!(env, "E_TYPE_MISMATCH", String.concat("expected ", type-show(ta), ", found ", type-show(tb)), span)
@@ -521,7 +502,6 @@ let expect-type(env: TypeEnv, got: Type, expected: Type, span: Span) -> Type {
 
 ; ---------------------------------------------------------------------------
 ; Instantiation: fresh unification variables for a scheme's own parameters.
-
 let fresh-param-map(env: TypeEnv, params: List Str) -> Map Str Type =
   match (params)
     | [] -> Map.empty()
@@ -563,7 +543,6 @@ let instantiate(env: TypeEnv, scheme: Scheme) -> Type =
 ; Type-expression parsing: `(List T)`, `(Map K V)`, `(Maybe T)`,
 ; `(Result T E)`, `(Ref T)`, `(Fn T1 T2 -> R)`, primitives, declared type
 ; parameters, aliases, and nominal (record/variant) type names.
-
 record ArrowSplit {
   before: List Ast
   after: List Ast
@@ -675,13 +654,11 @@ let parse-type-expr-app-named(env: TypeEnv, hn: Str, args: List Ast, sp: Span, p
 
 ; `T1 * T2 * …` (≥2 factors) from `parse-type-product` in the reader.
 let parse-type-expr-product(env: TypeEnv, args: List Ast, sp: Span, params: List Str) -> Type =
-  cond
-    | length(args) < 2 ->
-      {
-        err!(env, "E_TYPE_EXPR", "product type requires at least two factors", sp)
-        fresh-var-anon(env)
-      }
-    | else -> t-product(parse-type-exprs(env, args, params))
+  if (length(args) < 2) ->
+    {
+      err!(env, "E_TYPE_EXPR", "product type requires at least two factors", sp)
+      fresh-var-anon(env)
+    } | t-product(parse-type-exprs(env, args, params))
 
 let parse-type-expr-one(env: TypeEnv, name: Str, args: List Ast, sp: Span, params: List Str, mk: (Type) -> Type) -> Type =
   match (args)
@@ -730,7 +707,6 @@ let parse-type-expr-nominal(env: TypeEnv, hn: Str, args: List Ast, sp: Span, par
 
 ; ---------------------------------------------------------------------------
 ; `Name` or `(Name [params…])`, shared by defn/defrec/variant headers.
-
 record NameParams {
   name: Str
   params: List Str
@@ -787,7 +763,6 @@ let params-to-types(params: List Str) -> List Type =
 
 ; Declaration collection. Names are registered before fields and payloads
 ; (`register-stubs`), then each declaration is checked.
-
 let collect-def(env: TypeEnv, ast: Ast) -> Unit =
   match (ast)
     | ParenNode(elems, sp) -> collect-def-elems(env, elems, sp)
@@ -812,7 +787,6 @@ let collect-def-named(env: TypeEnv, hn: Str, rest: List Ast, sp: Span) -> Unit =
     | _ -> ()
 
 ; alias
-
 let collect-alias(env: TypeEnv, rest: List Ast, sp: Span) -> Unit =
   match (rest)
     | name-part :: type-part :: _ -> collect-alias-named(env, name-part, type-part)
@@ -824,7 +798,6 @@ let collect-alias-named(env: TypeEnv, name-part: Ast, type-part: Ast) -> Unit =
     | Some(name) -> alias-set(env, name, parse-type-expr(env, type-part, []))
 
 ; defrec
-
 let record-field-type(f: RecordField) -> Type =
   match (f)
     | RecordField(_, t) -> t
@@ -880,7 +853,6 @@ let collect-defrec(env: TypeEnv, rest: List Ast, sp: Span) -> Unit =
     | [] -> ()
 
 ; variant
-
 let ctor-owner(c: CtorInfo) -> Str =
   match (c)
     | CtorInfo(type-name, _, _) -> type-name
@@ -957,7 +929,6 @@ let collect-variant(env: TypeEnv, rest: List Ast, sp: Span) -> Unit =
 ; ---------------------------------------------------------------------------
 ; defn header parsing, shared by scheme-collection (pass 1) and body
 ; checking (pass 2).
-
 record ParamsSplit {
   names: List Str
   types: List Type
@@ -1038,7 +1009,6 @@ let parse-defn(env: TypeEnv, elems: List Ast, whole-span: Span, report: Bool) ->
 ; "forward reference to later defn" and "mutual recursion" typecheck
 ; because both defns' *signatures* are known before either *body* is
 ; checked, exactly like host/src/type/check.ts's collectDefnScheme).
-
 let register-parsed-scheme(env: TypeEnv, p: ParsedDefn) -> Unit =
   match (p)
     | ParsedDefn(name, tparams, _, ptypes, ret, _) -> value-set(env, name, Scheme(tparams, t-fn(ptypes, ret)))
@@ -1073,7 +1043,6 @@ let collect-defn-scheme(env: TypeEnv, ast: Ast) -> Unit =
 
 ; ---------------------------------------------------------------------------
 ; Pass 2, body checking: `infer` and all its special forms.
-
 let build-param-local(names: List Str, types: List Type) -> Map Str Type =
   match (names)
     | [] -> Map.empty()
@@ -1114,7 +1083,6 @@ let typecheck-defn(env: TypeEnv, elems: List Ast, sp: Span) -> Unit =
     | Some(p) -> typecheck-defn-body(env, p, sp)
 
 ; -- expressions --
-
 let infer(env: TypeEnv, ast: Ast, local: Map Str Type) -> Type =
   match (ast)
     | IntNode(_, _) -> t-int()
@@ -1163,7 +1131,6 @@ let infer-bracket(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) 
     | first :: rest -> infer-bracket-nonempty(env, first, rest, local)
 
 ; -- if --
-
 let infer-if(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) -> Type =
   match (elems)
     | [_, test, then, els] -> infer-if-checked(env, test, then, els, local)
@@ -1184,7 +1151,6 @@ let infer-if-checked(env: TypeEnv, test: Ast, then: Ast, els: Ast, local: Map St
 }
 
 ; -- let / do / sequences --
-
 let infer-let-body(env: TypeEnv, body: List Ast, bound-type: Type, next: Map Str Type) -> Type =
   match (body)
     | [] -> bound-type
@@ -1292,7 +1258,6 @@ let infer-do(env: TypeEnv, rest: List Ast, local: Map Str Type) -> Type =
   infer-sequence(env, rest, local)
 
 ; -- loop / recur --
-
 record LoopAcc {
   local: Map Str Type
   types: List Type
@@ -1388,7 +1353,6 @@ let infer-recur(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) ->
       }
 
 ; -- panic / return --
-
 let infer-panic-arg(env: TypeEnv, rest: List Ast, local: Map Str Type) -> Unit =
   match (rest)
     | [] -> ()
@@ -1410,7 +1374,8 @@ let infer-return(env: TypeEnv, rest: List Ast, local: Map Str Type) -> Type =
 
 let infer-defer(env: TypeEnv, rest: List Ast, local: Map Str Type) -> Type {
   match (rest)
-    | a :: _ -> {
+    | a :: _ ->
+      {
         infer(env, a, local)
         t-unit()
       }
@@ -1418,7 +1383,6 @@ let infer-defer(env: TypeEnv, rest: List Ast, local: Map Str Type) -> Type {
 }
 
 ; -- quote --
-
 let infer-quote(ast: Ast) -> Type =
   match (ast)
     | IntNode(_, _) -> t-int()
@@ -1435,7 +1399,6 @@ let infer-quote-form(rest: List Ast) -> Type =
     | [] -> t-unit()
 
 ; -- set! --
-
 let infer-set-bang-checked(env: TypeEnv, r-ast: Ast, v-ast: Ast, local: Map Str Type) -> Type {
   let rt = infer(env, r-ast, local)
   let vt = infer(env, v-ast, local)
@@ -1456,7 +1419,6 @@ let infer-set-bang(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type)
 
 ; -- fn / lambda --
 ; `(fn params body)` or `(fn params -> ret body)`.
-
 record LambdaParts {
   params: Ast
   body: Ast
@@ -1497,32 +1459,30 @@ let bind-lambda-param(env: TypeEnv, p: Ast, loc: Ref (Map Str Type), expected: M
         apply-subst(env, ty)
       }
     | ParenNode(SymNode(raw, _) :: ty-ast :: _, _) ->
-      cond
-        | String.length(raw) > 0 && String.byte(String.length(raw) - 1, raw) == 58 ->
-          {
-            let bare = String.slice(0, String.length(raw) - 1, raw)
-            let ty = parse-type-expr(env, ty-ast, [])
-            let _chk =
-              match (expected)
-                | Some(e) -> expect-type(env, ty, e, ast-span(p))
-                | None -> ty
-            set!(loc, Map.set(bare, apply-subst(env, ty), deref(loc)))
-            apply-subst(env, ty)
-          }
-        | raw == "tuple" ->
-          {
-            let factors =
-              match (p)
-                | ParenNode(_ :: rest, _) -> rest
-                | _ -> []
-            let v =
-              match (expected)
-                | Some(e) -> e
-                | None -> t-product(map-fresh-n(env, length(factors)))
-            bind-pattern(env, p, apply-subst(env, v), loc, ref([]))
-            apply-subst(env, v)
-          }
-        | else -> bind-lambda-param-bad(env, p)
+      if (String.length(raw) > 0 && String.byte(String.length(raw) - 1, raw) == 58) ->
+        {
+          let bare = String.slice(0, String.length(raw) - 1, raw)
+          let ty = parse-type-expr(env, ty-ast, [])
+          let _chk =
+            match (expected)
+              | Some(e) -> expect-type(env, ty, e, ast-span(p))
+              | None -> ty
+          set!(loc, Map.set(bare, apply-subst(env, ty), deref(loc)))
+          apply-subst(env, ty)
+        } |
+      if (raw == "tuple") ->
+        {
+          let factors =
+            match (p)
+              | ParenNode(_ :: rest, _) -> rest
+              | _ -> []
+          let v =
+            match (expected)
+              | Some(e) -> e
+              | None -> t-product(map-fresh-n(env, length(factors)))
+          bind-pattern(env, p, apply-subst(env, v), loc, ref([]))
+          apply-subst(env, v)
+        } | bind-lambda-param-bad(env, p)
     | _ -> bind-lambda-param-bad(env, p)
 
 let map-fresh-n(env: TypeEnv, n: Int) -> List Type =
@@ -1538,10 +1498,8 @@ let bind-lambda-params(env: TypeEnv, pelems: List Ast, expected: List Type, loc:
     | [] -> rev-types(acc, [])
     | p :: rest ->
       match (expected)
-        | e :: erest ->
-          bind-lambda-params(env, rest, erest, loc, bind-lambda-param(env, p, loc, Some(e)) :: acc)
-        | [] ->
-          bind-lambda-params(env, rest, [], loc, bind-lambda-param(env, p, loc, None) :: acc)
+        | e :: erest -> bind-lambda-params(env, rest, erest, loc, bind-lambda-param(env, p, loc, Some(e)) :: acc)
+        | [] -> bind-lambda-params(env, rest, [], loc, bind-lambda-param(env, p, loc, None) :: acc)
 
 let rev-types(xs: List Type, acc: List Type) -> List Type =
   match (xs)
@@ -1592,15 +1550,13 @@ let check-lambda-against(env: TypeEnv, elems: List Ast, sp: Span, expected: Type
         | Some(parts) ->
           {
             let pelems = lambda-param-elems(parts.params)
-            if (length(pelems) != length(ps)) ->
-              err-help!(env, "E_TYPE_ARITY", String.concat("function arity mismatch: expected ", show(length(ps)), ", found ", show(length(pelems))), sp, Some("check the call: expected and found argument counts must match"))
+            if (length(pelems) != length(ps)) -> err-help!(env, "E_TYPE_ARITY", String.concat("function arity mismatch: expected ", show(length(ps)), ", found ", show(length(pelems))), sp, Some("check the call: expected and found argument counts must match"))
             infer-lambda-with(env, parts, local, ps, Some(ret))
           }
         | None -> infer-lambda(env, elems, sp, local)
     | _ -> infer-lambda(env, elems, sp, local)
 
 ; -- match --
-
 let nominal-kind-of(env: TypeEnv, type-name: Str) -> Str =
   match (type-get(env, type-name))
     | Some(td) -> type-def-kind(td)
@@ -1689,7 +1645,7 @@ let is-product-type(t: Type) -> Bool =
 ; further decomposition, so it covers the whole product (there is no
 ; declared ctor name to add to `covered` otherwise).
 let mark-product-covered(env: TypeEnv, scrut: Type, covered: Ref (List Str)) -> Unit =
-  if (is-product-type(apply-subst(env, scrut))) -> set!(covered, "__product__" :: deref(covered)) | ()
+  if (is-product-type(apply-subst(env, scrut))) -> set!(covered, "__product__" :: deref(covered))
 
 let bind-pattern-sym(env: TypeEnv, name: Str, sp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
   if (name == "_") -> mark-product-covered(env, scrut, covered) | bind-pattern-sym-lookup(env, name, sp, scrut, loc, covered)
@@ -1729,38 +1685,22 @@ let bind-pattern-ctor-info(env: TypeEnv, cname: Str, ctor: CtorInfo, arg-pats: L
 
 let bind-pattern-ctor-named(env: TypeEnv, cname-ast: Ast, arg-pats: List Ast, psp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
   match (sym-str(cname-ast))
-    | None ->
-      ; Unresolved `Alias.Ctor` project head (before rewrite) or other non-sym.
-      err-help!(
-        env,
-        "E_TYPE_UNBOUND",
-        "unknown constructor",
-        psp,
-        Some("check the spelling, or qualify the constructor with its import alias")
-      )
+    | None -> err-help!(env, "E_TYPE_UNBOUND", "unknown constructor", psp, Some("check the spelling, or qualify the constructor with its import alias"))
+    ; Unresolved `Alias.Ctor` project head (before rewrite) or other non-sym.
     | Some(cname) -> bind-pattern-ctor-kind(env, cname, arg-pats, psp, scrut, loc, covered)
 
 let bind-pattern-ctor-kind(env: TypeEnv, cname: Str, arg-pats: List Ast, psp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
-  cond
-    | cname == "recpat" -> bind-record-pat(env, arg-pats, psp, scrut, loc, covered)
-    | cname == "guard" -> bind-guard-pat(env, arg-pats, scrut, loc)
-    | cname == "char" ->
-      {
-        unify(env, scrut, t-char(), psp)
-        ()
-      }
-    | cname == "tuple" -> bind-tuple-pat(env, arg-pats, psp, scrut, loc, covered)
-    | else ->
-      match (ctor-get(env, cname))
-        | None ->
-          err-help!(
-            env,
-            "E_TYPE_UNBOUND",
-            "unknown constructor",
-            psp,
-            Some("check the spelling, or qualify the constructor with its import alias")
-          )
-        | Some(ctor) -> bind-pattern-ctor-info(env, cname, ctor, arg-pats, psp, scrut, loc, covered)
+  if (cname == "recpat") -> bind-record-pat(env, arg-pats, psp, scrut, loc, covered) |
+  if (cname == "guard") -> bind-guard-pat(env, arg-pats, scrut, loc) |
+  if (cname == "char") ->
+    {
+      unify(env, scrut, t-char(), psp)
+      ()
+    } |
+  if (cname == "tuple") -> bind-tuple-pat(env, arg-pats, psp, scrut, loc, covered) |
+  match (ctor-get(env, cname))
+    | None -> err-help!(env, "E_TYPE_UNBOUND", "unknown constructor", psp, Some("check the spelling, or qualify the constructor with its import alias"))
+    | Some(ctor) -> bind-pattern-ctor-info(env, cname, ctor, arg-pats, psp, scrut, loc, covered)
 
 let fresh-vars-for-asts(xs: List Ast, env: TypeEnv) -> List Type =
   match (xs)
@@ -1779,9 +1719,7 @@ let bind-tuple-pat(env: TypeEnv, arg-pats: List Ast, psp: Span, scrut: Type, loc
 }
 
 let bind-tuple-pat-arity(env: TypeEnv, arg-pats: List Ast, elem-types: List Type, psp: Span, loc: Ref (Map Str Type)) -> Unit =
-  cond
-    | length(arg-pats) == length(elem-types) -> bind-pattern-args(env, arg-pats, elem-types, loc)
-    | else -> err!(env, "E_TYPE_ARITY", String.concat("tuple pattern arity mismatch: expected ", show(length(elem-types)), ", found ", show(length(arg-pats))), psp)
+  if (length(arg-pats) == length(elem-types)) -> bind-pattern-args(env, arg-pats, elem-types, loc) | err!(env, "E_TYPE_ARITY", String.concat("tuple pattern arity mismatch: expected ", show(length(elem-types)), ", found ", show(length(arg-pats))), psp)
 
 let bind-guard-pat(env: TypeEnv, arg-pats: List Ast, scrut: Type, loc: Ref (Map Str Type)) -> Unit =
   match (arg-pats)
@@ -1810,8 +1748,7 @@ let bind-record-named(env: TypeEnv, name-ast: Ast, fields: List Ast, psp: Span, 
 let bind-record-fields(env: TypeEnv, name-ast: Ast, fields: List Ast, rfields: List RecordField, psp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
   match (wanted-fields(env, fields, rfields, []))
     | None -> ()
-    | Some(wanted) ->
-      bind-pattern(env, ParenNode(name-ast :: positional-fields(rfields, wanted, psp), psp), scrut, loc, covered)
+    | Some(wanted) -> bind-pattern(env, ParenNode(name-ast :: positional-fields(rfields, wanted, psp), psp), scrut, loc, covered)
 
 let wanted-fields(env: TypeEnv, fields: List Ast, rfields: List RecordField, acc: List Str) -> Maybe (List Str) =
   match (fields)
@@ -1822,18 +1759,16 @@ let wanted-field(env: TypeEnv, f: Ast, rest: List Ast, rfields: List RecordField
   match (sym-str(f))
     | None -> wanted-fields(env, rest, rfields, acc)
     | Some(n) ->
-      cond
-        | member(n, acc) ->
-          {
-            err!(env, "E_TYPE_MISMATCH", String.concat("duplicate field ", n), ast-span(f))
-            wanted-fields(env, rest, rfields, acc)
-          }
-        | not(record-has-field(rfields, n)) ->
-          {
-            err!(env, "E_TYPE_UNBOUND", String.concat("unknown field ", n), ast-span(f))
-            wanted-fields(env, rest, rfields, acc)
-          }
-        | else -> wanted-fields(env, rest, rfields, n :: acc)
+      if (member(n, acc)) ->
+        {
+          err!(env, "E_TYPE_MISMATCH", String.concat("duplicate field ", n), ast-span(f))
+          wanted-fields(env, rest, rfields, acc)
+        } |
+      if (not(record-has-field(rfields, n))) ->
+        {
+          err!(env, "E_TYPE_UNBOUND", String.concat("unknown field ", n), ast-span(f))
+          wanted-fields(env, rest, rfields, acc)
+        } | wanted-fields(env, rest, rfields, n :: acc)
 
 let record-has-field(fields: List RecordField, name: Str) -> Bool =
   match (fields)
@@ -1846,10 +1781,10 @@ let positional-fields(fields: List RecordField, wanted: List Str, sp: Span) -> L
     | [] -> []
     | RecordField(n, _) :: rest ->
       {
-        let text = if (member(n, wanted)) -> n | "_"
+        let text =
+          if (member(n, wanted)) -> n | "_"
         SymNode(text, sp) :: positional-fields(rest, wanted, sp)
       }
-
 
 let bind-pattern-ctor(env: TypeEnv, pelems: List Ast, psp: Span, scrut: Type, loc: Ref (Map Str Type), covered: Ref (List Str)) -> Unit =
   match (pelems)
@@ -1898,10 +1833,7 @@ let check-match-exhaustive(env: TypeEnv, scrut: Type, covered: List Str, has-wil
 ; entirely — check it separately. `apply-subst` first since `scrut` may
 ; still be an unresolved unification variable at the call site.
 let check-match-exhaustive-product(env: TypeEnv, scrut: Type, covered: List Str, has-wild: Bool, sp: Span) -> Unit =
-  cond
-    | has-wild || member("__product__", covered) -> ()
-    | is-product-type(apply-subst(env, scrut)) -> err!(env, "E_TYPE_EXHAUSTIVE", "non-exhaustive match: missing product", sp)
-    | else -> ()
+  if (has-wild || member("__product__", covered)) -> () | if (is-product-type(apply-subst(env, scrut))) -> err!(env, "E_TYPE_EXHAUSTIVE", "non-exhaustive match: missing product", sp)
 
 let combine-match-result(env: TypeEnv, bt: Type, result: Maybe Type, sp: Span) -> Maybe Type =
   match (result)
@@ -1954,7 +1886,6 @@ let infer-match(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) ->
       }
 
 ; -- application, incl. print/println/show/compare special typing --
-
 let type-is-str(t: Type) -> Bool =
   match (t)
     | TStr -> true
@@ -2012,12 +1943,14 @@ let call-head-name(head: Ast) -> Maybe Str =
 let nth-type(xs: List Type, i: Int) -> Maybe Type =
   match (xs)
     | [] -> None
-    | x :: rest -> if (i == 0) -> Some(x) | nth-type(rest, i - 1)
+    | x :: rest ->
+      if (i == 0) -> Some(x) | nth-type(rest, i - 1)
 
 let nth-ast(xs: List Ast, i: Int) -> Maybe Ast =
   match (xs)
     | [] -> None
-    | x :: rest -> if (i == 0) -> Some(x) | nth-ast(rest, i - 1)
+    | x :: rest ->
+      if (i == 0) -> Some(x) | nth-ast(rest, i - 1)
 
 let type-still-open(t: Type) -> Bool =
   match (t)
@@ -2040,24 +1973,19 @@ let check-map-key-at(env: TypeEnv, arg-types: List Type, args: List Ast, sp: Spa
     | Some(raw) ->
       {
         let t = apply-subst(env, raw)
-        cond
-          | type-still-open(t) -> ()
-          | is-orderable(t) -> ()
-          | else ->
-            match (nth-ast(args, idx))
-              | Some(a) -> err-help!(env, "E_TYPE_ORDERABLE", String.concat("type ", type-show(t), " is not orderable"), ast-span(a), Some("only Int, Float, Str, Char, Bool, and variants of those are orderable"))
-              | None -> err-help!(env, "E_TYPE_ORDERABLE", String.concat("type ", type-show(t), " is not orderable"), sp, Some("only Int, Float, Str, Char, Bool, and variants of those are orderable"))
+        if (type-still-open(t)) -> () |
+        if (is-orderable(t)) -> () |
+        match (nth-ast(args, idx))
+          | Some(a) -> err-help!(env, "E_TYPE_ORDERABLE", String.concat("type ", type-show(t), " is not orderable"), ast-span(a), Some("only Int, Float, Str, Char, Bool, and variants of those are orderable"))
+          | None -> err-help!(env, "E_TYPE_ORDERABLE", String.concat("type ", type-show(t), " is not orderable"), sp, Some("only Int, Float, Str, Char, Bool, and variants of those are orderable"))
       }
 
 let check-show-compare(env: TypeEnv, head: Ast, arg-types: List Type, args: List Ast, sp: Span) -> Unit =
-  cond
-    | is-sym(head, "show") ->
-      {
-        note-show!(sp, first-type-or-fresh(arg-types, env))
-        check-predicate-arg(env, arg-types, args, sp, is-showable, "E_TYPE_SHOWABLE", "not showable")
-      }
-    | is-sym(head, "compare") -> check-predicate-arg-help(env, arg-types, args, sp, is-orderable, "E_TYPE_ORDERABLE", "not orderable", Some("only Int, Float, Str, Char, Bool, and variants of those are orderable"))
-    | else -> check-map-key-orderable(env, head, arg-types, args, sp)
+  if (is-sym(head, "show")) ->
+    {
+      note-show!(sp, first-type-or-fresh(arg-types, env))
+      check-predicate-arg(env, arg-types, args, sp, is-showable, "E_TYPE_SHOWABLE", "not showable")
+    } | if (is-sym(head, "compare")) -> check-predicate-arg-help(env, arg-types, args, sp, is-orderable, "E_TYPE_ORDERABLE", "not orderable", Some("only Int, Float, Str, Char, Bool, and variants of those are orderable")) | check-map-key-orderable(env, head, arg-types, args, sp)
 
 let is-lambda-ast(a: Ast) -> Bool =
   match (a)
@@ -2067,12 +1995,10 @@ let is-lambda-ast(a: Ast) -> Bool =
 let infer-app-arg(env: TypeEnv, a: Ast, expected: Maybe Type, local: Map Str Type) -> Type =
   match (expected)
     | Some(e) ->
-      cond
-        | is-lambda-ast(a) ->
-          match (a)
-            | ParenNode(elems, sp) -> check-lambda-against(env, elems, sp, e, local)
-            | _ -> infer(env, a, local)
-        | else -> expect-type(env, infer(env, a, local), e, ast-span(a))
+      if (is-lambda-ast(a)) ->
+        match (a)
+          | ParenNode(elems, sp) -> check-lambda-against(env, elems, sp, e, local)
+          | _ -> infer(env, a, local) | expect-type(env, infer(env, a, local), e, ast-span(a))
     | None -> infer(env, a, local)
 
 let infer-app-args-against(env: TypeEnv, args: List Ast, params: List Type, local: Map Str Type, acc: List Type) -> List Type =
@@ -2080,18 +2006,15 @@ let infer-app-args-against(env: TypeEnv, args: List Ast, params: List Type, loca
     | [] -> rev-types(acc, [])
     | a :: rest ->
       match (params)
-        | p :: prest ->
-          infer-app-args-against(env, rest, prest, local, infer-app-arg(env, a, Some(p), local) :: acc)
-        | [] ->
-          infer-app-args-against(env, rest, [], local, infer-app-arg(env, a, None, local) :: acc)
+        | p :: prest -> infer-app-args-against(env, rest, prest, local, infer-app-arg(env, a, Some(p), local) :: acc)
+        | [] -> infer-app-args-against(env, rest, [], local, infer-app-arg(env, a, None, local) :: acc)
 
 let infer-app-core(env: TypeEnv, head: Ast, args: List Ast, sp: Span, local: Map Str Type) -> Type {
   let callee = apply-subst(env, infer(env, head, local))
   match (callee)
     | TFn(ps, ret) ->
       {
-        if (length(args) != length(ps)) ->
-          err-help!(env, "E_TYPE_ARITY", String.concat("function arity mismatch: expected ", show(length(ps)), ", found ", show(length(args))), sp, Some("check the call: expected and found argument counts must match"))
+        if (length(args) != length(ps)) -> err-help!(env, "E_TYPE_ARITY", String.concat("function arity mismatch: expected ", show(length(ps)), ", found ", show(length(args))), sp, Some("check the call: expected and found argument counts must match"))
         let arg-types = infer-app-args-against(env, args, ps, local, [])
         check-show-compare(env, head, arg-types, args, sp)
         apply-subst(env, ret)
@@ -2121,13 +2044,15 @@ let nullary-ctor-name(env: TypeEnv, head: Ast, local: Map Str Type) -> Maybe Str
         | Some(_) -> None
         | None ->
           match (ctor-get(env, n))
-            | Some(info) -> if (ctor-is-nullary(info)) -> Some(n) | None
+            | Some(info) ->
+              if (ctor-is-nullary(info)) -> Some(n) | None
             | None -> None
     | None ->
       match (call-head-name(head))
         | Some(n) ->
           match (ctor-get(env, n))
-            | Some(info) -> if (ctor-is-nullary(info)) -> Some(n) | None
+            | Some(info) ->
+              if (ctor-is-nullary(info)) -> Some(n) | None
             | None -> None
         | None -> None
 
@@ -2142,15 +2067,13 @@ let infer-nullary-call(env: TypeEnv, name: Str, sp: Span) -> Type {
 }
 
 let infer-app-dispatch(env: TypeEnv, head: Ast, args: List Ast, sp: Span, local: Map Str Type) -> Type =
-  cond
-    | is-sym(head, "print") || is-sym(head, "println") -> infer-print-args(env, args, local, sp)
-    | else ->
-      match (args)
-        | [] ->
-          match (nullary-ctor-name(env, head, local))
-            | Some(n) -> infer-nullary-call(env, n, sp)
-            | None -> infer-app-core(env, head, args, sp, local)
-        | _ -> infer-app-core(env, head, args, sp, local)
+  if (is-sym(head, "print") || is-sym(head, "println")) -> infer-print-args(env, args, local, sp) |
+  match (args)
+    | [] ->
+      match (nullary-ctor-name(env, head, local))
+        | Some(n) -> infer-nullary-call(env, n, sp)
+        | None -> infer-app-core(env, head, args, sp, local)
+    | _ -> infer-app-core(env, head, args, sp, local)
 
 let infer-app(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) -> Type =
   match (elems)
@@ -2304,13 +2227,11 @@ let infer-project-index-oor(env: TypeEnv, elems: List Type, n: Int, fsp: Span) -
 ; `(e1, e2, …)` (≥2 elems, enforced by the reader already, but checked
 ; again here to mirror host).
 let infer-tuple(env: TypeEnv, rest: List Ast, sp: Span, local: Map Str Type) -> Type =
-  cond
-    | length(rest) < 2 ->
-      {
-        err!(env, "E_TYPE_ARITY", "tuple requires at least two elements", sp)
-        fresh-var-anon(env)
-      }
-    | else -> t-product(infer-args(env, rest, local))
+  if (length(rest) < 2) ->
+    {
+      err!(env, "E_TYPE_ARITY", "tuple requires at least two elements", sp)
+      fresh-var-anon(env)
+    } | t-product(infer-args(env, rest, local))
 
 ; `(? lhs rhs)` — unwrap Maybe/Result; `rhs` runs only on None/Err.
 let infer-ques(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) -> Type =
@@ -2388,7 +2309,6 @@ let infer-paren(env: TypeEnv, elems: List Ast, sp: Span, local: Map Str Type) ->
 ; done in pass 1) or to body checking, threading a mutable `top-local` for
 ; sequential top-level `let` (spec §2.4's `let*`-like sequencing, at the
 ; top level exactly as within a `defn` body).
-
 let bind-top-let(env: TypeEnv, n: Str, t: Type, top-local: Ref (Map Str Type)) -> Unit {
   set!(top-local, Map.set(n, t, deref(top-local)))
   value-set(env, n, Scheme([], t))
@@ -2469,7 +2389,6 @@ let typecheck-top(env: TypeEnv, ast: Ast, top-local: Ref (Map Str Type)) -> Unit
 ; Every record and variant name is bound before fields and payloads are
 ; checked, so a record may mention itself and two declarations in one file
 ; may mention each other. A second definition of the same name is an error.
-
 let span-same(a: Span, b: Span) -> Bool =
   match (a)
     | Span(s1, e1, o1, _) ->
@@ -2543,7 +2462,6 @@ let collect-defs-skip(env: TypeEnv, forms: List Ast, skip: List Span) -> Unit =
         if (span-skipped(ast-span(f), skip)) -> () | collect-def(env, f)
         collect-defs-skip(env, rest, skip)
       }
-
 
 let collect-defn-schemes(env: TypeEnv, forms: List Ast) -> Unit =
   match (forms)
@@ -2628,8 +2546,7 @@ let print-payloads(env: TypeEnv, ts: List Type, i: Int) -> Ast =
   match (ts)
     | [] -> print-str("")
     | [t] -> print-format(env, t, print-sym(String.concat("p", show(i))))
-    | t :: rest ->
-      print-concat(print-format(env, t, print-sym(String.concat("p", show(i)))), print-concat(print-str(", "), print-payloads(env, rest, i + 1)))
+    | t :: rest -> print-concat(print-format(env, t, print-sym(String.concat("p", show(i)))), print-concat(print-str(", "), print-payloads(env, rest, i + 1)))
 
 let print-pattern(name: Str, ts: List Type, i: Int) -> List Ast =
   match (ts)
@@ -2640,39 +2557,27 @@ let print-pattern(name: Str, ts: List Type, i: Int) -> List Ast =
 ; aliased import is rewritten to __import_Alias_Name. The derived show and
 ; type-directed printer strip both so printed text matches the source spelling.
 let source-name-digits(n: Str, i: Int, len: Int) -> Str =
-  cond
-    | i >= len -> n
-    | else ->
-      {
-        let b = String.byte(i, n)
-        cond
-          | b >= 48 && b <= 57 -> source-name-digits(n, i + 1, len)
-          | b == 95 -> String.slice(i + 1, len - (i + 1), n)
-          | else -> n
-      }
+  if (i >= len) -> n |
+  {
+    let b = String.byte(i, n)
+    if (b >= 48 && b <= 57) -> source-name-digits(n, i + 1, len) | if (b == 95) -> String.slice(i + 1, len - (i + 1), n) | n
+  }
 
 ; `__import_Alias_Name` → `Name` (alias names do not contain `_`).
 let source-import-name(n: Str, i: Int, len: Int) -> Str =
-  cond
-    | i >= len -> n
-    | String.byte(i, n) == 95 -> String.slice(i + 1, len - (i + 1), n)
-    | else -> source-import-name(n, i + 1, len)
+  if (i >= len) -> n | if (String.byte(i, n) == 95) -> String.slice(i + 1, len - (i + 1), n) | source-import-name(n, i + 1, len)
 
 let source-ctor-name(n: Str) -> Str {
   let len = String.length(n)
-  cond
-    | len >= 4 && String.byte(0, n) == 95 && String.byte(1, n) == 95 && String.byte(2, n) == 109 -> source-name-digits(n, 3, len)
-    | len >= 9 && String.slice(0, 9, n) == "__import_" -> source-import-name(n, 9, len)
-    | else -> n
+  if (len >= 4 && String.byte(0, n) == 95 && String.byte(1, n) == 95 && String.byte(2, n) == 109) -> source-name-digits(n, 3, len) | if (len >= 9 && String.slice(0, 9, n) == "__import_") -> source-import-name(n, 9, len) | n
 }
 
 let print-ctor-body(env: TypeEnv, name: Str, ts: List Type) -> Ast =
-  ; LANG-07: nullary constructors print as the bare name.
-  ; LANG-01: payloads use constructor-call syntax Name(a, b).
   match (ts)
+    ; LANG-07: nullary constructors print as the bare name.
+    ; LANG-01: payloads use constructor-call syntax Name(a, b).
     | [] -> print-str(source-ctor-name(name))
-    | _ ->
-      print-concat(print-str(String.concat(source-ctor-name(name), "(")), print-concat(print-payloads(env, ts, 0), print-str(")")))
+    | _ -> print-concat(print-str(String.concat(source-ctor-name(name), "(")), print-concat(print-payloads(env, ts, 0), print-str(")")))
 
 let print-ctor-arms(env: TypeEnv, cs: List VariantCtor, params: Map Str Type) -> List Ast =
   match (cs)
@@ -2694,10 +2599,8 @@ let print-nominal-body(env: TypeEnv, name: Str, args: List Type) -> Ast =
     | None -> print-error(String.concat("print: missing type ", name))
     | Some(td) ->
       match (td)
-        | RecordDef(_, ps, fs) ->
-          print-call("match", print-sym("v") :: print-ctor-arms(env, [VariantCtor(name, print-field-types(fs))], bind-type-params(ps, args, Map.empty())))
-        | VariantDef(_, ps, cs) ->
-          print-call("match", print-sym("v") :: print-ctor-arms(env, cs, bind-type-params(ps, args, Map.empty())))
+        | RecordDef(_, ps, fs) -> print-call("match", print-sym("v") :: print-ctor-arms(env, [VariantCtor(name, print-field-types(fs))], bind-type-params(ps, args, Map.empty())))
+        | VariantDef(_, ps, cs) -> print-call("match", print-sym("v") :: print-ctor-arms(env, cs, bind-type-params(ps, args, Map.empty())))
 
 let print-map-body(env: TypeEnv, t: Type, k: Type, value: Type) -> Ast {
   let name = String.concat("__print-map", show(Map.size(deref(print-names))))
@@ -2729,8 +2632,7 @@ let print-product-parts(env: TypeEnv, ts: List Type, i: Int) -> Ast =
   match (ts)
     | [] -> print-str("")
     | [t] -> print-product-part(env, t, i)
-    | t :: rest ->
-      print-concat(print-product-part(env, t, i), print-concat(print-str(", "), print-product-parts(env, rest, i + 1)))
+    | t :: rest -> print-concat(print-product-part(env, t, i), print-concat(print-str(", "), print-product-parts(env, rest, i + 1)))
 
 let print-product-body(env: TypeEnv, ts: List Type) -> Ast =
   print-concat(print-str("("), print-concat(print-product-parts(env, ts, 0), print-str(")")))
@@ -2740,17 +2642,17 @@ let print-format-body(env: TypeEnv, t: Type) -> Ast =
     | TBool -> print-call("if", [print-sym("v"), print-str("true"), print-str("false")])
     | TUnit -> print-str("()")
     | TList(e) -> print-list-body(env, t, e)
-    | TMaybe(e) ->
-      print-call("match", print-sym("v") :: print-ctor-arms(env, [VariantCtor("None", []), VariantCtor("Some", [e])], Map.empty()))
-    | TResult(a, b) ->
-      print-call("match", print-sym("v") :: print-ctor-arms(env, [VariantCtor("Ok", [a]), VariantCtor("Err", [b])], Map.empty()))
+    | TMaybe(e) -> print-call("match", print-sym("v") :: print-ctor-arms(env, [VariantCtor("None", []), VariantCtor("Some", [e])], Map.empty()))
+    | TResult(a, b) -> print-call("match", print-sym("v") :: print-ctor-arms(env, [VariantCtor("Ok", [a]), VariantCtor("Err", [b])], Map.empty()))
     | TNominal(n, args, _) -> print-nominal-body(env, n, args)
     | TMap(k, v) -> print-map-body(env, t, k, v)
     | TProduct(ts) -> print-product-body(env, ts)
-    | TParam(_) | TVar(_, _) ->
-      print-error("print: cannot format an unresolved type parameter")
+    | TParam(_) -> print-error("print: cannot format an unresolved type parameter")
+    | TVar(_, _) -> print-error("print: cannot format an unresolved type parameter")
     | TChar -> print-call("show-char", [print-sym("v")])
-    | TInt | TFloat | TStr -> print-call("show", [print-sym("v")])
+    | TInt -> print-call("show", [print-sym("v")])
+    | TFloat -> print-call("show", [print-sym("v")])
+    | TStr -> print-call("show", [print-sym("v")])
     | _ -> print-error(String.concat("print: type ", type-show(t), " is not supported"))
 
 let find-print-note(sp: Span, notes: List PrintNote) -> Maybe (List Type) =
@@ -2771,7 +2673,8 @@ let rewrite-print-args(args: List Ast, ts: List Type, notes: List ProjNote, env:
         | t :: tail ->
           {
             let value = rewrite-project-ast(a, notes, env)
-            let formatted = if (type-is-str(apply-subst(env, t))) -> value | print-format(env, t, value)
+            let formatted =
+              if (type-is-str(apply-subst(env, t))) -> value | print-format(env, t, value)
             print-write(formatted) :: rewrite-print-args(rest, tail, notes, env)
           }
 
@@ -2784,7 +2687,8 @@ let rewrite-print(elems: List Ast, sp: Span, notes: List ProjNote, env: TypeEnv)
           {
             let writes = rewrite-print-args(args, ts, notes, env)
             let unit = ParenNode([], sp)
-            let suffix = if (is-sym(head, "println")) -> [print-write(print-str("\n")), unit] | [unit]
+            let suffix =
+              if (is-sym(head, "println")) -> [print-write(print-str("\n")), unit] | [unit]
             ParenNode(print-sym("do") :: append(suffix, writes), sp)
           }
     | [] -> ParenNode([], sp)
@@ -2817,21 +2721,14 @@ let rewrite-show(elems: List Ast, sp: Span, notes: List ProjNote, env: TypeEnv) 
         | Some(t) ->
           {
             let resolved = apply-subst(env, t)
-            if (is-print-formattable(resolved)) ->
-              print-format(env, resolved, rewrite-project-ast(arg, notes, env)) |
-              ParenNode(elems, sp)
+            if (is-print-formattable(resolved)) -> print-format(env, resolved, rewrite-project-ast(arg, notes, env)) | ParenNode(elems, sp)
           }
     | _ -> ParenNode(elems, sp)
 
 let rewrite-project-node(elems: List Ast, sp: Span, notes: List ProjNote, env: TypeEnv) -> Ast =
   match (elems)
     | head :: obj :: _ ->
-      cond
-        | is-sym(head, "project") -> rewrite-project-field(elems, obj, sp, notes, env)
-        | is-sym(head, "?") -> rewrite-ques(elems, sp, notes, env)
-        | is-sym(head, "show") -> rewrite-show(elems, sp, notes, env)
-        | is-sym(head, "print") || is-sym(head, "println") -> rewrite-print(elems, sp, notes, env)
-        | else -> ParenNode(rewrite-project-list(elems, notes, env), sp)
+      if (is-sym(head, "project")) -> rewrite-project-field(elems, obj, sp, notes, env) | if (is-sym(head, "?")) -> rewrite-ques(elems, sp, notes, env) | if (is-sym(head, "show")) -> rewrite-show(elems, sp, notes, env) | if (is-sym(head, "print") || is-sym(head, "println")) -> rewrite-print(elems, sp, notes, env) | ParenNode(rewrite-project-list(elems, notes, env), sp)
     | [head] ->
       if (is-sym(head, "print") || is-sym(head, "println")) -> rewrite-print(elems, sp, notes, env) | ParenNode(elems, sp)
     | _ -> ParenNode(rewrite-project-list(elems, notes, env), sp)
@@ -2845,30 +2742,8 @@ let rewrite-ques(elems: List Ast, sp: Span, notes: List ProjNote, env: TypeEnv) 
         let right = rewrite-project-ast(rhs, notes, env)
         let binder = SymNode("mn-ques", sp)
         match (find-ques-note(sp, deref(ques-notes)))
-          | Some(QuesNote(_, _, _, 1)) ->
-            ParenNode(
-              [
-                SymNode("match", sp),
-                left,
-                ParenNode([SymNode("Ok", sp), binder], sp),
-                binder,
-                ParenNode([SymNode("Err", sp), SymNode("_", sp)], sp),
-                right
-              ],
-              sp
-            )
-          | _ ->
-            ParenNode(
-              [
-                SymNode("match", sp),
-                left,
-                ParenNode([SymNode("Some", sp), binder], sp),
-                binder,
-                ParenNode([SymNode("None", sp)], sp),
-                right
-              ],
-              sp
-            )
+          | Some(QuesNote(_, _, _, 1)) -> ParenNode([SymNode("match", sp), left, ParenNode([SymNode("Ok", sp), binder], sp), binder, ParenNode([SymNode("Err", sp), SymNode("_", sp)], sp), right], sp)
+          | _ -> ParenNode([SymNode("match", sp), left, ParenNode([SymNode("Some", sp), binder], sp), binder, ParenNode([SymNode("None", sp)], sp), right], sp)
       }
     | _ -> ParenNode(rewrite-project-list(elems, notes, env), sp)
 
@@ -2893,8 +2768,7 @@ let rewrite-noted-project(obj: Ast, field: Ast, sp: Span, notes: List ProjNote, 
 let rewrite-noted-project-named(obj: Ast, sp: Span, notes: List ProjNote, env: TypeEnv) -> Ast =
   match (find-proj-note(sp, notes))
     | None -> ParenNode([SymNode("project", sp), rewrite-project-ast(obj, notes, env)], sp)
-    | Some(note) ->
-      ParenNode([SymNode("slot", sp), rewrite-project-ast(obj, notes, env), IntNode(proj-index-of(note), sp)], sp)
+    | Some(note) -> ParenNode([SymNode("slot", sp), rewrite-project-ast(obj, notes, env), IntNode(proj-index-of(note), sp)], sp)
 
 ; Walk one form, replacing record projections with slot reads.
 let rewrite-project-ast(ast: Ast, notes: List ProjNote, env: TypeEnv) -> Ast =
@@ -3057,10 +2931,7 @@ let form-bound-names(form: Ast, acc: List Str) -> List Str =
     | _ -> acc
 
 let bound-names-of(head: Str, rest: List Ast, acc: List Str) -> List Str =
-  cond
-    | head == "defn" || head == "extern" || head == "runtime" || head == "alias" || head == "defrec" -> declared-type-add(first-ast-or(rest), acc)
-    | head == "variant" -> variant-bound-names(rest, acc)
-    | else -> acc
+  if (head == "defn" || head == "extern" || head == "runtime" || head == "alias" || head == "defrec") -> declared-type-add(first-ast-or(rest), acc) | if (head == "variant") -> variant-bound-names(rest, acc) | acc
 
 let first-ast-or(xs: List Ast) -> Ast =
   match (xs)
@@ -3152,19 +3023,16 @@ let walk-type-ast(ast: Ast, declared: List Str, pubs: List Str, aliases: Map Str
     | _ -> acc
 
 let consider-type-name(n: Str, sp: Span, declared: List Str, pubs: List Str, aliases: Map Str Ast, expanding: List Str, acc: List TypeError) -> List TypeError =
-  cond
-    | is-label(n) || member(n, expanding) -> acc
-    | else ->
-      match (Map.lookup(n, aliases))
-        | Some(target) -> walk-type-ast(target, declared, pubs, aliases, n :: expanding, acc)
-        | None ->
-          if (member(n, declared) && not(member(n, pubs))) -> TypeError(sp, "E_PUB_PRIVATE_TYPE", String.concat("pub signature mentions private type ", n), None) :: acc | acc
+  if (is-label(n) || member(n, expanding)) -> acc |
+  match (Map.lookup(n, aliases))
+    | Some(target) -> walk-type-ast(target, declared, pubs, aliases, n :: expanding, acc)
+    | None ->
+      if (member(n, declared) && not(member(n, pubs))) -> TypeError(sp, "E_PUB_PRIVATE_TYPE", String.concat("pub signature mentions private type ", n), None) :: acc | acc
 
 let is-label(n: Str) -> Bool {
   let len = String.length(n)
   len > 0 && String.byte(len - 1, n) == 58
 }
-
 
 pub let typecheck-forms(forms: List Ast) -> Result (List Ast) (List TypeError) =
   match (pack-rest(forms))

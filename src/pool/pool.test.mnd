@@ -3,7 +3,6 @@
 ; file is what `pool-dump` used to print, including the newline
 ; `println` adds. `emit` still running collection stays in
 ; tests/phase2/pool.test.ts.
-
 import "../reader/read.mnd"
 import "../test/paths.mnd"
 import "./pool.mnd"

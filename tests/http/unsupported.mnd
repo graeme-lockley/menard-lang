@@ -4,15 +4,18 @@ import std/map as Map
 
 let main() -> Int =
   match (Http.request("127.0.0.1", 9, Http.Request(Http.GET, "/", Map.empty(), "")))
-    | Err(Http.NetErr(Http.Unsupported)) -> {
+    | Err(Http.NetErr(Http.Unsupported)) ->
+      {
         println("Unsupported")
         1
       }
-    | Err(_) -> {
+    | Err(_) ->
+      {
         println("other-err")
         2
       }
-    | Ok(_) -> {
+    | Ok(_) ->
+      {
         println("ok")
         0
       }

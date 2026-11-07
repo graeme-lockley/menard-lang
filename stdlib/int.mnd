@@ -1,6 +1,5 @@
 ; Parse a decimal integer from a byte string.
 ; @module std/int
-
 import std/string as String
 
 ; The integer spelled by the leading digits of n. A leading minus negates it. No digits means 0.
@@ -35,7 +34,10 @@ let from-digits(n: Str, i: Int, acc: Int, neg: Bool, seen: Bool) -> Maybe Int =
 
 ; Finish when the scan has consumed n.
 let from-done(acc: Int, neg: Bool, seen: Bool) -> Maybe Int =
-  if (seen) -> Some(if (neg) -> -acc | acc) | None
+  if (seen) ->
+    Some(
+      if (neg) -> -acc | acc
+    ) | None
 
 ; Take one byte when it is a digit.
 let from-digit(n: Str, i: Int, acc: Int, neg: Bool, seen: Bool) -> Maybe Int {
@@ -46,13 +48,12 @@ let from-digit(n: Str, i: Int, acc: Int, neg: Bool, seen: Bool) -> Maybe Int {
 ; The integer spelled by the digits of n from byte i, stopping at the first non-digit.
 let parse-rest(n: Str, i: Int) -> Int {
   let len = String.length(n)
-
-  loop(iter = i, result = 0) {
-      cond
-        | iter >= len -> result
-        | else -> {
-            let d = String.byte(iter, n)
-            if (String.is-digit-byte(d)) -> recur(iter + 1, result * 10 + d - 48) | result
-          }
-  }
+  loop (iter = i, result = 0)
+    {
+      if (iter >= len) -> result |
+      {
+        let d = String.byte(iter, n)
+        if (String.is-digit-byte(d)) -> recur(iter + 1, result * 10 + d - 48) | result
+      }
+    }
 }

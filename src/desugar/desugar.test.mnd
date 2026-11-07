@@ -1,7 +1,6 @@
 ; Desugar pass. Fixture paths are from the repo root, and are also found
 ; when `./mn test` is run from a subdirectory. CLI dump flags stay in
 ; tests/phase2/desugar.test.ts.
-
 import "../reader/read.mnd"
 import "../reader/print.mnd"
 import "../test/paths.mnd"
@@ -84,8 +83,8 @@ let pipe-rejected(src: Str) -> Bool =
         | Ok(_) -> false
         | Err(es) -> codes-have(es, "E_DESUGAR_PIPE")
 
-test "pipe appends the left value as the last argument" =
-  desugars-to("tokens |> List.map(I.parse) |> List.filter(fn (n) = n <= 1000)", "(List.filter)(fn (n) = n <= 1000, (List.map)(I.parse, tokens))") && desugars-to("input |> String.drop(idx + 1) |> String.split-using(separators)", "(String.split-using)(separators, (String.drop)(idx + 1, input))") && desugars-to("numbers |> List.filter(is-negative) |> Err()", "Err((List.filter)(is-negative, numbers))") && desugars-to("numbers |> List.fold(fn (a, n) = a + n, 0)", "(List.fold)(fn (a, n) = a + n, 0, numbers)") && desugars-to("s |> String.drop(n)", "(String.drop)(n, s)") && desugars-to("s |> String.index-of-from(sep, i)", "(String.index-of-from)(sep, i, s)")
+; Projected callees print as `List.filter(...)`, not `(List.filter)(...)`.
+test "pipe appends the left value as the last argument" = desugars-to("tokens |> List.map(I.parse) |> List.filter(fn (n) = n <= 1000)", "List.filter(fn (n) = n <= 1000, List.map(I.parse, tokens))") && desugars-to("input |> String.drop(idx + 1) |> String.split-using(separators)", "String.split-using(separators, String.drop(idx + 1, input))") && desugars-to("numbers |> List.filter(is-negative) |> Err()", "Err(List.filter(is-negative, numbers))") && desugars-to("numbers |> List.fold(fn (a, n) = a + n, 0)", "List.fold(fn (a, n) = a + n, 0, numbers)") && desugars-to("s |> String.drop(n)", "String.drop(n, s)") && desugars-to("s |> String.index-of-from(sep, i)", "String.index-of-from(sep, i, s)")
 
 test "a map literal becomes nested map-set" = desugars-to("{\"a\" => 1, \"b\" => 2}", "map-set(map-set(map-new(), \"a\", 1), \"b\", 2)")
 
