@@ -12,7 +12,6 @@ let main() -> Int {
   match (Actor.receive(mb))
     | Ok(42) -> println(2)
     | _ -> println(0)
-
   ; send-timeout on a full bounded mailbox → ActorTimeout; message not enqueued.
   let full = Actor.mailbox-new-bounded(1)
   Actor.send(full, 1)
@@ -22,21 +21,22 @@ let main() -> Int {
   match (Actor.receive(full))
     | Ok(1) -> println(4)
     | _ -> println(0)
-
   ; close wakes a send-timeout waiter with ActorDead.
   let closed-mb = Actor.mailbox-new-bounded(1)
   Actor.send(closed-mb, 0)
-  let sender = Task.spawn(fn () = {
-    match (Actor.send-timeout(closed-mb, 99, 200))
-      | Err(Actor.ActorDead) -> 5
-      | Err(Actor.ActorTimeout) -> -1
-      | _ -> -2
-  })
+  let sender =
+    Task.spawn(
+      fn () {
+        match (Actor.send-timeout(closed-mb, 99, 200))
+          | Err(Actor.ActorDead) -> 5
+          | Err(Actor.ActorTimeout) -> -1
+          | _ -> -2
+      }
+    )
   Task.sleep-ms(5)
   Actor.close(closed-mb)
   match (Task.join(sender))
     | Ok(5) -> println(5)
     | _ -> println(0)
-
   0
 }

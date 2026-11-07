@@ -7,7 +7,6 @@
 ; The suite is one binary and one process. A `file <path>` line on its
 ; stdout starts that file's pass/fail lines.
 ; Green and red only when stdout is a terminal and `NO_COLOR` is unset.
-
 import "../diag/report.mnd"
 import "../reader/ast.mnd"
 import "../reader/read.mnd"
@@ -29,24 +28,23 @@ let print-verbose(lines: List Str, on: Bool, show-output: Bool) -> Unit =
     | [] -> ()
     | line :: rest ->
       {
-        cond
-          | String.starts-with("pass ", line) || String.starts-with("fail ", line) ->
-            {
-              write(stdout, "  ")
-              write(
-                stdout,
-                if (String.starts-with("pass ", line)) -> paint(on, "[32m", line) | paint(on, "[31m", line)
-              )
-              write(stdout, "\n")
-              ()
-            }
-          | show-output ->
-            {
-              write(stdout, "    ")
-              write(stdout, line)
-              write(stdout, "\n")
-              ()
-            }
+        if (String.starts-with("pass ", line) || String.starts-with("fail ", line)) ->
+          {
+            write(stdout, "  ")
+            write(
+              stdout,
+              if (String.starts-with("pass ", line)) -> paint(on, "[32m", line) | paint(on, "[31m", line)
+            )
+            write(stdout, "\n")
+            ()
+          } |
+        if (show-output) ->
+          {
+            write(stdout, "    ")
+            write(stdout, line)
+            write(stdout, "\n")
+            ()
+          }
         print-verbose(rest, on, show-output)
       }
 
@@ -87,16 +85,14 @@ let test-named(form: Ast, name: Str) -> Maybe Ast =
         | Some(h) ->
           match (sym-text(h))
             | Some(s) ->
-              cond
-                | s == "test" ->
-                  match (list-second(elems))
-                    | Some(n) ->
-                      match (str-text(n))
-                        | Some(text) ->
-                          if (text == name) -> third(elems) | None
-                        | None -> None
-                    | None -> None
-                | else -> None
+              if (s == "test") ->
+                match (list-second(elems))
+                  | Some(n) ->
+                    match (str-text(n))
+                      | Some(text) ->
+                        if (text == name) -> third(elems) | None
+                      | None -> None
+                  | None -> None | None
             | None -> None
         | None -> None
     | _ -> None
@@ -143,7 +139,8 @@ let explain-fails(path: Str, src: Str, shown: Str, original: Str, forms: List As
       }
 
 let explain-parsed(path: Str, src: Str, shown: Str, forms: List Ast, lines: List Str) -> Unit =
-  if (shown == path) -> explain-fails(path, src, shown, src, forms, lines) | match (read-file(shown))
+  if (shown == path) -> explain-fails(path, src, shown, src, forms, lines) |
+  match (read-file(shown))
     | Ok(original) -> explain-fails(path, src, shown, original, forms, lines)
     | Err(_) -> explain-fails(path, src, path, src, forms, lines)
 
@@ -156,7 +153,8 @@ let explain-file(path: Str, lines: List Str, originals: Map Str Str) -> Unit =
         | Ok(forms) -> explain-parsed(path, src, source-path(path, originals), forms, lines)
 
 let file-line(path: Str, ok: Bool, on: Bool) -> Unit =
-  if (json-mode-on()) -> () | {
+  if (json-mode-on()) -> () |
+  {
     write(stdout, path)
     write(stdout, " ... ")
     write(
@@ -186,22 +184,20 @@ record RunAcc {
 ; `exit-bad` is the process status, applied only to the file that was
 ; running when the process stopped. A panic aborts the rest of the suite.
 let flush-file(path: Str, lines: List Str, verbose: Bool, show-output: Bool, on: Bool, exit-bad: Bool, originals: Map Str Str) -> Counts =
-  cond
-    | String.length(path) == 0 ->
-      if (exit-bad) -> Counts(0, 1) | Counts(0, 0)
-    | else ->
-      {
-        let ordered = rev-strs(lines, [])
-        if (verbose || show-output) -> print-verbose(ordered, on, show-output)
-        match (count-lines(ordered))
-          | Counts(p, f) ->
-            {
-              let bad = f > 0 || exit-bad
-              file-line(shown-path(path, originals), not(bad), on)
-              if (f > 0) -> explain-file(path, ordered, originals)
-              if (bad && f == 0) -> Counts(p, 1) | Counts(p, f)
-            }
-      }
+  if (String.length(path) == 0) ->
+    if (exit-bad) -> Counts(0, 1) | Counts(0, 0) |
+  {
+    let ordered = rev-strs(lines, [])
+    if (verbose || show-output) -> print-verbose(ordered, on, show-output)
+    match (count-lines(ordered))
+      | Counts(p, f) ->
+        {
+          let bad = f > 0 || exit-bad
+          file-line(shown-path(path, originals), not(bad), on)
+          if (f > 0) -> explain-file(path, ordered, originals)
+          if (bad && f == 0) -> Counts(p, 1) | Counts(p, f)
+        }
+  }
 
 let take-lines(lines: List Str, acc: RunAcc, verbose: Bool, show-output: Bool, on: Bool, originals: Map Str Str) -> RunAcc =
   match (lines)
@@ -222,13 +218,12 @@ let finish-acc(acc: RunAcc, verbose: Bool, show-output: Bool, on: Bool, exit-bad
         match (flush-file(path, buf, verbose, show-output, on, exit-bad, originals))
           | Counts(p, f) ->
             {
-              cond
-                | exit-bad && String.length(err) > 0 ->
-                  {
-                    write(stderr, err)
-                    write(stderr, "\n")
-                    ()
-                  }
+              if (exit-bad && String.length(err) > 0) ->
+                {
+                  write(stderr, err)
+                  write(stderr, "\n")
+                  ()
+                }
               Counts(passed + p, failed + f)
             }
       }
@@ -314,8 +309,7 @@ let gather(paths: List Str, got: Gathered) -> Result Gathered Str =
         | Err(_) -> Err("")
         | Ok(cases) ->
           match (got)
-            | Gathered(files, originals) ->
-              gather(rest, Gathered(cat-new(files, cat(without-origins(present-list(discover(p)), cases), case-files(cases))), originals-of(cases, originals)))
+            | Gathered(files, originals) -> gather(rest, Gathered(cat-new(files, cat(without-origins(present-list(discover(p)), cases), case-files(cases))), originals-of(cases, originals)))
 
 let run-files(path: Str, files: List Str, originals: Map Str Str, clean: Bool, verbose: Bool, show-output: Bool, quiet: Bool, cc: Str, runtime: Str) -> Int {
   let on = tty-color(1)
@@ -353,16 +347,5 @@ pub let run-suite(paths: List Str, clean: Bool, verbose: Bool, show-output: Bool
                 report-plain(String.concat("no tests found in ", join-sp(roots)))
                 1
               }
-            | _ :: _ ->
-              run-files(
-                join-sp(roots),
-                sort-by(fn (p) = shown-path(p, originals), files),
-                originals,
-                clean,
-                verbose,
-                show-output,
-                quiet,
-                cc,
-                runtime
-              )
+            | _ :: _ -> run-files(join-sp(roots), sort-by(fn (p) = shown-path(p, originals), files), originals, clean, verbose, show-output, quiet, cc, runtime)
 }

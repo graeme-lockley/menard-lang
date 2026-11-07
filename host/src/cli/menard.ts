@@ -28,17 +28,28 @@ import {
 } from "./args.ts";
 import { parseFixArgs, runFix } from "./fix.ts";
 import { parseFmtArgs, runFmt } from "./fmt.ts";
+import { formatToolchainReport } from "./toolchain.ts";
+import { formatVersionReport } from "./version.ts";
 
 function usage(): never {
   console.error(
     "usage: menard <check|run> [--show-result] [--json] <file.mnd> [-- arg…]\n" +
-      "       menard fmt <file.mnd…>\n" +
-      "       menard fix [--dry-run] [--rule name] <file.mnd…>",
+      "       menard fmt [--check] [--stdin] <file.mnd…>\n" +
+      "       menard fix [--dry-run] [--rule name] <file.mnd…>\n" +
+      "       menard --version | --print-toolchain | --help",
   );
   process.exit(2);
 }
 
 const argv = process.argv.slice(2);
+if (argv.includes("--version")) {
+  process.stdout.write(formatVersionReport());
+  process.exit(0);
+}
+if (argv.includes("--print-toolchain")) {
+  process.stdout.write(formatToolchainReport());
+  process.exit(0);
+}
 const help = parseCliHelp(argv);
 if (help) {
   if (help.kind === "commands") {

@@ -1,7 +1,6 @@
 ; Internal cooperative scheduler seam (Build D).
 ; Not Platform API — do not import from applications. Use std/task.
 ; @module std/sched
-
 extern mn_task_spawn[a](thunk: () -> a) -> Int
 
 extern mn_task_self() -> Int

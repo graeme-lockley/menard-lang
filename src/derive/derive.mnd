@@ -23,7 +23,6 @@
 ; and `Fn` are not given bodies here — the typer already rejects `show`
 ; of those. Field payloads are printed with the builtin `show`, which
 ; matches the interpreter for `Int`.
-
 import "../reader/ast.mnd"
 import std/list
 import std/string as String
@@ -101,16 +100,11 @@ let ctor-pat(c: DeriveCtor, prefix: Str) -> Ast =
 ; The match pattern keeps that name so it still matches the value. Only the
 ; characters inside `show` and `dump` use the name the source wrote.
 let source-ctor-name-digits(n: Str, i: Int, len: Int) -> Str =
-  cond
-    | i >= len -> n
-    | else ->
-      {
-        let b = String.byte(i, n)
-        cond
-          | b >= 48 && b <= 57 -> source-ctor-name-digits(n, i + 1, len)
-          | b == 95 -> String.slice(i + 1, len - (i + 1), n)
-          | else -> n
-      }
+  if (i >= len) -> n |
+  {
+    let b = String.byte(i, n)
+    if (b >= 48 && b <= 57) -> source-ctor-name-digits(n, i + 1, len) | if (b == 95) -> String.slice(i + 1, len - (i + 1), n) | n
+  }
 
 let source-ctor-name(n: Str) -> Str {
   let len = String.length(n)
@@ -170,13 +164,11 @@ let eq-clauses(ctors: List DeriveCtor) -> List Ast =
 ; shape tags — not the old `_ -> 1` fallback that made every unequal pair
 ; report `a > b`.
 let cmp-sign(a-idx: Int, b-idx: Int) -> Int =
-  cond
-    | a-idx < b-idx -> -1
-    | a-idx > b-idx -> 1
-    | else -> 0
+  if (a-idx < b-idx) -> -1 | if (a-idx > b-idx) -> 1 | 0
 
 let cmp-b-arm(a-ctor: DeriveCtor, a-idx: Int, b-ctor: DeriveCtor, b-idx: Int) -> List Ast {
-  let body = if (a-idx == b-idx) -> cmp-fields(binders("a", dc-arity(a-ctor), 0), binders("b", dc-arity(b-ctor), 0)) | int-lit(cmp-sign(a-idx, b-idx))
+  let body =
+    if (a-idx == b-idx) -> cmp-fields(binders("a", dc-arity(a-ctor), 0), binders("b", dc-arity(b-ctor), 0)) | int-lit(cmp-sign(a-idx, b-idx))
   [ctor-pat(b-ctor, "b"), body]
 }
 
@@ -223,10 +215,7 @@ let insert-name(x: Str, xs: List Str) -> List Str =
   match (xs)
     | [] -> [x]
     | h :: rest ->
-      cond
-        | h == x -> xs
-        | compare(x, h) <= 0 -> x :: xs
-        | else -> h :: insert-name(x, rest)
+      if (h == x) -> xs | if (compare(x, h) <= 0) -> x :: xs | h :: insert-name(x, rest)
 
 let ctor-type-of(name: Str, ctors: Map Str Str) -> Maybe Str =
   Map.lookup(name, ctors)
@@ -244,11 +233,7 @@ let is-derive-op(name: Str) -> Bool =
   name == "show" || name == "=" || name == "compare" || name == "dump"
 
 let op-prefix(name: Str) -> Str =
-  cond
-    | name == "show" -> "show_"
-    | name == "=" -> "eq_"
-    | name == "compare" -> "compare_"
-    | else -> "dump_"
+  if (name == "show") -> "show_" | if (name == "=") -> "eq_" | if (name == "compare") -> "compare_" | "dump_"
 
 let note-used(ast: Ast, ctors: Map Str Str, acc: List Str) -> List Str =
   match (ast)
@@ -270,15 +255,13 @@ let note-used-head(head: Ast, rest: List Ast, ctors: Map Str Str, acc: List Str)
   match (sym-str(head))
     | None -> acc
     | Some(hn) ->
-      cond
-        | is-derive-op(hn) ->
-          match (rest)
-            | a :: _ ->
-              match (classify-user(a, ctors))
-                | None -> acc
-                | Some(ty) -> insert-name(ty, acc)
-            | [] -> acc
-        | else -> acc
+      if (is-derive-op(hn)) ->
+        match (rest)
+          | a :: _ ->
+            match (classify-user(a, ctors))
+              | None -> acc
+              | Some(ty) -> insert-name(ty, acc)
+          | [] -> acc | acc
 
 let used-in(forms: List Ast, ctors: Map Str Str) -> List Str =
   used-in-list(forms, ctors, [])
@@ -374,22 +357,20 @@ let take-name(ast: Ast) -> Maybe Str =
     | _ -> None
 
 let consider-named(hn: Str, rest: List Ast, acc: TypeAcc) -> TypeAcc =
-  cond
-    | hn == "defrec" ->
-      match (rest)
-        | name-ast :: fields ->
-          match (take-name(name-ast))
-            | None -> acc
-            | Some(name) -> acc-add-defrec(acc, name, length(fields))
-        | [] -> acc
-    | hn == "variant" ->
-      match (rest)
-        | name-ast :: cs ->
-          match (take-name(name-ast))
-            | None -> acc
-            | Some(name) -> acc-add-variant(acc, name, cs)
-        | [] -> acc
-    | else -> acc
+  if (hn == "defrec") ->
+    match (rest)
+      | name-ast :: fields ->
+        match (take-name(name-ast))
+          | None -> acc
+          | Some(name) -> acc-add-defrec(acc, name, length(fields))
+      | [] -> acc |
+  if (hn == "variant") ->
+    match (rest)
+      | name-ast :: cs ->
+        match (take-name(name-ast))
+          | None -> acc
+          | Some(name) -> acc-add-variant(acc, name, cs)
+      | [] -> acc | acc
 
 let consider(ast: Ast, acc: TypeAcc) -> TypeAcc =
   match (unwrap-pub(ast))

@@ -21,3 +21,17 @@ unchanged.
 
 The language server (TOOL-04, `mn lsp`) consumes this same diagnostic model.
 Code catalogue and sample objects: [`docs/errors.md`](docs/errors.md).
+
+## Formatting before a commit
+
+The **last step before a commit** that touches `.mnd` files is to format
+them:
+
+```bash
+mn fmt path/to/touched.mnd…          # or: bun run host/src/cli/menard.ts fmt …
+mn fmt --check path/to/touched.mnd…  # verify; exit 1 with a diff if dirty
+make fmt-check                       # whole trees: src/, stdlib/, examples/, tests/
+```
+
+Canonical style: [`docs/formatting.md`](docs/formatting.md). Tooling overview:
+[`docs/tooling.md`](docs/tooling.md).

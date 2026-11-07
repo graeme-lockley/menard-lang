@@ -1,6 +1,5 @@
 ; Standard streams and file reads and writes.
 ; @module std/io
-
 import std/result as Result
 
 ; Standard input, the file descriptor `write` takes as 0.
@@ -19,7 +18,6 @@ pub let stderr = 2
 ; return. Tags are the C statics: 20–26 nullary, 27 (Other Int), 28 Timeout,
 ; 29 TlsVerifyFailed, 36 Unsupported (shared with SpawnError.Unsupported),
 ; 37 TlsHandshakeFailed.
-
 pub type IoError =
   | NotFound
   | Permission

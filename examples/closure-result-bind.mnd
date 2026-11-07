@@ -1,7 +1,6 @@
 ; Slice 3E — Result + heap-closure continuation (inline `fn`).
 ; Prints the Ok path and the Err fallback.
 ; Run with: `./mn run examples/closure-result-bind.mnd`
-
 let result-bind-int(r: Result Int Str, k: (Int) -> Int) -> Int =
   match (r)
     | Ok(v) -> k(v)

@@ -65,7 +65,8 @@ lands as one identifier (`n+1`) is diagnosed later as `E_TYPE_UNBOUND` with a
 spacing `help:` — see [diagnostics.md](diagnostics.md) and
 [errors.md](errors.md). `mn fmt` rewrites spacing around a real binary
 operator in the AST and never rewrites an identifier's bytes (`n+1` stays
-`n+1`).
+`n+1`). The full canonical layout (indent, arms, imports, comments,
+`@test`) is [formatting.md](formatting.md).
 
 | Token | Role |
 |---|---|

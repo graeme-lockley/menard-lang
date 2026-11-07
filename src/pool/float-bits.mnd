@@ -6,7 +6,6 @@
 ; significand, round-to-nearest-even. `-0.0` and `0.0` stay distinct.
 ; `1.0`, `1.00`, and `1e0` are one payload. A value that overflows to
 ; infinity is an error; underflow becomes a signed zero.
-
 import std/list
 import std/result as Result
 import std/string as String
@@ -36,7 +35,6 @@ record Parsed {
 
 ; ---------------------------------------------------------------------------
 ; Base-2^30 integers, least-significant limb first. [] is zero.
-
 let bi-norm(xs: List Int) -> List Int =
   match (xs)
     | [] -> []
@@ -58,20 +56,18 @@ let bi-add-c(xs: List Int, ys: List Int, c: Int) -> List Int =
     | (x :: xt, y :: yt) ->
       {
         let s = x + y + c
-        (s % limb-base()) :: bi-add-c(xt, yt, s / limb-base())
+        s % limb-base() :: bi-add-c(xt, yt, s / limb-base())
       }
 
 let bi-add-rest(xs: List Int, c: Int) -> List Int =
-  cond
-    | c == 0 -> xs
-    | else ->
-      match (xs)
-        | [] -> [c]
-        | x :: xt ->
-          {
-            let s = x + c
-            (s % limb-base()) :: bi-add-rest(xt, s / limb-base())
-          }
+  if (c == 0) -> xs |
+  match (xs)
+    | [] -> [c]
+    | x :: xt ->
+      {
+        let s = x + c
+        s % limb-base() :: bi-add-rest(xt, s / limb-base())
+      }
 
 let bi-sub(xs: List Int, ys: List Int) -> List Int =
   bi-norm(bi-sub-c(xs, ys, 0))
@@ -96,10 +92,7 @@ let bi-cmp(xs: List Int, ys: List Int) -> Int =
 let bi-cmp-norm(xs: List Int, ys: List Int) -> Int {
   let lx = length(xs)
   let ly = length(ys)
-  cond
-    | lx < ly -> -1
-    | lx > ly -> 1
-    | else -> bi-cmp-hi(reverse(xs), reverse(ys))
+  if (lx < ly) -> -1 | if (lx > ly) -> 1 | bi-cmp-hi(reverse(xs), reverse(ys))
 }
 
 let bi-cmp-hi(xs: List Int, ys: List Int) -> Int =
@@ -107,10 +100,7 @@ let bi-cmp-hi(xs: List Int, ys: List Int) -> Int =
     | ([], _) -> 0
     | (_, []) -> 0
     | (x :: xt, y :: yt) ->
-      cond
-        | x < y -> -1
-        | x > y -> 1
-        | else -> bi-cmp-hi(xt, yt)
+      if (x < y) -> -1 | if (x > y) -> 1 | bi-cmp-hi(xt, yt)
 
 let bi-mul-limb(xs: List Int, m: Int) -> List Int =
   bi-norm(bi-mul-limb-c(xs, m, 0))
@@ -122,7 +112,7 @@ let bi-mul-limb-c(xs: List Int, m: Int, c: Int) -> List Int =
     | h :: t ->
       {
         let p = h * m + c
-        (p % limb-base()) :: bi-mul-limb-c(t, m, p / limb-base())
+        p % limb-base() :: bi-mul-limb-c(t, m, p / limb-base())
       }
 
 let bi-shl-words(xs: List Int, n: Int) -> List Int =
@@ -144,7 +134,7 @@ let bi-shl-rem-c(xs: List Int, bits: Int, c: Int) -> List Int =
     | h :: t ->
       {
         let cur = h * pow2(bits) + c
-        (cur % limb-base()) :: bi-shl-rem-c(t, bits, cur / limb-base())
+        cur % limb-base() :: bi-shl-rem-c(t, bits, cur / limb-base())
       }
 
 let bi-mul(xs: List Int, ys: List Int) -> List Int =
@@ -160,10 +150,7 @@ let bi-mul-int(xs: List Int, n: Int) -> List Int {
 }
 
 let bi-from-int(n: Int) -> List Int =
-  cond
-    | n <= 0 -> []
-    | n < limb-base() -> [n]
-    | else -> [n % limb-base(), n / limb-base()]
+  if (n <= 0) -> [] | if (n < limb-base()) -> [n] | [n % limb-base(), n / limb-base()]
 
 ; `ds` is most-significant digit first.
 let bi-digits-msd(ds: List Int) -> List Int =
@@ -224,15 +211,11 @@ let quot-mid(den: List Int, num: List Int, lo: Int, hi: Int) -> Int {
 
 let round-up(q: Int, rem: List Int, den: List Int) -> Bool {
   let c = bi-cmp(bi-shl-bits(rem, 1), den)
-  cond
-    | c > 0 -> true
-    | c == 0 -> q % 2 == 1
-    | else -> false
+  if (c > 0) -> true | if (c == 0) -> q % 2 == 1 | false
 }
 
 ; ---------------------------------------------------------------------------
 ; Parsing the lexer form: optional sign, digits, one dot, optional exponent.
-
 let is-digit-byte(b: Int) -> Bool =
   b >= 48 && b <= 57
 
@@ -244,10 +227,7 @@ let parse-float(text: Str) -> Result Parsed Str =
 
 let parse-signed(text: Str) -> Result Parsed Str {
   let b = String.byte(0, text)
-  cond
-    | b == 43 -> parse-body(text, 1, false, [], false, 0, false)
-    | b == 45 -> parse-body(text, 1, true, [], false, 0, false)
-    | else -> parse-body(text, 0, false, [], false, 0, false)
+  if (b == 43) -> parse-body(text, 1, false, [], false, 0, false) | if (b == 45) -> parse-body(text, 1, true, [], false, 0, false) | parse-body(text, 0, false, [], false, 0, false)
 }
 
 let parse-body(text: Str, i: Int, neg: Bool, rev-digits: List Int, saw-dot: Bool, frac: Int, saw: Bool) -> Result Parsed Str =
@@ -255,11 +235,7 @@ let parse-body(text: Str, i: Int, neg: Bool, rev-digits: List Int, saw-dot: Bool
 
 let parse-at(text: Str, i: Int, neg: Bool, rev-digits: List Int, saw-dot: Bool, frac: Int, saw: Bool) -> Result Parsed Str {
   let b = String.byte(i, text)
-  cond
-    | is-digit-byte(b) -> parse-digit(text, i, neg, rev-digits, saw-dot, frac, b)
-    | b == 46 && not(saw-dot) -> parse-body(text, i + 1, neg, rev-digits, true, frac, saw)
-    | is-exp-mark(b) && saw -> parse-exp(text, i + 1, neg, rev-digits, frac)
-    | else -> Err("malformed float")
+  if (is-digit-byte(b)) -> parse-digit(text, i, neg, rev-digits, saw-dot, frac, b) | if (b == 46 && not(saw-dot)) -> parse-body(text, i + 1, neg, rev-digits, true, frac, saw) | if (is-exp-mark(b) && saw) -> parse-exp(text, i + 1, neg, rev-digits, frac) | Err("malformed float")
 }
 
 let parse-digit(text: Str, i: Int, neg: Bool, rev-digits: List Int, saw-dot: Bool, frac: Int, b: Int) -> Result Parsed Str {
@@ -276,10 +252,7 @@ let parse-exp(text: Str, i: Int, neg: Bool, rev-digits: List Int, frac: Int) -> 
 
 let parse-exp-sign(text: Str, i: Int, neg: Bool, rev-digits: List Int, frac: Int) -> Result Parsed Str {
   let b = String.byte(i, text)
-  cond
-    | b == 43 -> parse-exp-digits(text, i + 1, neg, rev-digits, frac, false, 0, false)
-    | b == 45 -> parse-exp-digits(text, i + 1, neg, rev-digits, frac, true, 0, false)
-    | else -> parse-exp-digits(text, i, neg, rev-digits, frac, false, 0, false)
+  if (b == 43) -> parse-exp-digits(text, i + 1, neg, rev-digits, frac, false, 0, false) | if (b == 45) -> parse-exp-digits(text, i + 1, neg, rev-digits, frac, true, 0, false) | parse-exp-digits(text, i, neg, rev-digits, frac, false, 0, false)
 }
 
 let parse-exp-digits(text: Str, i: Int, neg: Bool, rev-digits: List Int, frac: Int, exp-neg: Bool, exp: Int, saw: Bool) -> Result Parsed Str =
@@ -324,7 +297,6 @@ let drop-trailing-rev(rev: List Int, e10: Int) -> Parsed =
 
 ; ---------------------------------------------------------------------------
 ; Encode a sign, a biased exponent, and a 52-bit fraction.
-
 let append-zeros!(sb: StringBuffer, n: Int) -> Unit =
   if (n <= 0) -> () | append-one-zero!(sb, n)
 
@@ -352,13 +324,13 @@ let signed-zero(neg: Bool) -> Str =
 let encode(sign: Int, biased: Int, frac: Int) -> Str {
   let sb = Buf.new()
   Buf.append-byte!(sb, frac % 256)
-  Buf.append-byte!(sb, (frac / 256) % 256)
-  Buf.append-byte!(sb, (frac / 65536) % 256)
-  Buf.append-byte!(sb, (frac / 16777216) % 256)
-  Buf.append-byte!(sb, (frac / 4294967296) % 256)
-  Buf.append-byte!(sb, (frac / 1099511627776) % 256)
-  Buf.append-byte!(sb, (frac / 281474976710656) % 16 + (biased % 16) * 16)
-  Buf.append-byte!(sb, (biased / 16) % 128 + sign * 128)
+  Buf.append-byte!(sb, frac / 256 % 256)
+  Buf.append-byte!(sb, frac / 65536 % 256)
+  Buf.append-byte!(sb, frac / 16777216 % 256)
+  Buf.append-byte!(sb, frac / 4294967296 % 256)
+  Buf.append-byte!(sb, frac / 1099511627776 % 256)
+  Buf.append-byte!(sb, frac / 281474976710656 % 16 + biased % 16 * 16)
+  Buf.append-byte!(sb, biased / 16 % 128 + sign * 128)
   Buf.take-str!(sb)
 }
 
@@ -376,10 +348,7 @@ let pack-normal-q(neg: Bool, exp2: Int, q: Int) -> Result Str Str =
   if (q >= two53()) -> pack-normal-q(neg, exp2 + 1, two52()) | pack-normal-ok(neg, exp2, q)
 
 let pack-normal-ok(neg: Bool, exp2: Int, q: Int) -> Result Str Str =
-  cond
-    | exp2 > 1023 -> Err("non-finite float")
-    | q < two52() -> Err("float conversion failed")
-    | else -> Ok(encode(sign-bit(neg), exp2 + 1023, q - two52()))
+  if (exp2 > 1023) -> Err("non-finite float") | if (q < two52()) -> Err("float conversion failed") | Ok(encode(sign-bit(neg), exp2 + 1023, q - two52()))
 
 let pack-sub(neg: Bool, q0: Int, rem: List Int, den: List Int) -> Str {
   let q =
@@ -403,11 +372,7 @@ let convert-normal(neg: Bool, exp2: Int, num: List Int, den: List Int) -> Result
   if (exp2 <= 52) -> divide-round(neg, exp2, bi-shl-bits(num, 52 - exp2), den, false) | divide-round(neg, exp2, num, bi-shl-bits(den, exp2 - 52), false)
 
 let convert-exp(neg: Bool, exp2: Int, num: List Int, den: List Int) -> Result Str Str =
-  cond
-    | exp2 > 1023 -> Err("non-finite float")
-    | exp2 < -1075 -> Ok(signed-zero(neg))
-    | exp2 < -1022 -> convert-sub(neg, num, den)
-    | else -> convert-normal(neg, exp2, num, den)
+  if (exp2 > 1023) -> Err("non-finite float") | if (exp2 < -1075) -> Ok(signed-zero(neg)) | if (exp2 < -1022) -> convert-sub(neg, num, den) | convert-normal(neg, exp2, num, den)
 
 let convert-ratio(neg: Bool, num: List Int, den: List Int) -> Result Str Str {
   let est = bi-bitlen(num) - bi-bitlen(den)
@@ -427,11 +392,7 @@ let approx-log10(digits: List Int, e10: Int) -> Int =
 
 let convert-scaled(neg: Bool, digits: List Int, e10: Int) -> Result Str Str {
   let mag = approx-log10(digits, e10)
-  cond
-    | length(digits) > 400 -> Err("float literal too long")
-    | mag > 400 -> Err("non-finite float")
-    | mag < -400 -> Ok(signed-zero(neg))
-    | else -> convert-parts(neg, digits, e10)
+  if (length(digits) > 400) -> Err("float literal too long") | if (mag > 400) -> Err("non-finite float") | if (mag < -400) -> Ok(signed-zero(neg)) | convert-parts(neg, digits, e10)
 }
 
 let convert-trimmed(neg: Bool, digits: List Int, e10: Int) -> Result Str Str =
@@ -453,14 +414,12 @@ let bits-inf(neg: Bool) -> Str =
 ; The 8 payload bytes of one literal. Overflowing numeric forms are still
 ; `Err`; `nan` / `inf` / `-inf` are defined payloads.
 pub let float-bits(text: Str) -> Result Str Str =
-  cond
-    | text == "nan" -> Ok(bits-nan())
-    | text == "inf" -> Ok(bits-inf(false))
-    | text == "-inf" -> Ok(bits-inf(true))
-    | else ->
-      match (parse-float(text))
-        | Err(msg) -> Err(msg)
-        | Ok(p) -> convert-clean(p)
+  if (text == "nan") -> Ok(bits-nan()) |
+  if (text == "inf") -> Ok(bits-inf(false)) |
+  if (text == "-inf") -> Ok(bits-inf(true)) |
+  match (parse-float(text))
+    | Err(msg) -> Err(msg)
+    | Ok(p) -> convert-clean(p)
 
 let hex-digit(n: Int) -> Str =
   String.slice(n, 1, "0123456789abcdef")
@@ -479,10 +438,7 @@ pub let float-hex(text: Str) -> Result Str Str =
     | Ok(bits) -> Ok(hex-from(bits, 0))
 
 let hex-val(c: Int) -> Int =
-  cond
-    | c >= 48 && c <= 57 -> c - 48
-    | c >= 97 && c <= 102 -> c - 87
-    | else -> 0
+  if (c >= 48 && c <= 57) -> c - 48 | if (c >= 97 && c <= 102) -> c - 87 | 0
 
 let unhex-into!(sb: StringBuffer, hex: Str, i: Int) -> Unit =
   if (i >= 16) -> () | unhex-byte!(sb, hex, i)

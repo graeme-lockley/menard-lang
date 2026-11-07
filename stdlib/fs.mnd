@@ -1,7 +1,6 @@
 ; Path predicates. `exists` is allocation-free; `rename` returns IoError,
 ; which is defined in io.mnd.
 ; @module std/fs
-
 pub import std/io (IoError)
 
 extern mn_exists(path: Str) -> Bool

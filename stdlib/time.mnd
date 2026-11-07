@@ -1,7 +1,6 @@
 ; Wall clock, durations, civil time with fixed offsets, and minimal ISO-8601.
 ; IANA zone names are out of scope. “Clock” apps are examples on this API.
 ; @module std/time
-
 import std/string as String
 import std/string-buffer as Buf
 
@@ -141,15 +140,17 @@ pub let offset-minutes(o: Offset) -> Int =
 let floor-div(a: Int, b: Int) -> Int {
   let q = a / b
   let r = a % b
-  if (r == 0) -> q | if ((a < 0) != (b < 0)) -> q - 1 | q
+  if (r == 0) -> q | if (a < 0 != (b < 0)) -> q - 1 | q
 }
 
 ; Days from civil (y, m, d) to 1970-01-01, proleptic Gregorian.
 let days-from-civil(y0: Int, m: Int, d: Int) -> Int {
-  let y1 = if (m <= 2) -> y0 - 1 | y0
+  let y1 =
+    if (m <= 2) -> y0 - 1 | y0
   let era = floor-div(y1, 400)
   let yoe = y1 - era * 400
-  let mp = if (m > 2) -> m - 3 | m + 9
+  let mp =
+    if (m > 2) -> m - 3 | m + 9
   let doy = (153 * mp + 2) / 5 + d - 1
   let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
   era * 146097 + doe - 719468
@@ -165,8 +166,10 @@ let civil-from-days(z0: Int) -> Int * Int * Int {
   let doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
   let mp = (5 * doy + 2) / 153
   let d = doy - (153 * mp + 2) / 5 + 1
-  let m = if (mp < 10) -> mp + 3 | mp - 9
-  let year = if (m <= 2) -> y + 1 | y
+  let m =
+    if (mp < 10) -> mp + 3 | mp - 9
+  let year =
+    if (m <= 2) -> y + 1 | y
   (year, m, d)
 }
 
@@ -233,34 +236,24 @@ let pad2(n: Int) -> Str =
 
 ; pad3.
 let pad3(n: Int) -> Str =
-  cond
-    | n < 10 -> String.concat("00", show(n))
-    | n < 100 -> String.concat("0", show(n))
-    | else -> show(n)
+  if (n < 10) -> String.concat("00", show(n)) | if (n < 100) -> String.concat("0", show(n)) | show(n)
 
 ; pad4.
 let pad4(n: Int) -> Str {
   let s = show(n)
   let len = String.length(s)
-  cond
-    | len >= 4 -> s
-    | len == 3 -> String.concat("0", s)
-    | len == 2 -> String.concat("00", s)
-    | len == 1 -> String.concat("000", s)
-    | else -> "0000"
+  if (len >= 4) -> s | if (len == 3) -> String.concat("0", s) | if (len == 2) -> String.concat("00", s) | if (len == 1) -> String.concat("000", s) | "0000"
 }
 
 ; format-offset.
 let format-offset(o: Offset) -> Str {
   let m = o.minutes
-  cond
-    | m == 0 -> "Z"
-    | m > 0 -> String.concat("+", pad2(m / 60), ":", pad2(m % 60))
-    | else ->
-      {
-        let am = 0 - m
-        String.concat("-", pad2(am / 60), ":", pad2(am % 60))
-      }
+  if (m == 0) -> "Z" |
+  if (m > 0) -> String.concat("+", pad2(m / 60), ":", pad2(m % 60)) |
+  {
+    let am = 0 - m
+    String.concat("-", pad2(am / 60), ":", pad2(am % 60))
+  }
 }
 
 ; ISO-8601 instant in the given offset: `YYYY-MM-DDTHH:MM:SS.mmmZ` or `±HH:MM`.
@@ -300,14 +293,12 @@ let parse-digits(s: Str, i: Int, n: Int) -> Maybe Int =
 
 ; parse-digits-acc.
 let parse-digits-acc(s: Str, i: Int, n: Int, acc: Int) -> Maybe Int =
-  cond
-    | n == 0 -> Some(acc)
-    | i >= String.length(s) -> None
-    | else ->
-      {
-        let d = digit-at(s, i)
-        if (d < 0) -> None | parse-digits-acc(s, i + 1, n - 1, acc * 10 + d)
-      }
+  if (n == 0) -> Some(acc) |
+  if (i >= String.length(s)) -> None |
+  {
+    let d = digit-at(s, i)
+    if (d < 0) -> None | parse-digits-acc(s, i + 1, n - 1, acc * 10 + d)
+  }
 
 ; Expect byte b at i.
 let expect-byte(s: Str, i: Int, b: Int) -> Bool =
@@ -315,14 +306,12 @@ let expect-byte(s: Str, i: Int, b: Int) -> Bool =
 
 ; Parse `±HH:MM` or `Z` at index i → (Offset * next-index) or None.
 let parse-offset-at(s: Str, i: Int) -> Maybe (Offset * Int) =
-  cond
-    | expect-byte(s, i, 90) -> Some((utc(), i + 1))
-    | expect-byte(s, i, 43) || expect-byte(s, i, 45) -> parse-offset-hm(s, i)
-    | else -> None
+  if (expect-byte(s, i, 90)) -> Some((utc(), i + 1)) | if (expect-byte(s, i, 43) || expect-byte(s, i, 45)) -> parse-offset-hm(s, i) | None
 
 ; parse-offset-hm.
 let parse-offset-hm(s: Str, i: Int) -> Maybe (Offset * Int) {
-  let sign = if (expect-byte(s, i, 45)) -> -1 | 1
+  let sign =
+    if (expect-byte(s, i, 45)) -> -1 | 1
   match (parse-digits(s, i + 1, 2))
     | None -> None
     | Some(hh) -> parse-offset-mm(s, i, sign, hh)
@@ -330,12 +319,10 @@ let parse-offset-hm(s: Str, i: Int) -> Maybe (Offset * Int) {
 
 ; parse-offset-mm.
 let parse-offset-mm(s: Str, i: Int, sign: Int, hh: Int) -> Maybe (Offset * Int) =
-  cond
-    | not(expect-byte(s, i + 3, 58)) -> None
-    | else ->
-      match (parse-digits(s, i + 4, 2))
-        | None -> None
-        | Some(mm) -> Some((fixed-offset(sign * (hh * 60 + mm)), i + 6))
+  if (not(expect-byte(s, i + 3, 58))) -> None |
+  match (parse-digits(s, i + 4, 2))
+    | None -> None
+    | Some(mm) -> Some((fixed-offset(sign * (hh * 60 + mm)), i + 6))
 
 ; Require fixed digits at i, then continue.
 let need-digits(s: Str, i: Int, n: Int) -> Maybe Int =
@@ -421,7 +408,4 @@ let finish-parse(s: Str, year: Int, month: Int, day: Int, hour: Int, minute: Int
   match (parse-offset-at(s, 23))
     | None -> None
     | Some(pair) ->
-      cond
-        | pair.2 == String.length(s) ->
-          Some(from-datetime(DateTime(year, month, day, hour, minute, second, millis, pair.1)))
-        | else -> None
+      if (pair.2 == String.length(s)) -> Some(from-datetime(DateTime(year, month, day, hour, minute, second, millis, pair.1))) | None

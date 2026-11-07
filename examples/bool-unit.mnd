@@ -1,7 +1,6 @@
 ; Slice 3B — Bool/Unit immediates as first-class values.
 ; Prints one line per value: t, f, is-pos results, and a Unit.
 ; Run with: `./mn run examples/bool-unit.mnd`
-
 let is-pos(n: Int) -> Bool =
   n > 0
 
@@ -9,7 +8,6 @@ let main() -> Unit {
   let t = true
   let f = false
   let u = ()
-
   println("t = ", t)
   println("f = ", f)
   println("is-pos(5) = ", is-pos(5))

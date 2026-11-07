@@ -9,7 +9,6 @@
 ; `write-module-bc`. A program with no `defn main`, or a form the lowerer
 ; refuses, is an `Err`: `emit` fails rather than writing
 ; a stale module.
-
 import "../reader/ast.mnd"
 import "./lower.mnd"
 

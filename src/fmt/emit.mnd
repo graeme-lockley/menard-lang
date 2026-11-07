@@ -1,0 +1,25 @@
+; Comment-aware emitter: leading trivia at indent, then the reader printer.
+; Twin of host/src/fmt/emit.ts.
+import "../reader/ast.mnd"
+import "../reader/print.mnd"
+import "./trivia.mnd"
+import "./attach.mnd"
+import std/string as String
+
+let nl() -> Str =
+  String.from-char('\n')
+
+let ends-with-nl(s: Str) -> Bool =
+  String.ends-with(nl(), s)
+
+let ensure-nl(s: Str) -> Str =
+  if (ends-with-nl(s)) -> s | String.concat(s, nl())
+
+pub let emit-source(forms: List Ast, attached: AttachedTrivia) -> Str {
+  set-leading-trivia(attached.leading)
+  let body = print-form-all(forms)
+  let trail =
+    if (attached.trailing == []) -> "" | format-trivia-items(attached.trailing, 0)
+  clear-leading-trivia()
+  if (trail == "") -> body | if (body == "") -> ensure-nl(trail) | ensure-nl(String.concat(ensure-nl(body), trail))
+}

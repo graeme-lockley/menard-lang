@@ -29,7 +29,8 @@ let main() -> Int {
   let shown-red = show(Red)
   let from-map =
     match (Map.lookup(1, m))
-      | Some(c) -> if (c == Red) -> 0 | 1
+      | Some(c) ->
+        if (c == Red) -> 0 | 1
       | None -> 2
   if (take-maybe(x) == 0 && shown == "None" && shown-red == "Red" && n == 1 && colors == [Red, Blue] && b.flag == Blue && from-map == 0) -> 0 | 3
 }

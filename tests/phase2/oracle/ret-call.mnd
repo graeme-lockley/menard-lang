@@ -4,7 +4,6 @@
 ; return `LFunc`, with its own `alloca`/`store`/`load` for the
 ; parameter — not a compile-time inlined `ret i32 42`. See
 ; `tests/phase2/oracle.test.ts`.
-
 let answer(n: Int) -> Int =
   n + 2
 

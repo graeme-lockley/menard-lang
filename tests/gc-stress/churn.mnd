@@ -2,7 +2,6 @@
 ; The strings differ in length so old space cannot reuse one freelist size.
 ; Prints one number: the sum of the dropped lengths.
 ; Run under MENARD_GC_TRACE and MENARD_HEAP_VERIFY. See bound.test.ts.
-
 import std/string as String
 import std/string-buffer as Buf
 import std/map as Map
@@ -10,13 +9,11 @@ import std/map as Map
 let fill-buf(n: Int) -> Str {
   let sb = Buf.new()
   loop (i = 0)
-    cond
-      | i == n -> Buf.take-str!(sb)
-      | else ->
-        {
-          Buf.append-byte!(sb, 97)
-          recur(i + 1)
-        }
+    if (i == n) -> Buf.take-str!(sb) |
+    {
+      Buf.append-byte!(sb, 97)
+      recur(i + 1)
+    }
 }
 
 let singleton(n: Int) -> List Int =

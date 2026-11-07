@@ -1,5 +1,4 @@
 ; Slice 3D oracle: Str concat; stdout "hello\n", exit 5.
-
 import std/io
 import std/string as String
 

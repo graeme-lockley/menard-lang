@@ -1,4 +1,4 @@
-let f() -> Int = {
-  let g(n: Int) -> Int = n
+let f() -> Int {
+  let g = fn (n) = n
   g(1)
 }

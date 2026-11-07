@@ -6,7 +6,6 @@
 ; (`mn run` forwards only the words after `--`.)
 ; A missing file is reported on standard error and the rest are still copied.
 ; The process exits 1 when any file fails.
-
 import std/io
 import std/string as String
 import std/sys
@@ -48,13 +47,18 @@ let emit(path: Str) -> Int =
       }
 
 let cat-from(i: Int, status: Int) -> Int =
-  if (i >= arg-count()) -> status | {
+  if (i >= arg-count()) -> status |
+  {
     let next = emit(arg(i))
-    cat-from(i + 1, if (next == 0) -> status | 1)
+    cat-from(
+      i + 1,
+      if (next == 0) -> status | 1
+    )
   }
 
 let main() -> Int =
-  if (arg-count() == 0) -> {
-    write-line(stderr, "cat: standard input is not available")
-    1
-  } | cat-from(0, 0)
+  if (arg-count() == 0) ->
+    {
+      write-line(stderr, "cat: standard input is not available")
+      1
+    } | cat-from(0, 0)

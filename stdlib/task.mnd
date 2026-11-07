@@ -2,7 +2,6 @@
 ; Suspend points: join, yield, and scope exit (cancel+join children).
 ; Seam calls go through internal std/sched (this module is not a seam).
 ; @module std/task
-
 import std/sched as Sched
 
 pub type Cancelled =
@@ -87,7 +86,8 @@ let join-drain(ids: List Int) -> Unit {
   loop ()
     match (deref(cell))
       | [] -> ()
-      | n :: rest -> {
+      | n :: rest ->
+        {
           set!(cell, rest)
           Sched.cancel(n)
           Sched.join(n)

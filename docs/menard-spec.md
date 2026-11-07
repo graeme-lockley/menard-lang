@@ -1993,6 +1993,8 @@ mn check <file.mnd>              ; typecheck only, no output
 mn build <file.mnd> [-o out]     ; emit bitcode, spawn cc, link, rename
 mn run   <file.mnd> [args…]      ; build, then spawn the binary
 mn <file.mnd> [arg…]             ; same as run; every following word is an argument
+mn --version                     ; Menard semver, git sha, build date, bun/clang/openssl/llvm, target
+mn --print-toolchain             ; cc, runtime include/lib, bun, llvm, openssl paths/version
 ```
 
 Its rules, all of which fall out of the subsections above:
@@ -2358,7 +2360,8 @@ implementation on every bootstrap, and the compiler then checks itself.
   get wrong by calling a path-normalising helper "for tidiness", and it is a
   fixed-point failure when you do.
 - Opaque pointers (`ptr`). Assume LLVM 17+ and **pin the exact version in the
-  build**; record it in `--version` output.
+  build**; record it in `--version` output (alongside Bun, clang, OpenSSL, and
+  the target triple).
 
 ### 3.5 Bootstrap chain
 

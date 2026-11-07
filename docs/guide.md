@@ -577,11 +577,29 @@ for tools), then:
 ./mn test examples/sc.mnd --show-output
 ./mn inter examples/sc.mnd --show-result
 ./mn check --json examples/loop-sum.mnd
+./mn fmt examples/loop-sum.mnd
+./mn fmt --check examples/loop-sum.mnd
+./mn --version
+./mn --print-toolchain
+./mn --help
+./mn check --help
 ```
 
 `run` compiles, links, and executes. `build` stops at the binary. `test`
 runs the `@test` lines. `inter` is the reference interpreter, useful when
-you want the oracle rather than the native binary.
+you want the oracle rather than the native binary. `fmt` rewrites a file
+in the canonical style ([formatting.md](formatting.md)); `fmt --check`
+prints a unified diff and exits 1 when the file is not formatted. See
+[tooling.md](tooling.md).
+
+`--version` prints the Menard semver (from the root `VERSION` file), the git
+commit (and `, dirty` when the tree is dirty), optional project name/version
+when a walk-up finds `project.mnd`, the git commit date (`built YYYY-MM-DD`),
+then Bun, clang, OpenSSL, LLVM (via `llvm-config` when available), and the
+target triple. `--print-toolchain` prints the exact `cc` path, runtime
+include/lib directories, Bun path, LLVM version, and OpenSSL include/lib paths
+and version — the same discovery `build`/`run` use. `--help` lists commands;
+`mn <command> --help` lists that command's flags.
 
 `check --json` (also `build --json`, `test --json`, and the compile phase of
 `run --json`) writes one versioned JSON object of diagnostics to stdout — the

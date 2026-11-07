@@ -2,7 +2,6 @@
 ; `./mn test` is run from a subdirectory. Forms are desugared first,
 ; matching the pipeline contract in src/type/check.mnd. CLI dump flags
 ; stay in tests/phase2/typecheck.test.ts.
-
 import "../reader/read.mnd"
 import "../desugar/desugar.mnd"
 import "../test/paths.mnd"

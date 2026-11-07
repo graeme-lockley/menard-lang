@@ -1,7 +1,6 @@
 ; Value-directed `=` and `compare`. The two "ab" strings are separate
 ; allocations. `compare` orders "a" before "b".
 ; Run with: `./mn run examples/str-order.mnd`
-
 import std/string as String
 
 let main() -> Unit {

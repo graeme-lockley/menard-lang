@@ -36,6 +36,11 @@ RUNTIME_LIB_SRCS := $(RUNTIME_DIR)/src/alloc.c $(RUNTIME_DIR)/src/gc.c $(RUNTIME
 
 BUILD_DIR := build
 
+# Sole Menard semver string. Host and native `mn --version` read VERSION at
+# runtime; recipes that need the number use this Make variable — do not
+# copy the digits into package.json or generated sources.
+MENARD_VERSION := $(shell cat VERSION)
+
 .DEFAULT_GOAL := mn
 
 .PHONY: mn bootstrap test typecheck backlog-check next loop ci memory-checks native-test runtime-smoke runtime-sb-gc runtime-clean hello-native ret-native sqlite-native check-fixed-point float-text-wasm float-text-bench
@@ -66,11 +71,14 @@ bootstrap: check-fixed-point
 
 # Bootstrap the native driver. Stage0 (the interpreter) compiles
 # src/mn.mnd; clang links it to ./mn. The binary is not committed.
-mn:
+# MENARD_VERSION is the same string `./mn --version` reads from VERSION.
+mn: VERSION
 	@mkdir -p $(BUILD_DIR)
+	@echo "menard $(MENARD_VERSION): compiling driver"
 	bun run host/src/cli/menard.ts run src/mn.mnd -- emit src/mn.mnd $(BUILD_DIR)/mn.bc
 	$(CC) $(CFLAGS) -I$(RUNTIME_DIR)/include $(BUILD_DIR)/mn.bc $(RUNTIME_LIB_SRCS) -o $(BUILD_DIR)/mn.tmp $(LDLIBS)
 	mv $(BUILD_DIR)/mn.tmp mn
+	@echo "menard $(MENARD_VERSION) -> ./mn"
 
 # Functional suite. The collector bound lives in memory-checks so a leak
 # does not sit inside the agreement tests.
@@ -97,7 +105,15 @@ next:
 loop:
 	bun run tools/loop/run.ts $(ARGS)
 
-ci: typecheck test backlog-check
+# Format check over the four trees the review names. Uses the host CLI so the
+# host CI job can run it without a bootstrap `./mn`.
+fmt-check:
+	@set -e; \
+	files=$$(find src stdlib examples tests -name '*.mnd' ! -path 'tests/negative/*' -print | sort); \
+	if [ -z "$$files" ]; then echo "fmt-check: no .mnd files found"; exit 1; fi; \
+	bun run host/src/cli/menard.ts fmt --check $$files
+
+ci: typecheck test backlog-check fmt-check
 
 # Non-functional collector checks: StringBuffer reclaim, and a bounded
 # live set on the stress program. Separate from `test` on purpose.
@@ -190,8 +206,9 @@ ret-native:
 # `stage`), then copied aside. ld hashes the output path into LC_UUID and
 # records the bitcode filename; distinct paths would make identical
 # compiles compare unequal.
-check-fixed-point:
+check-fixed-point: VERSION
 	@mkdir -p $(BUILD_DIR)/fp
+	@echo "menard $(MENARD_VERSION): fixed-point gate"
 	@echo "==> stage0 emit src/mn.mnd → bc0"
 	@start=$$(date +%s); \
 	bun run host/src/cli/menard.ts run src/mn.mnd -- emit src/mn.mnd $(BUILD_DIR)/fp/bc0.bc; \
@@ -217,7 +234,7 @@ check-fixed-point:
 	cp $(BUILD_DIR)/fp/stage $(BUILD_DIR)/fp/stage2
 	@echo "==> cmp stage1 stage2"
 	cmp $(BUILD_DIR)/fp/stage1 $(BUILD_DIR)/fp/stage2 && echo "stage1 == stage2 OK"
-	@echo "==> install ./mn from the stage1 link"
+	@echo "==> install ./mn from the stage1 link (menard $(MENARD_VERSION))"
 	cp $(BUILD_DIR)/fp/stage1 mn
 	@echo "==> installed mn vs stage1 artifact"
 	./mn build examples/loop-sum.mnd -o $(BUILD_DIR)/fp/art

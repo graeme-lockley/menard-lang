@@ -1,6 +1,5 @@
 ; Slice 3E oracle: a nested `fn` with an empty capture is a direct call of
 ; the lifted function. Exit 41.
-
 let main() -> Int {
   let add = fn (x) = x + 1
   add(40)

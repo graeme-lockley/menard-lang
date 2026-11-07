@@ -5,14 +5,19 @@
 ;   GET  /users/:id
 ;   PUT  /users  JSON {"id","name","email"}
 ;   GET  /search?q=Name
-
 import std/actor as Actor
+
 pub import std/actor (Ask, Pid, Cancelled)
+
 import std/http as Http
+
 pub import std/http (Request, Response, Method)
+
 import std/rest as Rest
 import std/json as Json
+
 pub import std/json (Json)
+
 import std/map as Map
 import std/string as String
 import std/list as List
@@ -34,7 +39,7 @@ type UserRes =
   | Missing
   | BadRequest(Str)
 
-let step(db: Map Str User, req: UserReq) -> (Map Str User * UserRes) =
+let step(db: Map Str User, req: UserReq) -> Map Str User * UserRes =
   match (req)
     | Put(u) ->
       match (u)
@@ -43,59 +48,57 @@ let step(db: Map Str User, req: UserReq) -> (Map Str User * UserRes) =
       match (Map.lookup(id, db))
         | Some(u) -> (db, OkUser(u))
         | None -> (db, Missing)
-    | Search(q) -> {
+    | Search(q) ->
+      {
         let users =
-          Map.keys(db)
-          |> List.filter-map(fn (id) = {
-            match (Map.lookup(id, db))
-              | None -> None
-              | Some(u) ->
-                match (u)
-                  | User(_, name, _) ->
-                    if (name == q) -> Some(u) | None
-          })
+          Map.keys(db) |> List.filter-map(
+            fn (id) {
+              match (Map.lookup(id, db))
+                | None -> None
+                | Some(u) ->
+                  match (u)
+                    | User(_, name, _) ->
+                      if (name == q) -> Some(u) | None
+            }
+          )
         (db, OkUsers(users))
       }
 
 let user-json(u: User) -> Json =
   match (u)
-    | User(id, name, email) ->
-      JsonObject({
-        "id" => JsonStr(id),
-        "name" => JsonStr(name),
-        "email" => JsonStr(email),
-      })
+    | User(id, name, email) -> JsonObject({"id" => JsonStr(id), "name" => JsonStr(name), "email" => JsonStr(email)})
 
 let handle(um: Pid (Ask UserReq UserRes), req: Request) -> Response =
   match (req)
     | Request(GET, path, _, _) ->
-      cond
-        | String.starts-with("/users/", path) -> {
-            let id = String.drop(7, path)
-            match (Actor.call(um, Get(id)))
-              | Err(_) -> Rest.bad-request("actor error")
-              | Ok(Missing) -> Rest.not-found()
-              | Ok(OkUser(u)) -> Rest.ok-json(Json.encode(user-json(u)))
-              | Ok(_) -> Rest.bad-request("unexpected")
-          }
-        | String.starts-with("/search?q=", path) -> {
-            let q = String.drop(10, path)
-            match (Actor.call(um, Search(q)))
-              | Err(_) -> Rest.bad-request("actor error")
-              | Ok(OkUsers(xs)) ->
-                Rest.ok-json(Json.encode(JsonArray(xs |> List.map(user-json))))
-              | Ok(_) -> Rest.bad-request("unexpected")
-          }
-        | else -> Rest.not-found()
+      if (String.starts-with("/users/", path)) ->
+        {
+          let id = String.drop(7, path)
+          match (Actor.call(um, Get(id)))
+            | Err(_) -> Rest.bad-request("actor error")
+            | Ok(Missing) -> Rest.not-found()
+            | Ok(OkUser(u)) -> Rest.ok-json(Json.encode(user-json(u)))
+            | Ok(_) -> Rest.bad-request("unexpected")
+        } |
+      if (String.starts-with("/search?q=", path)) ->
+        {
+          let q = String.drop(10, path)
+          match (Actor.call(um, Search(q)))
+            | Err(_) -> Rest.bad-request("actor error")
+            | Ok(OkUsers(xs)) -> Rest.ok-json(Json.encode(JsonArray(xs |> List.map(user-json))))
+            | Ok(_) -> Rest.bad-request("unexpected")
+        } | Rest.not-found()
     | Request(PUT, "/users", _, body) ->
       match (Json.decode(body))
         | Err(_) -> Rest.bad-request("invalid json")
-        | Ok(JsonObject(m)) -> {
+        | Ok(JsonObject(m)) ->
+          {
             let id = Map.lookup("id", m)
             let name = Map.lookup("name", m)
             let email = Map.lookup("email", m)
             match ((id, name, email))
-              | (Some(JsonStr(i)), Some(JsonStr(n)), Some(JsonStr(e))) -> {
+              | (Some(JsonStr(i)), Some(JsonStr(n)), Some(JsonStr(e))) ->
+                {
                   let u = User(i, n, e)
                   match (Actor.call(um, Put(u)))
                     | Err(_) -> Rest.bad-request("actor error")

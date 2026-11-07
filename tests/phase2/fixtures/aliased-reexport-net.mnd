@@ -9,7 +9,8 @@ let classify(e: Net.IoError) -> Int =
 let main() -> Int =
   match (Net.listen(0))
     | Err(e) -> classify(e)
-    | Ok(fd) -> {
+    | Ok(fd) ->
+      {
         Net.close(fd)
         0
       }

@@ -6,6 +6,7 @@ import std/sched as Sched
 import std/string-buffer as Buf
 
 let cert = "tests/net/certs/localhost.crt"
+
 let key = "tests/net/certs/localhost.key"
 
 ; Truncated TLS application-data record header (claims 100 payload bytes, sends none).
@@ -23,59 +24,74 @@ let partial-record() -> Str {
 let step-clean-shutdown() -> Int {
   let ready = Sched.wait-new()
   let port-cell = ref(0)
-  let server = Task.spawn(fn () = {
-    match (Net.listen(0))
-      | Err(_) -> {
-          Sched.notify(ready)
-          1
-        }
-      | Ok(listener) -> {
-          defer Net.close(listener)
-          match (Net.local-port(listener))
-            | Err(_) -> {
-                Sched.notify(ready)
-                1
-              }
-            | Ok(port) -> {
-                set!(port-cell, port)
-                Sched.notify(ready)
-                match (Net.accept(listener))
-                  | Err(_) -> 1
-                  | Ok(conn) -> {
-                      defer Net.close(conn)
-                      match (Net.tls-server(conn, cert, key))
-                        | Err(_) -> 1
-                        | Ok(tls) -> {
-                            Net.tls-close(tls)
-                            0
-                          }
-                    }
-              }
-        }
-  })
+  let server =
+    Task.spawn(
+      fn () {
+        match (Net.listen(0))
+          | Err(_) ->
+            {
+              Sched.notify(ready)
+              1
+            }
+          | Ok(listener) ->
+            {
+              defer Net.close(listener)
+              match (Net.local-port(listener))
+                | Err(_) ->
+                  {
+                    Sched.notify(ready)
+                    1
+                  }
+                | Ok(port) ->
+                  {
+                    set!(port-cell, port)
+                    Sched.notify(ready)
+                    match (Net.accept(listener))
+                      | Err(_) -> 1
+                      | Ok(conn) ->
+                        {
+                          defer Net.close(conn)
+                          match (Net.tls-server(conn, cert, key))
+                            | Err(_) -> 1
+                            | Ok(tls) ->
+                              {
+                                Net.tls-close(tls)
+                                0
+                              }
+                        }
+                  }
+            }
+      }
+    )
   Sched.wait(ready)
   match (Net.connect("127.0.0.1", deref(port-cell)))
-    | Err(_) -> {
+    | Err(_) ->
+      {
         Task.cancel(server)
         Task.join(server)
         1
       }
-    | Ok(c) -> {
+    | Ok(c) ->
+      {
         defer Net.close(c)
         match (Net.tls-client(c, "localhost"))
-          | Err(_) -> {
+          | Err(_) ->
+            {
               Task.cancel(server)
               Task.join(server)
               1
             }
-          | Ok(tls) -> {
+          | Ok(tls) ->
+            {
               defer Net.tls-close(tls)
               match (Net.tls-read(tls, 64))
-                | Ok("") -> {
+                | Ok("") ->
+                  {
                     Task.join(server)
                     0
                   }
-                | _ -> {
+                | _ ->
+                  {
                     Task.cancel(server)
                     Task.join(server)
                     1
@@ -88,67 +104,84 @@ let step-clean-shutdown() -> Int {
 let step-abrupt-close() -> Int {
   let ready = Sched.wait-new()
   let port-cell = ref(0)
-  let server = Task.spawn(fn () = {
-    match (Net.listen(0))
-      | Err(_) -> {
-          Sched.notify(ready)
-          1
-        }
-      | Ok(listener) -> {
-          defer Net.close(listener)
-          match (Net.local-port(listener))
-            | Err(_) -> {
-                Sched.notify(ready)
-                1
-              }
-            | Ok(port) -> {
-                set!(port-cell, port)
-                Sched.notify(ready)
-                match (Net.accept(listener))
-                  | Err(_) -> 1
-                  | Ok(conn) -> {
-                      match (Net.tls-server(conn, cert, key))
-                        | Err(_) -> {
-                            Net.close(conn)
-                            1
-                          }
-                        | Ok(_) -> {
-                            ; No tls-close — abrupt TCP close without close_notify.
-                            Net.close(conn)
-                            0
-                          }
-                    }
-              }
-        }
-  })
+  let server =
+    Task.spawn(
+      fn () {
+        match (Net.listen(0))
+          | Err(_) ->
+            {
+              Sched.notify(ready)
+              1
+            }
+          | Ok(listener) ->
+            {
+              defer Net.close(listener)
+              match (Net.local-port(listener))
+                | Err(_) ->
+                  {
+                    Sched.notify(ready)
+                    1
+                  }
+                | Ok(port) ->
+                  {
+                    set!(port-cell, port)
+                    Sched.notify(ready)
+                    match (Net.accept(listener))
+                      | Err(_) -> 1
+                      | Ok(conn) ->
+                        {
+                          match (Net.tls-server(conn, cert, key))
+                            | Err(_) ->
+                              {
+                                Net.close(conn)
+                                1
+                              }
+                            | Ok(_) ->
+                              {
+                                ; No tls-close — abrupt TCP close without close_notify.
+                                Net.close(conn)
+                                0
+                              }
+                        }
+                  }
+            }
+      }
+    )
   Sched.wait(ready)
   match (Net.connect("127.0.0.1", deref(port-cell)))
-    | Err(_) -> {
+    | Err(_) ->
+      {
         Task.cancel(server)
         Task.join(server)
         1
       }
-    | Ok(c) -> {
+    | Ok(c) ->
+      {
         defer Net.close(c)
         match (Net.tls-client(c, "localhost"))
-          | Err(_) -> {
+          | Err(_) ->
+            {
               Task.cancel(server)
               Task.join(server)
               1
             }
-          | Ok(tls) -> {
+          | Ok(tls) ->
+            {
               defer Net.tls-close(tls)
               match (Net.tls-read(tls, 64))
-                | Err(Net.Other(_)) -> {
+                | Err(Net.Other(_)) ->
+                  {
                     Task.join(server)
                     0
                   }
-                | Ok("") -> {
+                | Ok("") ->
+                  {
                     Task.cancel(server)
                     Task.join(server)
                     1
                   }
-                | _ -> {
+                | _ ->
+                  {
                     Task.cancel(server)
                     Task.join(server)
                     1
@@ -161,67 +194,84 @@ let step-abrupt-close() -> Int {
 let step-truncated() -> Int {
   let ready = Sched.wait-new()
   let port-cell = ref(0)
-  let server = Task.spawn(fn () = {
-    match (Net.listen(0))
-      | Err(_) -> {
-          Sched.notify(ready)
-          1
-        }
-      | Ok(listener) -> {
-          defer Net.close(listener)
-          match (Net.local-port(listener))
-            | Err(_) -> {
-                Sched.notify(ready)
-                1
-              }
-            | Ok(port) -> {
-                set!(port-cell, port)
-                Sched.notify(ready)
-                match (Net.accept(listener))
-                  | Err(_) -> 1
-                  | Ok(conn) -> {
-                      match (Net.tls-server(conn, cert, key))
-                        | Err(_) -> {
-                            Net.close(conn)
-                            1
-                          }
-                        | Ok(_) -> {
-                            Net.write(conn, partial-record())
-                            Net.close(conn)
-                            0
-                          }
-                    }
-              }
-        }
-  })
+  let server =
+    Task.spawn(
+      fn () {
+        match (Net.listen(0))
+          | Err(_) ->
+            {
+              Sched.notify(ready)
+              1
+            }
+          | Ok(listener) ->
+            {
+              defer Net.close(listener)
+              match (Net.local-port(listener))
+                | Err(_) ->
+                  {
+                    Sched.notify(ready)
+                    1
+                  }
+                | Ok(port) ->
+                  {
+                    set!(port-cell, port)
+                    Sched.notify(ready)
+                    match (Net.accept(listener))
+                      | Err(_) -> 1
+                      | Ok(conn) ->
+                        {
+                          match (Net.tls-server(conn, cert, key))
+                            | Err(_) ->
+                              {
+                                Net.close(conn)
+                                1
+                              }
+                            | Ok(_) ->
+                              {
+                                Net.write(conn, partial-record())
+                                Net.close(conn)
+                                0
+                              }
+                        }
+                  }
+            }
+      }
+    )
   Sched.wait(ready)
   match (Net.connect("127.0.0.1", deref(port-cell)))
-    | Err(_) -> {
+    | Err(_) ->
+      {
         Task.cancel(server)
         Task.join(server)
         1
       }
-    | Ok(c) -> {
+    | Ok(c) ->
+      {
         defer Net.close(c)
         match (Net.tls-client(c, "localhost"))
-          | Err(_) -> {
+          | Err(_) ->
+            {
               Task.cancel(server)
               Task.join(server)
               1
             }
-          | Ok(tls) -> {
+          | Ok(tls) ->
+            {
               defer Net.tls-close(tls)
               match (Net.tls-read(tls, 64))
-                | Err(Net.Other(_)) -> {
+                | Err(Net.Other(_)) ->
+                  {
                     Task.join(server)
                     0
                   }
-                | Ok("") -> {
+                | Ok("") ->
+                  {
                     Task.cancel(server)
                     Task.join(server)
                     1
                   }
-                | _ -> {
+                | _ ->
+                  {
                     Task.cancel(server)
                     Task.join(server)
                     1
@@ -234,61 +284,76 @@ let step-truncated() -> Int {
 let step-handshake-transport() -> Int {
   let ready = Sched.wait-new()
   let port-cell = ref(0)
-  let server = Task.spawn(fn () = {
-    match (Net.listen(0))
-      | Err(_) -> {
-          Sched.notify(ready)
-          1
-        }
-      | Ok(listener) -> {
-          defer Net.close(listener)
-          match (Net.local-port(listener))
-            | Err(_) -> {
-                Sched.notify(ready)
-                1
-              }
-            | Ok(port) -> {
-                set!(port-cell, port)
-                Sched.notify(ready)
-                match (Net.accept(listener))
-                  | Err(_) -> 1
-                  | Ok(conn) -> {
-                      Net.close(conn)
-                      0
-                    }
-              }
-        }
-  })
+  let server =
+    Task.spawn(
+      fn () {
+        match (Net.listen(0))
+          | Err(_) ->
+            {
+              Sched.notify(ready)
+              1
+            }
+          | Ok(listener) ->
+            {
+              defer Net.close(listener)
+              match (Net.local-port(listener))
+                | Err(_) ->
+                  {
+                    Sched.notify(ready)
+                    1
+                  }
+                | Ok(port) ->
+                  {
+                    set!(port-cell, port)
+                    Sched.notify(ready)
+                    match (Net.accept(listener))
+                      | Err(_) -> 1
+                      | Ok(conn) ->
+                        {
+                          Net.close(conn)
+                          0
+                        }
+                  }
+            }
+      }
+    )
   Sched.wait(ready)
   match (Net.connect("127.0.0.1", deref(port-cell)))
-    | Err(_) -> {
+    | Err(_) ->
+      {
         Task.cancel(server)
         Task.join(server)
         1
       }
-    | Ok(c) -> {
+    | Ok(c) ->
+      {
         defer Net.close(c)
         match (Net.tls-client(c, "localhost"))
-          | Err(Net.Other(_)) -> {
+          | Err(Net.Other(_)) ->
+            {
               Task.join(server)
               0
             }
-          | Err(Net.TlsHandshakeFailed) -> {
+          | Err(Net.TlsHandshakeFailed) ->
+            {
               Task.cancel(server)
               Task.join(server)
               1
             }
-          | Err(Net.TlsVerifyFailed) -> {
+          | Err(Net.TlsVerifyFailed) ->
+            {
               Task.cancel(server)
               Task.join(server)
               1
             }
-          | Err(_) -> {
+          | Err(_) ->
+            {
               Task.cancel(server)
               Task.join(server)
               1
             }
-          | Ok(tls) -> {
+          | Ok(tls) ->
+            {
               Net.tls-close(tls)
               Task.cancel(server)
               Task.join(server)
@@ -298,25 +363,33 @@ let step-handshake-transport() -> Int {
 }
 
 let main() -> Int {
-  if (step-clean-shutdown() != 0) -> {
-    println("clean-shutdown-fail")
-    1
-  } | {
-    println("1")
-    if (step-abrupt-close() != 0) -> {
-      println("abrupt-close-fail")
+  if (step-clean-shutdown() != 0) ->
+    {
+      println("clean-shutdown-fail")
       1
-    } | {
-      println("2")
-      if (step-truncated() != 0) -> {
-        println("truncated-fail")
+    } |
+  {
+    println("1")
+    if (step-abrupt-close() != 0) ->
+      {
+        println("abrupt-close-fail")
         1
-      } | {
-        println("3")
-        if (step-handshake-transport() != 0) -> {
-          println("handshake-transport-fail")
+      } |
+    {
+      println("2")
+      if (step-truncated() != 0) ->
+        {
+          println("truncated-fail")
           1
-        } | {
+        } |
+      {
+        println("3")
+        if (step-handshake-transport() != 0) ->
+          {
+            println("handshake-transport-fail")
+            1
+          } |
+        {
           println("4")
           0
         }

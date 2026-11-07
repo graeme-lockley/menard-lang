@@ -58,19 +58,12 @@ pub let ends-with(suffix: Str, s: Str) -> Bool {
 ; } => true
 pub let drop(n: Int, s: Str) -> Str {
   let l = length(s)
-
-  cond
-    | n <= 0 -> s
-    | n >= l -> ""
-    | else -> slice(n, l - n, s)
+  if (n <= 0) -> s | if (n >= l) -> "" | slice(n, l - n, s)
 }
 
 ; Whether needle matches s at byte i. The needle is short, so the walk stays shallow.
 let bytes-eq(s: Str, i: Int, pat: Str, j: Int, n: Int) -> Bool =
-  cond
-    | j >= n -> true
-    | byte(i + j, s) == byte(j, pat) -> bytes-eq(s, i, pat, j + 1, n)
-    | else -> false
+  if (j >= n) -> true | if (byte(i + j, s) == byte(j, pat)) -> bytes-eq(s, i, pat, j + 1, n) | false
 
 ; Whether s contains needle as a byte substring.
 ; @test contains("ell", "hello") => true
@@ -80,10 +73,7 @@ pub let contains(needle: Str, s: Str) -> Bool {
   let n = length(needle)
   let sn = length(s)
   loop (i = 0)
-    cond
-      | i + n > sn -> false
-      | bytes-eq(s, i, needle, 0, n) -> true
-      | else -> recur(i + 1)
+    if (i + n > sn) -> false | if (bytes-eq(s, i, needle, 0, n)) -> true | recur(i + 1)
 }
 
 ; parts joined by sep. An empty list joins to the empty string.
@@ -123,10 +113,7 @@ pub let index-of-from(sep: Str, i: Int, s: Str) -> Maybe Int {
   let n = length(sep)
   let sn = length(s)
   loop (j = if (i < 0) -> 0 | i)
-    cond
-      | j > sn || n > sn - j -> None
-      | bytes-eq(s, j, sep, 0, n) -> Some(j)
-      | else -> recur(j + 1)
+    if (j > sn || n > sn - j) -> None | if (bytes-eq(s, j, sep, 0, n)) -> Some(j) | recur(j + 1)
 }
 
 ; The pieces of s from byte i to the end, split on sep.
@@ -167,23 +154,18 @@ let matching-sep-length(s: Str, seps: List Str, i: Int) -> Int =
     | sep :: rest ->
       {
         let n = length(sep)
-        if (n > 0 && i + n <= length(s) && bytes-eq(s, i, sep, 0, n)) ->
-          n | matching-sep-length(s, rest, i)
+        if (n > 0 && i + n <= length(s) && bytes-eq(s, i, sep, 0, n)) -> n | matching-sep-length(s, rest, i)
       }
 
 ; The pieces of s from byte start to the end, split on any separator in seps.
 let split-using-from(s: Str, seps: List Str, start: Int) -> List Str {
   let sn = length(s)
   loop (i = start)
-    cond
-      | i >= sn -> [slice(start, sn - start, s)]
-      | else ->
-        {
-          let n = matching-sep-length(s, seps, i)
-          if (n > 0) ->
-            slice(start, i - start, s) :: split-using-from(s, seps, i + n) |
-            recur(i + 1)
-        }
+    if (i >= sn) -> [slice(start, sn - start, s)] |
+    {
+      let n = matching-sep-length(s, seps, i)
+      if (n > 0) -> slice(start, i - start, s) :: split-using-from(s, seps, i + n) | recur(i + 1)
+    }
 }
 
 ; Drop a final empty piece left by a trailing newline.
@@ -243,11 +225,7 @@ pub let right(n: Int, s: Str) -> Str =
 ; @test drop-right(9, "hello") => ""
 pub let drop-right(n: Int, s: Str) -> Str {
   let l = length(s)
-
-  cond
-    | n <= 0 -> s
-    | n >= l -> ""
-    | else -> slice(0, l - n, s)
+  if (n <= 0) -> s | if (n >= l) -> "" | slice(0, l - n, s)
 }
 
 ; Whether b is ASCII space, tab, newline, or carriage return.
@@ -327,8 +305,4 @@ pub let is-digit-byte(b: Int) -> Bool =
 ; @test hex-value(71) => None
 ; @test hex-value(103) => None
 pub let hex-value(b: Int) -> Maybe Int =
-  cond
-    | b >= 48 && b <= 57 -> Some(b - 48)
-    | b >= 65 && b <= 70 -> Some(b - 55)
-    | b >= 97 && b <= 102 -> Some(b - 87)
-    | else -> None
+  if (b >= 48 && b <= 57) -> Some(b - 48) | if (b >= 65 && b <= 70) -> Some(b - 55) | if (b >= 97 && b <= 102) -> Some(b - 87) | None

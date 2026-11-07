@@ -69,46 +69,45 @@
 ; *type* `write-module-bc` gives it (`() -> i32` instead of `(i64 x N) ->
 ; i64`) and that its `IRet`'s value is consequently already `i32`-typed by
 ; the time it is written.
-
 import std/string as String
 
-  ; An i64/i32 constant already encoded per LLVM's zig-zag signed
-  ; integer scheme (`v>=0: v*2`, `v<0: (-v)*2+1` — see `bc-writer.mnd`'s
-  ; `encode-signed-i64`) — consumes the next value id, like an instruction.
-  ; `alloca i64, align 8`: `sizeConstAbsId` is the **absolute** (not
-  ; relative) id of the i32 constant `1` this alloca's array size uses —
-  ; see header comment's "deliberately not relative".
-  ; opcode, lhs-rel, rhs-rel -> new i64 value (see llvm-ir opcode
-  ; constants below).
-  ; predicate, lhs-rel, rhs-rel -> new i1 value.
-  ; opcode, val-rel, dest-type-index -> new value (only `Trunc`, i32, used
-  ; here — `main`'s untagged return).
-  ; ptr-rel, val-rel (both i64) — no result.
-  ; ptr-rel -> new i64 value.
-  ; unconditional branch: target block, absolute.
-  ; conditional branch: true-block, false-block (both absolute), cond-rel.
-  ; callee-rel, arg-rels -> new i64 value. The callee's own function type
-  ; is derived from `(List Int)`'s length (its arity) by `write-module-bc`
-  ; — every function of a given arity shares one function type (spec
-  ; §3.4: "compile each polymorphic function exactly once" extends
-  ; trivially here since there is no polymorphism in this ABI at all, only
-  ; one type per arity).
-  ; A call to one of the three fixed runtime externs (`mn_write_stdout`/
-  ; `mn_write_stderr`, kind `extern-kind-write`; `mn_print_i64`, kind
-  ; `extern-kind-print`) — `println`/`print`/`write` lowering's one
-  ; instruction shape (`src/emit/lower.mnd`'s `emit-call-void!`). Every
-  ; one of these three externs returns `void`, so — unlike `ICall` —
-  ; this produces **no** SSA value at all (a void call consumes no value
-  ; id; `lower.mnd`'s `Builder` must not `bump-val!` after emitting one):
-  ; `kind` only tells `write-module-bc` which of the two fixed extern
-  ; function *types* (`void(ptr,i64)` vs `void(i64)`) the call record's
-  ; own `fnty` field must reference — arity alone cannot disambiguate
-  ; them the way it does for `ICall`, since a real one-`Int`-argument
-  ; user call and a call to `mn_print_i64` are both "one argument" but
-  ; need different function types and different result semantics.
-  ; val-rel — the function's return value (already `i32`-typed, via a
-  ; preceding `ICast`, for `main`; tagged `i64` otherwise).
-  ; No operands. Terminates the block after `mn_panic`, which does not return.
+; An i64/i32 constant already encoded per LLVM's zig-zag signed
+; integer scheme (`v>=0: v*2`, `v<0: (-v)*2+1` — see `bc-writer.mnd`'s
+; `encode-signed-i64`) — consumes the next value id, like an instruction.
+; `alloca i64, align 8`: `sizeConstAbsId` is the **absolute** (not
+; relative) id of the i32 constant `1` this alloca's array size uses —
+; see header comment's "deliberately not relative".
+; opcode, lhs-rel, rhs-rel -> new i64 value (see llvm-ir opcode
+; constants below).
+; predicate, lhs-rel, rhs-rel -> new i1 value.
+; opcode, val-rel, dest-type-index -> new value (only `Trunc`, i32, used
+; here — `main`'s untagged return).
+; ptr-rel, val-rel (both i64) — no result.
+; ptr-rel -> new i64 value.
+; unconditional branch: target block, absolute.
+; conditional branch: true-block, false-block (both absolute), cond-rel.
+; callee-rel, arg-rels -> new i64 value. The callee's own function type
+; is derived from `(List Int)`'s length (its arity) by `write-module-bc`
+; — every function of a given arity shares one function type (spec
+; §3.4: "compile each polymorphic function exactly once" extends
+; trivially here since there is no polymorphism in this ABI at all, only
+; one type per arity).
+; A call to one of the three fixed runtime externs (`mn_write_stdout`/
+; `mn_write_stderr`, kind `extern-kind-write`; `mn_print_i64`, kind
+; `extern-kind-print`) — `println`/`print`/`write` lowering's one
+; instruction shape (`src/emit/lower.mnd`'s `emit-call-void!`). Every
+; one of these three externs returns `void`, so — unlike `ICall` —
+; this produces **no** SSA value at all (a void call consumes no value
+; id; `lower.mnd`'s `Builder` must not `bump-val!` after emitting one):
+; `kind` only tells `write-module-bc` which of the two fixed extern
+; function *types* (`void(ptr,i64)` vs `void(i64)`) the call record's
+; own `fnty` field must reference — arity alone cannot disambiguate
+; them the way it does for `ICall`, since a real one-`Int`-argument
+; user call and a call to `mn_print_i64` are both "one argument" but
+; need different function types and different result semantics.
+; val-rel — the function's return value (already `i32`-typed, via a
+; preceding `ICast`, for `main`; tagged `i64` otherwise).
+; No operands. Terminates the block after `mn_panic`, which does not return.
 pub type Item =
   | IConstI64(Int)
   | IConstI32(Int)
@@ -227,10 +226,7 @@ let str-extra-constants(payload: Str) -> Int =
 let pool-extra-one(o: PoolObj) -> Int =
   match (o)
     | PoolObj(k, payload, _, _) ->
-      cond
-        | k == pool-kind-str -> str-extra-constants(payload)
-        | k == pool-kind-float -> 3
-        | else -> 2
+      if (k == pool-kind-str) -> str-extra-constants(payload) | if (k == pool-kind-float) -> 3 | 2
 
 pub let pool-extra-constants(objs: List PoolObj) -> Int =
   match (objs)
@@ -256,22 +252,7 @@ pub let module-local-base(nstrings: Int, objs: List PoolObj, nimps: Int, nfuncs:
 }
 
 pub let singleton-symbol(i: Int) -> Str =
-  cond
-    | i == 0 -> "mn_static_nil"
-    | i == 1 -> "mn_static_none"
-    | i == 2 -> "mn_static_not_found"
-    | i == 3 -> "mn_static_permission"
-    | i == 4 -> "mn_static_exists"
-    | i == 5 -> "mn_static_is_a_directory"
-    | i == 6 -> "mn_static_not_a_directory"
-    | i == 7 -> "mn_static_invalid_path"
-    | i == 8 -> "mn_static_too_large"
-    | i == 9 -> "mn_static_not_executable"
-    | i == 10 -> "mn_static_invalid_argument"
-    | i == 11 -> "mn_static_too_many_arguments"
-    | i == 12 -> "mn_static_timeout"
-    | i == 13 -> "mn_static_tls_verify_failed"
-    | else -> "mn_static_tls_handshake_failed"
+  if (i == 0) -> "mn_static_nil" | if (i == 1) -> "mn_static_none" | if (i == 2) -> "mn_static_not_found" | if (i == 3) -> "mn_static_permission" | if (i == 4) -> "mn_static_exists" | if (i == 5) -> "mn_static_is_a_directory" | if (i == 6) -> "mn_static_not_a_directory" | if (i == 7) -> "mn_static_invalid_path" | if (i == 8) -> "mn_static_too_large" | if (i == 9) -> "mn_static_not_executable" | if (i == 10) -> "mn_static_invalid_argument" | if (i == 11) -> "mn_static_too_many_arguments" | if (i == 12) -> "mn_static_timeout" | if (i == 13) -> "mn_static_tls_verify_failed" | "mn_static_tls_handshake_failed"
 
 pub record LlvmModule {
   funcs: List LFunc
@@ -763,39 +744,37 @@ pub let tag-tuple = 50
 ; doc comment above for why arity alone can't disambiguate them).
 pub let extern-kind-write = 0
 
- ; void(ptr, i64) — write_stdout/write_stderr
+; void(ptr, i64) — write_stdout/write_stderr
 pub let extern-kind-print = 1
 
- ; void(i64) — print_i64 / print_str / mn_exit
+; void(i64) — print_i64 / print_str / mn_exit
 pub let extern-kind-init = 2
 
- ; void(i32, ptr) — mn_init
+; void(i32, ptr) — mn_init
 pub let extern-kind-panic = 3
 
- ; void(ptr) — mn_panic
+; void(ptr) — mn_panic
 pub let extern-kind-trace-push = 4
 
- ; void(ptr, i64) — mn_trace_push
+; void(ptr, i64) — mn_trace_push
 pub let extern-kind-trace-pop = 5
 
- ; void() — mn_trace_pop
+; void() — mn_trace_pop
 pub let extern-kind-panic-at = 6
 
- ; void(ptr, i64, ptr) — mn_panic_at
-
+; void(ptr, i64, ptr) — mn_panic_at
 pub let cast-zext = 1
 
- ; LLVM CastOps::ZExt — i1 -> i64 for Bool immediates
+; LLVM CastOps::ZExt — i1 -> i64 for Bool immediates
 pub let cast-ptrtoint = 9
 
- ; LLVM CastOps::PtrToInt — string global -> i64
+; LLVM CastOps::PtrToInt — string global -> i64
 
 ; ---------------------------------------------------------------------------
 ; Opcode/predicate constants (llvm/Bitcode/LLVMBitCodes.h's
 ; `Instruction`/`CmpInst::Predicate` encodings; the small subset this
 ; backend needs — confirmed against `llvm-bcanalyzer --dump` by
 ; `tools/bc-writer/write-ssa.ts`, see its header comment).
-
 pub let binop-add = 0
 
 pub let binop-sub = 1

@@ -1,13 +1,10 @@
 ; Slice 3D oracle: Ref counter; exit 55.
-
 let main() -> Int {
   let c = ref(0)
   loop (i = 0)
-    cond
-      | i > 10 -> deref(c)
-      | else ->
-        {
-          set!(c, deref(c) + i)
-          recur(i + 1)
-        }
+    if (i > 10) -> deref(c) |
+    {
+      set!(c, deref(c) + i)
+      recur(i + 1)
+    }
 }

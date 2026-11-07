@@ -53,7 +53,6 @@
 ; instantiation, mutual recursion between derived functions for nested
 ; types, memoisation so `(Tree Int)` derives once — spec §2.8.4) is real
 ; work, deferred rather than half-done here.
-
 import "../reader/ast.mnd"
 import std/list
 import std/string as String
@@ -62,7 +61,6 @@ import std/map as Map
 ; ---------------------------------------------------------------------------
 ; Small Ast helpers, restated locally per `src/`'s "no prelude import"
 ; rule (see `type/check.mnd`'s equivalent header note).
-
 let sym-str(ast: Ast) -> Maybe Str =
   match (ast)
     | SymNode(n, _) -> Some(n)
@@ -103,7 +101,6 @@ let unwrap-pub-head(head: Ast, rest: List Ast, sp: Span, ast: Ast) -> Ast =
 ; declaration of the same name — unusual, but harmless — simply wins, the
 ; same "last write wins" `map-set` behaviour `type/check.mnd`'s own
 ; `ctor-set` has).
-
 record CtorMeta {
   type-name: Str
   arity: Int
@@ -175,10 +172,7 @@ let collect-defrec-decl-named(name-part: Ast, fields: List Ast, acc: Map Str Cto
     | Some(type-name) -> Map.set(type-name, CtorMeta(type-name, length(fields)), acc)
 
 let collect-ctors-named(hn: Str, rest: List Ast, acc: Map Str CtorMeta) -> Map Str CtorMeta =
-  cond
-    | hn == "variant" -> collect-variant-decl(rest, acc)
-    | hn == "defrec" -> collect-defrec-decl(rest, acc)
-    | else -> acc
+  if (hn == "variant") -> collect-variant-decl(rest, acc) | if (hn == "defrec") -> collect-defrec-decl(rest, acc) | acc
 
 let collect-ctors-form(ast: Ast, acc: Map Str CtorMeta) -> Map Str CtorMeta =
   collect-ctors-form-checked(unwrap-pub(ast), acc)
@@ -205,7 +199,6 @@ let all-ctor-metas(forms: List Ast) -> Map Str CtorMeta =
 ; `classify-expr-type`: the syntactic, no-typer type guess described in
 ; the header comment above. `(None)` on any expression this cannot
 ; classify — never a wrong guess, only a missing one.
-
 let is-int-op(name: Str) -> Bool =
   name == "+" || name == "-" || name == "*" || name == "/" || name == "%"
 
@@ -215,7 +208,6 @@ let is-bool-op(name: Str) -> Bool =
 ; LANG-01: built-in composites report type-show-shaped instantiations
 ; (`(List Int)`, `(Maybe Int)`, `(Map Str Int)`, `Int * Bool`) so the plan
 ; names the same keys the typer's `print-names` dedupe uses.
-
 let classify-sym(name: Str, ctors: Map Str CtorMeta) -> Maybe Str =
   match (Map.lookup(name, ctors))
     | None -> None
@@ -225,11 +217,7 @@ let classify-sym(name: Str, ctors: Map Str CtorMeta) -> Maybe Str =
 ; Nullary builtins without a payload cannot name their type argument(s);
 ; omit them rather than reporting a bare `Maybe`/`List`/`Result`.
 let classify-nullary-inst(type-name: Str) -> Maybe Str =
-  cond
-    | type-name == "Maybe" -> None
-    | type-name == "List" -> None
-    | type-name == "Result" -> None
-    | else -> Some(type-name)
+  if (type-name == "Maybe") -> None | if (type-name == "List") -> None | if (type-name == "Result") -> None | Some(type-name)
 
 let classify-type-list(args: List Ast, ctors: Map Str CtorMeta) -> Maybe (List Str) =
   match (args)
@@ -300,9 +288,7 @@ let classify-map-lit(entries: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
       match (classify-map-entry(e, ctors))
         | None -> None
         | Some((kt, vt)) ->
-          if (map-entries-agree(rest, kt, vt, ctors)) ->
-            Some(String.concat("(Map ", kt, " ", vt, ")")) |
-            None
+          if (map-entries-agree(rest, kt, vt, ctors)) -> Some(String.concat("(Map ", kt, " ", vt, ")")) | None
 
 let classify-maybe-inst(args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
   match (args)
@@ -326,19 +312,13 @@ let classify-list-ctor-inst(hn: Str, args: List Ast, ctors: Map Str CtorMeta) ->
   if (hn == "Cons") -> classify-cons-inst(args, ctors) | None
 
 let classify-ctor-inst(hn: Str, type-name: Str, args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
-  cond
-    | type-name == "Maybe" -> classify-maybe-inst(args, ctors)
-    | type-name == "Result" -> None
-    | type-name == "List" -> classify-list-ctor-inst(hn, args, ctors)
-    | else -> Some(type-name)
+  if (type-name == "Maybe") -> classify-maybe-inst(args, ctors) | if (type-name == "Result") -> None | if (type-name == "List") -> classify-list-ctor-inst(hn, args, ctors) | Some(type-name)
 
 let classify-ctor-call(hn: Str, args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
   match (Map.lookup(hn, ctors))
     | None -> None
     | Some(meta) ->
-      if (ctor-meta-arity(meta) == length(args)) ->
-        classify-ctor-inst(hn, ctor-meta-type(meta), args, ctors) |
-        None
+      if (ctor-meta-arity(meta) == length(args)) -> classify-ctor-inst(hn, ctor-meta-type(meta), args, ctors) | None
 
 let classify-map-set(args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
   match (args)
@@ -352,9 +332,7 @@ let classify-map-set(args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
     | _ -> None
 
 let classify-qualified(mod: Str, name: Str, args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
-  cond
-    | mod == "Map" && name == "set" -> classify-map-set(args, ctors)
-    | else -> None
+  if (mod == "Map" && name == "set") -> classify-map-set(args, ctors) | None
 
 let classify-project-names(mod-ast: Ast, name-ast: Ast, args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
   match (sym-str(mod-ast))
@@ -396,17 +374,7 @@ let classify-paren-head(head: Ast, args: List Ast, ctors: Map Str CtorMeta) -> M
     | None -> classify-project-call(head, args, ctors)
 
 let classify-named(hn: Str, args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
-  cond
-    | is-int-op(hn) -> Some("Int")
-    | is-bool-op(hn) -> Some("Bool")
-    | hn == "str-concat" -> Some("Str")
-    | hn == "char->str" -> Some("Str")
-    | hn == "if" -> classify-if(args, ctors)
-    | hn == "let" -> classify-let(args, ctors)
-    | hn == "do" -> classify-do(args, ctors)
-    | hn == "tuple" -> classify-tuple(args, ctors)
-    | hn == "map-lit" -> classify-map-lit(args, ctors)
-    | else -> classify-ctor-call(hn, args, ctors)
+  if (is-int-op(hn)) -> Some("Int") | if (is-bool-op(hn)) -> Some("Bool") | if (hn == "str-concat") -> Some("Str") | if (hn == "char->str") -> Some("Str") | if (hn == "if") -> classify-if(args, ctors) | if (hn == "let") -> classify-let(args, ctors) | if (hn == "do") -> classify-do(args, ctors) | if (hn == "tuple") -> classify-tuple(args, ctors) | if (hn == "map-lit") -> classify-map-lit(args, ctors) | classify-ctor-call(hn, args, ctors)
 
 let classify-if(args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
   match (args)
@@ -435,7 +403,6 @@ let classify-do(args: List Ast, ctors: Map Str CtorMeta) -> Maybe Str =
 ; classify. `quote`'s body is data, not code, and is left unwalked, the
 ; same way `type/check.mnd`'s `infer-quote-form` treats it specially
 ; rather than recursing.
-
 record Usage {
   type-name: Str
   op: Str
@@ -502,7 +469,6 @@ let walk-paren-nonquote(head: Ast, rest: List Ast, ctors: Map Str CtorMeta, usag
 ; (never contain a runtime use site), walk everything else — `defn`
 ; bodies, top-level `let`s, bare top-level expressions — as ordinary code,
 ; exactly like `type/check.mnd`'s `typecheck-top-named` does for typing.
-
 let is-decl-head(name: Str) -> Bool =
   name == "alias" || name == "defrec" || name == "variant" || name == "extern" || name == "import"
 
@@ -535,7 +501,6 @@ let walk-top-forms(forms: List Ast, ctors: Map Str CtorMeta, usages: Ref (List U
 ; type's own ops listed in a fixed canonical order — both required so the
 ; plan's text is deterministic (spec §2.11) rather than dependent on
 ; `Map`/traversal order.
-
 let str-insert-sorted(x: Str, xs: List Str) -> List Str =
   match (xs)
     | [] -> [x]

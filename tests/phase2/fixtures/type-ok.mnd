@@ -1,7 +1,6 @@
 ; A simple, well-typed defn using only builtin Int arithmetic — exercises
 ; the Phase 2 typer's happy path (let signature, `+`, recursion via a
 ; second mutually-independent defn).
-
 let add-one(x: Int) -> Int =
   x + 1
 

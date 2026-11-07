@@ -1,7 +1,6 @@
 ; Discovery and the summary line for `(test …)` files.
 ; The compiler's runner stays in src/test: this module does not import it.
 ; @module std/test
-
 import std/console
 import std/fs
 import std/io
@@ -21,11 +20,9 @@ let skip-name(name: Str) -> Bool =
 
 ; Split s on newline bytes, dropping empty lines.
 let split-acc(s: Str, i: Int, start: Int, n: Int, acc: List Str) -> List Str =
-  cond
-    | i > n -> acc
-    | i == n || String.byte(i, s) == 10 ->
-      if (i == start) -> split-acc(s, i + 1, i + 1, n, acc) | split-acc(s, i + 1, i + 1, n, String.slice(start, i - start, s) :: acc)
-    | else -> split-acc(s, i + 1, start, n, acc)
+  if (i > n) -> acc |
+  if (i == n || String.byte(i, s) == 10) ->
+    if (i == start) -> split-acc(s, i + 1, i + 1, n, acc) | split-acc(s, i + 1, i + 1, n, String.slice(start, i - start, s) :: acc) | split-acc(s, i + 1, start, n, acc)
 
 ; The lines of s.
 let lines-of(s: Str) -> List Str =
@@ -39,10 +36,7 @@ let contains-test(path: Str) -> Bool =
 
 ; A `*.test.mnd` file, or any other `*.mnd` file that carries `@test`.
 let is-test-file(path: Str) -> Bool =
-  cond
-    | String.ends-with(".test.mnd", path) -> true
-    | String.ends-with(".mnd", path) -> contains-test(path)
-    | else -> false
+  if (String.ends-with(".test.mnd", path)) -> true | if (String.ends-with(".mnd", path)) -> contains-test(path) | false
 
 ; Walk dir, collecting test files onto acc.
 let walk(dir: Str, acc: List Str) -> List Str =
@@ -57,29 +51,20 @@ let walk-names(dir: Str, names: List Str, acc: List Str) -> List Str =
 
 ; A child path: descend into directories, keep test files.
 let walk-child(dir: Str, child: Str, rest: List Str, acc: List Str) -> List Str =
-  cond
-    | is-dir(child) -> walk-names(dir, rest, walk(child, acc))
-    | is-test-file(child) -> walk-names(dir, rest, child :: acc)
-    | else -> walk-names(dir, rest, acc)
+  if (is-dir(child)) -> walk-names(dir, rest, walk(child, acc)) | if (is-test-file(child)) -> walk-names(dir, rest, child :: acc) | walk-names(dir, rest, acc)
 
 ; Test files under path, or a one-element list when path itself is a test file.
 ; @test member("stdlib/list.test.mnd", discover("stdlib/list.test.mnd")) || member("list.test.mnd", discover("list.test.mnd")) => true
 ; @test member("stdlib/list.test.mnd", discover("stdlib")) || member("list.test.mnd", discover(".")) => true
 ; @test member("examples/sc.mnd", discover("examples/sc.mnd")) || member("basics.mnd", discover("basics.mnd")) => true
 pub let discover(path: Str) -> List Str =
-  cond
-    | is-dir(path) -> reverse(walk(path, []))
-    | is-test-file(path) -> [path]
-    | else -> []
+  if (is-dir(path)) -> reverse(walk(path, [])) | if (is-test-file(path)) -> [path] | []
 
 ; Add one output line to the counts.
 let count-line(line: Str, c: Counts) -> Counts =
   match (c)
     | Counts(p, f) ->
-      cond
-        | String.starts-with("pass ", line) -> Counts(p + 1, f)
-        | String.starts-with("fail ", line) -> Counts(p, f + 1)
-        | else -> c
+      if (String.starts-with("pass ", line)) -> Counts(p + 1, f) | if (String.starts-with("fail ", line)) -> Counts(p, f + 1) | c
 
 ; Fold count-line over lines.
 let count-onto(lines: List Str, c: Counts) -> Counts =
@@ -107,13 +92,12 @@ pub let summary(c: Counts, ms: Int, on: Bool) -> Unit =
   match (c)
     | Counts(p, f) ->
       {
-        cond
-          | f > 0 ->
-            {
-              write(stdout, paint(on, "[31m", String.concat(show(f), " failed")))
-              write(stdout, ", ")
-              ()
-            }
+        if (f > 0) ->
+          {
+            write(stdout, paint(on, "[31m", String.concat(show(f), " failed")))
+            write(stdout, ", ")
+            ()
+          }
         write(stdout, paint(on, "[32m", String.concat(show(p), " passed")))
         write(stdout, String.concat(" (", show(ms), "ms)"))
         write(stdout, "\n")

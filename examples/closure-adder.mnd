@@ -2,7 +2,6 @@
 ; then `List.map` applies it to every element of a list.
 ; Prints the list before and after.
 ; Run with: `./mn run examples/closure-adder.mnd`
-
 import std/list as List
 import std/string as String
 
@@ -22,7 +21,6 @@ let main() -> Unit {
   let before = [1, 2, 3]
   let add40 = adder(40)
   let after = before |> List.map(add40)
-
   print-list("before", before)
   print-list("after", after)
 }
