@@ -45,6 +45,10 @@ The review section, which is the specification:
 ${specification}
 </specification>
 
+If Out of scope declines an identifier that Scope or an AC requires, add an
+\`AC override:\` line that names the identifier and the AC it serves — otherwise
+the driver rejects the plan before implementation.
+
 Write the plan with the plan tool, or as your final message if the tool is unavailable. Do not edit files.`;
 }
 
@@ -78,6 +82,12 @@ ${plan}
 Before you finish, write your summary to ${summaryPath} (create the file): files changed grouped by purpose, one line per acceptance-criterion id saying what satisfies it, and anything you could not do. The driver reads that file for the commit message and PR body.`;
 }
 
+export type ReviewFinding = {
+  criterion: string;
+  status: string;
+  evidence: string;
+};
+
 export function fixPrompt(input: {
   row: Row;
   plan: string;
@@ -85,16 +95,35 @@ export function fixPrompt(input: {
   failedGate: string | null;
   gateOutput: string;
   gaps: string[];
+  /** Partial/missing AC rows from the last review, with evidence paths. */
+  findings: ReviewFinding[];
   summaryPath: string;
   criteria: AcceptanceCriterion[];
   skillPath: string;
 }): string {
-  const { row, plan, reviewFile, failedGate, gateOutput, gaps, summaryPath, criteria, skillPath } = input;
+  const {
+    row,
+    plan,
+    reviewFile,
+    failedGate,
+    gateOutput,
+    gaps,
+    findings,
+    summaryPath,
+    criteria,
+    skillPath,
+  } = input;
   const gate =
     failedGate === null
       ? "The gate passed, but an independent review found the work incomplete."
       : `The gate failed at: ${failedGate}`;
   const gapList = gaps.length === 0 ? "(the reviewer reported no gaps)" : gaps.map((gap) => `- ${gap}`).join("\n");
+  const findingList =
+    findings.length === 0
+      ? "(no partial/missing AC rows)"
+      : findings
+          .map((f) => `- ${f.criterion} (${f.status}): ${f.evidence || "(no evidence path)"}`)
+          .join("\n");
   return `Read ${skillPath} and follow it. You are fixing ${row.id}; the previous attempt did not pass.
 
 Review anchor: ${reviewFile}#${row.id.toLowerCase()}
@@ -109,6 +138,10 @@ ${gateOutput}
 ${gapList}
 </review-gaps>
 
+<review-findings>
+${findingList}
+</review-findings>
+
 Acceptance criteria:
 
 ${criteriaBlock(criteria)}
@@ -120,7 +153,9 @@ ${NO_GATE}
 ${plan}
 </plan>
 
-Fix the causes. Do not work around the checks, and do not edit a test to match broken behaviour. When you are done, overwrite ${summaryPath} with what you changed and how each failing check is now satisfied.`;
+Fix the causes. Do not work around the checks, and do not edit a test to match broken behaviour.
+
+Your summary in ${summaryPath} must map every gap and every partial/missing finding to a concrete file change (one line each: \`gap → path\`). If a gap is already fixed, say so with the path that proves it. Do not finish with an unmapped gap.`;
 }
 
 export function reviewPrompt(input: {
@@ -131,8 +166,36 @@ export function reviewPrompt(input: {
   stat: string;
   changed: string;
   diff: string;
+  /** Prior attempt's verdict; when set, verify its gaps before raising new ones. */
+  priorVerdict: {
+    gaps: string[];
+    criteria: ReviewFinding[];
+  } | null;
 }): string {
-  const { row, specification, criteria, base, stat, changed, diff } = input;
+  const { row, specification, criteria, base, stat, changed, diff, priorVerdict } = input;
+  const priorBlock =
+    priorVerdict === null
+      ? ""
+      : `
+
+This is a fix-round review. A prior attempt already failed with these gaps and partial/missing criteria:
+
+<prior-gaps>
+${priorVerdict.gaps.length === 0 ? "(none)" : priorVerdict.gaps.map((g) => `- ${g}`).join("\n")}
+</prior-gaps>
+
+<prior-findings>
+${
+  priorVerdict.criteria
+    .filter((c) => c.status === "partial" || c.status === "missing")
+    .map((c) => `- ${c.criterion} (${c.status}): ${c.evidence || "(no evidence)"}`)
+    .join("\n") || "(none)"
+}
+</prior-findings>
+
+First verify each prior gap/finding is closed with evidence. Only add a *new* gap when it blocks an acceptance criterion. Do not re-litigate closed ACs or raise preference/style gaps that do not block an AC.
+`;
+
   return `You are an adversarial reviewer with fresh context. Assume nothing the implementer wrote; check the repository itself. The working directory is the repo root.
 
 This session is read-only: shell commands are rejected, so you cannot run the suite. The driver has already run the gate and it passed. Judge from the diff, the code, and the tests.
@@ -141,7 +204,7 @@ You are not planning work: do not create a plan and do not call any plan tool. A
 
 Item: ${row.id} — ${row.title}
 Change: uncommitted work in the working tree, on top of ${base}.
-
+${priorBlock}
 Changed files:
 <changed>
 ${changed}

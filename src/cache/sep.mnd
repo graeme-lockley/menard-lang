@@ -18,6 +18,7 @@ import "../emit/llvm-ir.mnd"
 import "../emit/lower.mnd"
 import "../modules/graph.mnd"
 import "../diag/report.mnd"
+import "../diag/helps.mnd"
 import "./cache.mnd"
 import std/fs
 import std/io
@@ -168,20 +169,29 @@ let report-at-help(abs: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str, 
 let report-at(abs: Str, src: Str, sp: Span, sev: Str, code: Str, msg: Str) -> Unit =
   report-at-help(abs, src, sp, sev, code, msg, None)
 
+let resolve-diag-help(code: Str, help: Maybe Str) -> Maybe Str =
+  match (help)
+    | Some(h) -> Some(h)
+    | None -> catalogue-help(code)
+
 let report-parse(abs: Str, src: Str, e: ParseError) -> Unit =
   match (e)
-    | ParseError(sp, msg, help) -> report-at-help(abs, src, sp, "error", parse-code(msg), msg, help)
+    | ParseError(sp, msg, help) ->
+      {
+        let code = parse-code(msg)
+        report-at-help(abs, src, sp, "error", code, msg, resolve-diag-help(code, help))
+      }
 
 let report-casing(abs: Str, src: Str, e: CasingError) -> Unit =
   match (e)
-    | CasingError(sp, msg) -> report-at(abs, src, sp, "error", "E_CASING", msg)
+    | CasingError(sp, msg) -> report-at-help(abs, src, sp, "error", "E_CASING", msg, catalogue-help("E_CASING"))
 
 let report-desugar(abs: Str, src: Str, es: List DesugarError) -> Unit =
   match (es)
     | [] -> ()
     | DesugarError(sp, code, msg) :: rest ->
       {
-        report-at(abs, src, sp, "error", code, msg)
+        report-at-help(abs, src, sp, "error", code, msg, catalogue-help(code))
         report-desugar(abs, src, rest)
       }
 

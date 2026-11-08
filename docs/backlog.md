@@ -66,7 +66,7 @@ Rows are ordered by phase, then priority, then area, then ID.
 | [LANG-15](reviews/2026-10-24-build-f.md#lang-15) | Pin `defer` semantics, tests and documentation | Language | P1 | 1 | todo | LANG-12, CONC-02 | [#83](https://github.com/graeme-lockley/menard-lang/issues/83) | — |
 | [LIB-08](reviews/2026-10-24-build-f.md#lib-08) | Remove `Int.parse`; `Int.from-str` is the only integer parser | Libraries | P1 | 1 | todo | LANG-06 | [#84](https://github.com/graeme-lockley/menard-lang/issues/84) | — |
 | [DOC-04](reviews/2026-10-24-build-f.md#doc-04) | Contributor guide and architecture map | Documentation | P1 | 1 | todo | DOC-03 | [#85](https://github.com/graeme-lockley/menard-lang/issues/85) | — |
-| [DOC-05](reviews/2026-10-24-build-f.md#doc-05) | Error-code catalogue, with `help:` | Documentation | P1 | 1 | todo | LANG-04, LANG-09, TOOL-03 | [#86](https://github.com/graeme-lockley/menard-lang/issues/86) | — |
+| [DOC-05](reviews/2026-10-24-build-f.md#doc-05) | Error-code catalogue, with `help:` | Documentation | P1 | 1 | done | LANG-04, LANG-09, TOOL-03 | [#86](https://github.com/graeme-lockley/menard-lang/issues/86) | — |
 | [DOC-07](reviews/2026-10-24-build-f.md#doc-07) | README refresh for Build F | Documentation | P1 | 1 | todo | TOOL-01, TOOL-02, TOOL-05, TOOL-09, TOOL-13, OTH-01 | [#87](https://github.com/graeme-lockley/menard-lang/issues/87) | — |
 | [DOC-08](reviews/2026-10-24-build-f.md#doc-08) | Decisions journal: index, status, and supersession | Documentation | P1 | 1 | todo | — | [#88](https://github.com/graeme-lockley/menard-lang/issues/88) | — |
 | [OTH-08](reviews/2026-10-24-build-f.md#oth-08) | Repository hygiene | Other | P1 | 1 | todo | OTH-01 | [#89](https://github.com/graeme-lockley/menard-lang/issues/89) | — |

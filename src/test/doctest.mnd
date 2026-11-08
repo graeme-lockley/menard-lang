@@ -6,6 +6,7 @@
 ; rewritten, so the object cache does not see a new mtime.
 import "../cache/cache.mnd"
 import "../diag/report.mnd"
+import "../diag/helps.mnd"
 import "../modules/graph.mnd"
 import "../reader/ast.mnd"
 import std/fs
@@ -589,7 +590,7 @@ let one-source(abs: Str, display: Str, src: Str, failed: Ref Bool) -> Maybe DocC
           if (write-if-changed(gen, text)) -> Some(DocCase(gen, display)) |
           {
             set!(failed, true)
-            report-span(display, src, blank-span(), "error", "E_TEST", "cannot write generated tests")
+            report-span-help(display, src, blank-span(), "error", "E_TEST", "cannot write generated tests", catalogue-help("E_TEST"))
             None
           }
         }

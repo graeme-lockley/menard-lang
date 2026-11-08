@@ -89,11 +89,14 @@ User panics never include a JavaScript / `MENARD_STACK` interpreter dump.
 
 ## Codes and samples
 
-Every emitted `E_*` code and a sample JSON object live in
-[errors.md](errors.md). Actionable codes that exist today carry `help` in both
-text and JSON (nullary call, orderability, function/closure arity, unbound
-constructor, operator-spacing hints on `E_TYPE_UNBOUND` / glued `E_PARSE`).
-`?`/`??` return-type diagnostics and their `help` lines remain LANG-06.
+Every emitted `E_*` / `W_*` code — severity, meaning, example, fix, `help:`,
+sample JSON, and a spec link — lives in [errors.md](errors.md), grouped by
+phase. Actionable codes carry `help` in both text and JSON. Scope codes that
+are not emitted yet (`E_TYPE_QUESTION_RETURN`, `E_OPERATOR_SPACING`,
+`E_TYPE_LOCAL_POLY`, `E_UNSUPPORTED`, `W_PATTERN_*`) are documented under
+[errors.md § Reserved](errors.md#reserved) with the same fields as live
+entries (under `####`, so they stay out of the emitted-set sync test) and
+gain `###` catalogue sections when their owning items land emit sites.
 
 ## LSP
 

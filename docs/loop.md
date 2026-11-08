@@ -59,6 +59,10 @@ verdict must have one entry per id. Both are checked by the driver:
 
 - a plan that misses an AC is retried once, then stops the run **before** the
   implementation — a bad plan costs five minutes, not twenty;
+- a plan whose **Out of scope** declines an identifier that **Scope** or an AC
+  requires is likewise retried, then stopped, unless the plan includes an
+  explicit `AC override:` line naming that identifier (the DOC-05 failure mode:
+  Scope listed reserved codes, Out of scope silently dropped them);
 - a verdict that misses an AC is marked `satisfied: false` with the missing ids
   added to `gaps`, so they go to the fix round instead of being silently
   accepted.
@@ -156,16 +160,20 @@ the wrong thing is still green. That is what the review pass is for.
 
 After the gate is green, a second Cursor session gets the item's specification
 section, the changed files, the diffstat, and the diff itself (truncated at
-24k characters), with one instruction: decide, criterion by criterion, whether
-the work is real. It reads the code and the tests, not the implementation
-summary. The session is read-only (`--mode ask`; shell commands are rejected), so
-the prompt says so, and the verdict rests on inspection rather than a second test
+24k characters, or 120k when the item is Documentation or the changed tree is
+docs-dominated — the catalogue under review must not disappear into the
+ellipsis), with one instruction: decide, criterion by criterion, whether the
+work is real. It reads the code and the tests, not the implementation summary.
+The session is read-only (`--mode ask`; shell commands are rejected), so the
+prompt says so, and the verdict rests on inspection rather than a second test
 run. It is told not to write a plan, because plan mode turns the verdict into a
-plan document. The verdict is harvested from the final message or any plan
-payload; if no JSON is found, the driver makes one cheap formatting call before
-failing with the command that commits the green tree anyway
-(`--resume --no-review`). It looks for the specific ways this kind of work is
-usually faked:
+plan document. On a fix-round review the driver also passes the prior verdict's
+gaps and partial/missing findings, and asks the reviewer to verify those are
+closed before raising new gaps that block an AC. The verdict is harvested from
+the final message or any plan payload; if no JSON is found, the driver makes one
+cheap formatting call before failing with the command that commits the green
+tree anyway (`--resume --no-review`). It looks for the specific ways this kind
+of work is usually faked:
 
 - stubs, `TODO`, dead code, `@test true`, skipped tests, or a fallback that
   hides a failure;
@@ -192,13 +200,16 @@ stops the run rather than passing it. Fail closed, always.
 ## What happens when it is red
 
 A failed gate or a review with gaps produces a repair prompt containing the
-failing step, the tail of its log, and the review's `gaps` list. The agent
-fixes; the driver re-runs the gate and the review from the top.
+failing step, the tail of its log, the review's `gaps` list, and each
+partial/missing AC with its evidence path. The fixer must map every gap to a
+concrete file change in its summary. The agent fixes; the driver re-runs the
+gate and the review from the top.
 
 `--max-rounds N` (default 2) bounds this. When the budget is spent the driver
-stops, leaves the branch and every artifact in place, and tells you to fix it
-by hand and `--resume`. It does not keep spending tokens on a loop that is not
-converging, and it does not commit a red tree.
+stops, writes `.loop/<item>/HANDOFF.md` (gaps, findings, suggested verify
+commands), leaves the branch and every artifact in place, and tells you to fix
+it by hand and `--resume`. It does not keep spending tokens on a loop that is
+not converging, and it does not commit a red tree.
 
 ## Resuming
 
@@ -259,6 +270,8 @@ The raw NDJSON is kept in `cursor-<stage>.log` beside the rendered text.
     review-<n>.raw.md     the reviewer's raw output, per attempt
     review-<n>.json       its parsed verdict, per attempt
     review.json           the latest verdict
+    HANDOFF.md            written when --max-rounds is spent: gaps, findings,
+                          and how to resume
     pr.md                 the PR body that was submitted
   <item>-dry/           the same, for --dry-run
 ```

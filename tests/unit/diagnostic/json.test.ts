@@ -9,6 +9,8 @@ import {
   formatPanicJson,
   diagnosticsToJson,
   panicToJson,
+  diagnosticToJson,
+  CATALOGUE_HELPS,
 } from "../../../host/src/diagnostic/index.ts";
 
 const ROOT = join(import.meta.dir, "../../..");
@@ -62,13 +64,47 @@ describe("diagnostics JSON schema", () => {
   });
 
   test("help omitted when absent (not null)", () => {
-    const src = "{";
-    const diags = diagnose(src);
-    const doc = diagnosticsToJson(diags, src, "a.mnd");
-    const j = doc.diagnostics[0]!;
+    // Constructed without going through diagnostic(), so help stays unset.
+    const j = diagnosticToJson(
+      {
+        severity: "error",
+        category: "syntax",
+        code: "E_PARSE_UNCLOSED",
+        message: "unclosed {",
+        span: { start: 0, end: 1 },
+      },
+      "{",
+      "a.mnd",
+    );
     expect(j.code).toBe("E_PARSE_UNCLOSED");
     expect(j).not.toHaveProperty("help");
     expect(JSON.stringify(j)).not.toContain('"help"');
+  });
+
+  test("live parse unclosed carries catalogue help in JSON", () => {
+    const src = "{";
+    const diags = diagnose(src);
+    const j = diagnosticsToJson(diags, src, "a.mnd").diagnostics[0]!;
+    expect(j.code).toBe("E_PARSE_UNCLOSED");
+    expect(j.help).toBe(CATALOGUE_HELPS.E_PARSE_UNCLOSED);
+  });
+
+  test("every actionable catalogue help appears in JSON help field", () => {
+    for (const [code, help] of Object.entries(CATALOGUE_HELPS)) {
+      const j = diagnosticToJson(
+        {
+          severity: "error",
+          category: "type",
+          code,
+          message: `sample for ${code}`,
+          span: { start: 0, end: 1 },
+          help,
+        },
+        "x",
+        "t.mnd",
+      );
+      expect(j.help).toBe(help);
+    }
   });
 
   test("glued == and n+1 carry help in JSON", () => {
@@ -434,31 +470,11 @@ let main() -> Int =
       });
   });
 
-  test("docs/errors.md lists every catalogue code with a sample object", () => {
-    const errorsMd = readFileSync(join(ROOT, "docs/errors.md"), "utf-8");
+  test("diagnostics.md documents schema version 1", () => {
     const diagnosticsMd = readFileSync(join(ROOT, "docs/diagnostics.md"), "utf-8");
     expect(diagnosticsMd).toContain("version");
     expect(diagnosticsMd).toMatch(/"version"\s*:\s*1/);
-    const codes = [
-      "E_PARSE",
-      "E_PARSE_UNCLOSED",
-      "E_PARSE_BANG",
-      "E_PARSE_STRING",
-      "E_CASING",
-      "E_TYPE_NULLARY_CALL",
-      "E_TYPE_ORDERABLE",
-      "E_TYPE_ARITY",
-      "E_TYPE_UNBOUND",
-      "E_TYPE_MISMATCH",
-      "E_TYPE_EXHAUSTIVE",
-      "E_TYPE_UNKNOWN",
-      "E_DESUGAR_PIPE",
-      "E_PUB_PRIVATE_TYPE",
-    ];
-    for (const code of codes) {
-      expect(errorsMd).toContain(code);
-      expect(errorsMd).toContain(`"code": "${code}"`);
-    }
+    expect(diagnosticsMd).toContain("errors.md");
   });
 
   test("AGENTS.md and guide.md document JSON mode", () => {

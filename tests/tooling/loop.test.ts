@@ -12,8 +12,24 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { extractCriteria, extractReviewSection, Journal, readState, runStreaming, slug, tail, writeState } from "../../tools/loop/lib.ts";
-import { executePrompt, reviewPrompt } from "../../tools/loop/prompts.ts";
-import { auditAgentCommands, describeToolCall, issueRef, markRowDone, nextCandidate, planFromToolCall, planMissing, prBase, renderCursorEvent, withCoverage } from "../../tools/loop/run.ts";
+import { executePrompt, fixPrompt, reviewPrompt } from "../../tools/loop/prompts.ts";
+import {
+  auditAgentCommands,
+  describeToolCall,
+  formatHandoff,
+  issueRef,
+  markRowDone,
+  nextCandidate,
+  openFindings,
+  planFromToolCall,
+  planMissing,
+  planScopeConflicts,
+  prBase,
+  renderCursorEvent,
+  reviewDiffLimit,
+  significantIds,
+  withCoverage,
+} from "../../tools/loop/run.ts";
 import type { Row } from "../../tools/next.ts";
 
 const REVIEW = join(import.meta.dir, "..", "..", "docs", "reviews", "2026-10-24-build-f.md");
@@ -315,6 +331,73 @@ describe("acceptance criteria", () => {
     expect(covered.gaps.join(" ")).toContain("AC2");
     expect(withCoverage(verdict, [{ id: "AC1", text: "" }]).satisfied).toBe(true);
   });
+
+  test("Out of scope that declines a Scope/AC identifier is a conflict", () => {
+    const specification = `### DOC-05\n\n**Scope.** Include \`E_TYPE_QUESTION_RETURN\` and \`E_UNSUPPORTED\`.\n\n**Acceptance criteria.**\n\n- [ ] Catalogue every emitted code.\n`;
+    const plan = `## Scope\ndocs/errors.md\n\n## Steps\n1. write\n\n## Out of scope\n\n- Cataloguing \`E_TYPE_QUESTION_RETURN\` (not emitted yet).\n`;
+    const conflicts = planScopeConflicts(plan, specification, [
+      { id: "AC1", text: "Catalogue every emitted code." },
+    ]);
+    expect(conflicts.some((c) => c.includes("E_TYPE_QUESTION_RETURN"))).toBe(true);
+  });
+
+  test("AC override names the id and clears the Scope conflict", () => {
+    const specification = `### DOC-05\n\n**Scope.** Include \`E_TYPE_QUESTION_RETURN\`.\n`;
+    const plan = `## Scope\nx\n\n## Steps\n1.\n\n## Out of scope\n\n- \`E_TYPE_QUESTION_RETURN\` reserved only.\n\nAC override: Scope names \`E_TYPE_QUESTION_RETURN\` for completeness; AC1 only requires emitted codes, so it stays reserved.\n`;
+    expect(planScopeConflicts(plan, specification, [])).toEqual([]);
+  });
+
+  test("significantIds keeps error codes and paths", () => {
+    const ids = significantIds("See `E_IMPORT_CYCLE` and `docs/errors.md` plus E_PARSE.");
+    expect(ids.has("E_IMPORT_CYCLE")).toBe(true);
+    expect(ids.has("docs/errors.md")).toBe(true);
+    expect(ids.has("E_PARSE")).toBe(true);
+  });
+});
+
+describe("review diff budget", () => {
+  test("Documentation area and docs-only trees get the raised limit", () => {
+    expect(reviewDiffLimit("docs/errors.md\ndocs/guide.md", "Libraries")).toBeGreaterThan(24000);
+    expect(reviewDiffLimit("stdlib/actor.mnd", "Documentation")).toBeGreaterThan(24000);
+    expect(reviewDiffLimit("stdlib/actor.mnd", "Concurrency")).toBe(24000);
+  });
+});
+
+describe("handoff and findings", () => {
+  test("openFindings keeps partial and missing only", () => {
+    const verdict = {
+      satisfied: false,
+      criteria: [
+        { criterion: "AC1", status: "met", evidence: "a" },
+        { criterion: "AC2", status: "partial", evidence: "b" },
+        { criterion: "AC3", status: "missing", evidence: "c" },
+      ],
+      gaps: ["gap"],
+      notes: "",
+    };
+    expect(openFindings(verdict).map((f) => f.criterion)).toEqual(["AC2", "AC3"]);
+  });
+
+  test("formatHandoff lists gaps and findings for the human", () => {
+    const text = formatHandoff({
+      item: "DOC-05",
+      attempt: 3,
+      maxRounds: 2,
+      failedGate: null,
+      gateOutput: "",
+      verdict: {
+        satisfied: false,
+        criteria: [{ criterion: "AC1", status: "partial", evidence: "docs/errors.md:3" }],
+        gaps: ["sample messages disagree"],
+        notes: "not green",
+      },
+      criteria: [{ id: "AC1", text: "samples match mn check --json" }],
+    });
+    expect(text).toContain("DOC-05");
+    expect(text).toContain("sample messages disagree");
+    expect(text).toContain("docs/errors.md:3");
+    expect(text).toContain("make loop ARGS=--resume");
+  });
 });
 
 describe("prompt contracts", () => {
@@ -349,6 +432,25 @@ describe("prompt contracts", () => {
     expect(prompt).toContain("/tmp/loop/agent-summary.md");
   });
 
+  test("the fix prompt includes findings and requires a gap map", () => {
+    const prompt = fixPrompt({
+      row,
+      plan: "## Scope",
+      reviewFile: "docs/reviews/x.md",
+      failedGate: null,
+      gateOutput: "",
+      gaps: ["sample messages disagree"],
+      findings: [{ criterion: "AC1", status: "partial", evidence: "docs/errors.md:3" }],
+      summaryPath: "/tmp/loop/agent-summary.md",
+      criteria,
+      skillPath: skill,
+    });
+    expect(prompt).toContain("sample messages disagree");
+    expect(prompt).toContain("AC1 (partial): docs/errors.md:3");
+    expect(prompt).toContain("gap → path");
+    expect(prompt).toContain("unmapped gap");
+  });
+
   test("the review prompt demands the JSON verdict and no edits", () => {
     const prompt = reviewPrompt({
       row,
@@ -358,10 +460,31 @@ describe("prompt contracts", () => {
       stat: "1 file changed",
       changed: "stdlib/actor.mnd",
       diff: "diff --git a/stdlib/actor.mnd b/stdlib/actor.mnd",
+      priorVerdict: null,
     });
     expect(prompt).toContain('"satisfied"');
     expect(prompt).toContain("Output JSON only");
     expect(prompt).toContain("a criterion");
     expect(prompt).toContain("do not modify files");
+    expect(prompt).not.toContain("fix-round review");
+  });
+
+  test("a fix-round review prompt binds thrash to prior gaps", () => {
+    const prompt = reviewPrompt({
+      row,
+      specification: "### CONC-05\n- [ ] a criterion",
+      criteria,
+      base: "main",
+      stat: "1 file changed",
+      changed: "stdlib/actor.mnd",
+      diff: "diff",
+      priorVerdict: {
+        gaps: ["sample messages disagree"],
+        criteria: [{ criterion: "AC1", status: "partial", evidence: "docs/errors.md:3" }],
+      },
+    });
+    expect(prompt).toContain("fix-round review");
+    expect(prompt).toContain("sample messages disagree");
+    expect(prompt).toContain("Do not re-litigate");
   });
 });

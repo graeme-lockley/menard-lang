@@ -38,6 +38,7 @@ import "./derive/plan.mnd"
 import "./emit/bitcode.mnd"
 import "./modules/graph.mnd"
 import "./diag/report.mnd"
+import "./diag/helps.mnd"
 import "./cache/cache.mnd"
 import "./cache/sep.mnd"
 import "./test/run.mnd"
@@ -172,17 +173,26 @@ let child-args() -> List Str =
 let parse-code(msg: Str) -> Str =
   if (String.contains("unclosed", msg)) -> "E_PARSE_UNCLOSED" | if (String.contains("'!'", msg)) -> "E_PARSE_BANG" | if (String.contains("unterminated", msg)) -> "E_PARSE_STRING" | "E_PARSE"
 
+let resolve-diag-help(code: Str, help: Maybe Str) -> Maybe Str =
+  match (help)
+    | Some(h) -> Some(h)
+    | None -> catalogue-help(code)
+
 let report-parse-error(path: Str, src: Str, e: ParseError) -> Unit =
   match (e)
-    | ParseError(sp, msg, help) -> report-span-help(path, src, sp, "error", parse-code(msg), msg, help)
+    | ParseError(sp, msg, help) ->
+      {
+        let code = parse-code(msg)
+        report-span-help(path, src, sp, "error", code, msg, resolve-diag-help(code, help))
+      }
 
 let report-casing-error(path: Str, src: Str, e: CasingError) -> Unit =
   match (e)
-    | CasingError(sp, msg) -> report-span(path, src, sp, "error", "E_CASING", msg)
+    | CasingError(sp, msg) -> report-span-help(path, src, sp, "error", "E_CASING", msg, catalogue-help("E_CASING"))
 
 let report-desugar-error(path: Str, src: Str, e: DesugarError) -> Unit =
   match (e)
-    | DesugarError(sp, code, msg) -> report-span(path, src, sp, "error", code, msg)
+    | DesugarError(sp, code, msg) -> report-span-help(path, src, sp, "error", code, msg, catalogue-help(code))
 
 let report-desugar-errors(path: Str, src: Str, es: List DesugarError) -> Unit =
   match (es)
