@@ -43,7 +43,7 @@ MENARD_VERSION := $(shell cat VERSION)
 
 .DEFAULT_GOAL := mn
 
-.PHONY: mn bootstrap test typecheck backlog-check next loop ci memory-checks native-test runtime-smoke runtime-sb-gc runtime-clean hello-native ret-native sqlite-native check-fixed-point float-text-wasm float-text-bench
+.PHONY: mn bootstrap test typecheck backlog-check decisions-nav-check next loop ci memory-checks native-test runtime-smoke runtime-sb-gc runtime-clean hello-native ret-native sqlite-native check-fixed-point float-text-wasm float-text-bench
 
 # Build B FFI proving ground: SQLite (cross-platform).
 # Dedicated link target — does not bake libsqlite3 into ./mn.
@@ -96,6 +96,12 @@ typecheck:
 backlog-check:
 	bun run tools/backlog-check.ts
 
+# DOC-08 navigation layer for docs/decisions.md (Current rules, Topic index,
+# status/supersession, single-file chronology). Stand-in for DOC-09's broader
+# docs lint until that item lands.
+decisions-nav-check:
+	bun run tools/decisions-nav-check.ts
+
 # What is safe to start now: every item in a row's `Blocked by` cell is
 # done. The phase gate limits this to the lowest phase with an open item;
 # `make next ARGS=--all` lifts that.
@@ -116,7 +122,7 @@ fmt-check:
 	if [ -z "$$files" ]; then echo "fmt-check: no .mnd files found"; exit 1; fi; \
 	bun run host/src/cli/menard.ts fmt --check $$files
 
-ci: typecheck test backlog-check fmt-check
+ci: typecheck test backlog-check decisions-nav-check fmt-check
 
 # Non-functional collector checks: StringBuffer reclaim, and a bounded
 # live set on the stress program. Separate from `test` on purpose.

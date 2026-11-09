@@ -38,6 +38,10 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: make backlog-check
 
+      - name: Decisions journal navigation
+        working-directory: ${{ github.workspace }}
+        run: make decisions-nav-check
+
       - name: Format check
         working-directory: ${{ github.workspace }}
         run: make fmt-check
